@@ -44,6 +44,7 @@ const PLANS_DIR = path.join(CLAUDE_DIR, 'plans');
 const AGENT_ACTIVITY_DIR = path.join(CLAUDE_DIR, 'agent-activity');
 
 const PERMISSION_TTL_MS = 120000;
+const AGENT_TTL_MS = 3600000;
 
 function checkWaitingForUser(agentDir) {
   try {
@@ -58,6 +59,11 @@ function checkWaitingForUser(agentDir) {
   return null;
 }
 
+function isAgentFresh(agent) {
+  if (!agent.updatedAt) return true;
+  return (Date.now() - new Date(agent.updatedAt).getTime()) < AGENT_TTL_MS;
+}
+
 function checkActiveAgents(sessionId) {
   const teamConfig = loadTeamConfig(sessionId);
   const resolvedId = (teamConfig && teamConfig.leadSessionId) ? teamConfig.leadSessionId : sessionId;
@@ -68,7 +74,7 @@ function checkActiveAgents(sessionId) {
     for (const file of readdirSync(agentDir).filter(f => f.endsWith('.json') && !f.startsWith('_'))) {
       try {
         const agent = JSON.parse(readFileSync(path.join(agentDir, file), 'utf8'));
-        if (agent.status === 'active' || agent.status === 'idle') {
+        if ((agent.status === 'active' || agent.status === 'idle') && isAgentFresh(agent)) {
           return true;
         }
       } catch (e) { /* skip invalid */ }
@@ -83,7 +89,7 @@ function checkRunningAgents(agentDir) {
     for (const file of readdirSync(agentDir).filter(f => f.endsWith('.json') && !f.startsWith('_'))) {
       try {
         const agent = JSON.parse(readFileSync(path.join(agentDir, file), 'utf8'));
-        if (agent.status === 'active') return true;
+        if (agent.status === 'active' && isAgentFresh(agent)) return true;
       } catch (e) { /* skip invalid */ }
     }
   } catch (e) { /* ignore */ }
@@ -612,7 +618,8 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
     const agents = [];
     for (const file of files) {
       try {
-        agents.push(JSON.parse(readFileSync(path.join(agentDir, file), 'utf8')));
+        const agent = JSON.parse(readFileSync(path.join(agentDir, file), 'utf8'));
+        if (isAgentFresh(agent)) agents.push(agent);
       } catch (e) { /* skip invalid */ }
     }
     const waitingForUser = checkWaitingForUser(agentDir);

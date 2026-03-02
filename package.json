@@ -8,7 +8,8 @@
   },
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js --open"
+    "dev": "node server.js --open",
+    "test": "bash tests/test-agent-spy.sh"
   },
   "repository": {
     "type": "git",

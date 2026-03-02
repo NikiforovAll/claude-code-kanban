@@ -11,7 +11,7 @@ The session has one or more tasks with status `pending`.
 The session has one or more tasks with status `in_progress`.
 
 ### 3. Has active agents
-The session has at least one subagent with `active` or `idle` status in its agent-activity JSON. We trust the actual data written by Claude Code — no artificial staleness timeout. For team sessions, agents are resolved via the team leader's session ID.
+The session has at least one subagent with `active` or `idle` status in its agent-activity JSON **and** the agent's `updatedAt` is within the last **1 hour**. Agents older than 1 hour are considered stale (e.g. orphaned by a crashed session). For team sessions, agents are resolved via the team leader's session ID.
 
 ### 4. Has a recent plan
 The session has an associated plan file **and** was last modified within the last **15 minutes**. Plans alone don't keep a session active indefinitely — once activity stops, the session fades from the active list.
@@ -24,8 +24,9 @@ The session has a fresh `_waiting.json` marker (< 120s old) in its agent-activit
 
 ## Design Principles
 
-- **Tasks and agents are always-on signals** — if work is happening, the session is active regardless of age.
+- **Tasks are always-on signals** — if work is happening, the session is active regardless of age.
+- **Agents are time-gated (1h)** — active/idle agents keep a session active, but stale agents (>1h since last update) are ignored to handle orphaned processes.
 - **Waiting for user is an always-on signal** — permission prompts and questions require attention regardless of age (within the 120s TTL).
 - **Plans are time-gated** — a plan file persists on disk indefinitely, so we use recency to avoid showing stale sessions.
 - **Recency as a catch-all** — the 5-minute window ensures any recently touched session stays visible briefly.
-- **Trust the source data** — agent status comes directly from the JSON files Claude Code writes. No client-side staleness override.
+- **Trust the source data** — agent status comes directly from the JSON files Claude Code writes.
