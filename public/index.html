@@ -1455,6 +1455,34 @@
       max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
 
+    /* Active agents indicator */
+    .session-item.has-agents {
+      border-color: var(--success);
+      box-shadow: 0 0 0 1px var(--success-dim);
+    }
+    /* Permission pending (overrides has-agents) */
+    .session-item.permission-pending {
+      border-color: var(--warning);
+      box-shadow: 0 0 0 1px var(--warning-dim);
+    }
+    .permission-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      background: var(--warning-dim);
+      border: 1px solid var(--warning);
+      border-radius: 8px;
+      font-size: 12px;
+      color: var(--warning);
+      white-space: nowrap;
+      animation: permission-pulse 1.5s ease-in-out infinite;
+    }
+    @keyframes permission-pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
     /* Light mode */
     body.light {
       --bg-deep: #e8e6e3;
@@ -2116,6 +2144,7 @@
     let bulkDeleteSessionId = null; // Track session for bulk delete
     let ownerFilter = '';
     let currentAgents = [];
+    let currentWaiting = null;
     let lastAgentsHash = '';
     let agentDurationInterval = null;
     let selectedTaskId = null;
@@ -2511,15 +2540,17 @@
     }
 
     const AGENT_COOLDOWN_MS = 3 * 60 * 1000;
-    const AGENT_STALE_MS = 5 * 60 * 1000;
+    const AGENT_STALE_MS = 5 * 60 * 1000; // kept for reference; no longer used for force-stopping
     const AGENT_LOG_MAX = 8;
 
     async function fetchAgents(sessionId) {
       try {
         const res = await fetch(`/api/sessions/${sessionId}/agents`);
-        if (!res.ok) { currentAgents = []; renderAgentFooter(); return; }
-        const agents = await res.json();
-        const hash = JSON.stringify(agents);
+        if (!res.ok) { currentAgents = []; currentWaiting = null; renderAgentFooter(); return; }
+        const data = await res.json();
+        const agents = Array.isArray(data) ? data : (data.agents || []);
+        currentWaiting = data.waitingForUser || null;
+        const hash = JSON.stringify(data);
         if (hash === lastAgentsHash) return;
         lastAgentsHash = hash;
         currentAgents = agents;
@@ -2543,13 +2574,7 @@
       const label = document.getElementById('agent-footer-label');
       const now = Date.now();
 
-      // Mark stale "active" agents as stopped (SubagentStop unreliable for shutdown agents)
-      const agents = currentAgents.map(a => {
-        if (a.status === 'active' && a.startedAt && (now - new Date(a.startedAt).getTime()) > AGENT_STALE_MS) {
-          return { ...a, status: 'stopped', stoppedAt: a.updatedAt };
-        }
-        return a;
-      });
+      const agents = currentAgents;
       // Filter shutdown ghosts: for same-type agents, keep if they overlapped (parallel)
       // or started >30s after previous stopped (legitimate re-spawn). Filter the rest.
       const byType = {};
@@ -2572,7 +2597,10 @@
         .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0))
         .slice(0, AGENT_LOG_MAX);
 
-      if (visible.length === 0) {
+      const permFresh = currentWaiting && currentWaiting.timestamp &&
+        (now - new Date(currentWaiting.timestamp).getTime()) < 120000;
+
+      if (visible.length === 0 && !permFresh) {
         footer.classList.remove('visible');
         clearInterval(agentDurationInterval);
         agentDurationInterval = null;
@@ -2586,7 +2614,11 @@
       footer.classList.toggle('collapsed', collapsed);
       document.getElementById('agent-footer-toggle').innerHTML = collapsed ? '&#x25B4;' : '&#x25BE;';
 
-      content.innerHTML = visible.map(a => {
+      const permHtml = permFresh
+        ? `<div class="permission-badge">${currentWaiting.kind === 'question' ? '❓ Question pending' : '⏳ Awaiting: ' + escapeHtml(currentWaiting.toolName || 'unknown')}</div>`
+        : '';
+
+      content.innerHTML = permHtml + visible.map(a => {
         const elapsed = a.status === 'stopped' && a.stoppedAt
           ? new Date(a.stoppedAt).getTime() - new Date(a.startedAt || a.stoppedAt).getTime()
           : now - new Date(a.startedAt || a.updatedAt).getTime();
@@ -2685,7 +2717,7 @@
         viewMode = 'all';
         currentSessionId = null;
         ownerFilter = '';
-        currentAgents = []; lastAgentsHash = ''; renderAgentFooter();
+        currentAgents = []; currentWaiting = null; lastAgentsHash = ''; renderAgentFooter();
         const res = await fetch('/api/tasks/all');
         let tasks = await res.json();
         if (filterProject) {
@@ -2728,7 +2760,12 @@
 
       let filteredSessions = sessions;
       if (sessionFilter === 'active') {
-        filteredSessions = filteredSessions.filter(s => s.pending > 0 || s.inProgress > 0 || s.hasPlan);
+        const ACTIVE_PLAN_MS = 15 * 60 * 1000;
+        const RECENTLY_MODIFIED_MS = 5 * 60 * 1000;
+        const now = Date.now();
+        filteredSessions = filteredSessions.filter(s => s.pending > 0 || s.inProgress > 0 || s.hasActiveAgents || s.hasWaitingForUser ||
+          (s.hasPlan && (now - new Date(s.modifiedAt).getTime()) <= ACTIVE_PLAN_MS) ||
+          (now - new Date(s.modifiedAt).getTime()) <= RECENTLY_MODIFIED_MS);
       }
       if (filterProject) {
         filteredSessions = filteredSessions.filter(s => matchesProjectFilter(s.project));
@@ -2810,7 +2847,7 @@
         const memberCount = session.memberCount || 0;
 
         return `
-          <button onclick="fetchTasks('${session.id}')" data-session-id="${session.id}" class="session-item ${isActive ? 'active' : ''}" title="${tooltip}">
+          <button onclick="fetchTasks('${session.id}')" data-session-id="${session.id}" class="session-item ${isActive ? 'active' : ''} ${session.hasWaitingForUser ? 'permission-pending' : session.hasActiveAgents ? 'has-agents' : ''}" title="${tooltip}">
             <div class="session-name">${escapeHtml(primaryName)}</div>
             ${secondaryName ? `<div class="session-secondary">${escapeHtml(secondaryName)}</div>` : ''}
             ${gitBranch ? `<div class="session-branch">${gitBranch}</div>` : ''}
@@ -3683,6 +3720,7 @@
           }
 
           if (data.type === 'agent-update') {
+            debouncedRefresh(data.sessionId, false);
             if (currentSessionId && data.sessionId === currentSessionId) {
               fetchAgents(currentSessionId);
             }

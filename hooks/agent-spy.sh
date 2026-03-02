@@ -8,7 +8,34 @@ SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty')
 AGENT_ID=$(echo "$INPUT" | jq -r '.agent_id // empty')
 EVENT=$(echo "$INPUT" | jq -r '.hook_event_name // empty')
 
-[ -z "$SESSION_ID" ] || [ -z "$AGENT_ID" ] && exit 0
+[ -z "$SESSION_ID" ] && exit 0
+
+# PostToolUse: clear waiting state (permission granted or question answered)
+if [ "$EVENT" = "PostToolUse" ]; then
+  WFILE="$HOME/.claude/agent-activity/$SESSION_ID/_waiting.json"
+  [ -f "$WFILE" ] && rm -f "$WFILE"
+  exit 0
+fi
+
+# Waiting-for-user events → write _waiting.json marker
+TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // empty')
+if [ "$EVENT" = "PermissionRequest" ] || { [ "$EVENT" = "PreToolUse" ] && [ "$TOOL_NAME" = "AskUserQuestion" ]; }; then
+  DIR="$HOME/.claude/agent-activity/$SESSION_ID"
+  mkdir -p "$DIR"
+  [ -z "$TOOL_NAME" ] && TOOL_NAME="unknown"
+  TOOL_NAME_ESC=$(echo "$TOOL_NAME" | jq -Rs '.')
+  TOOL_INPUT=$(echo "$INPUT" | jq -r '.tool_input | tostring | .[0:200] // ""')
+  TOOL_INPUT_ESC=$(echo "$TOOL_INPUT" | jq -Rs '.')
+  KIND="permission"
+  [ "$EVENT" = "PreToolUse" ] && KIND="question"
+  TS=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  cat > "$DIR/_waiting.json" <<EOF
+{"status":"waiting","kind":"$KIND","toolName":$TOOL_NAME_ESC,"toolInput":$TOOL_INPUT_ESC,"timestamp":"$TS"}
+EOF
+  exit 0
+fi
+
+[ -z "$AGENT_ID" ] && exit 0
 
 AGENT_TYPE_RAW=$(echo "$INPUT" | jq -r '.agent_type // empty')
 DIR="$HOME/.claude/agent-activity/$SESSION_ID"

@@ -43,6 +43,40 @@ const TEAMS_DIR = path.join(CLAUDE_DIR, 'teams');
 const PLANS_DIR = path.join(CLAUDE_DIR, 'plans');
 const AGENT_ACTIVITY_DIR = path.join(CLAUDE_DIR, 'agent-activity');
 
+const PERMISSION_TTL_MS = 120000;
+
+function checkWaitingForUser(agentDir) {
+  try {
+    const waitFile = path.join(agentDir, '_waiting.json');
+    if (!existsSync(waitFile)) return null;
+    const data = JSON.parse(readFileSync(waitFile, 'utf8'));
+    if (data.status === 'waiting' && data.timestamp) {
+      const age = Date.now() - new Date(data.timestamp).getTime();
+      if (age < PERMISSION_TTL_MS) return data;
+    }
+  } catch (e) { /* skip invalid */ }
+  return null;
+}
+
+function checkActiveAgents(sessionId) {
+  const teamConfig = loadTeamConfig(sessionId);
+  const resolvedId = (teamConfig && teamConfig.leadSessionId) ? teamConfig.leadSessionId : sessionId;
+  const agentDir = path.join(AGENT_ACTIVITY_DIR, resolvedId);
+  if (!existsSync(agentDir)) return false;
+  try {
+    if (checkWaitingForUser(agentDir)) return true;
+    for (const file of readdirSync(agentDir).filter(f => f.endsWith('.json') && !f.startsWith('_'))) {
+      try {
+        const agent = JSON.parse(readFileSync(path.join(agentDir, file), 'utf8'));
+        if (agent.status === 'active' || agent.status === 'idle') {
+          return true;
+        }
+      } catch (e) { /* skip invalid */ }
+    }
+  } catch (e) { /* ignore */ }
+  return false;
+}
+
 function isTeamSession(sessionId) {
   return existsSync(path.join(TEAMS_DIR, sessionId, 'config.json'));
 }
@@ -331,6 +365,12 @@ app.get('/api/sessions', async (req, res) => {
           const memberCount = isTeam ? (loadTeamConfig(entry.name)?.members?.length || 0) : 0;
           const planInfo = getPlanInfo(meta.slug);
 
+          const resolvedAgentDir = (() => {
+            const tc = loadTeamConfig(entry.name);
+            const rid = (tc && tc.leadSessionId) ? tc.leadSessionId : entry.name;
+            return path.join(AGENT_ACTIVITY_DIR, rid);
+          })();
+
           sessionsMap.set(entry.name, {
             id: entry.name,
             name: getSessionDisplayName(entry.name, meta),
@@ -346,6 +386,8 @@ app.get('/api/sessions', async (req, res) => {
             modifiedAt: modifiedAt,
             isTeam,
             memberCount,
+            hasActiveAgents: checkActiveAgents(entry.name),
+            hasWaitingForUser: !!checkWaitingForUser(resolvedAgentDir),
             ...planInfo
           });
         }
@@ -360,6 +402,7 @@ app.get('/api/sessions', async (req, res) => {
           try { modifiedAt = statSync(meta.jsonlPath).mtime.toISOString(); } catch (e) {}
         }
         const planInfo = getPlanInfo(meta.slug);
+        const metaAgentDir = path.join(AGENT_ACTIVITY_DIR, sessionId);
         sessionsMap.set(sessionId, {
           id: sessionId,
           name: getSessionDisplayName(sessionId, meta),
@@ -375,9 +418,42 @@ app.get('/api/sessions', async (req, res) => {
           modifiedAt: modifiedAt || new Date(0).toISOString(),
           isTeam: false,
           memberCount: 0,
+          hasActiveAgents: checkActiveAgents(sessionId),
+          hasWaitingForUser: !!checkWaitingForUser(metaAgentDir),
           ...planInfo
         });
       }
+    }
+
+    // Add sessions from agent-activity that have _waiting.json but no tasks/metadata
+    if (existsSync(AGENT_ACTIVITY_DIR)) {
+      try {
+        for (const dir of readdirSync(AGENT_ACTIVITY_DIR, { withFileTypes: true })) {
+          if (!dir.isDirectory() || sessionsMap.has(dir.name)) continue;
+          const agentDir = path.join(AGENT_ACTIVITY_DIR, dir.name);
+          const waiting = checkWaitingForUser(agentDir);
+          if (!waiting) continue;
+          const meta = metadata[dir.name] || {};
+          sessionsMap.set(dir.name, {
+            id: dir.name,
+            name: getSessionDisplayName(dir.name, meta),
+            slug: meta.slug || null,
+            project: meta.project || null,
+            description: meta.description || null,
+            gitBranch: meta.gitBranch || null,
+            taskCount: 0,
+            completed: 0,
+            inProgress: 0,
+            pending: 0,
+            createdAt: meta.created || null,
+            modifiedAt: waiting.timestamp || new Date().toISOString(),
+            isTeam: false,
+            memberCount: 0,
+            hasActiveAgents: true,
+            hasWaitingForUser: true,
+          });
+        }
+      } catch (e) { /* ignore */ }
     }
 
     // Hide leader UUID sessions that are represented by a team session
@@ -515,18 +591,19 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
     sessionId = teamConfig.leadSessionId;
   }
   const agentDir = path.join(AGENT_ACTIVITY_DIR, sessionId);
-  if (!existsSync(agentDir)) return res.json([]);
+  if (!existsSync(agentDir)) return res.json({ agents: [], waitingForUser: null });
   try {
-    const files = readdirSync(agentDir).filter(f => f.endsWith('.json'));
+    const files = readdirSync(agentDir).filter(f => f.endsWith('.json') && !f.startsWith('_'));
     const agents = [];
     for (const file of files) {
       try {
         agents.push(JSON.parse(readFileSync(path.join(agentDir, file), 'utf8')));
       } catch (e) { /* skip invalid */ }
     }
-    res.json(agents);
+    const waitingForUser = checkWaitingForUser(agentDir);
+    res.json({ agents, waitingForUser });
   } catch (e) {
-    res.json([]);
+    res.json({ agents: [], waitingForUser: null });
   }
 });
 
@@ -782,14 +859,14 @@ const agentActivityWatcher = chokidar.watch(AGENT_ACTIVITY_DIR, {
 const AGENT_FILE_CAP = 20;
 
 agentActivityWatcher.on('all', (event, filePath) => {
-  if ((event === 'add' || event === 'change') && filePath.endsWith('.json')) {
+  if ((event === 'add' || event === 'change' || event === 'unlink') && filePath.endsWith('.json')) {
     const relativePath = path.relative(AGENT_ACTIVITY_DIR, filePath);
     const sessionId = relativePath.split(path.sep)[0];
     // Cleanup: if session dir exceeds cap, delete oldest files by mtime
     if (event === 'add') {
       try {
         const sessionDir = path.join(AGENT_ACTIVITY_DIR, sessionId);
-        const files = readdirSync(sessionDir).filter(f => f.endsWith('.json'));
+        const files = readdirSync(sessionDir).filter(f => f.endsWith('.json') && !f.startsWith('_'));
         if (files.length > AGENT_FILE_CAP) {
           const withStats = files.map(f => {
             const fp = path.join(sessionDir, f);
