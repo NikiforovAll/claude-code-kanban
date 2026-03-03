@@ -132,54 +132,26 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 /**
- * Read customTitle and slug from a JSONL file
- * Returns { customTitle, slug } - customTitle from /rename, slug from session
+ * Extract slug and projectPath from first few lines of a session JSONL.
+ * Slug and cwd appear in the first few entries, so 4KB is plenty.
  */
 function readSessionInfoFromJsonl(jsonlPath) {
-  const result = { customTitle: null, slug: null, projectPath: null };
-
+  const result = { slug: null, projectPath: null };
   try {
     if (!existsSync(jsonlPath)) return result;
-
-    // Read first 64KB - should contain custom-title and at least one message with slug/cwd
     const fd = require('fs').openSync(jsonlPath, 'r');
-    const buffer = Buffer.alloc(65536);
-    const bytesRead = require('fs').readSync(fd, buffer, 0, 65536, 0);
+    const buf = Buffer.alloc(4096);
+    const n = require('fs').readSync(fd, buf, 0, 4096, 0);
     require('fs').closeSync(fd);
-
-    const content = buffer.toString('utf8', 0, bytesRead);
-    const lines = content.split('\n');
-
-    for (const line of lines) {
-      if (!line.trim()) continue;
+    for (const line of buf.toString('utf8', 0, n).split('\n')) {
       try {
         const data = JSON.parse(line);
-
-        // Check for custom-title entry (from /rename command)
-        if (data.type === 'custom-title' && data.customTitle) {
-          result.customTitle = data.customTitle;
-        }
-
-        // Check for slug in user/assistant messages
-        if (data.slug && !result.slug) {
-          result.slug = data.slug;
-        }
-
-        // Extract project path from cwd field (actual path, no encoding issues)
-        if (data.cwd && !result.projectPath) {
-          result.projectPath = data.cwd;
-        }
-
-        // Stop early if we found all three
-        if (result.customTitle && result.slug && result.projectPath) break;
-      } catch (e) {
-        // Skip malformed lines
-      }
+        if (data.slug) result.slug = data.slug;
+        if (data.cwd) result.projectPath = data.cwd;
+        if (result.slug && result.projectPath) break;
+      } catch (e) {}
     }
-  } catch (e) {
-    // Return partial results
-  }
-
+  } catch (e) {}
   return result;
 }
 
@@ -221,7 +193,6 @@ function loadSessionMetadata() {
         }
 
         metadata[sessionId] = {
-          customTitle: sessionInfo.customTitle,
           slug: sessionInfo.slug,
           project: sessionInfo.projectPath || null,
           jsonlPath: jsonlPath
@@ -249,7 +220,6 @@ function loadSessionMetadata() {
             if (entry.sessionId) {
               if (!metadata[entry.sessionId]) {
                 metadata[entry.sessionId] = {
-                  customTitle: null,
                   slug: null,
                   project: entry.projectPath || null,
                   jsonlPath: null
@@ -282,8 +252,7 @@ function loadSessionMetadata() {
           const project = parentMeta?.project || leadMember?.cwd || teamConfig.working_dir || null;
 
           metadata[dir.name] = {
-            customTitle: teamConfig.description || dir.name,
-            slug: null,
+            slug: teamConfig.description || dir.name,
             project,
             jsonlPath: parentMeta?.jsonlPath || null,
             description: teamConfig.description || parentMeta?.description || null,
@@ -302,9 +271,6 @@ function loadSessionMetadata() {
   return metadata;
 }
 
-/**
- * Get display name for a session: customTitle > slug > null (frontend shows UUID)
- */
 function getPlanInfo(slug) {
   if (!slug) return { hasPlan: false, planTitle: null };
   const planPath = path.join(PLANS_DIR, `${slug}.md`);
@@ -319,7 +285,6 @@ function getPlanInfo(slug) {
 }
 
 function getSessionDisplayName(sessionId, meta) {
-  if (meta?.customTitle) return meta.customTitle;
   if (meta?.slug) return meta.slug;
   return null; // Frontend will show UUID as fallback
 }
