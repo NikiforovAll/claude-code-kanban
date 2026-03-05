@@ -1,6 +1,6 @@
 {
   "name": "claude-code-kanban",
-  "version": "1.19.0-rc.4",
+  "version": "1.19.0-rc.5",
   "description": "A web-based Kanban board for viewing Claude Code tasks with agent teams support",
   "main": "server.js",
   "bin": {
@@ -45,6 +45,7 @@
     "server.js",
     "install.js",
     "hooks/agent-spy.sh",
+    "lib/**/*",
     "public/**/*"
   ],
   "devDependencies": {
