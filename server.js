@@ -156,7 +156,7 @@ function readRecentMessages(jsonlPath, limit = 10) {
 
     fd = require('fs').openSync(jsonlPath, 'r');
     const messages = [];
-    let readSize = 65536;
+    let readSize = Math.min(65536, stat.size);
 
     while (messages.length < limit && readSize <= stat.size) {
       const start = Math.max(0, stat.size - readSize);
