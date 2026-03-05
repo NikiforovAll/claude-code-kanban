@@ -8,6 +8,11 @@ const readline = require('readline');
 const chokidar = require('chokidar');
 const os = require('os');
 
+const {
+  readRecentMessages: _readRecentMessagesUncached,
+  readSessionInfoFromJsonl
+} = require('./lib/parsers');
+
 const isSetupCommand = process.argv.includes('--install') || process.argv.includes('--uninstall');
 
 if (isSetupCommand) {
@@ -136,6 +141,20 @@ let sessionMetadataCache = {};
 let lastMetadataRefresh = 0;
 const METADATA_CACHE_TTL = 10000; // 10 seconds
 
+const SAFE_ID_RE = /^[a-zA-Z0-9_-]+$/;
+function isSafeId(id) {
+  return typeof id === 'string' && id.length > 0 && id.length <= 128 && SAFE_ID_RE.test(id);
+}
+
+app.param('sessionId', (req, res, next, val) => {
+  if (!isSafeId(val)) return res.status(400).json({ error: 'Invalid session ID' });
+  next();
+});
+app.param('taskId', (req, res, next, val) => {
+  if (!isSafeId(val)) return res.status(400).json({ error: 'Invalid task ID' });
+  next();
+});
+
 // Parse JSON bodies
 app.use(express.json());
 
@@ -146,118 +165,18 @@ const messageCache = new Map();
 const MESSAGE_CACHE_TTL = 5000;
 
 function readRecentMessages(jsonlPath, limit = 10) {
-  let fd;
   try {
     const stat = statSync(jsonlPath);
     const cached = messageCache.get(jsonlPath);
     if (cached && cached.mtime === stat.mtimeMs && Date.now() - cached.ts < MESSAGE_CACHE_TTL) {
       return cached.messages;
     }
-
-    fd = require('fs').openSync(jsonlPath, 'r');
-    const messages = [];
-    let readSize = Math.min(65536, stat.size);
-
-    while (messages.length < limit && readSize <= stat.size) {
-      const start = Math.max(0, stat.size - readSize);
-      const bufSize = Math.min(readSize, stat.size);
-      const buf = Buffer.alloc(bufSize);
-      require('fs').readSync(fd, buf, 0, bufSize, start);
-
-      const text = buf.toString('utf8');
-      const firstNewline = text.indexOf('\n');
-      const clean = firstNewline >= 0 ? text.substring(firstNewline + 1) : text;
-
-      messages.length = 0;
-      for (const line of clean.split('\n')) {
-        if (!line.trim()) continue;
-        try {
-          const obj = JSON.parse(line);
-          if (obj.type === 'assistant' && obj.message?.content && Array.isArray(obj.message.content)) {
-            for (const block of obj.message.content) {
-              if (block.type === 'text' && block.text) {
-                const truncated = block.text.length > 500;
-                messages.push({
-                  type: 'assistant',
-                  text: truncated ? block.text.slice(0, 500) + '...' : block.text,
-                  fullText: truncated ? block.text : null,
-                  timestamp: obj.timestamp,
-                  model: obj.message.model || null
-                });
-              } else if (block.type === 'tool_use') {
-                let detail = null;
-                let fullDetail = null;
-                let inp = null;
-                if (block.input) {
-                  inp = typeof block.input === 'string' ? (() => { try { return JSON.parse(block.input); } catch(_) { return {}; } })() : block.input;
-                  if (inp.file_path) { detail = inp.file_path.replace(/^.*[/\\]/, ''); fullDetail = inp.file_path; }
-                  else if (inp.command) { detail = inp.command.length > 80 ? inp.command.slice(0, 80) + '...' : inp.command; fullDetail = inp.command; }
-                  else if (inp.pattern) { detail = inp.pattern; fullDetail = inp.pattern; }
-                  else if (inp.query) { detail = inp.query; fullDetail = inp.query; }
-                  else if (inp.description) { detail = inp.description; fullDetail = inp.description; }
-                }
-                messages.push({
-                  type: 'tool_use',
-                  tool: block.name,
-                  detail,
-                  fullDetail: fullDetail !== detail ? fullDetail : null,
-                  description: inp?.description || null,
-                  timestamp: obj.timestamp
-                });
-              }
-            }
-          } else if (obj.type === 'user' && obj.message?.role === 'user' && !obj.isMeta) {
-            if (typeof obj.message.content === 'string') {
-              const t = obj.message.content;
-              const uTruncated = t.length > 500;
-              messages.push({
-                type: 'user',
-                text: uTruncated ? t.slice(0, 500) + '...' : t,
-                fullText: uTruncated ? t : null,
-                timestamp: obj.timestamp
-              });
-            }
-          }
-        } catch (e) { /* partial line */ }
-      }
-
-      if (readSize >= stat.size) break;
-      readSize *= 4;
-    }
-
-    require('fs').closeSync(fd);
-    fd = null;
-    const result = messages.slice(-limit);
-    messageCache.set(jsonlPath, { messages: result, mtime: stat.mtimeMs, ts: Date.now() });
-    return result;
+    const messages = _readRecentMessagesUncached(jsonlPath, limit);
+    messageCache.set(jsonlPath, { messages, mtime: stat.mtimeMs, ts: Date.now() });
+    return messages;
   } catch (e) {
-    if (fd) try { require('fs').closeSync(fd); } catch (_) {}
     return [];
   }
-}
-
-/**
- * Extract slug and projectPath from first few lines of a session JSONL.
- * Slug and cwd appear in the first few entries, so 4KB is plenty.
- */
-function readSessionInfoFromJsonl(jsonlPath) {
-  const result = { slug: null, projectPath: null };
-  try {
-    if (!existsSync(jsonlPath)) return result;
-    const fd = require('fs').openSync(jsonlPath, 'r');
-    const buf = Buffer.alloc(4096);
-    const n = require('fs').readSync(fd, buf, 0, 4096, 0);
-    require('fs').closeSync(fd);
-    for (const line of buf.toString('utf8', 0, n).split('\n')) {
-      try {
-        const data = JSON.parse(line);
-        if (data.slug) result.slug = data.slug;
-        if (data.cwd) result.projectPath = data.cwd;
-        if (result.slug && result.projectPath) break;
-      } catch (e) {}
-    }
-  } catch (e) {}
-  return result;
 }
 
 /**
@@ -670,7 +589,7 @@ app.post('/api/sessions/:sessionId/plan/open', (req, res) => {
     if (!existsSync(planPath)) return res.status(404).json({ error: 'No plan found' });
 
     const editor = process.env.EDITOR || 'code';
-    require('child_process').exec(`${editor} "${planPath}"`);
+    require('child_process').execFile(editor, [planPath]);
     res.json({ success: true });
   } catch (error) {
     console.error('Error opening plan in VS Code:', error);

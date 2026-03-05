@@ -1500,6 +1500,27 @@
       overflow: hidden;
     }
     .msg-tool .msg-text { color: var(--text-secondary); }
+    .rendered-md h1, .rendered-md h2, .rendered-md h3,
+    .rendered-md h4, .rendered-md h5, .rendered-md h6 {
+      margin-top: 1em;
+      margin-bottom: 0.4em;
+    }
+    .rendered-md h1:first-child, .rendered-md h2:first-child,
+    .rendered-md h3:first-child { margin-top: 0; }
+    .rendered-md p { margin: 0.5em 0; }
+    .rendered-md ul, .rendered-md ol { margin: 0.4em 0; padding-left: 2em; }
+    .rendered-md li { margin: 0.2em 0; }
+    .rendered-md pre { margin: 0.6em 0; }
+    .rendered-md blockquote { margin: 0.6em 0; }
+    .rendered-md table { margin: 0.6em 0; border-collapse: collapse; width: 100%; }
+    .rendered-md th, .rendered-md td {
+      border: 1px solid var(--border);
+      padding: 6px 10px;
+      text-align: left;
+    }
+    .rendered-md th { background: var(--bg-hover); font-weight: 600; }
+    .rendered-md tr:hover td { background: var(--bg-hover); }
+    .rendered-md hr { margin: 0.8em 0; border-color: var(--border); }
     .msg-detail-pre {
       white-space: pre-wrap;
       word-break: break-all;
@@ -2833,6 +2854,10 @@
           body.textContent = text;
         }
       }
+      const modal = document.getElementById('msg-detail-modal').querySelector('.modal');
+      const hasTable = body.querySelector('table') !== null;
+      modal.style.maxWidth = hasTable ? '1100px' : '860px';
+
       const meta = [formatDate(m.timestamp)];
       if (m.model) meta.unshift(m.model);
       document.getElementById('msg-detail-meta').textContent = meta.join(' · ');
@@ -2975,7 +3000,7 @@
           : `<pre style="white-space:pre-wrap;margin:0;">${escapeHtml(stripAnsi(agent.lastMessage.trim()))}</pre>`;
         html += `<div style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px;">
           <div style="font-size:12px;color:var(--text-tertiary);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.05em;">Last Message</div>
-          <div class="detail-desc" style="font-size:13px;">${sanitized}</div>
+          <div class="detail-desc rendered-md" style="font-size:13px;">${sanitized}</div>
         </div>`;
       }
 
@@ -4574,16 +4599,16 @@
 
   <!-- Message Detail Modal -->
   <div id="msg-detail-modal" class="modal-overlay" onclick="closeMsgDetailModal()">
-    <div class="modal" onclick="event.stopPropagation()" style="max-width: 640px;">
+    <div class="modal" onclick="event.stopPropagation()" style="max-width: 860px; width: 90vw; max-height: 90vh; display: flex; flex-direction: column;">
       <div class="modal-header">
         <h3 class="modal-title" id="msg-detail-title">Message</h3>
         <button class="modal-close" aria-label="Close" onclick="closeMsgDetailModal()">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
         </button>
       </div>
-      <div class="modal-body">
-        <div id="msg-detail-body" style="white-space: pre-wrap; word-break: break-word; font-size: 13px; line-height: 1.6; max-height: 60vh; overflow-y: auto;"></div>
-        <div id="msg-detail-meta" style="margin-top: 12px; font-size: 11px; color: var(--text-muted);"></div>
+      <div class="modal-body" style="flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden;">
+        <div id="msg-detail-body" class="rendered-md" style="word-break: break-word; font-size: 13px; line-height: 1.6; overflow-y: auto; flex: 1; min-height: 0; scrollbar-gutter: stable;"></div>
+        <div id="msg-detail-meta" style="margin-top: 12px; font-size: 11px; color: var(--text-muted); flex-shrink: 0;"></div>
       </div>
     </div>
   </div>
@@ -4751,7 +4776,7 @@
           </svg>
         </button>
       </div>
-      <div id="team-modal-body" class="modal-body" style="overflow-y: auto; flex: 1;"></div>
+      <div id="team-modal-body" class="modal-body" style="overflow-y: auto; flex: 1; min-height: 0; scrollbar-gutter: stable;"></div>
       <div class="modal-footer">
         <button class="btn btn-primary" onclick="closeTeamModal()">Close</button>
       </div>
@@ -4770,7 +4795,7 @@
           </svg>
         </button>
       </div>
-      <div id="plan-modal-body" class="modal-body detail-desc" style="overflow-y: auto; flex: 1;"></div>
+      <div id="plan-modal-body" class="modal-body detail-desc rendered-md" style="overflow-y: auto; flex: 1; min-height: 0; scrollbar-gutter: stable;"></div>
       <div class="modal-footer">
         <button class="btn btn-primary" onclick="closePlanModal()">Close</button>
       </div>
@@ -4814,7 +4839,7 @@
           </svg>
         </button>
       </div>
-      <div id="agent-modal-body" class="modal-body" style="overflow-y: auto; flex: 1;"></div>
+      <div id="agent-modal-body" class="modal-body" style="overflow-y: auto; flex: 1; min-height: 0; scrollbar-gutter: stable;"></div>
       <div class="modal-footer">
         <button class="btn btn-primary" onclick="closeAgentModal()">Close</button>
       </div>
