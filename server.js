@@ -45,6 +45,7 @@ const AGENT_ACTIVITY_DIR = path.join(CLAUDE_DIR, 'agent-activity');
 
 const PERMISSION_TTL_MS = 1800000;
 const AGENT_TTL_MS = 3600000;
+const AGENT_STALE_MS = 120000;
 
 function checkWaitingForUser(agentDir) {
   try {
@@ -64,12 +65,23 @@ function isAgentFresh(agent) {
   return (Date.now() - new Date(agent.updatedAt).getTime()) < AGENT_TTL_MS;
 }
 
+function isSessionStale(meta) {
+  if (!meta.jsonlPath) return false;
+  try {
+    const mtime = statSync(meta.jsonlPath).mtime;
+    return (Date.now() - mtime.getTime()) > AGENT_STALE_MS;
+  } catch (e) { return false; }
+}
+
 function checkActiveAgents(sessionId) {
   const teamConfig = loadTeamConfig(sessionId);
   const resolvedId = (teamConfig && teamConfig.leadSessionId) ? teamConfig.leadSessionId : sessionId;
   const agentDir = path.join(AGENT_ACTIVITY_DIR, resolvedId);
   if (!existsSync(agentDir)) return false;
   try {
+    const metadata = loadSessionMetadata();
+    const meta = metadata[resolvedId] || metadata[sessionId] || {};
+    if (isSessionStale(meta)) return false;
     if (checkWaitingForUser(agentDir)) return true;
     for (const file of readdirSync(agentDir).filter(f => f.endsWith('.json') && !f.startsWith('_'))) {
       try {
@@ -83,8 +95,9 @@ function checkActiveAgents(sessionId) {
   return false;
 }
 
-function checkRunningAgents(agentDir) {
+function checkRunningAgents(agentDir, meta) {
   if (!existsSync(agentDir)) return false;
+  if (meta && isSessionStale(meta)) return false;
   try {
     for (const file of readdirSync(agentDir).filter(f => f.endsWith('.json') && !f.startsWith('_'))) {
       try {
@@ -457,7 +470,7 @@ app.get('/api/sessions', async (req, res) => {
             isTeam,
             memberCount,
             hasActiveAgents: checkActiveAgents(entry.name),
-            hasRunningAgents: checkRunningAgents(resolvedAgentDir),
+            hasRunningAgents: checkRunningAgents(resolvedAgentDir, meta),
             hasWaitingForUser: !!checkWaitingForUser(resolvedAgentDir),
             ...planInfo
           });
@@ -490,7 +503,7 @@ app.get('/api/sessions', async (req, res) => {
           isTeam: false,
           memberCount: 0,
           hasActiveAgents: checkActiveAgents(sessionId),
-          hasRunningAgents: checkRunningAgents(metaAgentDir),
+          hasRunningAgents: checkRunningAgents(metaAgentDir, meta),
           hasWaitingForUser: !!checkWaitingForUser(metaAgentDir),
           ...planInfo
         });
@@ -665,12 +678,21 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
   const agentDir = path.join(AGENT_ACTIVITY_DIR, sessionId);
   if (!existsSync(agentDir)) return res.json({ agents: [], waitingForUser: null });
   try {
+    const metadata = loadSessionMetadata();
+    const meta = metadata[sessionId] || {};
+    const sessionStale = isSessionStale(meta);
+
     const files = readdirSync(agentDir).filter(f => f.endsWith('.json') && !f.startsWith('_'));
     const agents = [];
     for (const file of files) {
       try {
         const agent = JSON.parse(readFileSync(path.join(agentDir, file), 'utf8'));
-        if (isAgentFresh(agent)) agents.push(agent);
+        if (!isAgentFresh(agent)) continue;
+        if (sessionStale && (agent.status === 'active' || agent.status === 'idle')) {
+          agent.status = 'stopped';
+          if (!agent.stoppedAt) agent.stoppedAt = agent.updatedAt || agent.startedAt;
+        }
+        agents.push(agent);
       } catch (e) { /* skip invalid */ }
     }
     const waitingForUser = checkWaitingForUser(agentDir);
