@@ -131,6 +131,82 @@ app.use(express.json());
 // Serve static files
 app.use(express.static(path.join(__dirname, 'public')));
 
+const messageCache = new Map();
+const MESSAGE_CACHE_TTL = 5000;
+
+function readRecentMessages(jsonlPath, limit = 10) {
+  let fd;
+  try {
+    const stat = statSync(jsonlPath);
+    const cached = messageCache.get(jsonlPath);
+    if (cached && cached.mtime === stat.mtimeMs && Date.now() - cached.ts < MESSAGE_CACHE_TTL) {
+      return cached.messages;
+    }
+
+    fd = require('fs').openSync(jsonlPath, 'r');
+    const messages = [];
+    let readSize = 65536;
+
+    while (messages.length < limit && readSize <= stat.size) {
+      const start = Math.max(0, stat.size - readSize);
+      const bufSize = Math.min(readSize, stat.size);
+      const buf = Buffer.alloc(bufSize);
+      require('fs').readSync(fd, buf, 0, bufSize, start);
+
+      const text = buf.toString('utf8');
+      const firstNewline = text.indexOf('\n');
+      const clean = firstNewline >= 0 ? text.substring(firstNewline + 1) : text;
+
+      messages.length = 0;
+      for (const line of clean.split('\n')) {
+        if (!line.trim()) continue;
+        try {
+          const obj = JSON.parse(line);
+          if (obj.type === 'assistant' && obj.message?.content && Array.isArray(obj.message.content)) {
+            for (const block of obj.message.content) {
+              if (block.type === 'text' && block.text) {
+                messages.push({
+                  type: 'assistant',
+                  text: block.text.length > 500 ? block.text.slice(0, 500) + '...' : block.text,
+                  timestamp: obj.timestamp,
+                  model: obj.message.model || null
+                });
+              } else if (block.type === 'tool_use') {
+                messages.push({
+                  type: 'tool_use',
+                  tool: block.name,
+                  timestamp: obj.timestamp
+                });
+              }
+            }
+          } else if (obj.type === 'user' && obj.message?.role === 'user' && !obj.isMeta) {
+            if (typeof obj.message.content === 'string') {
+              const t = obj.message.content;
+              messages.push({
+                type: 'user',
+                text: t.length > 500 ? t.slice(0, 500) + '...' : t,
+                timestamp: obj.timestamp
+              });
+            }
+          }
+        } catch (e) { /* partial line */ }
+      }
+
+      if (readSize >= stat.size) break;
+      readSize *= 4;
+    }
+
+    require('fs').closeSync(fd);
+    fd = null;
+    const result = messages.slice(-limit);
+    messageCache.set(jsonlPath, { messages: result, mtime: stat.mtimeMs, ts: Date.now() });
+    return result;
+  } catch (e) {
+    if (fd) try { require('fs').closeSync(fd); } catch (_) {}
+    return [];
+  }
+}
+
 /**
  * Extract slug and projectPath from first few lines of a session JSONL.
  * Slug and cwd appear in the first few entries, so 4KB is plenty.
@@ -592,6 +668,16 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
   } catch (e) {
     res.json({ agents: [], waitingForUser: null });
   }
+});
+
+app.get('/api/sessions/:sessionId/messages', (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit, 10) || 10, 50);
+  const metadata = loadSessionMetadata();
+  const meta = metadata[req.params.sessionId];
+  const jsonlPath = meta?.jsonlPath;
+  if (!jsonlPath) return res.json({ messages: [], sessionId: req.params.sessionId });
+  const messages = readRecentMessages(jsonlPath, limit);
+  res.json({ messages, sessionId: req.params.sessionId });
 });
 
 app.get('/api/version', (req, res) => {
