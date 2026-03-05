@@ -1494,8 +1494,19 @@
       white-space: pre-wrap;
       word-break: break-word;
       color: var(--text-primary);
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
     }
     .msg-tool .msg-text { color: var(--text-secondary); }
+    .msg-detail-pre {
+      white-space: pre-wrap;
+      word-break: break-all;
+      margin: 0;
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+    }
     .msg-cmd .msg-text code {
       background: var(--bg-hover);
       padding: 2px 6px;
@@ -2777,7 +2788,7 @@
         return;
       }
       container.innerHTML = messages.map((m, i) => {
-        const clickable = m.type !== 'tool_use' ? `onclick="showMsgDetail(${i})" style="cursor:pointer"` : '';
+        const clickable = `onclick="showMsgDetail(${i})" style="cursor:pointer"`;
         if (m.type === 'user') {
           const cmd = parseCommandMessage(m.text);
           const displayText = cmd ? cmd : escapeHtml(cleanMessageText(m.text));
@@ -2793,7 +2804,7 @@
           </div>`;
         } else if (m.type === 'tool_use') {
           const toolDetail = m.detail ? ` <span style="color:var(--text-muted)">${escapeHtml(m.detail)}</span>` : '';
-          return `<div class="msg-item msg-tool">
+          return `<div class="msg-item msg-tool" ${clickable}>
             <svg class="msg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
             <div class="msg-body"><div class="msg-text">${escapeHtml(m.tool)}${toolDetail}</div><div class="msg-time">${formatDate(m.timestamp)}</div></div>
           </div>`;
@@ -2806,13 +2817,20 @@
     function showMsgDetail(idx) {
       const m = currentMessages[idx];
       if (!m) return;
-      const title = m.type === 'assistant' ? 'Claude' : 'User';
-      document.getElementById('msg-detail-title').textContent = title;
       const body = document.getElementById('msg-detail-body');
-      if (typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined') {
-        body.innerHTML = DOMPurify.sanitize(marked.parse(m.text));
+      if (m.type === 'tool_use') {
+        document.getElementById('msg-detail-title').textContent = m.tool;
+        const fullText = m.fullDetail || m.detail || '';
+        const descHtml = m.description && m.description !== fullText ? `<div style="margin-bottom:8px;color:var(--text-secondary);font-size:0.85rem">${escapeHtml(m.description)}</div>` : '';
+        body.innerHTML = fullText ? descHtml + `<pre class="msg-detail-pre">${escapeHtml(fullText)}</pre>` : '<em>No details</em>';
       } else {
-        body.textContent = m.text;
+        const text = m.fullText || m.text;
+        document.getElementById('msg-detail-title').textContent = m.type === 'assistant' ? 'Claude' : 'User';
+        if (typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined') {
+          body.innerHTML = DOMPurify.sanitize(marked.parse(text));
+        } else {
+          body.textContent = text;
+        }
       }
       const meta = [formatDate(m.timestamp)];
       if (m.model) meta.unshift(m.model);
@@ -3820,7 +3838,12 @@
         return;
       }
 
-      if (document.querySelector('.modal-overlay.visible')) return;
+      if (document.querySelector('.modal-overlay.visible')) {
+        if (e.key === 'Escape') {
+          document.querySelectorAll('.modal-overlay.visible').forEach(m => m.classList.remove('visible'));
+        }
+        return;
+      }
 
       if (e.key === '[') {
         e.preventDefault();

@@ -73,15 +73,13 @@ function isSessionStale(meta) {
   } catch (e) { return false; }
 }
 
-function checkActiveAgents(sessionId) {
+function checkActiveAgents(sessionId, meta) {
   const teamConfig = loadTeamConfig(sessionId);
   const resolvedId = (teamConfig && teamConfig.leadSessionId) ? teamConfig.leadSessionId : sessionId;
   const agentDir = path.join(AGENT_ACTIVITY_DIR, resolvedId);
   if (!existsSync(agentDir)) return false;
   try {
-    const metadata = loadSessionMetadata();
-    const meta = metadata[resolvedId] || metadata[sessionId] || {};
-    if (isSessionStale(meta)) return false;
+    if (meta && isSessionStale(meta)) return false;
     if (checkWaitingForUser(agentDir)) return true;
     for (const file of readdirSync(agentDir).filter(f => f.endsWith('.json') && !f.startsWith('_'))) {
       try {
@@ -178,26 +176,32 @@ function readRecentMessages(jsonlPath, limit = 10) {
           if (obj.type === 'assistant' && obj.message?.content && Array.isArray(obj.message.content)) {
             for (const block of obj.message.content) {
               if (block.type === 'text' && block.text) {
+                const truncated = block.text.length > 500;
                 messages.push({
                   type: 'assistant',
-                  text: block.text.length > 500 ? block.text.slice(0, 500) + '...' : block.text,
+                  text: truncated ? block.text.slice(0, 500) + '...' : block.text,
+                  fullText: truncated ? block.text : null,
                   timestamp: obj.timestamp,
                   model: obj.message.model || null
                 });
               } else if (block.type === 'tool_use') {
                 let detail = null;
+                let fullDetail = null;
+                let inp = null;
                 if (block.input) {
-                  const inp = typeof block.input === 'string' ? (() => { try { return JSON.parse(block.input); } catch(_) { return {}; } })() : block.input;
-                  if (inp.file_path) detail = inp.file_path.replace(/^.*[/\\]/, '');
-                  else if (inp.command) detail = inp.command.length > 80 ? inp.command.slice(0, 80) + '...' : inp.command;
-                  else if (inp.pattern) detail = inp.pattern;
-                  else if (inp.query) detail = inp.query;
-                  else if (inp.description) detail = inp.description;
+                  inp = typeof block.input === 'string' ? (() => { try { return JSON.parse(block.input); } catch(_) { return {}; } })() : block.input;
+                  if (inp.file_path) { detail = inp.file_path.replace(/^.*[/\\]/, ''); fullDetail = inp.file_path; }
+                  else if (inp.command) { detail = inp.command.length > 80 ? inp.command.slice(0, 80) + '...' : inp.command; fullDetail = inp.command; }
+                  else if (inp.pattern) { detail = inp.pattern; fullDetail = inp.pattern; }
+                  else if (inp.query) { detail = inp.query; fullDetail = inp.query; }
+                  else if (inp.description) { detail = inp.description; fullDetail = inp.description; }
                 }
                 messages.push({
                   type: 'tool_use',
                   tool: block.name,
                   detail,
+                  fullDetail: fullDetail !== detail ? fullDetail : null,
+                  description: inp?.description || null,
                   timestamp: obj.timestamp
                 });
               }
@@ -205,9 +209,11 @@ function readRecentMessages(jsonlPath, limit = 10) {
           } else if (obj.type === 'user' && obj.message?.role === 'user' && !obj.isMeta) {
             if (typeof obj.message.content === 'string') {
               const t = obj.message.content;
+              const uTruncated = t.length > 500;
               messages.push({
                 type: 'user',
-                text: t.length > 500 ? t.slice(0, 500) + '...' : t,
+                text: uTruncated ? t.slice(0, 500) + '...' : t,
+                fullText: uTruncated ? t : null,
                 timestamp: obj.timestamp
               });
             }
@@ -469,7 +475,7 @@ app.get('/api/sessions', async (req, res) => {
             modifiedAt: modifiedAt,
             isTeam,
             memberCount,
-            hasActiveAgents: checkActiveAgents(entry.name),
+            hasActiveAgents: checkActiveAgents(entry.name, meta),
             hasRunningAgents: checkRunningAgents(resolvedAgentDir, meta),
             hasWaitingForUser: !!checkWaitingForUser(resolvedAgentDir),
             ...planInfo
@@ -502,7 +508,7 @@ app.get('/api/sessions', async (req, res) => {
           modifiedAt: modifiedAt || new Date(0).toISOString(),
           isTeam: false,
           memberCount: 0,
-          hasActiveAgents: checkActiveAgents(sessionId),
+          hasActiveAgents: checkActiveAgents(sessionId, meta),
           hasRunningAgents: checkRunningAgents(metaAgentDir, meta),
           hasWaitingForUser: !!checkWaitingForUser(metaAgentDir),
           ...planInfo
