@@ -739,9 +739,14 @@ app.get('/api/events', (req, res) => {
   res.setHeader('Connection', 'keep-alive');
 
   clients.add(res);
+  console.log(`[SSE] Client connected (total: ${clients.size})`);
+
+  const heartbeat = setInterval(() => res.write(':heartbeat\n\n'), 30000);
 
   req.on('close', () => {
+    clearInterval(heartbeat);
     clients.delete(res);
+    console.log(`[SSE] Client disconnected (total: ${clients.size})`);
   });
 
   // Send initial ping

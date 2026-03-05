@@ -3669,12 +3669,19 @@
     function setupEventSource() {
       let retryDelay = 1000;
       let eventSource;
+      let wasConnected = false;
 
       function connect() {
         eventSource = new EventSource('/api/events');
 
         eventSource.onopen = () => {
-          retryDelay = 1000; // Reset on successful connection
+          if (wasConnected) {
+            console.warn('[SSE] Reconnected after drop — forcing full refresh');
+            fetchSessions().catch(() => {});
+            if (currentSessionId) fetchTasks(currentSessionId);
+          }
+          wasConnected = true;
+          retryDelay = 1000;
           connectionStatus.innerHTML = `
             <span class="connection-dot live"></span>
             <span>Connected</span>
@@ -3683,24 +3690,36 @@
 
         eventSource.onerror = () => {
           eventSource.close();
+          console.warn('[SSE] Connection lost, retrying in', retryDelay, 'ms');
           connectionStatus.innerHTML = `
             <span class="connection-dot error"></span>
             <span>Reconnecting...</span>
           `;
           setTimeout(connect, retryDelay);
-          retryDelay = Math.min(retryDelay * 2, 30000); // Max 30s
+          retryDelay = Math.min(retryDelay * 2, 30000);
         };
 
-        let refreshTimer = null;
+        let taskRefreshTimer = null;
+        let metadataRefreshTimer = null;
+        let pendingTaskSessionIds = new Set();
+
         function debouncedRefresh(sessionId, isMetadata) {
-          clearTimeout(refreshTimer);
-          const delay = isMetadata ? 2000 : 500;
-          refreshTimer = setTimeout(() => {
-            fetchSessions().catch(err => console.error('[SSE] fetchSessions failed:', err));
-            if (currentSessionId && (isMetadata || sessionId === currentSessionId)) {
-              fetchTasks(currentSessionId);
-            }
-          }, delay);
+          if (isMetadata) {
+            clearTimeout(metadataRefreshTimer);
+            metadataRefreshTimer = setTimeout(() => {
+              fetchSessions().catch(err => console.error('[SSE] fetchSessions failed:', err));
+            }, 2000);
+          } else {
+            pendingTaskSessionIds.add(sessionId);
+            clearTimeout(taskRefreshTimer);
+            taskRefreshTimer = setTimeout(() => {
+              fetchSessions().catch(err => console.error('[SSE] fetchSessions failed:', err));
+              if (currentSessionId && pendingTaskSessionIds.has(currentSessionId)) {
+                fetchTasks(currentSessionId);
+              }
+              pendingTaskSessionIds.clear();
+            }, 500);
+          }
         }
 
         eventSource.onmessage = (event) => {
@@ -3715,7 +3734,6 @@
           }
 
           if (data.type === 'agent-update') {
-            // No debounce — agent events are infrequent and time-sensitive (waiting prompts)
             fetchSessions().catch(err => console.error('[SSE] fetchSessions failed:', err));
             if (currentSessionId && data.sessionId === currentSessionId) {
               fetchAgents(currentSessionId);
@@ -3725,12 +3743,14 @@
           if (data.type === 'team-update') {
             console.log('[SSE] Team update:', data.teamName);
             debouncedRefresh(data.teamName, false);
-            if (currentSessionId && data.teamName === currentSessionId) {
-              fetchTasks(currentSessionId);
-            }
           }
         };
       }
+
+      // Fallback poll every 30s in case SSE silently drops
+      setInterval(() => {
+        fetchSessions().catch(() => {});
+      }, 30000);
 
       connect();
     }
