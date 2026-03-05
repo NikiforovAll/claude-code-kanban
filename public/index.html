@@ -888,7 +888,7 @@
       position: fixed;
       top: 0;
       right: 0;
-      width: 440px;
+      width: 540px;
       height: 100vh;
       background: var(--bg-surface);
       border-left: 1px solid var(--border);
@@ -1426,7 +1426,7 @@
       position: fixed;
       top: 0;
       right: 0;
-      width: 420px;
+      width: 540px;
       height: 100vh;
       background: var(--bg-surface);
       border-left: 1px solid var(--border);
@@ -1496,6 +1496,12 @@
       color: var(--text-primary);
     }
     .msg-tool .msg-text { color: var(--text-secondary); }
+    .msg-cmd .msg-text code {
+      background: var(--bg-hover);
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-size: 11px;
+    }
     .msg-time {
       font-size: 10px;
       color: var(--text-muted);
@@ -2704,6 +2710,7 @@
       panel.classList.toggle('visible', messagePanelOpen);
       document.getElementById('message-toggle')?.classList.toggle('active', messagePanelOpen);
       if (messagePanelOpen && currentSessionId) {
+        if (currentMessages.length) renderMessages(currentMessages);
         fetchMessages(currentSessionId);
       }
     }
@@ -2724,8 +2731,19 @@
       }
     }
 
+    function parseCommandMessage(text) {
+      const nameMatch = text.match(/<command-name>([^<]+)<\/command-name>/);
+      if (nameMatch) return nameMatch[1].trim();
+      const msgMatch = text.match(/<command-message>([^<]+)<\/command-message>/);
+      if (msgMatch) return '/' + msgMatch[1].trim();
+      return null;
+    }
+
     function cleanMessageText(text) {
+      const cmd = parseCommandMessage(text);
+      if (cmd) return cmd;
       return text
+        .replace(/<[^>]+>/g, '')
         .replace(/\*\*/g, '')
         .replace(/^#+\s*/gm, '')
         .replace(/\n/g, ' ')
@@ -2761,19 +2779,23 @@
       container.innerHTML = messages.map((m, i) => {
         const clickable = m.type !== 'tool_use' ? `onclick="showMsgDetail(${i})" style="cursor:pointer"` : '';
         if (m.type === 'user') {
-          return `<div class="msg-item msg-user" ${clickable}>
+          const cmd = parseCommandMessage(m.text);
+          const displayText = cmd ? cmd : escapeHtml(cleanMessageText(m.text));
+          const isCmd = !!cmd;
+          return `<div class="msg-item msg-user${isCmd ? ' msg-cmd' : ''}" ${clickable}>
             <svg class="msg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-            <div class="msg-body"><div class="msg-text">${escapeHtml(m.text)}</div><div class="msg-time">${formatDate(m.timestamp)}</div></div>
+            <div class="msg-body"><div class="msg-text">${isCmd ? '<code>' + escapeHtml(displayText) + '</code>' : displayText}</div><div class="msg-time">${formatDate(m.timestamp)}</div></div>
           </div>`;
         } else if (m.type === 'assistant') {
           return `<div class="msg-item msg-assistant" ${clickable}>
             <svg class="msg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="9" cy="16" r="1.5"/><circle cx="15" cy="16" r="1.5"/><path d="M12 2v4M8 7h8"/></svg>
-            <div class="msg-body"><div class="msg-text">${escapeHtml(m.text)}</div><div class="msg-time">${m.model ? escapeHtml(m.model) + ' · ' : ''}${formatDate(m.timestamp)}</div></div>
+            <div class="msg-body"><div class="msg-text">${escapeHtml(cleanMessageText(m.text))}</div><div class="msg-time">${m.model ? escapeHtml(m.model) + ' · ' : ''}${formatDate(m.timestamp)}</div></div>
           </div>`;
         } else if (m.type === 'tool_use') {
+          const toolDetail = m.detail ? ` <span style="color:var(--text-muted)">${escapeHtml(m.detail)}</span>` : '';
           return `<div class="msg-item msg-tool">
             <svg class="msg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
-            <div class="msg-body"><div class="msg-text">${escapeHtml(m.tool)}</div><div class="msg-time">${formatDate(m.timestamp)}</div></div>
+            <div class="msg-body"><div class="msg-text">${escapeHtml(m.tool)}${toolDetail}</div><div class="msg-time">${formatDate(m.timestamp)}</div></div>
           </div>`;
         }
         return '';

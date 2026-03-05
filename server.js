@@ -172,9 +172,19 @@ function readRecentMessages(jsonlPath, limit = 10) {
                   model: obj.message.model || null
                 });
               } else if (block.type === 'tool_use') {
+                let detail = null;
+                if (block.input) {
+                  const inp = typeof block.input === 'string' ? (() => { try { return JSON.parse(block.input); } catch(_) { return {}; } })() : block.input;
+                  if (inp.file_path) detail = inp.file_path.replace(/^.*[/\\]/, '');
+                  else if (inp.command) detail = inp.command.length > 80 ? inp.command.slice(0, 80) + '...' : inp.command;
+                  else if (inp.pattern) detail = inp.pattern;
+                  else if (inp.query) detail = inp.query;
+                  else if (inp.description) detail = inp.description;
+                }
                 messages.push({
                   type: 'tool_use',
                   tool: block.name,
+                  detail,
                   timestamp: obj.timestamp
                 });
               }
