@@ -1,8 +1,6 @@
 ---
 name: release
 description: This skill should be used when the user wants to create a new release — bump version, tag, push, create GitHub release, and optionally publish to npm. Use when user says "release", "bump version", "publish", "cut a release", or "release candidate".
-disable-model-invocation: true
-user-invocable: true
 argument-hint: "[version | rc]"
 allowed-tools: Read, Bash(git *), Bash(gh *), Bash(bun *)
 ---
