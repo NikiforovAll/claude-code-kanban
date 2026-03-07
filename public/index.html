@@ -398,7 +398,7 @@
 
     .session-item.active {
       background: var(--bg-elevated);
-      border-color: var(--border);
+      border-color: var(--accent);
     }
 
     .session-name {
@@ -2113,7 +2113,7 @@
 
     .sidebar-focused .session-item.active {
       background: transparent;
-      border-color: transparent;
+      border-color: var(--accent);
     }
 
     .sidebar-focused .session-item.active::before {
@@ -2920,11 +2920,15 @@
         const fullText = m.fullDetail || m.detail || '';
         const descHtml = m.description && m.description !== fullText ? `<div style="margin-bottom:8px;color:var(--text-secondary);font-size:0.85rem">${escapeHtml(m.description)}</div>` : '';
         let agentExtraHtml = '';
+        const agentBtn = document.getElementById('msg-detail-agent-btn');
         if (m.tool === 'Agent' && m.agentId) {
           const respHtml = m.agentLastMessage ? renderMarkdown(stripAnsi(m.agentLastMessage.trim())) : null;
           const promptHtml = m.agentPrompt ? renderMarkdown(m.agentPrompt) : null;
           agentExtraHtml += renderAgentTabs(promptHtml, respHtml);
-          agentExtraHtml += `<div style="margin-top:10px"><button onclick="closeMsgDetailModal();showAgentModal('${escapeHtml(m.agentId)}')" style="background:var(--accent);color:#fff;border:none;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:0.85rem">View Agent ⇗</button></div>`;
+          agentBtn.style.display = '';
+          agentBtn.dataset.agentId = m.agentId;
+        } else {
+          agentBtn.style.display = 'none';
         }
         body.innerHTML = (fullText ? descHtml + `<pre class="msg-detail-pre">${escapeHtml(fullText)}</pre>` : '<em>No details</em>') + agentExtraHtml;
       } else {
@@ -3180,13 +3184,14 @@
       // Update project dropdown
       updateProjectDropdown();
 
+      const LIVE_INDICATOR_MS = 10 * 1000;
       let filteredSessions = sessions;
       if (sessionFilter === 'active') {
         const ACTIVE_PLAN_MS = 15 * 60 * 1000;
         const RECENTLY_MODIFIED_MS = 5 * 60 * 1000;
         const now = Date.now();
         filteredSessions = filteredSessions.filter(s => s.hasMessages && (s.pending > 0 || s.inProgress > 0 || s.hasActiveAgents || s.hasWaitingForUser || s.hasRecentLog ||
-          (s.hasPlan && (now - new Date(s.modifiedAt).getTime()) <= ACTIVE_PLAN_MS) ||
+          (s.hasPlan && !s.planImplementationSessionId && (now - new Date(s.modifiedAt).getTime()) <= ACTIVE_PLAN_MS) ||
           (now - new Date(s.modifiedAt).getTime()) <= RECENTLY_MODIFIED_MS));
       }
       if (filterProject) {
@@ -3247,6 +3252,7 @@
         const percent = total > 0 ? Math.round((session.completed / total) * 100) : 0;
         const isActive = session.id === currentSessionId && viewMode === 'session';
         const hasInProgress = session.inProgress > 0;
+        const isLive = hasInProgress || (session.modifiedAt && (Date.now() - new Date(session.modifiedAt).getTime()) <= LIVE_INDICATOR_MS);
         const sessionName = session.name || session.id;
         const projectName = session.project ? session.project.split('/').pop() : null;
         const primaryName = projectName || sessionName;
@@ -3281,8 +3287,8 @@
                 ${session.hasPlan ? `<span class="plan-indicator" onclick="event.stopPropagation(); openPlanForSession('${session.id}')" title="View plan"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span>` : ''}
                 ${session.hasRunningAgents ? '<span class="agent-badge" title="Active agents">🤖</span>' : ''}
                 ${session.hasWaitingForUser ? '<span class="agent-badge" title="Waiting for user">❓</span>' : ''}
-                ${session.planSourceSessionId ? `<span class="agent-badge" title="Implements plan from another session" onclick="event.stopPropagation(); fetchTasks('${escapeHtml(session.planSourceSessionId)}')" style="cursor:pointer;opacity:0.7">📋⬅</span>` : ''}
-                ${hasInProgress ? '<span class="pulse"></span>' : ''}
+                ${session.planSourceSessionId ? `<span class="plan-indicator" title="Implements plan — click to view plan session" onclick="event.stopPropagation(); fetchTasks('${escapeHtml(session.planSourceSessionId)}')">📋</span>` : ''}
+                ${isLive ? '<span class="pulse"></span>' : ''}
               </span>
               <div class="progress-bar"><div class="progress-fill" style="width: ${percent}%"></div></div>
               <span class="progress-text">${session.completed}/${total}</span>
@@ -4242,13 +4248,6 @@
       return `<pre style="white-space:pre-wrap;margin:0;">${escapeHtml(text)}</pre>`;
     }
 
-    function renderSection(label, contentHtml) {
-      return `<div style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px;">
-        <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:10px;text-transform:uppercase;letter-spacing:0.08em;">${escapeHtml(label)}</div>
-        <div class="detail-desc rendered-md" style="font-size:13px;">${contentHtml}</div>
-      </div>`;
-    }
-
     function renderAgentTabs(promptHtml, responseHtml) {
       const tabs = [];
       const panels = [];
@@ -4812,6 +4811,9 @@
       <div class="modal-header">
         <h3 class="modal-title" id="msg-detail-title">Message</h3>
         <div style="display:flex;gap:4px;align-items:center;">
+          <button id="msg-detail-agent-btn" class="icon-btn" aria-label="View Agent" title="View Agent" style="display:none" onclick="closeMsgDetailModal();showAgentModal(this.dataset.agentId)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          </button>
           <button class="icon-btn" aria-label="Copy to clipboard" title="Copy to clipboard" onclick="copyMsgToClipboard(this)">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
           </button>
@@ -4823,8 +4825,8 @@
           </button>
         </div>
       </div>
-      <div class="modal-body" style="flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden;">
-        <div id="msg-detail-body" class="rendered-md" style="word-break: break-word; font-size: 13px; line-height: 1.6; overflow-y: auto; flex: 1; min-height: 0;"></div>
+      <div class="modal-body" style="min-height: 0; display: flex; flex-direction: column; overflow: hidden;">
+        <div id="msg-detail-body" class="rendered-md" style="word-break: break-word; font-size: 13px; line-height: 1.6; overflow-y: auto; overflow-x: auto; min-height: 0;"></div>
         <div id="msg-detail-meta" style="margin-top: 12px; font-size: 11px; color: var(--text-muted); flex-shrink: 0;"></div>
       </div>
     </div>
@@ -4988,7 +4990,7 @@
 
   <!-- Team Info Modal -->
   <div id="team-modal" class="modal-overlay" onclick="closeTeamModal()">
-    <div class="modal" onclick="event.stopPropagation()" style="max-width: 520px; max-height: 80vh; display: flex; flex-direction: column;">
+    <div class="modal" onclick="event.stopPropagation()" style="max-width: 520px; max-height: 80vh; height: fit-content; display: flex; flex-direction: column; overflow: hidden;">
       <div class="modal-header">
         <h3 id="team-modal-title" class="modal-title">Team</h3>
         <button class="modal-close" aria-label="Close dialog" onclick="closeTeamModal()">
@@ -4997,7 +4999,7 @@
           </svg>
         </button>
       </div>
-      <div id="team-modal-body" class="modal-body" style="overflow-y: auto; flex: 1; min-height: 0;"></div>
+      <div id="team-modal-body" class="modal-body" style="overflow-y: auto; overflow-x: auto; min-height: 0;"></div>
       <div class="modal-footer">
         <button class="btn btn-primary" onclick="closeTeamModal()">Close</button>
       </div>
@@ -5016,7 +5018,7 @@
           </svg>
         </button>
       </div>
-      <div id="plan-modal-body" class="modal-body detail-desc rendered-md" style="overflow-y: auto; flex: 1; min-height: 0;"></div>
+      <div id="plan-modal-body" class="modal-body detail-desc rendered-md" style="overflow-y: auto; overflow-x: auto; min-height: 0;"></div>
       <div class="modal-footer">
         <button class="btn btn-primary" onclick="closePlanModal()">Close</button>
       </div>
@@ -5060,7 +5062,7 @@
           </svg>
         </button>
       </div>
-      <div id="agent-modal-body" class="modal-body" style="overflow-y: auto; overflow-x: hidden; flex: 1; min-height: 0;"></div>
+      <div id="agent-modal-body" class="modal-body" style="overflow-y: auto; overflow-x: auto; min-height: 0;"></div>
       <div class="modal-footer">
         <button class="btn btn-primary" onclick="closeAgentModal()">Close</button>
       </div>

@@ -75,15 +75,12 @@ function isAgentFresh(agent) {
   return (Date.now() - new Date(agent.updatedAt).getTime()) < AGENT_TTL_MS;
 }
 
-function getSessionLogMtime(meta) {
-  if (!meta.jsonlPath) return null;
-  try { return statSync(meta.jsonlPath).mtime.getTime(); } catch (e) { return null; }
-}
-
-
-function checkHasMessages(meta) {
-  if (!meta.jsonlPath) return false;
-  try { return statSync(meta.jsonlPath).size > 200; } catch (e) { return false; }
+function getSessionLogStat(meta) {
+  if (!meta.jsonlPath) return { mtime: null, hasMessages: false };
+  try {
+    const st = statSync(meta.jsonlPath);
+    return { mtime: st.mtimeMs, hasMessages: st.size > 200 };
+  } catch (e) { return { mtime: null, hasMessages: false }; }
 }
 
 function checkActiveAgents(sessionId, meta, stale, logMtime) {
@@ -176,11 +173,24 @@ const progressMapCache = new Map();
 
 function evictStaleCache(cache) {
   if (cache.size <= MAX_CACHE_ENTRIES) return;
-  let oldest = null;
-  for (const [key, val] of cache) {
-    if (!oldest || val.ts < oldest[1]) oldest = [key, val.ts];
-  }
-  if (oldest) cache.delete(oldest[0]);
+  const oldest = cache.keys().next().value;
+  if (oldest !== undefined) cache.delete(oldest);
+}
+
+function getProgressMap(jsonlPath) {
+  try {
+    const cached = progressMapCache.get(jsonlPath);
+    if (cached && Date.now() - cached.ts < MESSAGE_CACHE_TTL) return cached.map;
+    const st = statSync(jsonlPath);
+    if (cached && cached.mtime === st.mtimeMs) {
+      cached.ts = Date.now();
+      return cached.map;
+    }
+    const map = buildAgentProgressMap(jsonlPath);
+    progressMapCache.set(jsonlPath, { map, mtime: st.mtimeMs, ts: Date.now() });
+    evictStaleCache(progressMapCache);
+    return map;
+  } catch (_) { return {}; }
 }
 
 function readRecentMessages(jsonlPath, limit = 10) {
@@ -386,7 +396,8 @@ app.get('/api/sessions', async (req, res) => {
           // Get metadata for this session
           const meta = metadata[entry.name] || {};
 
-          const logMtime = getSessionLogMtime(meta);
+          const logStat = getSessionLogStat(meta);
+          const logMtime = logStat.mtime;
           const logAge = logMtime ? Date.now() - logMtime : Infinity;
           const stale = logAge > AGENT_STALE_MS;
 
@@ -422,7 +433,7 @@ app.get('/api/sessions', async (req, res) => {
             modifiedAt: modifiedAt,
             isTeam,
             memberCount,
-            hasMessages: checkHasMessages(meta),
+            hasMessages: logStat.hasMessages,
             hasActiveAgents: checkActiveAgents(entry.name, meta, stale, logMtime),
             hasRunningAgents: checkRunningAgents(resolvedAgentDir, meta, stale),
             hasWaitingForUser: !!checkWaitingForUser(resolvedAgentDir, logMtime),
@@ -436,7 +447,8 @@ app.get('/api/sessions', async (req, res) => {
     // Add sessions from metadata that don't have task directories
     for (const [sessionId, meta] of Object.entries(metadata)) {
       if (!sessionsMap.has(sessionId)) {
-        const logMtime = getSessionLogMtime(meta);
+        const logStat = getSessionLogStat(meta);
+        const logMtime = logStat.mtime;
         const logAge = logMtime ? Date.now() - logMtime : Infinity;
         const stale = logAge > AGENT_STALE_MS;
         let modifiedAt = meta.created || null;
@@ -461,7 +473,7 @@ app.get('/api/sessions', async (req, res) => {
           modifiedAt: modifiedAt || new Date(0).toISOString(),
           isTeam: false,
           memberCount: 0,
-          hasMessages: checkHasMessages(meta),
+          hasMessages: logStat.hasMessages,
           hasActiveAgents: checkActiveAgents(sessionId, meta, stale, logMtime),
           hasRunningAgents: checkRunningAgents(metaAgentDir, meta, stale),
           hasWaitingForUser: !!checkWaitingForUser(metaAgentDir, logMtime),
@@ -478,7 +490,8 @@ app.get('/api/sessions', async (req, res) => {
           if (!dir.isDirectory() || sessionsMap.has(dir.name)) continue;
           const agentDir = path.join(AGENT_ACTIVITY_DIR, dir.name);
           const meta = metadata[dir.name] || {};
-          const waiting = checkWaitingForUser(agentDir, getSessionLogMtime(meta));
+          const logStat = getSessionLogStat(meta);
+          const waiting = checkWaitingForUser(agentDir, logStat.mtime);
           if (!waiting) continue;
           sessionsMap.set(dir.name, {
             id: dir.name,
@@ -495,7 +508,7 @@ app.get('/api/sessions', async (req, res) => {
             modifiedAt: waiting.timestamp || new Date().toISOString(),
             isTeam: false,
             memberCount: 0,
-            hasMessages: checkHasMessages(meta),
+            hasMessages: logStat.hasMessages,
             hasActiveAgents: true,
             hasWaitingForUser: true,
           });
@@ -561,13 +574,13 @@ app.get('/api/projects', (req, res) => {
   const projectMap = {};
   for (const meta of Object.values(metadata)) {
     if (!meta.project) continue;
-    const mtime = meta.jsonlPath ? (() => { try { return statSync(meta.jsonlPath).mtime; } catch (e) { return null; } })() : null;
+    const mtime = getSessionLogStat(meta).mtime;
     if (!projectMap[meta.project] || (mtime && mtime > projectMap[meta.project])) {
       projectMap[meta.project] = mtime;
     }
   }
   const projects = Object.entries(projectMap)
-    .map(([path, mtime]) => ({ path, modifiedAt: mtime ? mtime.toISOString() : null }))
+    .map(([path, mtime]) => ({ path, modifiedAt: mtime ? new Date(mtime).toISOString() : null }))
     .sort((a, b) => a.path.localeCompare(b.path));
   res.json(projects);
 });
@@ -681,7 +694,7 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
   try {
     const metadata = loadSessionMetadata();
     const meta = metadata[sessionId] || {};
-    const logMtime = getSessionLogMtime(meta);
+    const logMtime = getSessionLogStat(meta).mtime;
     const sessionStale = logMtime ? (Date.now() - logMtime) > AGENT_STALE_MS : true;
 
     const files = readdirSync(agentDir).filter(f => f.endsWith('.json') && !f.startsWith('_'));
@@ -700,11 +713,7 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
     const agentsNeedingPrompt = agents.filter(a => !a.prompt);
     if (agentsNeedingPrompt.length && meta.jsonlPath) {
       try {
-        const st = statSync(meta.jsonlPath);
-        const cached = progressMapCache.get(meta.jsonlPath);
-        const progressMap = (cached && cached.mtime === st.mtimeMs && Date.now() - cached.ts < MESSAGE_CACHE_TTL)
-          ? cached.map
-          : (() => { const m = buildAgentProgressMap(meta.jsonlPath); progressMapCache.set(meta.jsonlPath, { map: m, mtime: st.mtimeMs, ts: Date.now() }); return m; })();
+        const progressMap = getProgressMap(meta.jsonlPath);
         const byAgentId = {};
         for (const entry of Object.values(progressMap)) {
           if (entry.prompt && !byAgentId[entry.agentId]) byAgentId[entry.agentId] = entry.prompt;
@@ -735,18 +744,7 @@ app.get('/api/sessions/:sessionId/messages', (req, res) => {
   const messages = readRecentMessages(jsonlPath, limit);
   const agentMessages = messages.filter(m => m.tool === 'Agent' && m.toolUseId);
   if (agentMessages.length) {
-    let progressMap;
-    try {
-      const st = statSync(jsonlPath);
-      const cached = progressMapCache.get(jsonlPath);
-      if (cached && cached.mtime === st.mtimeMs && Date.now() - cached.ts < MESSAGE_CACHE_TTL) {
-        progressMap = cached.map;
-      } else {
-        progressMap = buildAgentProgressMap(jsonlPath);
-        progressMapCache.set(jsonlPath, { map: progressMap, mtime: st.mtimeMs, ts: Date.now() });
-        evictStaleCache(progressMapCache);
-      }
-    } catch (_) { progressMap = {}; }
+    const progressMap = getProgressMap(jsonlPath);
     let sessionId = req.params.sessionId;
     const teamConfig = loadTeamConfig(sessionId);
     if (teamConfig && teamConfig.leadSessionId) sessionId = teamConfig.leadSessionId;
