@@ -2579,7 +2579,7 @@
         console.log('[fetchSessions] Sessions loaded:', sessions.length);
         renderSessions();
         console.log('[fetchSessions] Render complete');
-        fetchLiveUpdates();
+        renderLiveUpdatesFromCache();
       } catch (error) {
         console.error('Failed to fetch sessions:', error);
       }
@@ -2798,18 +2798,12 @@
       return false;
     }
 
-    async function fetchLiveUpdates() {
-      try {
-        const res = await fetch('/api/tasks/all');
-        const allTasks = await res.json();
-        let activeTasks = allTasks.filter(t => t.status === 'in_progress' && !isInternalTask(t));
-        if (filterProject) {
-          activeTasks = activeTasks.filter(t => matchesProjectFilter(t.project));
-        }
-        renderLiveUpdates(activeTasks);
-      } catch (error) {
-        console.error('Failed to fetch live updates:', error);
+    function renderLiveUpdatesFromCache() {
+      let activeTasks = allTasksCache.filter(t => t.status === 'in_progress' && !isInternalTask(t));
+      if (filterProject) {
+        activeTasks = activeTasks.filter(t => matchesProjectFilter(t.project));
       }
+      renderLiveUpdates(activeTasks);
     }
 
     function renderLiveUpdates(activeTasks) {
@@ -3256,7 +3250,8 @@
         ownerFilter = '';
         currentAgents = []; currentWaiting = null; lastAgentsHash = ''; renderAgentFooter();
         const res = await fetch('/api/tasks/all');
-        let tasks = await res.json();
+        allTasksCache = await res.json();
+        let tasks = allTasksCache;
         if (filterProject) {
           tasks = tasks.filter(t => matchesProjectFilter(t.project));
         }
@@ -3264,6 +3259,7 @@
         updateUrl();
         renderAllTasks();
         renderSessions();
+        renderLiveUpdatesFromCache();
       } catch (error) {
         console.error('Failed to fetch all tasks:', error);
       }
@@ -4187,11 +4183,11 @@
     }
 
     async function refreshCurrentView() {
-      fetchLiveUpdates();
       if (viewMode === 'all') {
         await showAllTasks();
       } else if (currentSessionId) {
         await fetchTasks(currentSessionId);
+        renderLiveUpdatesFromCache();
       } else {
         await fetchSessions();
       }
@@ -4574,7 +4570,6 @@
       filterProject = project || null;
       updateUrl();
       renderSessions();
-      fetchLiveUpdates();
       showAllTasks();
     }
 

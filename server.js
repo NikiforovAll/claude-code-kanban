@@ -79,7 +79,7 @@ function getSessionLogStat(meta) {
   if (!meta.jsonlPath) return { mtime: null, hasMessages: false };
   try {
     const st = statSync(meta.jsonlPath);
-    return { mtime: st.mtimeMs, hasMessages: st.size > 200 };
+    return { mtime: st.mtimeMs, hasMessages: st.size > 1000 };
   } catch (e) { return { mtime: null, hasMessages: false }; }
 }
 
