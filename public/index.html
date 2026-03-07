@@ -4403,9 +4403,15 @@
           } else {
             pendingTaskSessionIds.add(sessionId);
             clearTimeout(taskRefreshTimer);
-            taskRefreshTimer = setTimeout(() => {
-              fetchSessions().catch(err => console.error('[SSE] fetchSessions failed:', err));
-              if (currentSessionId && pendingTaskSessionIds.has(currentSessionId)) {
+            taskRefreshTimer = setTimeout(async () => {
+              await fetchSessions().catch(err => console.error('[SSE] fetchSessions failed:', err));
+              if (viewMode === 'all') {
+                currentTasks = filterProject
+                  ? allTasksCache.filter(t => matchesProjectFilter(t.project))
+                  : allTasksCache;
+                renderAllTasks();
+                renderLiveUpdatesFromCache();
+              } else if (currentSessionId && pendingTaskSessionIds.has(currentSessionId)) {
                 fetchTasks(currentSessionId);
               }
               pendingTaskSessionIds.clear();
