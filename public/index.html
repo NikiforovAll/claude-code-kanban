@@ -3522,7 +3522,7 @@
       const session = sessions.find(s => s.id === currentSessionId);
       if (!session) return;
 
-      const displayName = session.customTitle || session.gitBranch || session.description || session.name || currentSessionId;
+      const displayName = session.customTitle || session.name || session.gitBranch || session.description || currentSessionId;
 
       sessionTitle.textContent = displayName;
 
@@ -4787,32 +4787,35 @@
       const titleEl = document.getElementById('team-modal-title');
       const bodyEl = document.getElementById('team-modal-body');
 
-      titleEl.textContent = teamConfig
+      const titleText = teamConfig
         ? `Team: ${teamConfig.team_name || teamConfig.name || 'Unknown'}`
         : (session.name || session.slug || session.id);
+      titleEl.innerHTML = escapeHtml(titleText) + (session.modifiedAt
+        ? `<div style="font-size: 12px; font-weight: 400; color: var(--text-tertiary); margin-top: 2px;">${formatDate(session.modifiedAt)} (${new Date(session.modifiedAt).toLocaleString()})</div>`
+        : '');
 
       let html = '';
 
       // Session & project details as compact key-value rows
       const infoRows = [];
-      infoRows.push(['Session', `<span style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; user-select: all;">${escapeHtml(session.id)}</span>`]);
-      if (session.modifiedAt) {
-        const d = new Date(session.modifiedAt);
-        infoRows.push(['Last Modified', `${formatDate(session.modifiedAt)} <span style="font-size: 10px; color: var(--text-tertiary);">(${d.toLocaleString()})</span>`]);
-      }
+      infoRows.push(['Session', session.id]);
       if (session.project) {
         const projectName = session.project.split(/[/\\]/).pop();
-        infoRows.push(['Project', `${escapeHtml(projectName)}<br><span style="font-size: 10px; color: var(--text-tertiary);">${escapeHtml(session.project)}</span>`]);
+        infoRows.push(['Project', projectName]);
+        infoRows.push(['Path', session.project]);
         if (session.gitBranch) {
-          infoRows.push(['Branch', escapeHtml(session.gitBranch)]);
+          infoRows.push(['Branch', session.gitBranch]);
         }
         if (session.description) {
-          infoRows.push(['Description', escapeHtml(session.description)]);
+          infoRows.push(['Description', session.description]);
         }
       }
-      html += `<div class="team-modal-meta" style="margin-bottom: 16px; display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; align-items: baseline;">`;
+      html += `<div class="team-modal-meta" style="margin-bottom: 16px; display: grid; grid-template-columns: auto 1fr auto; gap: 6px 12px; align-items: center;">`;
       infoRows.forEach(([label, value]) => {
-        html += `<span style="font-weight: 500; color: var(--text-secondary); font-size: 12px; white-space: nowrap;">${label}</span><span>${value}</span>`;
+        const copyVal = escapeHtml(value).replace(/"/g, '&quot;');
+        html += `<span style="font-weight: 500; color: var(--text-secondary); font-size: 12px; white-space: nowrap;">${label}</span>`;
+        html += `<span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; user-select: all; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${copyVal}">${escapeHtml(value)}</span>`;
+        html += `<button onclick="navigator.clipboard.writeText('${copyVal.replace(/'/g, "\\'")}'); this.textContent='✓'; setTimeout(() => this.textContent='Copy', 1000)" style="padding: 2px 8px; font-size: 11px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 4px; color: var(--text-secondary); cursor: pointer; white-space: nowrap;">Copy</button>`;
       });
       html += `</div>`;
 
@@ -5243,7 +5246,7 @@
 
   <!-- Team Info Modal -->
   <div id="team-modal" class="modal-overlay" onclick="closeTeamModal()">
-    <div class="modal" onclick="event.stopPropagation()" style="max-width: 520px; max-height: 80vh; display: flex; flex-direction: column;">
+    <div class="modal" onclick="event.stopPropagation()" style="max-width: 640px; max-height: 80vh; display: flex; flex-direction: column;">
       <div class="modal-header">
         <h3 id="team-modal-title" class="modal-title">Team</h3>
         <button class="modal-close" aria-label="Close dialog" onclick="closeTeamModal()">
