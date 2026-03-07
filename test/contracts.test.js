@@ -12,7 +12,8 @@ const {
   parseTeamConfig,
   parseSessionsIndex,
   parseJsonlLine,
-  readRecentMessages
+  readRecentMessages,
+  buildAgentProgressMap
 } = require('../lib/parsers');
 
 const ajv = new Ajv({ allErrors: true, strict: false });
@@ -277,5 +278,29 @@ describe('Parser: readRecentMessages', () => {
   it('returns empty for non-existent file', () => {
     const messages = readRecentMessages('/nonexistent/path.jsonl', 10);
     assert.deepEqual(messages, []);
+  });
+
+  it('extracts Agent tool fields (toolUseId, agentType, agentPrompt)', () => {
+    const messages = readRecentMessages(jsonlPath, 20);
+    const agentMsg = messages.find(m => m.tool === 'Agent');
+    assert.ok(agentMsg, 'should find an Agent tool_use message');
+    assert.equal(agentMsg.toolUseId, 'tu_agent_01');
+    assert.equal(agentMsg.agentType, 'Explore');
+    assert.equal(agentMsg.agentPrompt, 'Find all auth middleware files');
+  });
+});
+
+describe('Parser: buildAgentProgressMap', () => {
+  const jsonlPath = path.join(FIXTURES_DIR, 'session.jsonl');
+
+  it('maps parentToolUseID to agentId and prompt', () => {
+    const map = buildAgentProgressMap(jsonlPath);
+    assert.equal(map['tu_agent_01'].agentId, 'agent-abc-123');
+    assert.equal(map['tu_agent_01'].prompt, 'Find all auth middleware files');
+  });
+
+  it('returns empty map for non-existent file', () => {
+    const map = buildAgentProgressMap('/nonexistent/path.jsonl');
+    assert.deepEqual(map, {});
   });
 });

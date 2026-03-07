@@ -10,7 +10,8 @@ const os = require('os');
 
 const {
   readRecentMessages: _readRecentMessagesUncached,
-  readSessionInfoFromJsonl
+  readSessionInfoFromJsonl,
+  buildAgentProgressMap
 } = require('./lib/parsers');
 
 const isSetupCommand = process.argv.includes('--install') || process.argv.includes('--uninstall');
@@ -79,6 +80,11 @@ function getSessionLogMtime(meta) {
   try { return statSync(meta.jsonlPath).mtime.getTime(); } catch (e) { return null; }
 }
 
+
+function checkHasMessages(meta) {
+  if (!meta.jsonlPath) return false;
+  try { return statSync(meta.jsonlPath).size > 200; } catch (e) { return false; }
+}
 
 function checkActiveAgents(sessionId, meta, stale, logMtime) {
   const teamConfig = loadTeamConfig(sessionId);
@@ -165,6 +171,17 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 const messageCache = new Map();
 const MESSAGE_CACHE_TTL = 5000;
+const MAX_CACHE_ENTRIES = 200;
+const progressMapCache = new Map();
+
+function evictStaleCache(cache) {
+  if (cache.size <= MAX_CACHE_ENTRIES) return;
+  let oldest = null;
+  for (const [key, val] of cache) {
+    if (!oldest || val.ts < oldest[1]) oldest = [key, val.ts];
+  }
+  if (oldest) cache.delete(oldest[0]);
+}
 
 function readRecentMessages(jsonlPath, limit = 10) {
   try {
@@ -175,6 +192,7 @@ function readRecentMessages(jsonlPath, limit = 10) {
     }
     const messages = _readRecentMessagesUncached(jsonlPath, limit);
     messageCache.set(jsonlPath, { messages, mtime: stat.mtimeMs, ts: Date.now() });
+    evictStaleCache(messageCache);
     return messages;
   } catch (e) {
     return [];
@@ -404,6 +422,7 @@ app.get('/api/sessions', async (req, res) => {
             modifiedAt: modifiedAt,
             isTeam,
             memberCount,
+            hasMessages: checkHasMessages(meta),
             hasActiveAgents: checkActiveAgents(entry.name, meta, stale, logMtime),
             hasRunningAgents: checkRunningAgents(resolvedAgentDir, meta, stale),
             hasWaitingForUser: !!checkWaitingForUser(resolvedAgentDir, logMtime),
@@ -442,6 +461,7 @@ app.get('/api/sessions', async (req, res) => {
           modifiedAt: modifiedAt || new Date(0).toISOString(),
           isTeam: false,
           memberCount: 0,
+          hasMessages: checkHasMessages(meta),
           hasActiveAgents: checkActiveAgents(sessionId, meta, stale, logMtime),
           hasRunningAgents: checkRunningAgents(metaAgentDir, meta, stale),
           hasWaitingForUser: !!checkWaitingForUser(metaAgentDir, logMtime),
@@ -475,6 +495,7 @@ app.get('/api/sessions', async (req, res) => {
             modifiedAt: waiting.timestamp || new Date().toISOString(),
             isTeam: false,
             memberCount: 0,
+            hasMessages: checkHasMessages(meta),
             hasActiveAgents: true,
             hasWaitingForUser: true,
           });
@@ -494,6 +515,26 @@ app.get('/api/sessions', async (req, res) => {
       const session = sessionsMap.get(leaderId);
       if (session && session.taskCount === 0) {
         sessionsMap.delete(leaderId);
+      }
+    }
+
+    // Correlate plan sessions with their implementation sessions (same slug)
+    const slugGroups = new Map();
+    for (const [sid, session] of sessionsMap) {
+      if (session.slug) {
+        if (!slugGroups.has(session.slug)) slugGroups.set(session.slug, []);
+        slugGroups.get(session.slug).push(session);
+      }
+    }
+    for (const [slug, group] of slugGroups) {
+      if (group.length < 2) continue;
+      group.sort((a, b) => new Date(a.modifiedAt) - new Date(b.modifiedAt));
+      const planSession = group.find(s => s.hasPlan);
+      const implSession = group.find(s => s !== planSession && new Date(s.modifiedAt) >= new Date(planSession?.modifiedAt || 0));
+      if (planSession && implSession) {
+        planSession.hasWaitingForUser = false;
+        planSession.planImplementationSessionId = implSession.id;
+        implSession.planSourceSessionId = planSession.id;
       }
     }
 
@@ -656,6 +697,28 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
         agents.push(agent);
       } catch (e) { /* skip invalid */ }
     }
+    const agentsNeedingPrompt = agents.filter(a => !a.prompt);
+    if (agentsNeedingPrompt.length && meta.jsonlPath) {
+      try {
+        const st = statSync(meta.jsonlPath);
+        const cached = progressMapCache.get(meta.jsonlPath);
+        const progressMap = (cached && cached.mtime === st.mtimeMs && Date.now() - cached.ts < MESSAGE_CACHE_TTL)
+          ? cached.map
+          : (() => { const m = buildAgentProgressMap(meta.jsonlPath); progressMapCache.set(meta.jsonlPath, { map: m, mtime: st.mtimeMs, ts: Date.now() }); return m; })();
+        const byAgentId = {};
+        for (const entry of Object.values(progressMap)) {
+          if (entry.prompt && !byAgentId[entry.agentId]) byAgentId[entry.agentId] = entry.prompt;
+        }
+        for (const agent of agentsNeedingPrompt) {
+          const prompt = byAgentId[agent.agentId];
+          if (prompt) {
+            agent.prompt = prompt;
+            const agentFile = path.join(agentDir, agent.agentId + '.json');
+            fs.writeFile(agentFile, JSON.stringify(agent), 'utf8').catch(() => {});
+          }
+        }
+      } catch (_) {}
+    }
     const waitingForUser = checkWaitingForUser(agentDir, logMtime);
     res.json({ agents, waitingForUser });
   } catch (e) {
@@ -670,6 +733,44 @@ app.get('/api/sessions/:sessionId/messages', (req, res) => {
   const jsonlPath = meta?.jsonlPath;
   if (!jsonlPath) return res.json({ messages: [], sessionId: req.params.sessionId });
   const messages = readRecentMessages(jsonlPath, limit);
+  const agentMessages = messages.filter(m => m.tool === 'Agent' && m.toolUseId);
+  if (agentMessages.length) {
+    let progressMap;
+    try {
+      const st = statSync(jsonlPath);
+      const cached = progressMapCache.get(jsonlPath);
+      if (cached && cached.mtime === st.mtimeMs && Date.now() - cached.ts < MESSAGE_CACHE_TTL) {
+        progressMap = cached.map;
+      } else {
+        progressMap = buildAgentProgressMap(jsonlPath);
+        progressMapCache.set(jsonlPath, { map: progressMap, mtime: st.mtimeMs, ts: Date.now() });
+        evictStaleCache(progressMapCache);
+      }
+    } catch (_) { progressMap = {}; }
+    let sessionId = req.params.sessionId;
+    const teamConfig = loadTeamConfig(sessionId);
+    if (teamConfig && teamConfig.leadSessionId) sessionId = teamConfig.leadSessionId;
+    const agentDir = path.join(AGENT_ACTIVITY_DIR, sessionId);
+    for (const msg of agentMessages) {
+      const entry = progressMap[msg.toolUseId];
+      if (entry) {
+        msg.agentId = entry.agentId;
+        if (entry.prompt && !msg.agentPrompt) msg.agentPrompt = entry.prompt;
+        try {
+          const agentFile = path.join(agentDir, entry.agentId + '.json');
+          const agent = JSON.parse(readFileSync(agentFile, 'utf8'));
+          if (agent.lastMessage) msg.agentLastMessage = agent.lastMessage;
+          if (agent.prompt && !msg.agentPrompt) msg.agentPrompt = agent.prompt;
+          const prompt = msg.agentPrompt || entry.prompt;
+          if (prompt && !agent.prompt) {
+            agent.prompt = prompt;
+            fs.writeFile(agentFile, JSON.stringify(agent), 'utf8').catch(() => {});
+          }
+        } catch (_) {}
+      }
+      delete msg.toolUseId;
+    }
+  }
   res.json({ messages, sessionId: req.params.sessionId });
 });
 
@@ -966,6 +1067,32 @@ agentActivityWatcher.on('all', (event, filePath) => {
     }
   }
 });
+
+// Cleanup agent-activity folders older than 2 days
+const CLEANUP_MAX_AGE_MS = 2 * 24 * 60 * 60 * 1000;
+const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
+
+async function cleanupAgentActivity() {
+  try {
+    const entries = await fs.readdir(AGENT_ACTIVITY_DIR, { withFileTypes: true });
+    const now = Date.now();
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      try {
+        const dirPath = path.join(AGENT_ACTIVITY_DIR, entry.name);
+        const contents = await fs.readdir(dirPath);
+        const stat = await fs.stat(dirPath);
+        const age = now - stat.mtimeMs;
+        if ((contents.length === 0 && age > AGENT_STALE_MS) || age > CLEANUP_MAX_AGE_MS) {
+          await fs.rm(dirPath, { recursive: true, force: true });
+        }
+      } catch (e) { /* ignore per-folder errors */ }
+    }
+  } catch (e) { /* agent-activity dir may not exist */ }
+}
+
+cleanupAgentActivity();
+setInterval(cleanupAgentActivity, CLEANUP_INTERVAL_MS);
 
 const server = app.listen(PORT, () => {
     const actualPort = server.address().port;

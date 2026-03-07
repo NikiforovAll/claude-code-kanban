@@ -61,6 +61,23 @@ assert_file "$ACTIVITY_DIR/s2/_waiting.json" "creates _waiting.json"
 assert_json "$ACTIVITY_DIR/s2/_waiting.json" ".kind" "question" "kind=question"
 assert_json "$ACTIVITY_DIR/s2/_waiting.json" ".toolName" "AskUserQuestion" "toolName=AskUserQuestion"
 
+# ─── Plan mode tools are suppressed ──────────────────────────────
+echo "Plan mode tool suppression:"
+
+run_hook '{"session_id":"s-plan","agent_id":"","hook_event_name":"PermissionRequest","tool_name":"ExitPlanMode","tool_input":{},"agent_type":""}'
+assert_no_file "$ACTIVITY_DIR/s-plan/_waiting.json" "ExitPlanMode PermissionRequest suppressed"
+run_hook '{"session_id":"s-plan","agent_id":"","hook_event_name":"PreToolUse","tool_name":"EnterPlanMode","tool_input":{},"agent_type":""}'
+assert_no_file "$ACTIVITY_DIR/s-plan/_waiting.json" "EnterPlanMode PreToolUse suppressed"
+
+# ─── PreToolUse (non-question) clears waiting ───────────────────
+echo "PreToolUse non-question cleanup:"
+
+# Create a waiting state with a regular tool, then clear with non-question PreToolUse
+run_hook '{"session_id":"s-clear","agent_id":"","hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{},"agent_type":""}'
+assert_file "$ACTIVITY_DIR/s-clear/_waiting.json" "PermissionRequest(Bash) creates _waiting.json"
+run_hook '{"session_id":"s-clear","agent_id":"","hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{},"agent_type":""}'
+assert_no_file "$ACTIVITY_DIR/s-clear/_waiting.json" "PreToolUse(Read) clears _waiting.json"
+
 # ─── PostToolUse clears waiting ──────────────────────────────────
 echo "PostToolUse cleanup:"
 

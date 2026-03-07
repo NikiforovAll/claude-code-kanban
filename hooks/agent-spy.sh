@@ -15,12 +15,15 @@ eval "$(echo "$INPUT" | jq -r '
 
 [ -z "$SESSION_ID" ] && exit 0
 
-# PostToolUse: clear waiting state (permission granted or question answered)
-if [ "$EVENT" = "PostToolUse" ]; then
+# PostToolUse / non-waiting PreToolUse: clear waiting state
+if [ "$EVENT" = "PostToolUse" ] || { [ "$EVENT" = "PreToolUse" ] && [ "$TOOL_NAME" != "AskUserQuestion" ]; }; then
   WFILE="$HOME/.claude/agent-activity/$SESSION_ID/_waiting.json"
-  [ -f "$WFILE" ] && rm -f "$WFILE"
-  exit 0
+  rm -f "$WFILE"
+  [ "$EVENT" = "PostToolUse" ] && exit 0
 fi
+
+# Plan mode tools don't fire PostToolUse — skip to avoid stale markers
+[ "$TOOL_NAME" = "EnterPlanMode" ] || [ "$TOOL_NAME" = "ExitPlanMode" ] && exit 0
 
 # Waiting-for-user events → write _waiting.json marker
 if [ "$EVENT" = "PermissionRequest" ] || { [ "$EVENT" = "PreToolUse" ] && [ "$TOOL_NAME" = "AskUserQuestion" ]; }; then
