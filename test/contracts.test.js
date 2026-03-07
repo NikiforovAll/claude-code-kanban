@@ -299,6 +299,12 @@ describe('Parser: buildAgentProgressMap', () => {
     assert.equal(map['tu_agent_01'].prompt, 'Find all auth middleware files');
   });
 
+  it('maps background agent tool_result to agentId', () => {
+    const map = buildAgentProgressMap(jsonlPath);
+    assert.equal(map['tu_bg_agent_01'].agentId, 'agent-bg-456');
+    assert.equal(map['tu_bg_agent_01'].prompt, null);
+  });
+
   it('returns empty map for non-existent file', () => {
     const map = buildAgentProgressMap('/nonexistent/path.jsonl');
     assert.deepEqual(map, {});
