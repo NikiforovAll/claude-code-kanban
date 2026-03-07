@@ -156,11 +156,39 @@ const messageCache = new Map();
 const MESSAGE_CACHE_TTL = 5000;
 const MAX_CACHE_ENTRIES = 200;
 const progressMapCache = new Map();
+const taskCountsCache = new Map();
 
 function evictStaleCache(cache) {
   if (cache.size <= MAX_CACHE_ENTRIES) return;
   const oldest = cache.keys().next().value;
   if (oldest !== undefined) cache.delete(oldest);
+}
+
+function getTaskCounts(sessionPath) {
+  const cached = taskCountsCache.get(sessionPath);
+  if (cached) return cached;
+
+  const taskFiles = readdirSync(sessionPath).filter(f => f.endsWith('.json'));
+  let completed = 0, inProgress = 0, pending = 0, newestTaskMtime = null;
+
+  for (const file of taskFiles) {
+    try {
+      const taskPath = path.join(sessionPath, file);
+      const task = JSON.parse(readFileSync(taskPath, 'utf8'));
+      if (task.metadata && task.metadata._internal) continue;
+      if (task.status === 'completed') completed++;
+      else if (task.status === 'in_progress') inProgress++;
+      else pending++;
+      const taskStat = statSync(taskPath);
+      if (!newestTaskMtime || taskStat.mtime > newestTaskMtime) {
+        newestTaskMtime = taskStat.mtime;
+      }
+    } catch (e) { /* skip invalid */ }
+  }
+
+  const result = { taskCount: taskFiles.length, completed, inProgress, pending, newestTaskMtime };
+  taskCountsCache.set(sessionPath, result);
+  return result;
 }
 
 function getProgressMap(jsonlPath) {
@@ -356,32 +384,7 @@ app.get('/api/sessions', async (req, res) => {
         if (entry.isDirectory()) {
           const sessionPath = path.join(TASKS_DIR, entry.name);
           const stat = statSync(sessionPath);
-          const taskFiles = readdirSync(sessionPath).filter(f => f.endsWith('.json'));
-
-          // Get task summary and find newest task file
-          let completed = 0;
-          let inProgress = 0;
-          let pending = 0;
-          let newestTaskMtime = null;
-
-          for (const file of taskFiles) {
-            try {
-              const taskPath = path.join(sessionPath, file);
-              const task = JSON.parse(readFileSync(taskPath, 'utf8'));
-              if (task.metadata && task.metadata._internal) continue;
-              if (task.status === 'completed') completed++;
-              else if (task.status === 'in_progress') inProgress++;
-              else pending++;
-
-              // Track newest task file mtime
-              const taskStat = statSync(taskPath);
-              if (!newestTaskMtime || taskStat.mtime > newestTaskMtime) {
-                newestTaskMtime = taskStat.mtime;
-              }
-            } catch (e) {
-              // Skip invalid files
-            }
-          }
+          const { taskCount, completed, inProgress, pending, newestTaskMtime } = getTaskCounts(sessionPath);
 
           // Get metadata for this session
           const meta = metadata[entry.name] || {};
@@ -417,7 +420,7 @@ app.get('/api/sessions', async (req, res) => {
             description: meta.description || null,
             gitBranch: meta.gitBranch || null,
             customTitle: meta.customTitle || null,
-            taskCount: taskFiles.length,
+            taskCount,
             completed,
             inProgress,
             pending,
@@ -954,6 +957,8 @@ watcher.on('all', (event, filePath) => {
   if ((event === 'add' || event === 'change' || event === 'unlink') && filePath.endsWith('.json')) {
     const relativePath = path.relative(TASKS_DIR, filePath);
     const sessionId = relativePath.split(path.sep)[0];
+
+    taskCountsCache.delete(path.join(TASKS_DIR, sessionId));
 
     broadcast({
       type: 'update',
