@@ -2465,6 +2465,7 @@
     let sessionLimit = '20';
     let filterProject = '__recent__'; // null = all, '__recent__' = last 24h, or project path
     let recentProjects = new Set();
+    let projectsCacheDirty = true;
     const collapsedProjectGroups = new Set();
     let stableGroupOrder = []; // cached project path order to prevent jumping
     let searchQuery = ''; // Search query for fuzzy search
@@ -4416,6 +4417,7 @@
           const data = JSON.parse(event.data);
           console.log('[SSE] Event received:', data);
           if (data.type === 'update' || data.type === 'metadata-update') {
+            if (data.type === 'metadata-update') projectsCacheDirty = true;
             debouncedRefresh(data.sessionId, data.type === 'metadata-update');
           }
 
@@ -4573,8 +4575,16 @@
       showAllTasks();
     }
 
+    let projectsCache = null;
+
     async function updateProjectDropdown() {
       const dropdown = document.getElementById('project-filter');
+
+      if (!projectsCacheDirty && projectsCache) {
+        renderProjectDropdown(dropdown, projectsCache);
+        return;
+      }
+
       let projects;
       try {
         const res = await fetch('/api/projects');
@@ -4584,11 +4594,18 @@
           .map(p => ({ path: p, modifiedAt: null }));
       }
 
+      projectsCache = projects;
+      projectsCacheDirty = false;
+
       const cutoff = Date.now() - 24 * 60 * 60 * 1000;
       recentProjects = new Set(
         projects.filter(p => p.modifiedAt && new Date(p.modifiedAt).getTime() > cutoff).map(p => p.path)
       );
 
+      renderProjectDropdown(dropdown, projects);
+    }
+
+    function renderProjectDropdown(dropdown, projects) {
       const recentSelected = filterProject === '__recent__' ? ' selected' : '';
       dropdown.innerHTML =
         '<option value="">All Projects</option>' +
