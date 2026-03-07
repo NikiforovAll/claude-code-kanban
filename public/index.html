@@ -3614,6 +3614,9 @@
           selectedTaskId = null;
           selectedSessionId = null;
         }
+        if (selectedTaskId && detailPanel.classList.contains('visible')) {
+          showTaskDetail(selectedTaskId, selectedSessionId);
+        }
       }
     }
 
