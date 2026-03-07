@@ -1528,7 +1528,7 @@
     .agent-tab { padding: 8px 16px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-tertiary); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; transition: color 0.15s, border-color 0.15s; user-select: none; }
     .agent-tab:hover { color: var(--text-secondary); border-bottom-color: var(--text-muted); }
     .agent-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
-    .agent-tab-panel { display: none; padding-top: 12px; }
+    .agent-tab-panel { display: none; padding-top: 12px; overflow: hidden; }
     .agent-tab-panel.active { display: block; }
     .rendered-md h1, .rendered-md h2, .rendered-md h3,
     .rendered-md h4, .rendered-md h5, .rendered-md h6 {
@@ -1542,7 +1542,7 @@
     .rendered-md li { margin: 0.2em 0; }
     .rendered-md pre { margin: 0.6em 0; }
     .rendered-md blockquote { margin: 0.6em 0; }
-    .rendered-md table { margin: 0.6em 0; border-collapse: collapse; width: 100%; }
+    .rendered-md table { margin: 0.6em 0; border-collapse: collapse; width: 100%; display: block; overflow-x: auto; }
     .rendered-md th, .rendered-md td {
       border: 1px solid var(--border);
       padding: 6px 10px;
@@ -1858,7 +1858,7 @@
     }
 
     .modal-body {
-      margin-bottom: 24px;
+      margin-bottom: 0;
     }
 
     .form-group {
@@ -1947,6 +1947,8 @@
       display: flex;
       gap: 12px;
       justify-content: flex-end;
+      padding-top: 16px;
+      flex-shrink: 0;
     }
 
     .btn {
@@ -4681,7 +4683,6 @@
       const body = document.getElementById('plan-modal-body');
       body.innerHTML = renderMarkdown(_pendingPlanContent);
       document.getElementById('plan-modal').classList.add('visible');
-
       const keyHandler = (e) => {
         if (e.key === 'Escape') {
           e.preventDefault();
@@ -4825,8 +4826,8 @@
           </button>
         </div>
       </div>
-      <div class="modal-body" style="min-height: 0; display: flex; flex-direction: column; overflow: hidden;">
-        <div id="msg-detail-body" class="rendered-md" style="word-break: break-word; font-size: 13px; line-height: 1.6; overflow-y: auto; overflow-x: auto; min-height: 0;"></div>
+      <div class="modal-body" style="flex: 0 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden;">
+        <div id="msg-detail-body" class="rendered-md" style="word-break: break-word; font-size: 13px; line-height: 1.6; overflow-y: auto; flex: 0 1 auto; min-height: 0;"></div>
         <div id="msg-detail-meta" style="margin-top: 12px; font-size: 11px; color: var(--text-muted); flex-shrink: 0;"></div>
       </div>
     </div>
@@ -4990,7 +4991,7 @@
 
   <!-- Team Info Modal -->
   <div id="team-modal" class="modal-overlay" onclick="closeTeamModal()">
-    <div class="modal" onclick="event.stopPropagation()" style="max-width: 520px; max-height: 80vh; height: fit-content; display: flex; flex-direction: column; overflow: hidden;">
+    <div class="modal" onclick="event.stopPropagation()" style="max-width: 520px; max-height: 80vh; display: flex; flex-direction: column;">
       <div class="modal-header">
         <h3 id="team-modal-title" class="modal-title">Team</h3>
         <button class="modal-close" aria-label="Close dialog" onclick="closeTeamModal()">
@@ -4999,7 +5000,7 @@
           </svg>
         </button>
       </div>
-      <div id="team-modal-body" class="modal-body" style="overflow-y: auto; overflow-x: auto; min-height: 0;"></div>
+      <div id="team-modal-body" class="modal-body" style="overflow-y: auto; flex: 0 1 auto; min-height: 0;"></div>
       <div class="modal-footer">
         <button class="btn btn-primary" onclick="closeTeamModal()">Close</button>
       </div>
@@ -5018,7 +5019,7 @@
           </svg>
         </button>
       </div>
-      <div id="plan-modal-body" class="modal-body detail-desc rendered-md" style="overflow-y: auto; overflow-x: auto; min-height: 0;"></div>
+      <div id="plan-modal-body" class="modal-body detail-desc rendered-md" style="overflow-y: auto; flex: 0 1 auto; min-height: 0;"></div>
       <div class="modal-footer">
         <button class="btn btn-primary" onclick="closePlanModal()">Close</button>
       </div>
@@ -5062,7 +5063,7 @@
           </svg>
         </button>
       </div>
-      <div id="agent-modal-body" class="modal-body" style="overflow-y: auto; overflow-x: auto; min-height: 0;"></div>
+      <div id="agent-modal-body" class="modal-body" style="overflow-y: auto; overflow-x: hidden; flex: 0 1 auto; min-height: 0;"></div>
       <div class="modal-footer">
         <button class="btn btn-primary" onclick="closeAgentModal()">Close</button>
       </div>
