@@ -53,7 +53,7 @@ const PERMISSION_TTL_MS = 1800000;
 const AGENT_TTL_MS = 3600000;
 const AGENT_STALE_MS = 300000;
 
-const WAITING_RESOLVE_GRACE_MS = 5000;
+const WAITING_RESOLVE_GRACE_MS = 15000;
 
 function checkWaitingForUser(agentDir, logMtime) {
   try {
@@ -85,10 +85,11 @@ function getSessionLogStat(meta) {
 
 function checkAgentStatus(agentDir, stale, logMtime) {
   const result = { hasActive: false, hasRunning: false, waitingForUser: null };
-  if (!existsSync(agentDir) || stale) return result;
+  if (!existsSync(agentDir)) return result;
+  result.waitingForUser = checkWaitingForUser(agentDir, logMtime);
+  if (result.waitingForUser) result.hasActive = true;
+  if (stale) return result;
   try {
-    result.waitingForUser = checkWaitingForUser(agentDir, logMtime);
-    if (result.waitingForUser) result.hasActive = true;
     for (const file of readdirSync(agentDir).filter(f => f.endsWith('.json') && !f.startsWith('_'))) {
       try {
         const agent = JSON.parse(readFileSync(path.join(agentDir, file), 'utf8'));
