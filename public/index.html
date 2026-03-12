@@ -4975,12 +4975,16 @@
       let html = '';
 
       // Session & project details as compact key-value rows
+      // Each row: [label, displayValue, { openPath?, copyValue? }]
       const infoRows = [];
-      infoRows.push(['Session', session.id]);
+      infoRows.push(['Session', session.id, { openClaudeDir: true, openFile: session.jsonlPath }]);
+      if (session.slug && session.hasPlan) {
+        infoRows.push(['Slug', session.slug, { openClaudeDir: true, openFile: session.planPath }]);
+      }
       if (session.project) {
         const projectName = session.project.split(/[/\\]/).pop();
-        infoRows.push(['Project', projectName]);
-        infoRows.push(['Path', session.project]);
+        infoRows.push(['Project', projectName, { openPath: session.projectDir }]);
+        infoRows.push(['Path', session.project, { openPath: session.project }]);
         if (session.gitBranch) {
           infoRows.push(['Branch', session.gitBranch]);
         }
@@ -4988,14 +4992,21 @@
           infoRows.push(['Description', session.description]);
         }
       }
+      if (session.tasksDir) {
+        infoRows.push(['Tasks Dir', session.tasksDir, { openPath: session.tasksDir }]);
+      }
+      const clickableStyle = 'font-family: \'IBM Plex Mono\', monospace; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; color: var(--accent-text); text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 3px;';
+      const plainStyle = 'font-family: \'IBM Plex Mono\', monospace; font-size: 12px; user-select: all; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;';
       html += `<div class="team-modal-meta" style="margin-bottom: 16px; display: grid; grid-template-columns: auto 1fr auto; gap: 6px 12px; align-items: center;">`;
-      infoRows.forEach(([label, value]) => {
+      infoRows.forEach(([label, value, opts]) => {
         const copyVal = escapeHtml(value).replace(/"/g, '&quot;');
         html += `<span style="font-weight: 500; color: var(--text-secondary); font-size: 12px; white-space: nowrap;">${label}</span>`;
-        if (label === 'Path') {
-          html += `<span data-folder="${copyVal}" onclick="openFolderInEditor(this.dataset.folder)" style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; color: var(--accent-text); text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 3px;" title="Open in editor">${escapeHtml(value)}</span>`;
+        if (opts?.openClaudeDir || opts?.openPath) {
+          const folder = opts.openClaudeDir ? '' : escapeHtml(opts.openPath).replace(/"/g, '&quot;');
+          const file = opts.openFile ? escapeHtml(opts.openFile).replace(/"/g, '&quot;') : '';
+          html += `<span data-folder="${folder}" data-file="${file}" data-claude-dir="${opts.openClaudeDir ? '1' : ''}" onclick="openFolderInEditor(this.dataset.claudeDir ? undefined : this.dataset.folder, this.dataset.file || undefined)" style="${clickableStyle}" title="Open in editor">${escapeHtml(value)}</span>`;
         } else {
-          html += `<span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; user-select: all; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${copyVal}">${escapeHtml(value)}</span>`;
+          html += `<span style="${plainStyle}" title="${copyVal}">${escapeHtml(value)}</span>`;
         }
         html += `<button onclick="navigator.clipboard.writeText('${copyVal.replace(/'/g, "\\'")}'); this.textContent='✓'; setTimeout(() => this.textContent='Copy', 1000)" style="padding: 2px 8px; font-size: 11px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 4px; color: var(--text-secondary); cursor: pointer; white-space: nowrap;">Copy</button>`;
       });
@@ -5136,8 +5147,11 @@
       postAndToast(`/api/sessions/${_planSessionId}/plan/open`, {}, 'in editor');
     }
 
-    function openFolderInEditor(folder) {
-      postAndToast('/api/open-folder', { folder }, 'folder');
+    function openFolderInEditor(folder, file) {
+      const body = {};
+      if (folder) body.folder = folder;
+      if (file) body.file = file;
+      postAndToast('/api/open-folder', body, 'folder');
     }
 
     function updateOwnerFilter() {

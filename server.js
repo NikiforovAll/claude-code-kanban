@@ -350,15 +350,15 @@ function loadSessionMetadata() {
 }
 
 function getPlanInfo(slug) {
-  if (!slug) return { hasPlan: false, planTitle: null };
+  if (!slug) return { hasPlan: false, planTitle: null, planPath: null };
   const planPath = path.join(PLANS_DIR, `${slug}.md`);
-  if (!existsSync(planPath)) return { hasPlan: false, planTitle: null };
+  if (!existsSync(planPath)) return { hasPlan: false, planTitle: null, planPath: null };
   try {
     const head = readFileSync(planPath, 'utf8').slice(0, 512);
     const match = head.match(/^#\s+(.+)$/m);
-    return { hasPlan: true, planTitle: match ? match[1].trim() : null };
+    return { hasPlan: true, planTitle: match ? match[1].trim() : null, planPath };
   } catch (e) {
-    return { hasPlan: true, planTitle: null };
+    return { hasPlan: true, planTitle: null, planPath };
   }
 }
 
@@ -440,6 +440,9 @@ app.get('/api/sessions', async (req, res) => {
             hasRunningAgents: agentStatus.hasRunning,
             hasWaitingForUser: !!agentStatus.waitingForUser,
             hasRecentLog: logAge <= AGENT_STALE_MS,
+            jsonlPath: meta.jsonlPath || null,
+            tasksDir: sessionPath,
+            projectDir: meta.jsonlPath ? path.dirname(meta.jsonlPath) : null,
             ...planInfo
           });
         }
@@ -482,6 +485,9 @@ app.get('/api/sessions', async (req, res) => {
           hasRunningAgents: metaAgentStatus.hasRunning,
           hasWaitingForUser: !!metaAgentStatus.waitingForUser,
           hasRecentLog: logAge <= AGENT_STALE_MS,
+          jsonlPath: meta.jsonlPath || null,
+          tasksDir: null,
+          projectDir: meta.jsonlPath ? path.dirname(meta.jsonlPath) : null,
           ...planInfo
         });
       }
@@ -516,6 +522,9 @@ app.get('/api/sessions', async (req, res) => {
             hasMessages: logStat.hasMessages,
             hasActiveAgents: true,
             hasWaitingForUser: true,
+            jsonlPath: meta.jsonlPath || null,
+            tasksDir: null,
+            projectDir: meta.jsonlPath ? path.dirname(meta.jsonlPath) : null,
           });
         }
       } catch (e) { /* ignore */ }
@@ -640,9 +649,9 @@ app.get('/api/sessions/:sessionId/plan', async (req, res) => {
   }
 });
 
-function openInEditor(target) {
+function openInEditor(...targets) {
   const editor = process.env.EDITOR || 'code';
-  spawn(editor, [target], { shell: true, stdio: 'ignore', detached: true }).unref();
+  spawn(editor, ['-n', ...targets], { shell: true, stdio: 'ignore', detached: true }).unref();
 }
 
 // API: Open session plan in VS Code
@@ -664,12 +673,12 @@ app.post('/api/sessions/:sessionId/plan/open', (req, res) => {
   }
 });
 
-// API: Open folder in editor
+// API: Open folder (and optionally a file within it) in editor
 app.post('/api/open-folder', (req, res) => {
   try {
-    const { folder } = req.body;
-    if (!folder) return res.status(400).json({ error: 'No folder provided' });
-    openInEditor(folder);
+    const { folder, file } = req.body;
+    const target = folder || CLAUDE_DIR;
+    openInEditor(target, ...(file ? [file] : []));
     res.json({ success: true });
   } catch (error) {
     console.error('Error opening folder:', error);
