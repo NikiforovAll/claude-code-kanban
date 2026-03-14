@@ -7,11 +7,14 @@ const { existsSync, readdirSync, readFileSync, statSync, createReadStream } = re
 const readline = require('readline');
 const chokidar = require('chokidar');
 const os = require('os');
+const crypto = require('crypto');
+const { spawn } = require('child_process');
 
 const {
   readRecentMessages: _readRecentMessagesUncached,
   readSessionInfoFromJsonl,
-  buildAgentProgressMap
+  buildAgentProgressMap,
+  readCompactSummaries
 } = require('./lib/parsers');
 
 const isSetupCommand = process.argv.includes('--install') || process.argv.includes('--uninstall');
@@ -53,7 +56,7 @@ const PERMISSION_TTL_MS = 1800000;
 const AGENT_TTL_MS = 3600000;
 const AGENT_STALE_MS = 300000;
 
-const WAITING_RESOLVE_GRACE_MS = 5000;
+const WAITING_RESOLVE_GRACE_MS = 15000;
 
 function checkWaitingForUser(agentDir, logMtime) {
   try {
@@ -85,10 +88,11 @@ function getSessionLogStat(meta) {
 
 function checkAgentStatus(agentDir, stale, logMtime) {
   const result = { hasActive: false, hasRunning: false, waitingForUser: null };
-  if (!existsSync(agentDir) || stale) return result;
+  if (!existsSync(agentDir)) return result;
+  result.waitingForUser = checkWaitingForUser(agentDir, logMtime);
+  if (result.waitingForUser) result.hasActive = true;
+  if (stale) return result;
   try {
-    result.waitingForUser = checkWaitingForUser(agentDir, logMtime);
-    if (result.waitingForUser) result.hasActive = true;
     for (const file of readdirSync(agentDir).filter(f => f.endsWith('.json') && !f.startsWith('_'))) {
       try {
         const agent = JSON.parse(readFileSync(path.join(agentDir, file), 'utf8'));
@@ -160,6 +164,7 @@ const messageCache = new Map();
 const MESSAGE_CACHE_TTL = 5000;
 const MAX_CACHE_ENTRIES = 200;
 const progressMapCache = new Map();
+const compactSummaryCache = new Map();
 const taskCountsCache = new Map();
 
 function evictStaleCache(cache) {
@@ -347,15 +352,15 @@ function loadSessionMetadata() {
 }
 
 function getPlanInfo(slug) {
-  if (!slug) return { hasPlan: false, planTitle: null };
+  if (!slug) return { hasPlan: false, planTitle: null, planPath: null };
   const planPath = path.join(PLANS_DIR, `${slug}.md`);
-  if (!existsSync(planPath)) return { hasPlan: false, planTitle: null };
+  if (!existsSync(planPath)) return { hasPlan: false, planTitle: null, planPath: null };
   try {
     const head = readFileSync(planPath, 'utf8').slice(0, 512);
     const match = head.match(/^#\s+(.+)$/m);
-    return { hasPlan: true, planTitle: match ? match[1].trim() : null };
+    return { hasPlan: true, planTitle: match ? match[1].trim() : null, planPath };
   } catch (e) {
-    return { hasPlan: true, planTitle: null };
+    return { hasPlan: true, planTitle: null, planPath };
   }
 }
 
@@ -437,6 +442,9 @@ app.get('/api/sessions', async (req, res) => {
             hasRunningAgents: agentStatus.hasRunning,
             hasWaitingForUser: !!agentStatus.waitingForUser,
             hasRecentLog: logAge <= AGENT_STALE_MS,
+            jsonlPath: meta.jsonlPath || null,
+            tasksDir: sessionPath,
+            projectDir: meta.jsonlPath ? path.dirname(meta.jsonlPath) : null,
             ...planInfo
           });
         }
@@ -479,6 +487,9 @@ app.get('/api/sessions', async (req, res) => {
           hasRunningAgents: metaAgentStatus.hasRunning,
           hasWaitingForUser: !!metaAgentStatus.waitingForUser,
           hasRecentLog: logAge <= AGENT_STALE_MS,
+          jsonlPath: meta.jsonlPath || null,
+          tasksDir: null,
+          projectDir: meta.jsonlPath ? path.dirname(meta.jsonlPath) : null,
           ...planInfo
         });
       }
@@ -513,6 +524,9 @@ app.get('/api/sessions', async (req, res) => {
             hasMessages: logStat.hasMessages,
             hasActiveAgents: true,
             hasWaitingForUser: true,
+            jsonlPath: meta.jsonlPath || null,
+            tasksDir: null,
+            projectDir: meta.jsonlPath ? path.dirname(meta.jsonlPath) : null,
           });
         }
       } catch (e) { /* ignore */ }
@@ -553,13 +567,52 @@ app.get('/api/sessions', async (req, res) => {
       }
     }
 
+    // Ensure pinned sessions are in the map even if they weren't discovered
+    const pinnedParam = req.query.pinned;
+    const pinnedIds = pinnedParam ? new Set(pinnedParam.split(',').filter(Boolean)) : new Set();
+    for (const pid of pinnedIds) {
+      if (sessionsMap.has(pid)) continue;
+      const meta = metadata[pid];
+      if (!meta) continue;
+      const logStat = getSessionLogStat(meta);
+      const logMtime = logStat.mtime;
+      let modifiedAt = meta.created || null;
+      if (logMtime) {
+        const jsonlMtime = new Date(logMtime).toISOString();
+        if (!modifiedAt || jsonlMtime > modifiedAt) modifiedAt = jsonlMtime;
+      }
+      sessionsMap.set(pid, {
+        id: pid,
+        name: getSessionDisplayName(pid, meta),
+        slug: meta.slug || null,
+        project: meta.project || null,
+        description: meta.description || null,
+        gitBranch: meta.gitBranch || null,
+        customTitle: meta.customTitle || null,
+        taskCount: 0, completed: 0, inProgress: 0, pending: 0,
+        createdAt: meta.created || null,
+        modifiedAt: modifiedAt || new Date(0).toISOString(),
+        isTeam: false, memberCount: 0,
+        hasMessages: logStat.hasMessages,
+        hasActiveAgents: false, hasRunningAgents: false, hasWaitingForUser: false,
+        hasRecentLog: false,
+        jsonlPath: meta.jsonlPath || null,
+        tasksDir: null,
+        projectDir: meta.jsonlPath ? path.dirname(meta.jsonlPath) : null,
+        ...getPlanInfo(meta.slug)
+      });
+    }
+
     // Convert map to array and sort by most recently modified
     let sessions = Array.from(sessionsMap.values());
     sessions.sort((a, b) => new Date(b.modifiedAt) - new Date(a.modifiedAt));
 
-    // Apply limit if specified
+    // Apply limit if specified, but always include pinned sessions
     if (limit !== null && limit > 0) {
-      sessions = sessions.slice(0, limit);
+      const top = sessions.slice(0, limit);
+      const topIds = new Set(top.map(s => s.id));
+      const missingPinned = sessions.filter(s => pinnedIds.has(s.id) && !topIds.has(s.id));
+      sessions = [...top, ...missingPinned];
     }
 
     res.json(sessions);
@@ -637,6 +690,11 @@ app.get('/api/sessions/:sessionId/plan', async (req, res) => {
   }
 });
 
+function openInEditor(...targets) {
+  const editor = process.env.EDITOR || 'code';
+  spawn(editor, ['-n', ...targets], { shell: true, stdio: 'ignore', detached: true }).unref();
+}
+
 // API: Open session plan in VS Code
 app.post('/api/sessions/:sessionId/plan/open', (req, res) => {
   try {
@@ -648,12 +706,24 @@ app.post('/api/sessions/:sessionId/plan/open', (req, res) => {
     const planPath = path.join(PLANS_DIR, `${slug}.md`);
     if (!existsSync(planPath)) return res.status(404).json({ error: 'No plan found' });
 
-    const editor = process.env.EDITOR || 'code';
-    require('child_process').spawn(editor, [planPath], { shell: true, stdio: 'ignore', detached: true }).unref();
+    openInEditor(planPath);
     res.json({ success: true });
   } catch (error) {
-    console.error('Error opening plan in VS Code:', error);
+    console.error('Error opening plan in editor:', error);
     res.status(500).json({ error: 'Failed to open plan' });
+  }
+});
+
+// API: Open folder (and optionally a file within it) in editor
+app.post('/api/open-folder', (req, res) => {
+  try {
+    const { folder, file } = req.body;
+    const target = folder || CLAUDE_DIR;
+    openInEditor(target, ...(file ? [file] : []));
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error opening folder:', error);
+    res.status(500).json({ error: 'Failed to open folder' });
   }
 });
 
@@ -664,11 +734,11 @@ app.post('/api/open-in-editor', (req, res) => {
     if (!content) return res.status(400).json({ error: 'No content provided' });
 
     const safeName = (title || 'message').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 50);
-    const tmpFile = path.join(os.tmpdir(), `claude-kanban-${safeName}-${Date.now()}.md`);
+    const hash = crypto.createHash('md5').update(content).digest('hex').slice(0, 8);
+    const tmpFile = path.join(os.tmpdir(), `claude-kanban-${safeName}-${hash}.md`);
     require('fs').writeFileSync(tmpFile, content, 'utf8');
 
-    const editor = process.env.EDITOR || 'code';
-    require('child_process').spawn(editor, [tmpFile], { shell: true, stdio: 'ignore', detached: true }).unref();
+    openInEditor(tmpFile);
     res.json({ success: true, path: tmpFile });
   } catch (error) {
     console.error('Error opening in editor:', error);
@@ -770,8 +840,29 @@ app.get('/api/sessions/:sessionId/messages', (req, res) => {
           }
         } catch (_) {}
       }
-      delete msg.toolUseId;
     }
+  }
+  const cachedCompact = compactSummaryCache.get(jsonlPath);
+  let compactSummaries;
+  if (cachedCompact && Date.now() - cachedCompact.ts < MESSAGE_CACHE_TTL) {
+    compactSummaries = cachedCompact.data;
+  } else {
+    compactSummaries = readCompactSummaries(jsonlPath);
+    compactSummaryCache.set(jsonlPath, { data: compactSummaries, ts: Date.now() });
+    evictStaleCache(compactSummaryCache);
+  }
+  // Match compaction messages to summaries by chronological order
+  const compactedMsgs = messages
+    .filter(m => m.systemLabel === 'Compacted')
+    .sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
+  for (let i = 0; i < compactedMsgs.length; i++) {
+    if (i < compactSummaries.length) {
+      compactedMsgs[i].compactSummary = compactSummaries[i].summary;
+    }
+  }
+  for (const msg of messages) {
+    if (msg.toolUseId) delete msg.toolUseId;
+    delete msg.promptId;
   }
   res.json({ messages, sessionId: req.params.sessionId });
 });
@@ -870,6 +961,7 @@ app.put('/api/tasks/:sessionId/:taskId', async (req, res) => {
 
     if (subject !== undefined) task.subject = subject;
     if (description !== undefined) task.description = description;
+    if (req.body.status !== undefined) task.status = req.body.status;
 
     await fs.writeFile(taskPath, JSON.stringify(task, null, 2));
 

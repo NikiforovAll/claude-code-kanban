@@ -366,14 +366,49 @@
     }
 
     /* Live Updates */
+    .collapse-chevron {
+      width: 14px;
+      height: 14px;
+      stroke: var(--text-muted);
+      fill: none;
+      stroke-width: 2;
+      transition: transform 0.2s ease;
+      flex-shrink: 0;
+    }
+
+    .collapse-chevron.rotated {
+      transform: rotate(-90deg);
+    }
+
+    .collapsible-section {
+      transition: max-height 0.2s ease, padding 0.2s ease, opacity 0.2s ease;
+      overflow: hidden;
+    }
+
+    .collapsible-section.collapsed {
+      max-height: 0 !important;
+      padding-top: 0 !important;
+      padding-bottom: 0 !important;
+      opacity: 0;
+      overflow: hidden;
+    }
+
     .live-updates {
-      padding: 0 16px 12px;
-      max-height: 180px;
+      padding: 0 16px 8px;
+      max-height: 140px;
       overflow-y: auto;
+      transition: max-height 0.2s ease, padding 0.2s ease, opacity 0.2s ease;
+    }
+
+    .live-updates.collapsed {
+      max-height: 0;
+      padding: 0 16px;
+      overflow: hidden;
+      opacity: 0;
     }
 
     .live-empty {
-      padding: 16px;
+      padding: 8px;
       text-align: center;
       font-size: 11px;
       color: var(--text-muted);
@@ -382,12 +417,12 @@
     .live-item {
       display: flex;
       align-items: flex-start;
-      gap: 10px;
-      padding: 10px 12px;
+      gap: 8px;
+      padding: 6px 10px;
       background: var(--bg-deep);
       border: 1px solid transparent;
-      border-radius: 8px;
-      margin-bottom: 4px;
+      border-radius: 6px;
+      margin-bottom: 3px;
       cursor: pointer;
       transition: all 0.15s ease;
     }
@@ -397,14 +432,14 @@
     }
 
     .live-item .pulse {
-      width: 8px;
-      height: 8px;
+      width: 6px;
+      height: 6px;
       margin-top: 4px;
       background: var(--accent);
       border-radius: 50%;
       flex-shrink: 0;
       animation: pulse 2s ease-in-out infinite;
-      box-shadow: 0 0 12px var(--accent-glow);
+      box-shadow: 0 0 8px var(--accent-glow);
     }
 
     .live-item-content {
@@ -413,7 +448,7 @@
     }
 
     .live-item-action {
-      font-size: 13px;
+      font-size: 11px;
       color: var(--text-primary);
       white-space: nowrap;
       overflow: hidden;
@@ -421,9 +456,9 @@
     }
 
     .live-item-session {
-      font-size: 11px;
+      font-size: 10px;
       color: var(--text-tertiary);
-      margin-top: 2px;
+      margin-top: 1px;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -870,6 +905,13 @@
     .task-card.blocked {
       opacity: 0.7;
     }
+    .task-card.dragging { opacity: 0.4; }
+    .column-tasks.drag-over {
+      background: color-mix(in srgb, var(--accent) 8%, transparent);
+      border-radius: 8px;
+      outline: 2px dashed color-mix(in srgb, var(--accent) 40%, transparent);
+      outline-offset: -2px;
+    }
 
     .task-card.selected,
     .task-card.selected:hover {
@@ -1298,9 +1340,7 @@
 
     /* Note form */
     .note-section {
-      margin-top: 24px;
-      padding-top: 20px;
-      border-top: 1px solid var(--border);
+      margin-top: 8px;
     }
 
     .note-form {
@@ -1581,12 +1621,60 @@
     .msg-tool .msg-text { color: var(--text-secondary); }
     .msg-agent-link { color: var(--accent); font-size: 0.85rem; margin-left: 4px; opacity: 0.7; }
     .msg-agent-link:hover { opacity: 1; }
+    .msg-pin-btn {
+      flex-shrink: 0; background: none; border: none; color: var(--text-muted);
+      cursor: pointer; padding: 2px; opacity: 0; transition: opacity 0.15s;
+      margin-left: auto; align-self: flex-start;
+    }
+    .msg-item:hover .msg-pin-btn, .agent-card:hover .msg-pin-btn { opacity: 0.6; }
+    .msg-pin-btn:hover { opacity: 1 !important; color: var(--accent); }
+    .msg-pin-btn.pinned { opacity: 1; color: var(--accent); }
+    #message-panel-pinned:empty { display: none; }
+    #message-panel-pinned { flex-shrink: 0; padding: 8px 16px; }
+    .pinned-section {
+      border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+      border-radius: 6px;
+      background: color-mix(in srgb, var(--accent) 5%, var(--bg-surface));
+    }
+    .pinned-header {
+      padding: 6px 10px; font-size: 11px; font-weight: 600; color: var(--accent);
+      cursor: pointer; display: flex; align-items: center; justify-content: space-between; user-select: none;
+    }
+    .pinned-header svg { transition: transform 0.15s; }
+    .pinned-header.collapsed svg { transform: rotate(-90deg); }
+    .pinned-header.empty { cursor: default; color: var(--text-muted); }
+    .pinned-items { padding: 0 8px 8px; display: flex; flex-direction: column; gap: 4px; }
+    .pinned-items.collapsed { display: none; }
+    .pinned-items .msg-item { margin: 0; }
+    .pinned-item-unpin {
+      flex-shrink: 0; background: none; border: none; color: var(--accent);
+      cursor: pointer; padding: 2px; opacity: 0.6; margin-left: auto; align-self: flex-start;
+    }
+    .pinned-item-unpin:hover { opacity: 1; color: var(--danger, #e55); }
+    .msg-pin-btn.pinned svg, #msg-detail-pin-btn.active svg, #agent-modal-pin-btn.active svg { fill: var(--accent); stroke: var(--accent); }
+    #msg-detail-pin-btn.active, #agent-modal-pin-btn.active { color: var(--accent); border-color: var(--accent); }
+    .session-pin-btn {
+      position: absolute; top: 6px; right: 6px; background: none; border: none;
+      color: var(--text-muted); cursor: pointer; padding: 2px; opacity: 0;
+      transition: opacity 0.15s; z-index: 1; line-height: 0;
+    }
+    .session-item:hover .session-pin-btn:not(.pinned) { opacity: 0.5; }
+    .session-pin-btn:hover { opacity: 1 !important; color: var(--accent); }
+    .session-pin-btn.pinned { opacity: 1; color: var(--accent); }
+    .session-pin-btn.pinned svg { fill: var(--accent); stroke: var(--accent); }
+    .pinned-sessions-divider {
+      height: 1px; margin: 4px 8px; background: color-mix(in srgb, var(--accent) 30%, transparent);
+    }
     .agent-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-top: 16px; }
     .agent-tab { padding: 8px 16px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-tertiary); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; transition: color 0.15s, border-color 0.15s; user-select: none; }
     .agent-tab:hover { color: var(--text-secondary); border-bottom-color: var(--text-muted); }
     .agent-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
-    .agent-tab-panel { display: none; padding-top: 12px; overflow: hidden; }
+    .agent-tab-panel { display: none; padding-top: 12px; overflow: hidden; position: relative; }
     .agent-tab-panel.active { display: block; }
+    .agent-tab-copy { position: absolute; top: 14px; right: 8px; background: var(--surface-hover); border: 1px solid var(--border); border-radius: 6px; padding: 4px 6px; cursor: pointer; color: var(--text-tertiary); opacity: 0.7; transition: opacity 0.15s, color 0.15s; z-index: 2; }
+    .agent-tab-copy:hover { opacity: 1; color: var(--text-primary); }
+    .toast { position: fixed; bottom: 24px; left: 24px; transform: translateY(20px); background: var(--bg-elevated); color: var(--accent-text); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 8px; padding: 10px 20px; font-size: 13px; font-weight: 600; z-index: 10000; opacity: 0; transition: opacity 0.25s, transform 0.25s; pointer-events: none; box-shadow: 0 4px 16px rgba(0,0,0,0.3); }
+    .toast.visible { opacity: 1; transform: translateY(0); }
     .rendered-md h1, .rendered-md h2, .rendered-md h3,
     .rendered-md h4, .rendered-md h5, .rendered-md h6 {
       margin-top: 1em;
@@ -1619,6 +1707,14 @@
       background: var(--bg-hover);
       padding: 2px 6px;
       border-radius: 3px;
+      font-size: 11px;
+    }
+    .msg-item.msg-system {
+      border-left: 3px solid var(--border);
+    }
+    .msg-system .msg-text code {
+      background: none;
+      padding: 0;
       font-size: 11px;
     }
     .msg-time {
@@ -2172,6 +2268,12 @@
       color: var(--text-primary);
     }
 
+    .project-group-header.kb-selected {
+      color: var(--text-primary);
+      background: var(--bg-hover);
+      border-radius: 4px;
+    }
+
     .project-group-header .group-chevron {
       transition: transform 0.15s ease;
       flex-shrink: 0;
@@ -2334,8 +2436,11 @@
 
       <!-- Live Updates -->
       <div class="sidebar-section">
-        <div class="section-header">
+        <div class="section-header" onclick="toggleLiveUpdates()" style="cursor: pointer;">
           <span>Live Updates</span>
+          <svg id="live-updates-chevron" class="collapse-chevron" viewBox="0 0 24 24">
+            <path d="M6 9l6 6 6-6"/>
+          </svg>
         </div>
         <div id="live-updates" class="live-updates">
           <div class="live-empty">No active tasks</div>
@@ -2344,46 +2449,50 @@
 
       <!-- Tasks -->
       <div class="sidebar-section flex-1">
-        <div class="section-header">
+        <div class="section-header" onclick="toggleSection('sessions-filters', 'sessions-chevron')" style="cursor: pointer;">
           <span>Sessions</span>
-          <button onclick="showAllTasks()" style="background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 4px; padding: 3px 8px; font-size: 10px; color: var(--text-secondary); cursor: pointer; font-family: var(--mono);">All Tasks</button>
+          <svg id="sessions-chevron" class="collapse-chevron" viewBox="0 0 24 24">
+            <path d="M6 9l6 6 6-6"/>
+          </svg>
         </div>
-        <div class="search-container">
-          <input
-            id="search-input"
-            type="text"
-            class="search-input"
-            placeholder="Search tasks, sessions, projects..."
-            oninput="handleSearch(this.value)"
-          />
-          <button id="search-clear-btn" class="search-clear" onclick="clearSearch()" title="Clear search" aria-label="Clear search">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M18 6L6 18M6 6l12 12"/>
-            </svg>
-          </button>
-        </div>
-        <div class="filter-row">
-          <select id="project-filter" class="filter-dropdown" onchange="filterByProject(this.value)" aria-label="Filter by project">
-            <option value="">All Projects</option>
-          </select>
-          <select id="session-filter" class="filter-dropdown" onchange="filterBySessions(this.value)" aria-label="Filter by session status">
-            <option value="all">All Sessions</option>
-            <option value="active">Active Only</option>
-          </select>
-        </div>
-        <div class="filter-row">
-          <select id="session-limit" class="filter-dropdown" onchange="changeSessionLimit(this.value)" aria-label="Number of sessions to show">
-            <option value="10">Show 10</option>
-            <option value="20">Show 20</option>
-            <option value="50">Show 50</option>
-            <option value="all">Show All</option>
-          </select>
-          <button class="icon-btn reset-btn" onclick="resetState()" title="Reset all filters" aria-label="Reset all filters">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
-              <path d="M3 12a9 9 0 1 1 9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
-              <path d="M3 22v-6h6"/>
-            </svg>
-          </button>
+        <div id="sessions-filters" class="collapsible-section">
+          <div class="search-container">
+            <input
+              id="search-input"
+              type="text"
+              class="search-input"
+              placeholder="Search tasks, sessions, projects..."
+              oninput="handleSearch(this.value)"
+            />
+            <button id="search-clear-btn" class="search-clear" onclick="clearSearch()" title="Clear search" aria-label="Clear search">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M18 6L6 18M6 6l12 12"/>
+              </svg>
+            </button>
+          </div>
+          <div class="filter-row">
+            <select id="project-filter" class="filter-dropdown" onchange="filterByProject(this.value)" aria-label="Filter by project">
+              <option value="">All Projects</option>
+            </select>
+            <select id="session-filter" class="filter-dropdown" onchange="filterBySessions(this.value)" aria-label="Filter by session status">
+              <option value="all">All Sessions</option>
+              <option value="active">Active Only</option>
+            </select>
+          </div>
+          <div class="filter-row">
+            <select id="session-limit" class="filter-dropdown" onchange="changeSessionLimit(this.value)" aria-label="Number of sessions to show">
+              <option value="10">Show 10</option>
+              <option value="20">Show 20</option>
+              <option value="50">Show 50</option>
+              <option value="all">Show All</option>
+            </select>
+            <button class="icon-btn reset-btn" onclick="resetState()" title="Reset all filters" aria-label="Reset all filters">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                <path d="M3 12a9 9 0 1 1 9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
+                <path d="M3 22v-6h6"/>
+              </svg>
+            </button>
+          </div>
         </div>
         <div id="sessions-list" class="sessions-list"></div>
       </div>
@@ -2456,7 +2565,7 @@
               <span class="column-title pending">Pending</span>
               <span id="pending-count" class="column-count pending">0</span>
             </div>
-            <div id="pending-tasks" class="column-tasks" role="list"></div>
+            <div id="pending-tasks" class="column-tasks" role="list" data-status="pending" ondragover="onColumnDragOver(event)" ondragleave="onColumnDragLeave(event)" ondrop="onColumnDrop(event)"></div>
           </div>
 
           <div class="kanban-column" aria-label="In progress tasks">
@@ -2465,7 +2574,7 @@
               <span class="column-title in-progress">In Progress</span>
               <span id="in-progress-count" class="column-count in-progress">0</span>
             </div>
-            <div id="in-progress-tasks" class="column-tasks" role="list"></div>
+            <div id="in-progress-tasks" class="column-tasks" role="list" data-status="in_progress" ondragover="onColumnDragOver(event)" ondragleave="onColumnDragLeave(event)" ondrop="onColumnDrop(event)"></div>
           </div>
 
           <div class="kanban-column" aria-label="Completed tasks">
@@ -2474,7 +2583,7 @@
               <span class="column-title completed">Completed</span>
               <span id="completed-count" class="column-count completed">0</span>
             </div>
-            <div id="completed-tasks" class="column-tasks" role="list"></div>
+            <div id="completed-tasks" class="column-tasks" role="list" data-status="completed" ondragover="onColumnDragOver(event)" ondragleave="onColumnDragLeave(event)" ondrop="onColumnDrop(event)"></div>
           </div>
         </div>
         <div id="agent-footer" class="agent-footer">
@@ -2523,6 +2632,7 @@
         </button>
         </div>
       </header>
+      <div id="message-panel-pinned"></div>
       <div id="message-panel-content" class="message-panel-content"></div>
     </aside>
   </div>
@@ -2621,6 +2731,7 @@
     const detailPanel = document.getElementById('detail-panel');
     const detailContent = document.getElementById('detail-content');
     const connectionStatus = document.getElementById('connection-status');
+    const CONTENT_TRUNCATE_MAX = 1500;
     const COLUMNS = [
       { el: pendingTasks },
       { el: inProgressTasks },
@@ -2633,7 +2744,8 @@
     async function fetchSessions() {
       console.log('[fetchSessions] Starting...');
       try {
-        const res = await fetch(`/api/sessions?limit=${sessionLimit}`);
+        const pinnedParam = pinnedSessionIds.size > 0 ? `&pinned=${[...pinnedSessionIds].join(',')}` : '';
+        const res = await fetch(`/api/sessions?limit=${sessionLimit}${pinnedParam}`);
         const newSessions = await res.json();
         const tasksRes = await fetch('/api/tasks/all');
         const newTasks = await tasksRes.json();
@@ -2879,6 +2991,18 @@
       renderLiveUpdates(activeTasks);
     }
 
+    function toggleSection(containerId, chevronId) {
+      const container = document.getElementById(containerId);
+      const chevron = document.getElementById(chevronId);
+      const collapsed = container.classList.toggle('collapsed');
+      chevron.classList.toggle('rotated', collapsed);
+      localStorage.setItem(containerId + 'Collapsed', collapsed);
+    }
+
+    function toggleLiveUpdates() {
+      toggleSection('live-updates', 'live-updates-chevron');
+    }
+
     function renderLiveUpdates(activeTasks) {
       const container = document.getElementById('live-updates');
 
@@ -2928,6 +3052,7 @@
 
         currentTasks = newTasks;
         currentSessionId = sessionId;
+        currentPins = loadPins(sessionId);
         ownerFilter = '';
         lastMessagesHash = '';
         lastInlineMessage = '';
@@ -2949,7 +3074,7 @@
 
     const AGENT_COOLDOWN_MS = 3 * 60 * 1000;
     const AGENT_STALE_MS = 5 * 60 * 1000; // kept for reference; no longer used for force-stopping
-    const WAITING_TTL_MS = 5 * 60 * 1000;
+    const WAITING_TTL_MS = 30 * 60 * 1000;
     const AGENT_LOG_MAX = 8;
 
     async function fetchAgents(sessionId) {
@@ -2997,6 +3122,14 @@
         if (hash === lastMessagesHash) return;
         lastMessagesHash = hash;
         currentMessages = data.messages;
+        let agentEnriched = false;
+        for (const m of data.messages) {
+          if (m.agentId && m.agentPrompt) {
+            const agent = currentAgents.find(a => a.agentId === m.agentId);
+            if (agent && !agent.prompt) { agent.prompt = m.agentPrompt; agentEnriched = true; }
+          }
+        }
+        if (agentEnriched) renderAgentFooter();
         updateLatestMessage(data.messages);
         if (messagePanelOpen) renderMessages(data.messages);
         if (msgDetailFollowLatest && data.messages.length) {
@@ -3031,7 +3164,7 @@
       const el = document.getElementById('latest-message');
       let last = null;
       for (let i = messages.length - 1; i >= 0; i--) {
-        if (messages[i].type === 'assistant' || messages[i].type === 'user') { last = messages[i]; break; }
+        if (messages[i].type === 'assistant' || (messages[i].type === 'user' && !messages[i].systemLabel)) { last = messages[i]; break; }
       }
       if (!last) { el.classList.remove('visible'); lastInlineMessage = ''; return; }
       const label = last.type === 'assistant' ? 'Claude' : 'User';
@@ -3047,26 +3180,84 @@
       }
     }
 
+    function renderMsgPinBtn(m, i) {
+      const pinned = isPinned(m);
+      return `<button class="msg-pin-btn${pinned ? ' pinned' : ''}" onclick="event.stopPropagation();togglePin(${i})" title="${pinned ? 'Unpin' : 'Pin'} message">${PIN_SVG}</button>`;
+    }
+
+    function renderPinnedSection() {
+      if (!currentPins.length) return '';
+      const chevron = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><path d="M6 9l6 6 6-6"/></svg>';
+      const items = currentPins.map((p, pi) => {
+        const click = `onclick="showPinnedMsgDetail(${pi})" style="cursor:pointer"`;
+        const unpin = `<button class="pinned-item-unpin" onclick="event.stopPropagation();unpinById(${pi})" title="Unpin">${PIN_SVG}</button>`;
+        if (p.type === 'user') {
+          const text = escapeHtml(cleanMessageText(p.text || ''));
+          return `<div class="msg-item msg-user" ${click}>
+            ${MSG_ICON_USER}
+            <div class="msg-body"><div class="msg-text">${text}</div><div class="msg-time">${formatDate(p.timestamp)}</div></div>${unpin}
+          </div>`;
+        } else if (p.type === 'assistant') {
+          return `<div class="msg-item msg-assistant" ${click}>
+            ${MSG_ICON_ASSISTANT}
+            <div class="msg-body"><div class="msg-text">${escapeHtml(cleanMessageText(p.text || ''))}</div><div class="msg-time">${formatDate(p.timestamp)}</div></div>${unpin}
+          </div>`;
+        } else if (p.type === 'tool_use') {
+          const toolDetail = p.detail ? ` <span style="color:var(--text-muted)">${escapeHtml(p.detail)}</span>` : '';
+          return `<div class="msg-item msg-tool" ${click}>
+            ${MSG_ICON_TOOL}
+            <div class="msg-body"><div class="msg-text">${escapeHtml(p.tool || '')}${toolDetail}</div><div class="msg-time">${formatDate(p.timestamp)}</div></div>${unpin}
+          </div>`;
+        } else if (p.type === 'agent') {
+          const agentClick = `onclick="showAgentModal('${escapeHtml(p.agentId)}')" style="cursor:pointer"`;
+          const msgTrunc = p.lastMessage ? escapeHtml(stripAnsi(p.lastMessage.trim()).replace(/[\r\n]+/g, ' ').slice(0, 60)) : '';
+          const agentDetail = msgTrunc ? ` <span style="color:var(--text-muted)">${msgTrunc}</span>` : '';
+          return `<div class="msg-item msg-tool" ${agentClick}>
+            ${MSG_ICON_TOOL}
+            <div class="msg-body"><div class="msg-text">${escapeHtml(p.agentType || 'Agent')}${agentDetail}</div><div class="msg-time">${formatDate(p.timestamp)}</div></div>${unpin}
+          </div>`;
+        }
+        return '';
+      }).join('');
+      const label = `Pinned (${currentPins.length})`;
+      const hasItems = currentPins.length > 0;
+      return `<div class="pinned-section">
+        <div class="pinned-header${pinnedCollapsed ? ' collapsed' : ''}${hasItems ? '' : ' empty'}" ${hasItems ? 'onclick="togglePinnedCollapse()"' : ''}>
+          <span>${label}</span>${hasItems ? chevron : ''}
+        </div>
+        ${hasItems ? `<div class="pinned-items${pinnedCollapsed ? ' collapsed' : ''}">${items}</div>` : ''}
+      </div>`;
+    }
+
     function renderMessages(messages) {
       const container = document.getElementById('message-panel-content');
+      const pinnedContainer = document.getElementById('message-panel-pinned');
+      pinnedContainer.innerHTML = renderPinnedSection();
       if (!messages.length) {
         container.innerHTML = '<div class="msg-empty">No messages found for this session</div>';
         return;
       }
-      container.innerHTML = messages.map((m, i) => {
+      const msgsHtml = messages.map((m, i) => {
+        const pinBtn = renderMsgPinBtn(m, i);
         const clickable = `onclick="msgDetailFollowLatest=false;showMsgDetail(${i})" style="cursor:pointer"`;
         if (m.type === 'user') {
+          if (m.systemLabel) {
+            return `<div class="msg-item msg-system" ${clickable}>
+              ${MSG_ICON_SYSTEM}
+              <div class="msg-body"><div class="msg-text"><code>${escapeHtml(m.systemLabel)}</code></div><div class="msg-time">${formatDate(m.timestamp)}</div></div>${pinBtn}
+            </div>`;
+          }
           const cmd = parseCommandMessage(m.text);
           const displayText = cmd ? cmd : escapeHtml(cleanMessageText(m.text));
           const isCmd = !!cmd;
           return `<div class="msg-item msg-user${isCmd ? ' msg-cmd' : ''}" ${clickable}>
-            <svg class="msg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-            <div class="msg-body"><div class="msg-text">${isCmd ? '<code>' + escapeHtml(displayText) + '</code>' : displayText}</div><div class="msg-time">${formatDate(m.timestamp)}</div></div>
+            ${MSG_ICON_USER}
+            <div class="msg-body"><div class="msg-text">${isCmd ? '<code>' + escapeHtml(displayText) + '</code>' : displayText}</div><div class="msg-time">${formatDate(m.timestamp)}</div></div>${pinBtn}
           </div>`;
         } else if (m.type === 'assistant') {
           return `<div class="msg-item msg-assistant" ${clickable}>
-            <svg class="msg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="9" cy="16" r="1.5"/><circle cx="15" cy="16" r="1.5"/><path d="M12 2v4M8 7h8"/></svg>
-            <div class="msg-body"><div class="msg-text">${escapeHtml(cleanMessageText(m.text))}</div><div class="msg-time">${m.model ? escapeHtml(m.model) + ' · ' : ''}${formatDate(m.timestamp)}</div></div>
+            ${MSG_ICON_ASSISTANT}
+            <div class="msg-body"><div class="msg-text">${escapeHtml(cleanMessageText(m.text))}</div><div class="msg-time">${m.model ? escapeHtml(m.model) + ' · ' : ''}${formatDate(m.timestamp)}</div></div>${pinBtn}
           </div>`;
         } else if (m.type === 'tool_use') {
           const toolDetail = m.detail ? ` <span style="color:var(--text-muted)">${escapeHtml(m.detail)}</span>` : '';
@@ -3075,17 +3266,185 @@
             ? `onclick="showAgentModal('${escapeHtml(m.agentId)}')" style="cursor:pointer"`
             : clickable;
           return `<div class="msg-item msg-tool" ${itemClick}>
-            <svg class="msg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
-            <div class="msg-body"><div class="msg-text">${escapeHtml(m.tool)}${toolDetail}${agentLink}</div><div class="msg-time">${formatDate(m.timestamp)}</div></div>
+            ${MSG_ICON_TOOL}
+            <div class="msg-body"><div class="msg-text">${escapeHtml(m.tool)}${toolDetail}${agentLink}</div><div class="msg-time">${formatDate(m.timestamp)}</div></div>${pinBtn}
           </div>`;
         }
         return '';
       }).join('');
+      container.innerHTML = msgsHtml;
       container.scrollTop = container.scrollHeight;
     }
 
     let currentMsgDetailIdx = null;
     let msgDetailFollowLatest = false;
+    let currentPins = [];
+    let pinnedCollapsed = false;
+
+    const PIN_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>';
+    const MSG_ICON_USER = '<svg class="msg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>';
+    const MSG_ICON_ASSISTANT = '<svg class="msg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="9" cy="16" r="1.5"/><circle cx="15" cy="16" r="1.5"/><path d="M12 2v4M8 7h8"/></svg>';
+    const MSG_ICON_TOOL = '<svg class="msg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>';
+    const MSG_ICON_SYSTEM = '<svg class="msg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>';
+
+    function getPinId(m) {
+      const content = m.type === 'tool_use'
+        ? `${m.tool}:${(m.detail || '').slice(0, 100)}`
+        : (m.text || '').slice(0, 100);
+      return `${m.type}|${m.timestamp}|${content}`;
+    }
+
+    function loadPins(sessionId) {
+      try { return JSON.parse(localStorage.getItem(`pinned-messages-${sessionId}`)) || []; }
+      catch { return []; }
+    }
+
+    function savePins(sessionId, pins) {
+      localStorage.setItem(`pinned-messages-${sessionId}`, JSON.stringify(pins));
+    }
+
+    function isPinned(m) { return currentPins.some(p => p.id === getPinId(m)); }
+
+    function isAgentPinned(agentId) { return currentPins.some(p => p.id === `agent|${agentId}`); }
+
+    function toggleAgentPin(agentId) {
+      const agent = currentAgents.find(a => a.agentId === agentId);
+      if (!agent || !currentSessionId) return;
+      const id = `agent|${agentId}`;
+      const idx = currentPins.findIndex(p => p.id === id);
+      if (idx >= 0) {
+        currentPins.splice(idx, 1);
+      } else {
+        pinnedCollapsed = false;
+        currentPins.push({
+          id, type: 'agent', agentId: agent.agentId,
+          agentType: agent.type || 'unknown',
+          lastMessage: agent.lastMessage || null,
+          timestamp: agent.startedAt || agent.updatedAt,
+          pinnedAt: new Date().toISOString()
+        });
+      }
+      savePins(currentSessionId, currentPins);
+      renderMessages(currentMessages);
+      renderAgentFooter();
+    }
+
+    function togglePin(msgIndex) {
+      const m = currentMessages[msgIndex];
+      if (!m || !currentSessionId) return;
+      const id = getPinId(m);
+      const idx = currentPins.findIndex(p => p.id === id);
+      if (idx >= 0) {
+        currentPins.splice(idx, 1);
+      } else {
+        pinnedCollapsed = false;
+        currentPins.push({
+          id, type: m.type, text: m.text || null, fullText: m.fullText || null,
+          tool: m.tool || null, detail: m.detail || null, fullDetail: m.fullDetail || null,
+          description: m.description || null, timestamp: m.timestamp, model: m.model || null,
+          agentId: m.agentId || null, agentPrompt: m.agentPrompt || null,
+          agentLastMessage: m.agentLastMessage || null,
+          pinnedAt: new Date().toISOString()
+        });
+      }
+      savePins(currentSessionId, currentPins);
+      renderMessages(currentMessages);
+      updateMsgDetailPinState();
+    }
+
+    function unpinById(pinIdx) {
+      if (!currentSessionId || pinIdx < 0 || pinIdx >= currentPins.length) return;
+      const wasAgent = currentPins[pinIdx].type === 'agent';
+      currentPins.splice(pinIdx, 1);
+      savePins(currentSessionId, currentPins);
+      renderMessages(currentMessages);
+      if (wasAgent) renderAgentFooter();
+      updateMsgDetailPinState();
+    }
+
+    function togglePinFromModal() {
+      if (currentMsgDetailIdx != null && currentMessages[currentMsgDetailIdx]) {
+        togglePin(currentMsgDetailIdx);
+      } else if (currentPinDetailId != null) {
+        const pinIdx = currentPins.findIndex(p => p.id === currentPinDetailId);
+        if (pinIdx >= 0) unpinById(pinIdx);
+        currentPinDetailId = null;
+        closeMsgDetailModal();
+      }
+    }
+
+    let currentPinDetailId = null;
+
+    function showPinnedMsgDetail(pinIdx) {
+      const pin = currentPins[pinIdx];
+      if (!pin) return;
+      const idx = currentMessages.findIndex(m => getPinId(m) === pin.id);
+      if (idx >= 0) { currentPinDetailId = null; showMsgDetail(idx); return; }
+      currentMsgDetailIdx = null;
+      currentPinDetailId = pin.id;
+      const body = document.getElementById('msg-detail-body');
+      const agentBtn = document.getElementById('msg-detail-agent-btn');
+      if (pin.type === 'tool_use') {
+        document.getElementById('msg-detail-title').textContent = pin.tool || 'Tool';
+        const fullText = pin.fullDetail || pin.detail || '';
+        const pinParamsHtml = renderToolParamsHtml(pin.params);
+        const pinResultHtml = renderToolResultHtml(pin.toolResult, pin.toolResultTruncated, pin.toolResultFull);
+        const pinDetailEscaped = escapeHtml(fullText);
+        const pinDetailRendered = pin.tool === 'Bash' ? highlightBash(pinDetailEscaped) : pinDetailEscaped;
+        body.innerHTML = (fullText ? `<pre class="msg-detail-pre">${pinDetailRendered}</pre>` : '<em>No details</em>') + pinParamsHtml + pinResultHtml;
+        agentBtn.style.display = 'none';
+      } else {
+        const text = stripAnsi(pin.fullText || pin.text || '');
+        document.getElementById('msg-detail-title').textContent = pin.type === 'assistant' ? 'Claude' : 'User';
+        agentBtn.style.display = 'none';
+        body.innerHTML = renderMarkdown(text);
+      }
+      document.getElementById('msg-detail-meta').textContent = formatDate(pin.timestamp);
+      const pinModal = document.getElementById('msg-detail-modal').querySelector('.modal');
+      autoSizeModal(pinModal, body);
+      const pinBtn = document.getElementById('msg-detail-pin-btn');
+      if (pinBtn) pinBtn.classList.add('active');
+      document.getElementById('msg-detail-modal').classList.add('visible');
+    }
+
+    function updateMsgDetailPinState() {
+      const pinBtn = document.getElementById('msg-detail-pin-btn');
+      if (!pinBtn) return;
+      if (currentMsgDetailIdx != null && currentMessages[currentMsgDetailIdx]) {
+        pinBtn.classList.toggle('active', isPinned(currentMessages[currentMsgDetailIdx]));
+      } else if (currentPinDetailId) {
+        pinBtn.classList.toggle('active', currentPins.some(p => p.id === currentPinDetailId));
+      }
+    }
+
+    function togglePinnedCollapse() {
+      pinnedCollapsed = !pinnedCollapsed;
+      const header = document.querySelector('.pinned-header');
+      const items = document.querySelector('.pinned-items');
+      if (header) header.classList.toggle('collapsed', pinnedCollapsed);
+      if (items) items.classList.toggle('collapsed', pinnedCollapsed);
+    }
+
+    // Session pinning
+    let pinnedSessionIds = new Set();
+
+    function loadPinnedSessions() {
+      try { return new Set(JSON.parse(localStorage.getItem('pinned-sessions')) || []); }
+      catch { return new Set(); }
+    }
+
+    function savePinnedSessions() {
+      localStorage.setItem('pinned-sessions', JSON.stringify([...pinnedSessionIds]));
+    }
+
+    function toggleSessionPin(sessionId) {
+      if (pinnedSessionIds.has(sessionId)) pinnedSessionIds.delete(sessionId);
+      else pinnedSessionIds.add(sessionId);
+      savePinnedSessions();
+      renderSessions();
+    }
+
+    const SESSION_PIN_SVG = PIN_SVG.replace('width="14" height="14"', 'width="12" height="12"');
 
     function showMsgDetail(idx) {
       currentMsgDetailIdx = idx;
@@ -3099,24 +3458,33 @@
         let agentExtraHtml = '';
         const agentBtn = document.getElementById('msg-detail-agent-btn');
         if (m.tool === 'Agent' && m.agentId) {
-          const respHtml = m.agentLastMessage ? renderMarkdown(stripAnsi(m.agentLastMessage.trim())) : null;
-          const promptHtml = m.agentPrompt ? renderMarkdown(m.agentPrompt) : null;
-          agentExtraHtml += renderAgentTabs(promptHtml, respHtml);
+          const agentRespText = m.agentLastMessage ? stripAnsi(m.agentLastMessage.trim()) : null;
+          const agentPromptText = m.agentPrompt || null;
+          const respHtml = agentRespText ? renderMarkdown(agentRespText) : null;
+          const promptHtml = agentPromptText ? renderMarkdown(agentPromptText) : null;
+          agentExtraHtml += renderAgentTabs(promptHtml, respHtml, agentPromptText, agentRespText);
           agentBtn.style.display = '';
           agentBtn.dataset.agentId = m.agentId;
         } else {
           agentBtn.style.display = 'none';
         }
-        body.innerHTML = (fullText ? descHtml + `<pre class="msg-detail-pre">${escapeHtml(fullText)}</pre>` : '<em>No details</em>') + agentExtraHtml;
+        const toolParamsHtml = renderToolParamsHtml(m.params);
+        const toolResultHtml = renderToolResultHtml(m.toolResult, m.toolResultTruncated, m.toolResultFull);
+        const detailEscaped = escapeHtml(fullText);
+        const detailRendered = m.tool === 'Bash' ? highlightBash(detailEscaped) : detailEscaped;
+        body.innerHTML = (fullText ? descHtml + `<pre class="msg-detail-pre">${detailRendered}</pre>` : '<em>No details</em>') + toolParamsHtml + toolResultHtml + agentExtraHtml;
       } else {
         const text = stripAnsi(m.fullText || m.text);
-        document.getElementById('msg-detail-title').textContent = m.type === 'assistant' ? 'Claude' : 'User';
+        document.getElementById('msg-detail-title').textContent = m.type === 'assistant' ? 'Claude' : (m.systemLabel ? 'System' : 'User');
         document.getElementById('msg-detail-agent-btn').style.display = 'none';
-        body.innerHTML = renderMarkdown(text);
+        if (m.compactSummary) {
+          body.innerHTML = renderMarkdown(m.compactSummary);
+        } else {
+          body.innerHTML = renderMarkdown(text);
+        }
       }
       const modal = document.getElementById('msg-detail-modal').querySelector('.modal');
-      const hasTable = body.querySelector('table') !== null;
-      modal.style.maxWidth = hasTable ? '1100px' : '860px';
+      autoSizeModal(modal, body);
       modal.classList.toggle('live', msgDetailFollowLatest);
       const overlay = document.getElementById('msg-detail-modal');
       overlay.classList.toggle('live-overlay', msgDetailFollowLatest);
@@ -3124,6 +3492,8 @@
       const meta = [formatDate(m.timestamp)];
       if (m.model) meta.unshift(m.model);
       document.getElementById('msg-detail-meta').textContent = meta.join(' · ');
+      currentPinDetailId = null;
+      updateMsgDetailPinState();
       overlay.classList.add('visible');
     }
 
@@ -3132,38 +3502,173 @@
       msgDetailFollowLatest = false;
     }
 
-    async function copyMsgToClipboard(btn) {
-      const m = currentMessages[currentMsgDetailIdx];
-      if (!m) return;
-      const content = m.type === 'tool_use'
-        ? (m.fullDetail || m.detail || '')
-        : stripAnsi(m.fullText || m.text);
+    let _toastTimer = null;
+    function showToast(msg) {
+      const el = document.getElementById('toast');
+      clearTimeout(_toastTimer);
+      el.style.transition = 'none';
+      el.classList.remove('visible');
+      void el.offsetHeight;
+      el.style.transition = '';
+      el.textContent = msg;
+      el.classList.add('visible');
+      _toastTimer = setTimeout(() => el.classList.remove('visible'), 2000);
+    }
+
+    async function copyWithFeedback(text, btn) {
+      if (btn.dataset.copying) return;
       try {
-        await navigator.clipboard.writeText(content);
+        await navigator.clipboard.writeText(text);
+        btn.dataset.copying = '1';
         const svg = btn.innerHTML;
         btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M20 6L9 17l-5-5"/></svg>';
-        setTimeout(() => btn.innerHTML = svg, 1500);
+        setTimeout(() => { btn.innerHTML = svg; delete btn.dataset.copying; }, 1500);
       } catch (e) {
         console.error('Failed to copy:', e);
       }
     }
 
-    async function openMsgInEditor() {
-      const m = currentMessages[currentMsgDetailIdx];
+    function renderToolParamsHtml(params) {
+      if (!params) return '';
+      const BLOCK_KEYS = new Set(['old_string', 'new_string', 'content']);
+      const badges = [], blocks = [];
+      for (const [k, v] of Object.entries(params)) {
+        if (BLOCK_KEYS.has(k)) continue;
+        const display = typeof v === 'boolean' ? (v ? 'yes' : 'no') : String(v);
+        if (display.length > 60) {
+          blocks.push({ k, display });
+        } else {
+          badges.push(`<span style="display:inline-flex;align-items:center;gap:3px;padding:1px 6px;border-radius:3px;background:var(--bg-secondary);font-size:0.75rem"><span style="color:var(--text-muted)">${escapeHtml(k)}:</span> ${escapeHtml(display)}</span>`);
+        }
+      }
+      let html = '';
+      if (badges.length) html += `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px">${badges.join('')}</div>`;
+      for (const { k, display } of blocks) {
+        html += `<div style="margin-top:6px;font-size:0.75rem"><span style="color:var(--text-muted)">${escapeHtml(k)}:</span> <span style="word-break:break-all">${escapeHtml(display)}</span></div>`;
+      }
+      if (params.old_string || params.new_string) {
+        html += `<div style="margin-top:8px;padding-top:6px;border-top:1px solid var(--border)">`;
+        if (params.old_string) {
+          html += `<div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:2px">old_string</div>
+            <pre class="msg-detail-pre" style="max-height:200px;overflow:auto;border-left:3px solid #e55;padding-left:8px">${escapeHtml(params.old_string)}</pre>`;
+        }
+        if (params.new_string) {
+          html += `<div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:2px;margin-top:6px">new_string</div>
+            <pre class="msg-detail-pre" style="max-height:200px;overflow:auto;border-left:3px solid #5b5;padding-left:8px">${escapeHtml(params.new_string)}</pre>`;
+        }
+        html += `</div>`;
+      }
+      if (params.content) {
+        const contentTruncated = params.content.length > CONTENT_TRUNCATE_MAX;
+        const truncContent = contentTruncated ? params.content.slice(0, CONTENT_TRUNCATE_MAX) + '\n... (truncated)' : params.content;
+        let writeMoreBtn = '', fullBlock = '';
+        if (contentTruncated) {
+          const toggle = makeExpandToggle(escapeHtml(truncContent), escapeHtml(params.content), { fontSize: '0.75rem', maxHeight: '500px' });
+          writeMoreBtn = ` ${toggle.btn}`;
+          fullBlock = toggle.full;
+        }
+        html += `<div style="margin-top:8px;padding-top:6px;border-top:1px solid var(--border)">
+          <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:2px">content${writeMoreBtn}</div>
+          <pre class="msg-detail-pre" style="max-height:300px;overflow:auto">${escapeHtml(truncContent)}</pre>
+          ${fullBlock}
+        </div>`;
+      }
+      return html;
+    }
+
+    // Strip cat -n style line number prefix (e.g. "   1→" or "   1\t") from tool output
+    function stripLineNumbers(text) {
+      return text.replace(/^ *\d+[→\t]/gm, '');
+    }
+
+    function highlightBash(escaped) {
+      return escaped
+        .replace(/^(\s*)(#.*)$/gm, '$1<span style="color:#6a9955">$2</span>')
+        .replace(/(&#x27;[^]*?&#x27;|&quot;[^]*?&quot;)/g, '<span style="color:#ce9178">$1</span>')
+        .replace(/\b(if|then|else|elif|fi|for|do|done|while|until|case|esac|function|return|in|select)\b/g, '<span style="color:#c586c0">$1</span>')
+        .replace(/\b(echo|cd|ls|cat|grep|awk|sed|rm|cp|mv|mkdir|chmod|chown|export|source|exit|test|read|printf|set|unset|eval|exec|trap|wait|kill|sudo|apt|npm|npx|git|docker|curl|wget|pip|python|node|make|dotnet)\b/g, '<span style="color:#569cd6">$1</span>')
+        .replace(/(\$\{[^}]*\}|\$[A-Za-z_][A-Za-z0-9_]*)/g, '<span style="color:#9cdcfe">$1</span>')
+        .replace(/((?:^|\s)(?:&amp;&amp;|\|\||[|;])(?:\s|$))/g, '<span style="color:#d4d4d4;font-weight:bold">$1</span>');
+    }
+
+    let _expandIdCounter = 0;
+    function makeExpandToggle(truncatedHtml, fullHtml, opts = {}) {
+      const id = `expand-${++_expandIdCounter}`;
+      const fontSize = opts.fontSize || '0.8rem';
+      const maxHeight = opts.maxHeight || '';
+      const btn = `<button onclick="var f=document.getElementById('${id}'),t=this.parentElement.nextElementSibling,expand=f.style.display==='none';f.style.display=expand?'block':'none';t.style.display=expand?'none':'block';this.textContent=expand?'Show less':'Show more'" style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:${fontSize};text-decoration:underline;margin-left:6px">Show more</button>`;
+      const mhStyle = maxHeight ? `max-height:${maxHeight};` : '';
+      const full = `<pre id="${id}" class="msg-detail-pre" style="${mhStyle}overflow:auto;display:none">${fullHtml}</pre>`;
+      return { btn, full };
+    }
+
+    function autoSizeModal(modal, body) {
+      const hasTable = body.querySelector('table') !== null;
+      const hasPre = body.querySelector('pre') !== null;
+      modal.style.maxWidth = hasTable ? '1100px' : (body.textContent.length > 2000 || hasPre) ? '960px' : '860px';
+    }
+
+    function renderToolResultHtml(toolResult, isTruncated, fullResult) {
+      if (!toolResult) return '';
+      const stripped = stripLineNumbers(toolResult);
+      const escaped = escapeHtml(stripped);
+      let truncLabel = '', fullBlock = '';
+      if (isTruncated && fullResult) {
+        const toggle = makeExpandToggle(escaped, escapeHtml(stripLineNumbers(fullResult)));
+        truncLabel = toggle.btn;
+        fullBlock = toggle.full;
+      } else if (isTruncated) {
+        truncLabel = '<span style="color:var(--text-muted);font-size:0.8rem;margin-left:6px">(truncated)</span>';
+      }
+      return `<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border)">
+        <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:4px">Output${truncLabel}</div>
+        <pre class="msg-detail-pre" style="overflow:auto">${escaped}</pre>
+        ${fullBlock}
+      </div>`;
+    }
+
+    function buildToolContent(m) {
+      let content = m.fullDetail || m.detail || '';
+      if (m.toolResult) content += '\n\n--- Output ---\n\n' + (m.toolResultFull || m.toolResult);
+      return content;
+    }
+
+    function getDetailMsg() {
+      if (currentMsgDetailIdx != null) return currentMessages[currentMsgDetailIdx];
+      if (currentPinDetailId) return currentPins.find(p => p.id === currentPinDetailId);
+      return null;
+    }
+
+    async function copyMsgToClipboard(btn) {
+      const m = getDetailMsg();
       if (!m) return;
       const content = m.type === 'tool_use'
-        ? (m.fullDetail || m.detail || '')
+        ? buildToolContent(m)
         : stripAnsi(m.fullText || m.text);
-      const title = m.type === 'tool_use' ? m.tool : m.type;
+      copyWithFeedback(content, btn);
+    }
+
+    async function postAndToast(url, body, label) {
       try {
-        await fetch('/api/open-in-editor', {
+        const r = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content, title })
+          body: JSON.stringify(body)
         });
+        showToast(r.ok ? `Opened ${label}` : `Failed to open ${label}`);
       } catch (e) {
-        console.error('Failed to open in editor:', e);
+        showToast(`Failed to open ${label}`);
       }
+    }
+
+    async function openMsgInEditor() {
+      const m = getDetailMsg();
+      if (!m) return;
+      const content = m.type === 'tool_use'
+        ? buildToolContent(m)
+        : stripAnsi(m.fullText || m.text);
+      const title = m.type === 'tool_use' ? m.tool : m.type;
+      postAndToast('/api/open-in-editor', { content, title }, 'in editor');
     }
 
     function formatDuration(ms) {
@@ -3234,17 +3739,20 @@
           : a.status === 'idle'
           ? `idle · ${formatDuration(elapsed)}`
           : `active · ${formatDuration(elapsed)}`;
-        const msgTrimmed = stripAnsi(a.lastMessage?.trim() || '').replace(/[\r\n]+/g, ' ');
-        const msgTrunc = msgTrimmed.length > 60 ? msgTrimmed.substring(0, 60) + '…' : msgTrimmed;
-        const msgHtml = msgTrunc
-          ? `<div class="agent-message" title="${escapeHtml(msgTrimmed)}">${escapeHtml(msgTrunc)}</div>` : '';
+        const promptTrimmed = stripAnsi((a.prompt || '').trim()).replace(/[\r\n]+/g, ' ');
+        const promptTrunc = promptTrimmed.length > 60 ? promptTrimmed.substring(0, 60) + '…' : promptTrimmed;
+        const msgHtml = promptTrunc
+          ? `<div class="agent-message" title="${escapeHtml(promptTrimmed)}">${escapeHtml(promptTrunc)}</div>` : '';
+        const agentPinned = isAgentPinned(a.agentId);
+        const agentPinBtn = `<button class="msg-pin-btn${agentPinned ? ' pinned' : ''}" onclick="event.stopPropagation();toggleAgentPin('${a.agentId}')" title="${agentPinned ? 'Unpin' : 'Pin'} agent">${PIN_SVG}</button>`;
         return `<div class="agent-card" onclick="showAgentModal('${a.agentId}')">
           <span class="agent-dot ${a.status}"></span>
-          <div>
+          <div style="flex:1;min-width:0">
             <div class="agent-type">${escapeHtml(a.type || 'unknown')}</div>
             <div class="agent-status">${statusText}</div>
             ${msgHtml}
           </div>
+          ${agentPinBtn}
         </div>`;
       }).join('');
 
@@ -3264,9 +3772,35 @@
       document.getElementById('agent-footer-toggle').innerHTML = collapsed ? '&#x25B4;' : '&#x25BE;';
     }
 
+    let _agentModalPromptText = null;
+    let _agentModalResponseText = null;
+
+    async function copyAgentModalAll(btn) {
+      const parts = [];
+      if (_agentModalPromptText) parts.push('## Prompt\n' + _agentModalPromptText);
+      if (_agentModalResponseText) parts.push('## Response\n' + _agentModalResponseText);
+      if (!parts.length) return;
+      copyWithFeedback(parts.join('\n\n'), btn);
+    }
+
+    let currentAgentModalId = null;
+
+    function updateAgentModalPinState() {
+      const btn = document.getElementById('agent-modal-pin-btn');
+      if (!btn || !currentAgentModalId) return;
+      btn.classList.toggle('active', isAgentPinned(currentAgentModalId));
+    }
+
+    function togglePinFromAgentModal() {
+      if (!currentAgentModalId) return;
+      toggleAgentPin(currentAgentModalId);
+      updateAgentModalPinState();
+    }
+
     function showAgentModal(agentId) {
       const agent = currentAgents.find(a => a.agentId === agentId);
       if (!agent) return;
+      currentAgentModalId = agentId;
       const modal = document.getElementById('agent-modal');
       const title = document.getElementById('agent-modal-title');
       const body = document.getElementById('agent-modal-body');
@@ -3295,12 +3829,16 @@
           `<tr><td style="padding:6px 12px 6px 0;color:var(--text-tertiary);white-space:nowrap;vertical-align:top;">${k}</td><td style="padding:6px 0;color:var(--text-primary);">${v}</td></tr>`
         ).join('') + `</table>`;
 
-      const prompt = agentMsg?.agentPrompt || agent.prompt;
-      const promptHtml = prompt ? renderMarkdown(prompt) : null;
-      const responseHtml = agent.lastMessage ? renderMarkdown(stripAnsi(agent.lastMessage.trim())) : null;
-      html += renderAgentTabs(promptHtml, responseHtml);
+      const promptText = agentMsg?.agentPrompt || agent.prompt || null;
+      const responseText = agent.lastMessage ? stripAnsi(agent.lastMessage.trim()) : null;
+      _agentModalPromptText = promptText;
+      _agentModalResponseText = responseText;
+      const promptHtml = promptText ? renderMarkdown(promptText) : null;
+      const responseHtml = responseText ? renderMarkdown(responseText) : null;
+      html += renderAgentTabs(promptHtml, responseHtml, promptText, responseText);
 
       body.innerHTML = html;
+      updateAgentModalPinState();
       modal.classList.add('visible');
       const keyHandler = (e) => {
         if (e.key === 'Escape') {
@@ -3314,6 +3852,7 @@
 
     function closeAgentModal() {
       document.getElementById('agent-modal').classList.remove('visible');
+      currentAgentModalId = null;
     }
 
     async function showAllTasks() {
@@ -3412,6 +3951,13 @@
         });
       }
 
+      // Always include pinned sessions even if they don't match filters
+      if (pinnedSessionIds.size > 0 && !searchQuery) {
+        const filteredIds = new Set(filteredSessions.map(s => s.id));
+        const missingPinned = sessions.filter(s => pinnedSessionIds.has(s.id) && !filteredIds.has(s.id));
+        if (missingPinned.length) filteredSessions = [...missingPinned, ...filteredSessions];
+      }
+
       if (filteredSessions.length === 0) {
         let emptyMsg = 'No sessions found';
         let emptyHint = 'Tasks appear when you use Claude Code';
@@ -3460,8 +4006,10 @@
         const isTeam = session.isTeam;
         const memberCount = session.memberCount || 0;
 
+        const isSessionPinned = pinnedSessionIds.has(session.id);
         return `
           <button onclick="fetchTasks('${session.id}')" data-session-id="${session.id}" class="session-item ${isActive ? 'active' : ''} ${session.hasWaitingForUser ? 'permission-pending' : ''} ${!session.hasRecentLog && !session.inProgress && !session.hasWaitingForUser ? 'stale' : ''}" title="${tooltip}">
+            <span class="session-pin-btn${isSessionPinned ? ' pinned' : ''}" onclick="event.stopPropagation();toggleSessionPin('${escapeHtml(session.id)}')" title="${isSessionPinned ? 'Unpin' : 'Pin'} session">${SESSION_PIN_SVG}</span>
             <div class="session-name">${escapeHtml(primaryName)}</div>
             ${secondaryName ? `<div class="session-secondary">${escapeHtml(secondaryName)}</div>` : ''}
             ${gitBranch ? `<div class="session-branch">${gitBranch}</div>` : ''}
@@ -3495,6 +4043,11 @@
           } else {
             ungrouped.push(session);
           }
+        }
+        if (pinnedSessionIds.size > 0) {
+          const pinSort = (a, b) => (pinnedSessionIds.has(b.id) ? 1 : 0) - (pinnedSessionIds.has(a.id) ? 1 : 0);
+          for (const [, arr] of groups) arr.sort(pinSort);
+          ungrouped.sort(pinSort);
         }
 
         // Stable group order: preserve existing order, append new groups sorted by recency
@@ -3554,29 +4107,34 @@
         sessionsList.innerHTML = filteredSessions.map(renderSessionCard).join('');
       }
 
-      const items = getSessionItems();
-      const activeIdx = items.findIndex(el => el.classList.contains('active'));
+      const navItems = getNavigableItems();
+      const allSessions = getSessionItems();
+      const activeIdx = allSessions.findIndex(el => el.classList.contains('active'));
       if (activeIdx >= 0 && (selectedSessionIdx < 0 || sessionJustSelected)) {
-        selectedSessionIdx = activeIdx;
-        selectedSessionKbId = items[activeIdx].dataset.sessionId || null;
+        const navIdx = navItems.indexOf(allSessions[activeIdx]);
+        selectedSessionIdx = navIdx >= 0 ? navIdx : 0;
+        selectedSessionKbId = allSessions[activeIdx].dataset.sessionId || null;
         sessionJustSelected = false;
       }
 
       if (selectedSessionKbId && focusZone === 'sidebar') {
-        const restoredIdx = items.findIndex(el => el.dataset.sessionId === selectedSessionKbId);
+        const restoredIdx = navItems.findIndex(el =>
+          getKbId(el) === selectedSessionKbId
+        );
         if (restoredIdx >= 0) {
           selectedSessionIdx = restoredIdx;
-          items[restoredIdx].classList.add('kb-selected');
+          navItems[restoredIdx].classList.add('kb-selected');
         } else {
           selectedSessionIdx = -1;
           selectedSessionKbId = null;
         }
       } else if (focusZone === 'sidebar' && selectedSessionIdx >= 0) {
-        if (items.length > 0) {
-          const clamped = Math.min(selectedSessionIdx, items.length - 1);
+        if (navItems.length > 0) {
+          const clamped = Math.min(selectedSessionIdx, navItems.length - 1);
           selectedSessionIdx = clamped;
-          selectedSessionKbId = items[clamped].dataset.sessionId || null;
-          items[clamped].classList.add('kb-selected');
+          const el = navItems[clamped];
+          selectedSessionKbId = getKbId(el);
+          el.classList.add('kb-selected');
         } else {
           selectedSessionIdx = -1;
           selectedSessionKbId = null;
@@ -3634,6 +4192,9 @@
           data-task-id="${task.id}"
           data-session-id="${actualSessionId}"
           onclick="showTaskDetail('${task.id}', '${actualSessionId}')"
+          draggable="true"
+          ondragstart="onCardDragStart(event)"
+          ondragend="onCardDragEnd(event)"
           class="task-card ${statusClass} ${isBlocked ? 'blocked' : ''}"
           aria-label="${escapeHtml(task.subject)} — ${task.status.replace('_',' ')}">
           <div class="task-id">
@@ -3690,6 +4251,57 @@
           showTaskDetail(selectedTaskId, selectedSessionId);
         }
       }
+    }
+
+    function onCardDragStart(e) {
+      const card = e.target.closest('.task-card');
+      if (!card) return;
+      card.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', JSON.stringify({
+        taskId: card.dataset.taskId,
+        sessionId: card.dataset.sessionId
+      }));
+    }
+
+    function onCardDragEnd(e) {
+      const card = e.target.closest('.task-card');
+      if (card) card.classList.remove('dragging');
+      document.querySelectorAll('.column-tasks.drag-over').forEach(el => el.classList.remove('drag-over'));
+    }
+
+    function onColumnDragOver(e) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      e.currentTarget.classList.add('drag-over');
+    }
+
+    function onColumnDragLeave(e) {
+      if (!e.currentTarget.contains(e.relatedTarget)) {
+        e.currentTarget.classList.remove('drag-over');
+      }
+    }
+
+    async function onColumnDrop(e) {
+      e.preventDefault();
+      e.currentTarget.classList.remove('drag-over');
+      const newStatus = e.currentTarget.dataset.status;
+      let data;
+      try { data = JSON.parse(e.dataTransfer.getData('text/plain')); } catch(_) { return; }
+      const { taskId, sessionId } = data;
+      const task = currentTasks.find(t => t.id === taskId && (t.sessionId || currentSessionId) === sessionId);
+      if (!task || task.status === newStatus) return;
+      try {
+        const res = await fetch(`/api/tasks/${sessionId}/${taskId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: newStatus })
+        });
+        if (res.ok) {
+          task.status = newStatus;
+          renderKanban();
+        }
+      } catch(_) {}
     }
 
     function selectTask(taskId, sessionId) {
@@ -3756,31 +4368,71 @@
       }
     }
 
+    function getKbId(el) {
+      return el.dataset.sessionId || el.dataset.groupPath || null;
+    }
+
+    function getGroupSessionsContainer(header) {
+      let el = header.nextElementSibling;
+      while (el && !el.classList.contains('project-group-sessions')) el = el.nextElementSibling;
+      return el;
+    }
+
+    function getNavigableItems() {
+      const items = [];
+      for (const el of sessionsList.children) {
+        if (el.classList.contains('project-group-header')) {
+          items.push(el);
+          if (!collapsedProjectGroups.has(el.dataset.groupPath)) {
+            const container = getGroupSessionsContainer(el);
+            if (container) {
+              for (const s of container.querySelectorAll('.session-item')) items.push(s);
+            }
+          }
+        } else if (el.classList.contains('session-item')) {
+          items.push(el);
+        }
+      }
+      return items;
+    }
+
     function getSessionItems() {
       return Array.from(sessionsList.querySelectorAll('.session-item'));
     }
 
-    function selectSessionByIndex(idx) {
-      const items = getSessionItems();
-      if (items.length === 0) return;
-      const prev = sessionsList.querySelector('.session-item.kb-selected');
+    function clearKbSelection() {
+      const prev = sessionsList.querySelector('.kb-selected');
       if (prev) prev.classList.remove('kb-selected');
-      selectedSessionIdx = Math.max(0, Math.min(idx, items.length - 1));
-      selectedSessionKbId = items[selectedSessionIdx].dataset.sessionId || null;
-      items[selectedSessionIdx].classList.add('kb-selected');
-      items[selectedSessionIdx].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     }
 
-    function navigateSession(direction) {
-      const items = getSessionItems();
+    function selectSessionByIndex(idx, items) {
+      items = items || getNavigableItems();
+      if (items.length === 0) return;
+      clearKbSelection();
+      selectedSessionIdx = Math.max(0, Math.min(idx, items.length - 1));
+      const el = items[selectedSessionIdx];
+      selectedSessionKbId = getKbId(el);
+      el.classList.add('kb-selected');
+      el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+
+    function navigateSession(direction, items) {
+      items = items || getNavigableItems();
       if (items.length === 0) return;
       if (selectedSessionIdx < 0) {
-        selectSessionByIndex(0);
+        selectSessionByIndex(0, items);
         return;
       }
-      const newIdx = selectedSessionIdx + direction;
+      const currentEl = items[selectedSessionIdx];
+      let newIdx = selectedSessionIdx + direction;
+      if (!currentEl || !currentEl.isConnected) {
+        const restoredIdx = selectedSessionKbId
+          ? items.findIndex(el => getKbId(el) === selectedSessionKbId)
+          : -1;
+        newIdx = restoredIdx >= 0 ? restoredIdx : 0;
+      }
       if (newIdx >= 0 && newIdx < items.length) {
-        selectSessionByIndex(newIdx);
+        selectSessionByIndex(newIdx, items);
       }
     }
 
@@ -3791,25 +4443,56 @@
       if (collapsed) collapsedProjectGroups.add(projectPath);
       else collapsedProjectGroups.delete(projectPath);
       header.classList.toggle('collapsed', collapsed);
-      let el = header.nextElementSibling;
-      while (el && !el.classList.contains('project-group-sessions')) el = el.nextElementSibling;
-      if (el) el.classList.toggle('collapsed', collapsed);
+      const container = getGroupSessionsContainer(header);
+      if (container) container.classList.toggle('collapsed', collapsed);
+      try { localStorage.setItem('collapsedGroups', JSON.stringify([...collapsedProjectGroups])); } catch(_) {}
     }
 
-    function toggleSelectedSessionGroup(collapse) {
-      const items = getSessionItems();
+    function handleSidebarHorizontal(direction) {
+      const items = getNavigableItems();
       if (selectedSessionIdx < 0 || selectedSessionIdx >= items.length) return;
-      const container = items[selectedSessionIdx].closest('.project-group-sessions');
-      if (!container) return;
-      let header = container.previousElementSibling;
-      while (header && !header.classList.contains('project-group-header')) header = header.previousElementSibling;
-      setGroupCollapsed(header, collapse);
+      const el = items[selectedSessionIdx];
+      const isHeader = el.classList.contains('project-group-header');
+      const collapse = direction < 0;
+
+      if (isHeader) {
+        const groupPath = el.dataset.groupPath;
+        const isCollapsed = collapsedProjectGroups.has(groupPath);
+        if (collapse) {
+          if (!isCollapsed) setGroupCollapsed(el, true);
+        } else {
+          if (isCollapsed) {
+            setGroupCollapsed(el, false);
+          } else {
+            navigateSession(1);
+          }
+        }
+      } else {
+        if (collapse) {
+          const container = el.closest('.project-group-sessions');
+          if (container) {
+            let header = container.previousElementSibling;
+            while (header && !header.classList.contains('project-group-header')) header = header.previousElementSibling;
+            if (header) {
+              const headerIdx = items.indexOf(header);
+              if (headerIdx >= 0) selectSessionByIndex(headerIdx, items);
+            }
+          }
+        } else {
+          activateSelectedSession(items);
+        }
+      }
     }
 
-    function activateSelectedSession() {
-      const items = getSessionItems();
-      if (selectedSessionIdx >= 0 && selectedSessionIdx < items.length) {
-        items[selectedSessionIdx].click();
+    function activateSelectedSession(items) {
+      items = items || getNavigableItems();
+      if (selectedSessionIdx < 0 || selectedSessionIdx >= items.length) return;
+      const el = items[selectedSessionIdx];
+      if (el.classList.contains('project-group-header')) {
+        const groupPath = el.dataset.groupPath;
+        setGroupCollapsed(el, !collapsedProjectGroups.has(groupPath));
+      } else {
+        el.click();
       }
     }
 
@@ -3817,8 +4500,7 @@
       const sidebar = document.querySelector('.sidebar');
       // Clear all zone visuals
       sidebar.classList.remove('sidebar-focused');
-      const prevSession = sessionsList.querySelector('.session-item.kb-selected');
-      if (prevSession) prevSession.classList.remove('kb-selected');
+      clearKbSelection();
       const selCard = document.querySelector('.task-card.selected');
       if (selCard) selCard.classList.remove('selected');
 
@@ -3829,13 +4511,13 @@
           localStorage.setItem('sidebar-collapsed', false);
         }
         sidebar.classList.add('sidebar-focused');
-        const items = getSessionItems();
+        const items = getNavigableItems();
         if (items.length > 0) {
           const activeIdx = items.findIndex(el => el.classList.contains('active'));
           if (activeIdx >= 0) {
             selectSessionByIndex(activeIdx);
           } else if (selectedSessionKbId) {
-            const restoredIdx = items.findIndex(el => el.dataset.sessionId === selectedSessionKbId);
+            const restoredIdx = items.findIndex(el => getKbId(el) === selectedSessionKbId);
             selectSessionByIndex(restoredIdx >= 0 ? restoredIdx : 0);
           } else {
             selectSessionByIndex(0);
@@ -3950,23 +4632,21 @@
           </div>
         ` : ''}
 
+        ${task.blockedBy && task.blockedBy.length > 0 ? `
         <div class="detail-section">
           <div class="detail-label">Blocked By</div>
           <div class="detail-deps">
-            ${task.blockedBy && task.blockedBy.length > 0
-              ? `<div class="detail-box blocked"><strong>Blocked by:</strong> ${task.blockedBy.map(id => '#' + id).join(', ')}</div>`
-              : '<em style="color: var(--text-muted); font-size: 13px;">No dependencies</em>'}
+            <div class="detail-box blocked"><strong>Blocked by:</strong> ${task.blockedBy.map(id => '#' + id).join(', ')}</div>
           </div>
-        </div>
+        </div>` : ''}
 
+        ${task.blocks && task.blocks.length > 0 ? `
         <div class="detail-section">
           <div class="detail-label">Blocks</div>
           <div class="detail-deps">
-            ${task.blocks && task.blocks.length > 0
-              ? `<div class="detail-box blocks"><strong>Blocks:</strong> ${task.blocks.map(id => '#' + id).join(', ')}</div>`
-              : '<em style="color: var(--text-muted); font-size: 13px;">No tasks blocked</em>'}
+            <div class="detail-box blocks"><strong>Blocks:</strong> ${task.blocks.map(id => '#' + id).join(', ')}</div>
           </div>
-        </div>
+        </div>` : ''}
 
         <div class="detail-section note-section">
           <label for="note-input" class="detail-label">Add Note</label>
@@ -4314,6 +4994,10 @@
       // Tab toggles focus zone
       if (e.key === 'Tab') {
         e.preventDefault();
+        if (focusZone === 'sidebar') {
+          const hasCards = document.querySelector('.task-card');
+          if (!hasCards) return;
+        }
         setFocusZone(focusZone === 'board' ? 'sidebar' : 'board');
         return;
       }
@@ -4332,12 +5016,12 @@
         }
         if (e.key === 'h' || e.key === 'ArrowLeft') {
           e.preventDefault();
-          toggleSelectedSessionGroup(true);
+          handleSidebarHorizontal(-1);
           return;
         }
         if (e.key === 'l' || e.key === 'ArrowRight') {
           e.preventDefault();
-          toggleSelectedSessionGroup(false);
+          handleSidebarHorizontal(1);
           return;
         }
         if (e.key === 'Enter' || e.key === ' ') {
@@ -4351,14 +5035,14 @@
         }
         if (e.key === 'p' || e.key === 'P') {
           e.preventDefault();
-          const highlighted = sessionsList.querySelector('.session-item.kb-selected');
+          const highlighted = sessionsList.querySelector('.kb-selected');
           const sid = highlighted?.dataset.sessionId || currentSessionId;
           if (sid) openPlanForSession(sid);
           return;
         }
         if (e.key === 'i' || e.key === 'I') {
           e.preventDefault();
-          const highlighted = sessionsList.querySelector('.session-item.kb-selected');
+          const highlighted = sessionsList.querySelector('.kb-selected');
           const sid = highlighted?.dataset.sessionId || currentSessionId;
           if (sid) showSessionInfoModal(sid);
           return;
@@ -4374,6 +5058,10 @@
       const navKeys = ['j','k','h','l','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'];
       if (navKeys.includes(e.key)) {
         e.preventDefault();
+        if (!selectedTaskId && !document.querySelector('.task-card.selected')) {
+          setFocusZone('sidebar');
+          return;
+        }
         if (e.key === 'j' || e.key === 'ArrowDown') navigateVertical(1);
         else if (e.key === 'k' || e.key === 'ArrowUp') navigateVertical(-1);
         else if (e.key === 'h' || e.key === 'ArrowLeft') navigateHorizontal(-1);
@@ -4572,27 +5260,39 @@
       return `<pre style="white-space:pre-wrap;margin:0;">${escapeHtml(text)}</pre>`;
     }
 
-    function renderAgentTabs(promptHtml, responseHtml) {
+    const _agentTabTexts = {};
+
+    function renderAgentTabs(promptHtml, responseHtml, promptText, responseText) {
+      for (const k in _agentTabTexts) delete _agentTabTexts[k];
       const tabs = [];
       const panels = [];
       const id = 'at-' + Math.random().toString(36).slice(2, 8);
       if (promptHtml) {
         tabs.push({ key: 'prompt', label: 'Prompt' });
         panels.push({ key: 'prompt', html: promptHtml });
+        if (promptText) _agentTabTexts[id + '-prompt'] = promptText;
       }
       if (responseHtml) {
         tabs.push({ key: 'response', label: 'Response' });
         panels.push({ key: 'response', html: responseHtml });
+        if (responseText) _agentTabTexts[id + '-response'] = responseText;
       }
       if (!tabs.length) return '';
       const defaultTab = responseHtml ? 'response' : tabs[0].key;
+      const copyBtn = (key) => `<button class="agent-tab-copy" title="Copy" onclick="copyAgentTab('${id}-${key}',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button>`;
       const tabsHtml = tabs.map(t =>
         `<div class="agent-tab${t.key === defaultTab ? ' active' : ''}" data-tab-group="${id}" data-tab-key="${t.key}" onclick="document.querySelectorAll('[data-tab-group=\\'${id}\\']').forEach(el=>{el.classList.toggle('active',el.dataset.tabKey==='${t.key}')})">${t.label}</div>`
       ).join('');
       const panelsHtml = panels.map(p =>
-        `<div class="agent-tab-panel${p.key === defaultTab ? ' active' : ''}" data-tab-group="${id}" data-tab-key="${p.key}"><div class="detail-desc rendered-md" style="font-size:13px;">${p.html}</div></div>`
+        `<div class="agent-tab-panel${p.key === defaultTab ? ' active' : ''}" data-tab-group="${id}" data-tab-key="${p.key}">${copyBtn(p.key)}<div class="detail-desc rendered-md" style="font-size:13px;">${p.html}</div></div>`
       ).join('');
       return `<div class="agent-tabs">${tabsHtml}</div>${panelsHtml}`;
+    }
+
+    async function copyAgentTab(key, btn) {
+      const text = _agentTabTexts[key];
+      if (!text) return;
+      copyWithFeedback(text, btn);
     }
 
     const ownerColors = [
@@ -4919,12 +5619,16 @@
       let html = '';
 
       // Session & project details as compact key-value rows
+      // Each row: [label, displayValue, { openPath?, copyValue? }]
       const infoRows = [];
-      infoRows.push(['Session', session.id]);
+      infoRows.push(['Session', session.id, { openClaudeDir: true, openFile: session.jsonlPath }]);
+      if (session.slug && session.hasPlan) {
+        infoRows.push(['Slug', session.slug, { openClaudeDir: true, openFile: session.planPath }]);
+      }
       if (session.project) {
         const projectName = session.project.split(/[/\\]/).pop();
-        infoRows.push(['Project', projectName]);
-        infoRows.push(['Path', session.project]);
+        infoRows.push(['Project', projectName, { openPath: session.projectDir }]);
+        infoRows.push(['Path', session.project, { openPath: session.project }]);
         if (session.gitBranch) {
           infoRows.push(['Branch', session.gitBranch]);
         }
@@ -4932,11 +5636,22 @@
           infoRows.push(['Description', session.description]);
         }
       }
+      if (session.tasksDir) {
+        infoRows.push(['Tasks Dir', session.tasksDir, { openPath: session.tasksDir }]);
+      }
+      const clickableStyle = 'font-family: \'IBM Plex Mono\', monospace; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; color: var(--accent-text); text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 3px;';
+      const plainStyle = 'font-family: \'IBM Plex Mono\', monospace; font-size: 12px; user-select: all; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;';
       html += `<div class="team-modal-meta" style="margin-bottom: 16px; display: grid; grid-template-columns: auto 1fr auto; gap: 6px 12px; align-items: center;">`;
-      infoRows.forEach(([label, value]) => {
+      infoRows.forEach(([label, value, opts]) => {
         const copyVal = escapeHtml(value).replace(/"/g, '&quot;');
         html += `<span style="font-weight: 500; color: var(--text-secondary); font-size: 12px; white-space: nowrap;">${label}</span>`;
-        html += `<span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; user-select: all; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${copyVal}">${escapeHtml(value)}</span>`;
+        if (opts?.openClaudeDir || opts?.openPath) {
+          const folder = opts.openClaudeDir ? '' : escapeHtml(opts.openPath).replace(/"/g, '&quot;');
+          const file = opts.openFile ? escapeHtml(opts.openFile).replace(/"/g, '&quot;') : '';
+          html += `<span data-folder="${folder}" data-file="${file}" data-claude-dir="${opts.openClaudeDir ? '1' : ''}" onclick="openFolderInEditor(this.dataset.claudeDir ? undefined : this.dataset.folder, this.dataset.file || undefined)" style="${clickableStyle}" title="Open in editor">${escapeHtml(value)}</span>`;
+        } else {
+          html += `<span style="${plainStyle}" title="${copyVal}">${escapeHtml(value)}</span>`;
+        }
         html += `<button onclick="navigator.clipboard.writeText('${copyVal.replace(/'/g, "\\'")}'); this.textContent='✓'; setTimeout(() => this.textContent='Copy', 1000)" style="padding: 2px 8px; font-size: 11px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 4px; color: var(--text-secondary); cursor: pointer; white-space: nowrap;">Copy</button>`;
       });
       html += `</div>`;
@@ -5073,7 +5788,14 @@
 
     function openPlanInEditor() {
       if (!_planSessionId) return;
-      fetch(`/api/sessions/${_planSessionId}/plan/open`, { method: 'POST' }).catch(() => {});
+      postAndToast(`/api/sessions/${_planSessionId}/plan/open`, {}, 'in editor');
+    }
+
+    function openFolderInEditor(folder, file) {
+      const body = {};
+      if (folder) body.folder = folder;
+      if (file) body.file = file;
+      postAndToast('/api/open-folder', body, 'folder');
     }
 
     function updateOwnerFilter() {
@@ -5122,6 +5844,12 @@
 
     // Init
     loadTheme();
+    ['live-updates', 'sessions-filters'].forEach(id => {
+      if (localStorage.getItem(id + 'Collapsed') === 'true') {
+        document.getElementById(id).classList.add('collapsed');
+        document.getElementById(id === 'live-updates' ? 'live-updates-chevron' : 'sessions-chevron').classList.add('rotated');
+      }
+    });
 
     document.addEventListener('DOMContentLoaded', () => {
       if (typeof marked !== 'undefined' && typeof hljs !== 'undefined') {
@@ -5140,6 +5868,7 @@
     });
 
     loadSidebarState();
+    try { const cg = JSON.parse(localStorage.getItem('collapsedGroups') || '[]'); cg.forEach(p => collapsedProjectGroups.add(p)); } catch(_) {}
     initSidebarResize();
     loadPanelWidths();
     initPanelResize('detail-panel', 'detail-panel-resize', '--detail-panel-width', 'detail-panel-width');
@@ -5156,6 +5885,7 @@
     searchQuery = urlState.search || '';
 
     loadPreferences();
+    pinnedSessionIds = loadPinnedSessions();
     setupEventSource();
 
     if (urlState.search) {
@@ -5196,6 +5926,9 @@
         <div style="display:flex;gap:4px;align-items:center;">
           <button id="msg-detail-agent-btn" class="icon-btn" aria-label="View Agent" title="View Agent" style="display:none" onclick="closeMsgDetailModal();showAgentModal(this.dataset.agentId)">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><rect x="4" y="10" width="16" height="10" rx="2"/><circle cx="9" cy="15" r="1"/><circle cx="15" cy="15" r="1"/><path d="M12 2v4"/><path d="M2 14h2"/><path d="M20 14h2"/></svg>
+          </button>
+          <button id="msg-detail-pin-btn" class="icon-btn" aria-label="Pin message" title="Pin message" onclick="togglePinFromModal()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
           </button>
           <button class="icon-btn" aria-label="Copy to clipboard" title="Copy to clipboard" onclick="copyMsgToClipboard(this)">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
@@ -5394,12 +6127,19 @@
     <div class="modal plan-modal" onclick="event.stopPropagation()">
       <div class="modal-header">
         <h3 id="plan-modal-title" class="modal-title">Plan</h3>
-        <button class="btn btn-secondary" style="padding: 4px 10px; font-size: 11px; margin-left: auto; margin-right: 12px;" onclick="openPlanInEditor()">Open in Editor</button>
-        <button class="modal-close" aria-label="Close dialog" onclick="closePlanModal()">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M18 6L6 18M6 6l12 12"/>
-          </svg>
-        </button>
+        <div style="display:flex;align-items:center;gap:4px;">
+          <button class="icon-btn" aria-label="Open in editor" title="Open in editor" onclick="openPlanInEditor()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+          <button class="icon-btn" aria-label="Copy plan" title="Copy plan" onclick="copyWithFeedback(_pendingPlanContent||'',this)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+          </button>
+          <button class="modal-close" aria-label="Close dialog" onclick="closePlanModal()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M18 6L6 18M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
       </div>
       <div id="plan-modal-body" class="modal-body detail-desc rendered-md" style="overflow-y: auto; flex: 0 1 auto; min-height: 0;"></div>
       <div class="modal-footer">
@@ -5439,11 +6179,19 @@
     <div class="modal plan-modal" onclick="event.stopPropagation()">
       <div class="modal-header">
         <h3 id="agent-modal-title" class="modal-title">Agent</h3>
-        <button class="modal-close" aria-label="Close dialog" onclick="closeAgentModal()">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M18 6L6 18M6 6l12 12"/>
-          </svg>
-        </button>
+        <div style="display:flex;align-items:center;gap:4px;">
+          <button id="agent-modal-pin-btn" class="icon-btn" aria-label="Pin agent" title="Pin agent" onclick="togglePinFromAgentModal()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+          </button>
+          <button class="icon-btn" id="agent-modal-copy-all" aria-label="Copy all" title="Copy prompt + response" onclick="copyAgentModalAll(this)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+          </button>
+          <button class="modal-close" aria-label="Close dialog" onclick="closeAgentModal()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M18 6L6 18M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
       </div>
       <div id="agent-modal-body" class="modal-body" style="overflow-y: auto; overflow-x: hidden; flex: 0 1 auto; min-height: 0;"></div>
       <div class="modal-footer">
@@ -5451,5 +6199,6 @@
       </div>
     </div>
   </div>
+  <div id="toast" class="toast"></div>
 </body>
 </html>
