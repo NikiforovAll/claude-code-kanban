@@ -366,14 +366,49 @@
     }
 
     /* Live Updates */
+    .collapse-chevron {
+      width: 14px;
+      height: 14px;
+      stroke: var(--text-muted);
+      fill: none;
+      stroke-width: 2;
+      transition: transform 0.2s ease;
+      flex-shrink: 0;
+    }
+
+    .collapse-chevron.rotated {
+      transform: rotate(-90deg);
+    }
+
+    .collapsible-section {
+      transition: max-height 0.2s ease, padding 0.2s ease, opacity 0.2s ease;
+      overflow: hidden;
+    }
+
+    .collapsible-section.collapsed {
+      max-height: 0 !important;
+      padding-top: 0 !important;
+      padding-bottom: 0 !important;
+      opacity: 0;
+      overflow: hidden;
+    }
+
     .live-updates {
-      padding: 0 16px 12px;
-      max-height: 180px;
+      padding: 0 16px 8px;
+      max-height: 140px;
       overflow-y: auto;
+      transition: max-height 0.2s ease, padding 0.2s ease, opacity 0.2s ease;
+    }
+
+    .live-updates.collapsed {
+      max-height: 0;
+      padding: 0 16px;
+      overflow: hidden;
+      opacity: 0;
     }
 
     .live-empty {
-      padding: 16px;
+      padding: 8px;
       text-align: center;
       font-size: 11px;
       color: var(--text-muted);
@@ -382,12 +417,12 @@
     .live-item {
       display: flex;
       align-items: flex-start;
-      gap: 10px;
-      padding: 10px 12px;
+      gap: 8px;
+      padding: 6px 10px;
       background: var(--bg-deep);
       border: 1px solid transparent;
-      border-radius: 8px;
-      margin-bottom: 4px;
+      border-radius: 6px;
+      margin-bottom: 3px;
       cursor: pointer;
       transition: all 0.15s ease;
     }
@@ -397,14 +432,14 @@
     }
 
     .live-item .pulse {
-      width: 8px;
-      height: 8px;
+      width: 6px;
+      height: 6px;
       margin-top: 4px;
       background: var(--accent);
       border-radius: 50%;
       flex-shrink: 0;
       animation: pulse 2s ease-in-out infinite;
-      box-shadow: 0 0 12px var(--accent-glow);
+      box-shadow: 0 0 8px var(--accent-glow);
     }
 
     .live-item-content {
@@ -413,7 +448,7 @@
     }
 
     .live-item-action {
-      font-size: 13px;
+      font-size: 11px;
       color: var(--text-primary);
       white-space: nowrap;
       overflow: hidden;
@@ -421,9 +456,9 @@
     }
 
     .live-item-session {
-      font-size: 11px;
+      font-size: 10px;
       color: var(--text-tertiary);
-      margin-top: 2px;
+      margin-top: 1px;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -2395,8 +2430,11 @@
 
       <!-- Live Updates -->
       <div class="sidebar-section">
-        <div class="section-header">
+        <div class="section-header" onclick="toggleLiveUpdates()" style="cursor: pointer;">
           <span>Live Updates</span>
+          <svg id="live-updates-chevron" class="collapse-chevron" viewBox="0 0 24 24">
+            <path d="M6 9l6 6 6-6"/>
+          </svg>
         </div>
         <div id="live-updates" class="live-updates">
           <div class="live-empty">No active tasks</div>
@@ -2405,46 +2443,50 @@
 
       <!-- Tasks -->
       <div class="sidebar-section flex-1">
-        <div class="section-header">
+        <div class="section-header" onclick="toggleSection('sessions-filters', 'sessions-chevron')" style="cursor: pointer;">
           <span>Sessions</span>
-          <button onclick="showAllTasks()" style="background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 4px; padding: 3px 8px; font-size: 10px; color: var(--text-secondary); cursor: pointer; font-family: var(--mono);">All Tasks</button>
+          <svg id="sessions-chevron" class="collapse-chevron" viewBox="0 0 24 24">
+            <path d="M6 9l6 6 6-6"/>
+          </svg>
         </div>
-        <div class="search-container">
-          <input
-            id="search-input"
-            type="text"
-            class="search-input"
-            placeholder="Search tasks, sessions, projects..."
-            oninput="handleSearch(this.value)"
-          />
-          <button id="search-clear-btn" class="search-clear" onclick="clearSearch()" title="Clear search" aria-label="Clear search">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M18 6L6 18M6 6l12 12"/>
-            </svg>
-          </button>
-        </div>
-        <div class="filter-row">
-          <select id="project-filter" class="filter-dropdown" onchange="filterByProject(this.value)" aria-label="Filter by project">
-            <option value="">All Projects</option>
-          </select>
-          <select id="session-filter" class="filter-dropdown" onchange="filterBySessions(this.value)" aria-label="Filter by session status">
-            <option value="all">All Sessions</option>
-            <option value="active">Active Only</option>
-          </select>
-        </div>
-        <div class="filter-row">
-          <select id="session-limit" class="filter-dropdown" onchange="changeSessionLimit(this.value)" aria-label="Number of sessions to show">
-            <option value="10">Show 10</option>
-            <option value="20">Show 20</option>
-            <option value="50">Show 50</option>
-            <option value="all">Show All</option>
-          </select>
-          <button class="icon-btn reset-btn" onclick="resetState()" title="Reset all filters" aria-label="Reset all filters">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
-              <path d="M3 12a9 9 0 1 1 9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
-              <path d="M3 22v-6h6"/>
-            </svg>
-          </button>
+        <div id="sessions-filters" class="collapsible-section">
+          <div class="search-container">
+            <input
+              id="search-input"
+              type="text"
+              class="search-input"
+              placeholder="Search tasks, sessions, projects..."
+              oninput="handleSearch(this.value)"
+            />
+            <button id="search-clear-btn" class="search-clear" onclick="clearSearch()" title="Clear search" aria-label="Clear search">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M18 6L6 18M6 6l12 12"/>
+              </svg>
+            </button>
+          </div>
+          <div class="filter-row">
+            <select id="project-filter" class="filter-dropdown" onchange="filterByProject(this.value)" aria-label="Filter by project">
+              <option value="">All Projects</option>
+            </select>
+            <select id="session-filter" class="filter-dropdown" onchange="filterBySessions(this.value)" aria-label="Filter by session status">
+              <option value="all">All Sessions</option>
+              <option value="active">Active Only</option>
+            </select>
+          </div>
+          <div class="filter-row">
+            <select id="session-limit" class="filter-dropdown" onchange="changeSessionLimit(this.value)" aria-label="Number of sessions to show">
+              <option value="10">Show 10</option>
+              <option value="20">Show 20</option>
+              <option value="50">Show 50</option>
+              <option value="all">Show All</option>
+            </select>
+            <button class="icon-btn reset-btn" onclick="resetState()" title="Reset all filters" aria-label="Reset all filters">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                <path d="M3 12a9 9 0 1 1 9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
+                <path d="M3 22v-6h6"/>
+              </svg>
+            </button>
+          </div>
         </div>
         <div id="sessions-list" class="sessions-list"></div>
       </div>
@@ -2941,6 +2983,18 @@
         activeTasks = activeTasks.filter(t => matchesProjectFilter(t.project));
       }
       renderLiveUpdates(activeTasks);
+    }
+
+    function toggleSection(containerId, chevronId) {
+      const container = document.getElementById(containerId);
+      const chevron = document.getElementById(chevronId);
+      const collapsed = container.classList.toggle('collapsed');
+      chevron.classList.toggle('rotated', collapsed);
+      localStorage.setItem(containerId + 'Collapsed', collapsed);
+    }
+
+    function toggleLiveUpdates() {
+      toggleSection('live-updates', 'live-updates-chevron');
     }
 
     function renderLiveUpdates(activeTasks) {
@@ -5702,6 +5756,12 @@
 
     // Init
     loadTheme();
+    ['live-updates', 'sessions-filters'].forEach(id => {
+      if (localStorage.getItem(id + 'Collapsed') === 'true') {
+        document.getElementById(id).classList.add('collapsed');
+        document.getElementById(id === 'live-updates' ? 'live-updates-chevron' : 'sessions-chevron').classList.add('rotated');
+      }
+    });
 
     document.addEventListener('DOMContentLoaded', () => {
       if (typeof marked !== 'undefined' && typeof hljs !== 'undefined') {
