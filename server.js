@@ -3,7 +3,7 @@
 const express = require('express');
 const path = require('path');
 const fs = require('fs').promises;
-const { existsSync, readdirSync, readFileSync, statSync, createReadStream } = require('fs');
+const { existsSync, readdirSync, readFileSync, writeFileSync, statSync, createReadStream, unlinkSync } = require('fs');
 const readline = require('readline');
 const chokidar = require('chokidar');
 const os = require('os');
@@ -126,6 +126,11 @@ function loadTeamConfig(teamName) {
   } catch (e) {
     return null;
   }
+}
+
+function resolveSessionId(sessionId) {
+  const teamConfig = loadTeamConfig(sessionId);
+  return (teamConfig && teamConfig.leadSessionId) ? teamConfig.leadSessionId : sessionId;
 }
 
 // SSE clients for live updates
@@ -755,12 +760,7 @@ app.get('/api/teams/:name', (req, res) => {
 
 // API: Get agents for a session
 app.get('/api/sessions/:sessionId/agents', (req, res) => {
-  let sessionId = req.params.sessionId;
-  // For team sessions, resolve to leader's session UUID
-  const teamConfig = loadTeamConfig(sessionId);
-  if (teamConfig && teamConfig.leadSessionId) {
-    sessionId = teamConfig.leadSessionId;
-  }
+  const sessionId = resolveSessionId(req.params.sessionId);
   const agentDir = path.join(AGENT_ACTIVITY_DIR, sessionId);
   if (!existsSync(agentDir)) return res.json({ agents: [], waitingForUser: null });
   try {
@@ -809,6 +809,25 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
   }
 });
 
+app.post('/api/sessions/:sessionId/agents/:agentId/stop', (req, res) => {
+  const sessionId = resolveSessionId(req.params.sessionId);
+  const agentId = path.basename(req.params.agentId).replace(/[^a-zA-Z0-9_-]/g, '');
+  const agentFile = path.join(AGENT_ACTIVITY_DIR, sessionId, agentId + '.json');
+  if (!existsSync(agentFile)) return res.status(404).json({ error: 'Agent not found' });
+  try {
+    const agent = JSON.parse(readFileSync(agentFile, 'utf8'));
+    agent.status = 'stopped';
+    agent.stoppedAt = new Date().toISOString();
+    writeFileSync(agentFile, JSON.stringify(agent), 'utf8');
+    // Also remove waiting state if present
+    const waitingFile = path.join(AGENT_ACTIVITY_DIR, sessionId, '_waiting.json');
+    if (existsSync(waitingFile)) unlinkSync(waitingFile);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to stop agent' });
+  }
+});
+
 app.get('/api/sessions/:sessionId/messages', (req, res) => {
   const limit = Math.min(parseInt(req.query.limit, 10) || 10, 50);
   const metadata = loadSessionMetadata();
@@ -819,10 +838,8 @@ app.get('/api/sessions/:sessionId/messages', (req, res) => {
   const agentMessages = messages.filter(m => m.tool === 'Agent' && m.toolUseId);
   if (agentMessages.length) {
     const progressMap = getProgressMap(jsonlPath);
-    let sessionId = req.params.sessionId;
-    const teamConfig = loadTeamConfig(sessionId);
-    if (teamConfig && teamConfig.leadSessionId) sessionId = teamConfig.leadSessionId;
-    const agentDir = path.join(AGENT_ACTIVITY_DIR, sessionId);
+    const resolvedSid = resolveSessionId(req.params.sessionId);
+    const agentDir = path.join(AGENT_ACTIVITY_DIR, resolvedSid);
     for (const msg of agentMessages) {
       const entry = progressMap[msg.toolUseId];
       if (entry) {

@@ -1208,6 +1208,7 @@
       border-radius: 4px;
       border: 1px solid transparent;
       transition: border-color 0.15s ease;
+      overflow-x: auto;
     }
 
     .detail-desc:hover {
@@ -1665,13 +1666,13 @@
     .pinned-sessions-divider {
       height: 1px; margin: 4px 8px; background: color-mix(in srgb, var(--accent) 30%, transparent);
     }
-    .agent-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-top: 16px; }
+    .agent-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-top: 16px; align-items: center; }
     .agent-tab { padding: 8px 16px; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-tertiary); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; transition: color 0.15s, border-color 0.15s; user-select: none; }
     .agent-tab:hover { color: var(--text-secondary); border-bottom-color: var(--text-muted); }
     .agent-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
     .agent-tab-panel { display: none; padding-top: 12px; overflow: hidden; position: relative; }
     .agent-tab-panel.active { display: block; }
-    .agent-tab-copy { position: absolute; top: 14px; right: 8px; background: var(--surface-hover); border: 1px solid var(--border); border-radius: 6px; padding: 4px 6px; cursor: pointer; color: var(--text-tertiary); opacity: 0.7; transition: opacity 0.15s, color 0.15s; z-index: 2; }
+    .agent-tab-copy { margin-left: auto; background: var(--surface-hover); border: 1px solid var(--border); border-radius: 6px; padding: 4px 6px; cursor: pointer; color: var(--text-tertiary); opacity: 0.7; transition: opacity 0.15s, color 0.15s; margin-bottom: -1px; }
     .agent-tab-copy:hover { opacity: 1; color: var(--text-primary); }
     .toast { position: fixed; bottom: 24px; left: 24px; transform: translateY(20px); background: var(--bg-elevated); color: var(--accent-text); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 8px; padding: 10px 20px; font-size: 13px; font-weight: 600; z-index: 10000; opacity: 0; transition: opacity 0.25s, transform 0.25s; pointer-events: none; box-shadow: 0 4px 16px rgba(0,0,0,0.3); }
     .toast.visible { opacity: 1; transform: translateY(0); }
@@ -1764,9 +1765,9 @@
     .agent-footer.collapsed .agent-footer-content { display: none; }
     .agent-card {
       display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 8px 14px;
+      flex-direction: column;
+      gap: 3px;
+      padding: 8px 12px;
       background: var(--bg-elevated);
       border: 1px solid var(--border);
       border-radius: 8px;
@@ -1775,11 +1776,30 @@
       overflow: hidden;
       transition: opacity 0.3s;
       cursor: pointer;
+      position: relative;
     }
     .agent-card:hover { border-color: var(--accent); }
     .agent-card.fading { opacity: 0.4; }
+    .agent-type-row {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      min-width: 0;
+    }
+    .agent-type-ns {
+      font-size: 11px; color: var(--text-muted); font-weight: 400;
+    }
+    .agent-type-name {
+      font-size: 13px; font-weight: 600; color: var(--text-primary);
+      overflow: hidden; text-overflow: ellipsis;
+    }
+    .agent-status-row {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
     .agent-dot {
-      width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+      width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
     }
     .agent-dot.active { background: var(--success); box-shadow: 0 0 6px var(--success); }
     .agent-dot.idle { background: var(--warning); box-shadow: 0 0 6px var(--warning); }
@@ -1792,9 +1812,14 @@
     }
     .agent-message {
       font-size: 11px; color: var(--text-muted);
-      max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
 
+    .agent-dismiss-btn {
+      font-size: 12px; padding: 4px 10px;
+      background: var(--bg-tertiary); color: var(--text-secondary);
+      border: 1px solid var(--border);
+    }
     .agent-badge { font-size: 12px; cursor: default; }
 
     /* Permission pending — indicated by ❓ badge only */
@@ -1948,10 +1973,17 @@
       background: rgba(0, 0, 0, 0.6);
     }
 
+    .modal.fullscreen {
+      width: 76vw !important;
+      max-width: 76vw !important;
+      height: 85vh !important;
+      max-height: 85vh !important;
+    }
+
     .modal.plan-modal {
       width: 60vw;
       max-width: 60vw;
-      max-height: 90vh;
+      max-height: 85vh;
       display: flex;
       flex-direction: column;
     }
@@ -3470,9 +3502,18 @@
         }
         const toolParamsHtml = renderToolParamsHtml(m.params);
         const toolResultHtml = renderToolResultHtml(m.toolResult, m.toolResultTruncated, m.toolResultFull);
-        const detailEscaped = escapeHtml(fullText);
-        const detailRendered = m.tool === 'Bash' ? highlightBash(detailEscaped) : detailEscaped;
-        body.innerHTML = (fullText ? descHtml + `<pre class="msg-detail-pre">${detailRendered}</pre>` : '<em>No details</em>') + toolParamsHtml + toolResultHtml + agentExtraHtml;
+        const hasAgentTabs = m.tool === 'Agent' && m.agentId && (m.agentLastMessage || m.agentPrompt);
+        let mainHtml;
+        if (hasAgentTabs) {
+          mainHtml = descHtml || '';
+        } else if (fullText) {
+          const detailEscaped = escapeHtml(fullText);
+          const detailRendered = m.tool === 'Bash' ? highlightBash(detailEscaped) : detailEscaped;
+          mainHtml = descHtml + `<pre class="msg-detail-pre">${detailRendered}</pre>`;
+        } else {
+          mainHtml = '<em>No details</em>';
+        }
+        body.innerHTML = mainHtml + toolParamsHtml + (hasAgentTabs ? '' : toolResultHtml) + agentExtraHtml;
       } else {
         const text = stripAnsi(m.fullText || m.text);
         document.getElementById('msg-detail-title').textContent = m.type === 'assistant' ? 'Claude' : (m.systemLabel ? 'System' : 'User');
@@ -3491,6 +3532,7 @@
 
       const meta = [formatDate(m.timestamp)];
       if (m.model) meta.unshift(m.model);
+      meta.push(`${idx + 1} of ${currentMessages.length}`);
       document.getElementById('msg-detail-meta').textContent = meta.join(' · ');
       currentPinDetailId = null;
       updateMsgDetailPinState();
@@ -3498,8 +3540,30 @@
     }
 
     function closeMsgDetailModal() {
-      document.getElementById('msg-detail-modal').classList.remove('visible');
+      resetModalFullscreen('msg-detail-modal');
       msgDetailFollowLatest = false;
+    }
+
+    function toggleModalFullscreen(modalId) {
+      const modal = document.querySelector(`#${modalId} .modal`);
+      const isFs = modal.classList.toggle('fullscreen');
+      updateFullscreenBtnIcon(`${modalId}-fullscreen-btn`, isFs);
+    }
+
+    function resetModalFullscreen(modalId) {
+      const modal = document.getElementById(modalId);
+      modal.classList.remove('visible');
+      modal.querySelector('.modal').classList.remove('fullscreen');
+      updateFullscreenBtnIcon(`${modalId}-fullscreen-btn`, false);
+      return modal;
+    }
+
+    function updateFullscreenBtnIcon(btnId, isFullscreen) {
+      const btn = document.getElementById(btnId);
+      if (!btn) return;
+      btn.innerHTML = isFullscreen
+        ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></svg>'
+        : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>';
     }
 
     let _toastTimer = null;
@@ -3605,7 +3669,9 @@
     function autoSizeModal(modal, body) {
       const hasTable = body.querySelector('table') !== null;
       const hasPre = body.querySelector('pre') !== null;
-      modal.style.maxWidth = hasTable ? '1100px' : (body.textContent.length > 2000 || hasPre) ? '960px' : '860px';
+      const desired = hasTable ? 1100 : (body.textContent.length > 2000 || hasPre) ? 960 : 860;
+      const current = parseFloat(getComputedStyle(modal).maxWidth) || 0;
+      if (desired > current) modal.style.maxWidth = desired + 'px';
     }
 
     function renderToolResultHtml(toolResult, isTruncated, fullResult) {
@@ -3743,16 +3809,14 @@
         const promptTrunc = promptTrimmed.length > 60 ? promptTrimmed.substring(0, 60) + '…' : promptTrimmed;
         const msgHtml = promptTrunc
           ? `<div class="agent-message" title="${escapeHtml(promptTrimmed)}">${escapeHtml(promptTrunc)}</div>` : '';
-        const agentPinned = isAgentPinned(a.agentId);
-        const agentPinBtn = `<button class="msg-pin-btn${agentPinned ? ' pinned' : ''}" onclick="event.stopPropagation();toggleAgentPin('${a.agentId}')" title="${agentPinned ? 'Unpin' : 'Pin'} agent">${PIN_SVG}</button>`;
+        const rawType = a.type || 'unknown';
+        const colonIdx = rawType.indexOf(':');
+        const typeNs = colonIdx > 0 ? rawType.substring(0, colonIdx + 1) : '';
+        const typeName = colonIdx > 0 ? rawType.substring(colonIdx + 1) : rawType;
         return `<div class="agent-card" onclick="showAgentModal('${a.agentId}')">
-          <span class="agent-dot ${a.status}"></span>
-          <div style="flex:1;min-width:0">
-            <div class="agent-type">${escapeHtml(a.type || 'unknown')}</div>
-            <div class="agent-status">${statusText}</div>
-            ${msgHtml}
-          </div>
-          ${agentPinBtn}
+          <div class="agent-type-row">${typeNs ? `<span class="agent-type-ns">${escapeHtml(typeNs)}</span>` : ''}<span class="agent-type-name">${escapeHtml(typeName)}</span></div>
+          <div class="agent-status-row"><span class="agent-dot ${a.status}"></span><span class="agent-status">${statusText}</span></div>
+          ${msgHtml}
         </div>`;
       }).join('');
 
@@ -3797,6 +3861,17 @@
       updateAgentModalPinState();
     }
 
+    async function dismissAgent(agentId) {
+      if (!currentSessionId || !agentId) return;
+      try {
+        const res = await fetch(`/api/sessions/${currentSessionId}/agents/${agentId}/stop`, { method: 'POST' });
+        if (res.ok) {
+          currentWaiting = null;
+          fetchAgents(currentSessionId);
+        }
+      } catch (e) { console.error('[dismissAgent]', e); }
+    }
+
     function showAgentModal(agentId) {
       const agent = currentAgents.find(a => a.agentId === agentId);
       if (!agent) return;
@@ -3839,6 +3914,9 @@
 
       body.innerHTML = html;
       updateAgentModalPinState();
+      autoSizeModal(modal.querySelector('.modal'), body);
+      const dismissBtn = document.getElementById('agent-modal-dismiss-btn');
+      dismissBtn.style.display = (agent.status === 'active' || agent.status === 'idle') ? '' : 'none';
       modal.classList.add('visible');
       const keyHandler = (e) => {
         if (e.key === 'Escape') {
@@ -3851,7 +3929,7 @@
     }
 
     function closeAgentModal() {
-      document.getElementById('agent-modal').classList.remove('visible');
+      resetModalFullscreen('agent-modal');
       currentAgentModalId = null;
     }
 
@@ -4865,11 +4943,11 @@
         if (e.key === 'Escape') {
           e.preventDefault();
           closeDeleteConfirmModal();
-        } else if (e.key === 'ArrowLeft' || e.key === 'h') {
+        } else if (matchKey(e, 'ArrowLeft', 'KeyH')) {
           e.preventDefault();
           focusIdx = 0;
           buttons[focusIdx].focus();
-        } else if (e.key === 'ArrowRight' || e.key === 'l') {
+        } else if (matchKey(e, 'ArrowRight', 'KeyL')) {
           e.preventDefault();
           focusIdx = 1;
           buttons[focusIdx].focus();
@@ -4951,35 +5029,58 @@
 
     document.getElementById('close-detail').onclick = closeDetailPanel;
 
+    // Layout-independent key matching: pass Arrow* for e.key, Key* for e.code (physical position)
+    function matchKey(e, ...keys) {
+      if (e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return false;
+      return keys.some(k => e.key === k || e.code === k);
+    }
+
     document.addEventListener('keydown', (e) => {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') {
         return;
       }
 
+      // Modal guard — only Escape, Shift+M, and msg-detail J/K navigation pass through
       if (document.querySelector('.modal-overlay.visible')) {
         if (e.key === 'Escape') {
           document.querySelectorAll('.modal-overlay.visible').forEach(m => m.classList.remove('visible'));
           msgDetailFollowLatest = false;
-        } else if ((e.key === 'M' || e.key === 'm') && e.shiftKey && document.getElementById('msg-detail-modal').classList.contains('visible')) {
+        } else if (e.code === 'KeyM' && e.shiftKey && document.getElementById('msg-detail-modal').classList.contains('visible')) {
           e.preventDefault();
           closeMsgDetailModal();
+        } else if (document.getElementById('msg-detail-modal').classList.contains('visible')) {
+          if (matchKey(e, 'ArrowDown', 'KeyJ')) {
+            e.preventDefault();
+            if (currentMsgDetailIdx < currentMessages.length - 1) {
+              msgDetailFollowLatest = false;
+              showMsgDetail(currentMsgDetailIdx + 1);
+            } else if (currentMsgDetailIdx === currentMessages.length - 1) {
+              msgDetailFollowLatest = true;
+              showMsgDetail(currentMsgDetailIdx);
+            }
+          } else if (matchKey(e, 'ArrowUp', 'KeyK')) {
+            e.preventDefault();
+            if (currentMsgDetailIdx > 0) {
+              msgDetailFollowLatest = false;
+              showMsgDetail(currentMsgDetailIdx - 1);
+            }
+          }
         }
         return;
       }
 
+      // Global shortcuts
       if (e.key === '[') {
         e.preventDefault();
         toggleSidebar();
         return;
       }
-
-      if ((e.key === 'L' || e.key === 'l') && e.shiftKey) {
+      if (e.code === 'KeyL' && e.shiftKey) {
         e.preventDefault();
         toggleMessagePanel();
         return;
       }
-
-      if ((e.key === 'M' || e.key === 'm') && e.shiftKey) {
+      if (e.code === 'KeyM' && e.shiftKey) {
         e.preventDefault();
         const msgDetailModal = document.getElementById('msg-detail-modal');
         if (msgDetailModal.classList.contains('visible')) {
@@ -5004,22 +5105,22 @@
 
       // Sidebar navigation
       if (focusZone === 'sidebar') {
-        if (e.key === 'j' || e.key === 'ArrowDown') {
+        if (matchKey(e, 'ArrowDown', 'KeyJ')) {
           e.preventDefault();
           navigateSession(1);
           return;
         }
-        if (e.key === 'k' || e.key === 'ArrowUp') {
+        if (matchKey(e, 'ArrowUp', 'KeyK')) {
           e.preventDefault();
           navigateSession(-1);
           return;
         }
-        if (e.key === 'h' || e.key === 'ArrowLeft') {
+        if (matchKey(e, 'ArrowLeft', 'KeyH')) {
           e.preventDefault();
           handleSidebarHorizontal(-1);
           return;
         }
-        if (e.key === 'l' || e.key === 'ArrowRight') {
+        if (matchKey(e, 'ArrowRight', 'KeyL')) {
           e.preventDefault();
           handleSidebarHorizontal(1);
           return;
@@ -5033,86 +5134,70 @@
           setFocusZone('board');
           return;
         }
-        if (e.key === 'p' || e.key === 'P') {
-          e.preventDefault();
-          const highlighted = sessionsList.querySelector('.kb-selected');
-          const sid = highlighted?.dataset.sessionId || currentSessionId;
-          if (sid) openPlanForSession(sid);
-          return;
-        }
-        if (e.key === 'i' || e.key === 'I') {
-          e.preventDefault();
-          const highlighted = sessionsList.querySelector('.kb-selected');
-          const sid = highlighted?.dataset.sessionId || currentSessionId;
-          if (sid) showSessionInfoModal(sid);
-          return;
-        }
-        if (e.key === '?' || (e.key === '/' && e.shiftKey)) {
-          e.preventDefault();
-          showHelpModal();
-        }
-        return;
       }
 
       // Board navigation
-      const navKeys = ['j','k','h','l','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'];
-      if (navKeys.includes(e.key)) {
-        e.preventDefault();
-        if (!selectedTaskId && !document.querySelector('.task-card.selected')) {
-          setFocusZone('sidebar');
+      if (focusZone === 'board') {
+        if (matchKey(e, 'ArrowDown', 'KeyJ', 'ArrowUp', 'KeyK', 'ArrowLeft', 'KeyH', 'ArrowRight', 'KeyL')) {
+          e.preventDefault();
+          if (!selectedTaskId && !document.querySelector('.task-card.selected')) {
+            setFocusZone('sidebar');
+            return;
+          }
+          if (matchKey(e, 'ArrowDown', 'KeyJ')) navigateVertical(1);
+          else if (matchKey(e, 'ArrowUp', 'KeyK')) navigateVertical(-1);
+          else if (matchKey(e, 'ArrowLeft', 'KeyH')) navigateHorizontal(-1);
+          else if (matchKey(e, 'ArrowRight', 'KeyL')) navigateHorizontal(1);
+
+          if (selectedTaskId && detailPanel.classList.contains('visible')) {
+            showTaskDetail(selectedTaskId, selectedSessionId);
+          }
           return;
         }
-        if (e.key === 'j' || e.key === 'ArrowDown') navigateVertical(1);
-        else if (e.key === 'k' || e.key === 'ArrowUp') navigateVertical(-1);
-        else if (e.key === 'h' || e.key === 'ArrowLeft') navigateHorizontal(-1);
-        else if (e.key === 'l' || e.key === 'ArrowRight') navigateHorizontal(1);
 
-        if (selectedTaskId && detailPanel.classList.contains('visible')) {
-          showTaskDetail(selectedTaskId, selectedSessionId);
-        }
-        return;
-      }
-
-      if ((e.key === 'Enter' || e.key === ' ') && selectedTaskId && e.target.tagName !== 'BUTTON') {
-        e.preventDefault();
-        if (detailPanel.classList.contains('visible')) {
-          const labelEl = document.querySelector('.detail-label');
-          const shownId = labelEl?.textContent.match(/\d+/)?.[0];
-          if (shownId === selectedTaskId) {
-            closeDetailPanel();
+        if ((e.key === 'Enter' || e.key === ' ') && selectedTaskId && e.target.tagName !== 'BUTTON') {
+          e.preventDefault();
+          if (detailPanel.classList.contains('visible')) {
+            const labelEl = document.querySelector('.detail-label');
+            const shownId = labelEl?.textContent.match(/\d+/)?.[0];
+            if (shownId === selectedTaskId) {
+              closeDetailPanel();
+            } else {
+              showTaskDetail(selectedTaskId, selectedSessionId);
+            }
           } else {
             showTaskDetail(selectedTaskId, selectedSessionId);
           }
-        } else {
-          showTaskDetail(selectedTaskId, selectedSessionId);
+          return;
         }
-        return;
+
+        if (matchKey(e, 'KeyD') && selectedTaskId) {
+          e.preventDefault();
+          deleteTask(selectedTaskId, selectedSessionId || currentSessionId);
+          return;
+        }
       }
 
       if (e.key === 'Escape') {
         if (detailPanel.classList.contains('visible')) closeDetailPanel();
         else if (messagePanelOpen) toggleMessagePanel();
-      }
-
-      if (e.key === 'p' || e.key === 'P') {
-        e.preventDefault();
-        const sid = selectedSessionId || currentSessionId;
-        if (sid) openPlanForSession(sid);
         return;
       }
 
-      if (e.key === 'i' || e.key === 'I') {
+      // Shared actions — work in both sidebar and board
+      const contextSid = focusZone === 'sidebar'
+        ? (sessionsList.querySelector('.kb-selected')?.dataset.sessionId || currentSessionId)
+        : (selectedSessionId || currentSessionId);
+      if (matchKey(e, 'KeyP') && !e.shiftKey) {
         e.preventDefault();
-        const sid = selectedSessionId || currentSessionId;
-        if (sid) showSessionInfoModal(sid);
+        if (contextSid) openPlanForSession(contextSid);
         return;
       }
-
-      if ((e.key === 'd' || e.key === 'D') && selectedTaskId) {
+      if (matchKey(e, 'KeyI') && !e.shiftKey) {
         e.preventDefault();
-        deleteTask(selectedTaskId, selectedSessionId || currentSessionId);
+        if (contextSid) showSessionInfoModal(contextSid);
+        return;
       }
-
       if (e.key === '?' || (e.key === '/' && e.shiftKey)) {
         e.preventDefault();
         showHelpModal();
@@ -5279,20 +5364,27 @@
       }
       if (!tabs.length) return '';
       const defaultTab = responseHtml ? 'response' : tabs[0].key;
-      const copyBtn = (key) => `<button class="agent-tab-copy" title="Copy" onclick="copyAgentTab('${id}-${key}',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button>`;
+      const copyBtnHtml = `<button class="agent-tab-copy" title="Copy" onclick="copyAgentTabActive('${id}',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button>`;
       const tabsHtml = tabs.map(t =>
         `<div class="agent-tab${t.key === defaultTab ? ' active' : ''}" data-tab-group="${id}" data-tab-key="${t.key}" onclick="document.querySelectorAll('[data-tab-group=\\'${id}\\']').forEach(el=>{el.classList.toggle('active',el.dataset.tabKey==='${t.key}')})">${t.label}</div>`
       ).join('');
       const panelsHtml = panels.map(p =>
-        `<div class="agent-tab-panel${p.key === defaultTab ? ' active' : ''}" data-tab-group="${id}" data-tab-key="${p.key}">${copyBtn(p.key)}<div class="detail-desc rendered-md" style="font-size:13px;">${p.html}</div></div>`
+        `<div class="agent-tab-panel${p.key === defaultTab ? ' active' : ''}" data-tab-group="${id}" data-tab-key="${p.key}"><div class="detail-desc rendered-md" style="font-size:13px;">${p.html}</div></div>`
       ).join('');
-      return `<div class="agent-tabs">${tabsHtml}</div>${panelsHtml}`;
+      return `<div class="agent-tabs">${tabsHtml}${copyBtnHtml}</div>${panelsHtml}`;
     }
 
     async function copyAgentTab(key, btn) {
       const text = _agentTabTexts[key];
       if (!text) return;
       copyWithFeedback(text, btn);
+    }
+
+    async function copyAgentTabActive(groupId, btn) {
+      const activePanel = document.querySelector(`.agent-tab-panel.active[data-tab-group="${groupId}"]`);
+      if (!activePanel) return;
+      const key = groupId + '-' + activePanel.dataset.tabKey;
+      copyAgentTab(key, btn);
     }
 
     const ownerColors = [
@@ -5783,7 +5875,7 @@
     }
 
     function closePlanModal() {
-      document.getElementById('plan-modal').classList.remove('visible');
+      resetModalFullscreen('plan-modal');
     }
 
     function openPlanInEditor() {
@@ -5936,6 +6028,9 @@
           <button class="icon-btn" aria-label="Open in editor" title="Open in editor" onclick="openMsgInEditor()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
           </button>
+          <button id="msg-detail-fullscreen-btn" class="icon-btn" aria-label="Toggle fullscreen" title="Toggle fullscreen" onclick="toggleModalFullscreen('msg-detail-modal')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+          </button>
           <button class="modal-close" aria-label="Close" onclick="closeMsgDetailModal()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
           </button>
@@ -6029,6 +6124,10 @@
               <tr>
                 <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">Shift+M</kbd></td>
                 <td style="padding: 4px 0; color: var(--text-primary);">Open last message detail</td>
+              </tr>
+              <tr>
+                <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">J/K</kbd></td>
+                <td style="padding: 4px 0; color: var(--text-primary);">Navigate messages in detail modal</td>
               </tr>
             </table>
           </div>
@@ -6134,6 +6233,9 @@
           <button class="icon-btn" aria-label="Copy plan" title="Copy plan" onclick="copyWithFeedback(_pendingPlanContent||'',this)">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
           </button>
+          <button id="plan-modal-fullscreen-btn" class="icon-btn" aria-label="Toggle fullscreen" title="Toggle fullscreen" onclick="toggleModalFullscreen('plan-modal')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+          </button>
           <button class="modal-close" aria-label="Close dialog" onclick="closePlanModal()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M18 6L6 18M6 6l12 12"/>
@@ -6186,6 +6288,9 @@
           <button class="icon-btn" id="agent-modal-copy-all" aria-label="Copy all" title="Copy prompt + response" onclick="copyAgentModalAll(this)">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
           </button>
+          <button id="agent-modal-fullscreen-btn" class="icon-btn" aria-label="Toggle fullscreen" title="Toggle fullscreen" onclick="toggleModalFullscreen('agent-modal')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+          </button>
           <button class="modal-close" aria-label="Close dialog" onclick="closeAgentModal()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M18 6L6 18M6 6l12 12"/>
@@ -6195,6 +6300,7 @@
       </div>
       <div id="agent-modal-body" class="modal-body" style="overflow-y: auto; overflow-x: hidden; flex: 0 1 auto; min-height: 0;"></div>
       <div class="modal-footer">
+        <button id="agent-modal-dismiss-btn" class="btn agent-dismiss-btn" style="display:none" onclick="dismissAgent(currentAgentModalId);closeAgentModal()">Dismiss</button>
         <button class="btn btn-primary" onclick="closeAgentModal()">Close</button>
       </div>
     </div>
