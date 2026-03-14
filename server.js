@@ -604,7 +604,7 @@ app.get('/api/sessions', async (req, res) => {
     }
 
     // Convert map to array and sort by most recently modified
-    sessions = Array.from(sessionsMap.values());
+    let sessions = Array.from(sessionsMap.values());
     sessions.sort((a, b) => new Date(b.modifiedAt) - new Date(a.modifiedAt));
 
     // Apply limit if specified, but always include pinned sessions

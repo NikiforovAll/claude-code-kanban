@@ -3596,7 +3596,7 @@
       const id = `expand-${++_expandIdCounter}`;
       const fontSize = opts.fontSize || '0.8rem';
       const maxHeight = opts.maxHeight || '';
-      const btn = `<button onclick="var f=document.getElementById('${id}'),t=this.parentElement.nextElementSibling,expand=f.style.display==='none';f.style.display=expand?'block':'none';t.style.display=expand?'none':'block';this.textContent=expand?'Show less':'Show more'" style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:${fontSize};text-decoration:underline">Show more</button>`;
+      const btn = `<button onclick="var f=document.getElementById('${id}'),t=this.parentElement.nextElementSibling,expand=f.style.display==='none';f.style.display=expand?'block':'none';t.style.display=expand?'none':'block';this.textContent=expand?'Show less':'Show more'" style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:${fontSize};text-decoration:underline;margin-left:6px">Show more</button>`;
       const mhStyle = maxHeight ? `max-height:${maxHeight};` : '';
       const full = `<pre id="${id}" class="msg-detail-pre" style="${mhStyle}overflow:auto;display:none">${fullHtml}</pre>`;
       return { btn, full };
