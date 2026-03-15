@@ -2124,7 +2124,7 @@ body::before {
 }
 .msg-item.msg-idle {
   border-left: 3px solid var(--border);
-  opacity: 0.55;
+  opacity: 0.75;
 }
 .msg-item.msg-idle .msg-icon {
   width: 12px;
@@ -2180,6 +2180,7 @@ body::before {
 }
 .msg-agent-log-btn {
   flex-shrink: 0;
+  margin-left: 0;
   background: none;
   border: none;
   color: var(--text-muted);
@@ -2196,6 +2197,52 @@ body::before {
 .msg-item:hover .msg-agent-log-btn:hover {
   opacity: 1;
   color: var(--accent);
+}
+.protocol-detail {
+  padding: 8px 12px;
+}
+.protocol-detail + div {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.protocol-type-badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 4px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: capitalize;
+  margin-bottom: 8px;
+}
+.protocol-fields {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 10px;
+  align-items: baseline;
+  font-size: 0.85rem;
+}
+.protocol-field {
+  display: contents;
+}
+.protocol-field-key {
+  color: var(--text-muted);
+  white-space: nowrap;
+  text-align: right;
+}
+.protocol-field-key::after {
+  content: ':';
+}
+.protocol-bool {
+  font-weight: 600;
+}
+.protocol-bool-true {
+  color: #4caf50;
+}
+.protocol-bool-false {
+  color: #ef5350;
 }
 
 /* #endregion */

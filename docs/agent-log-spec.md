@@ -16,17 +16,65 @@ Claude Code spawns subagent
   → renders Agent Log footer
 ```
 
+## Hook Events
+
+### Available Claude Code hook events
+
+| Event | Used | Purpose |
+|-------|------|---------|
+| `SubagentStart` | Yes | New subprocess spawned (Agent tool or team member) |
+| `SubagentStop` | Yes | Subprocess exits |
+| `TeammateIdle` | Yes | Team member waiting for work |
+| `PermissionRequest` | Yes | Agent needs user permission |
+| `PreToolUse` | Yes | Before tool execution (matched: AskUserQuestion) |
+| `PostToolUse` | Yes | After tool execution (clears waiting state) |
+| `SessionStart` | No | Session begins |
+| `SessionEnd` | No | Session ends |
+| `Stop` | No | Agent finishes responding |
+| `TaskCompleted` | No | Task completes |
+| `PreCompact` | No | Before context compaction |
+| `Notification` | No | Notification sent |
+| `WorktreeCreate` | No | Git worktree created |
+| `WorktreeRemove` | No | Git worktree removed |
+
+**Not available:** No `TeammateStart`, `TeammateStop`, or `SendMessage` hooks exist.
+
+### Hook input fields by event
+
+**Common fields (all events):** `session_id`, `cwd`, `hook_event_name`, `transcript_path`, `permission_mode`
+
+| Event | Additional fields |
+|-------|------------------|
+| `SubagentStart` | `agent_id`, `agent_type` |
+| `SubagentStop` | `agent_id`, `agent_type`, `agent_transcript_path`, `last_assistant_message`, `stop_hook_active` |
+| `TeammateIdle` | `teammate_name`, `team_name` (**no** `agent_id` or `agent_type`) |
+| `PreToolUse` | `tool_name`, `tool_use_id`, `tool_input` |
+| `PostToolUse` | `tool_name`, `tool_use_id`, `tool_input`, `tool_response` |
+| `PermissionRequest` | `tool_name`, `tool_use_id`, `tool_input` |
+
+Key discovery: `agent_transcript_path` (subagent's own JSONL path) is only available at `SubagentStop`, not `SubagentStart`.
+
 ## Hook: `~/.claude/hooks/agent-spy.sh`
 
-Configured in `~/.claude/settings.json` for three events: `SubagentStart`, `SubagentStop`, `TeammateIdle`.
+Configured in `~/.claude/settings.json` for six events: `SubagentStart`, `SubagentStop`, `TeammateIdle`, `PermissionRequest`, `PreToolUse`, `PostToolUse`.
 
 **File layout:** `~/.claude/agent-activity/{sessionId}/{agentId}.json` — one file per agent, grouped by session.
 
-**SubagentStart:** Creates file with `status: "active"`. Skips internal agents (empty `agent_type`, e.g. AskUserQuestion).
+**SubagentStart:** Creates file with `status: "active"`. Skips internal agents (empty `agent_type`, e.g. AskUserQuestion). Also writes a name→ID mapping file `_name-{agent_type}.id` for TeammateIdle resolution, and removes previous incarnation's agent file if the mapping pointed to a different ID (dedup).
 
 **SubagentStop:** Overwrites file with `status: "stopped"`, preserves `startedAt` from existing file, captures `last_assistant_message`. Falls back to reading `type` from existing file if `agent_type` is empty.
 
-**TeammateIdle:** Overwrites file with `status: "idle"`, preserves `startedAt`.
+**TeammateIdle:** Has no `agent_id` — resolves it by reading the `_name-{teammate_name}.id` mapping file. Updates the agent file to `status: "idle"`, preserves `startedAt`.
+
+### Name→ID mapping (teammate dedup)
+
+Team members get a new `agent_id` each time they wake up (each `SendMessage` creates a new subprocess). To avoid duplicate agent entries:
+
+1. `SubagentStart` writes `_name-{type}.id` containing the `agent_id`
+2. If a mapping file already exists with a different ID, the old agent JSON file is deleted
+3. `TeammateIdle` reads the mapping to find the correct agent file to update
+
+This ensures only the latest incarnation of each teammate is tracked.
 
 ### Agent JSON schema
 
@@ -42,11 +90,59 @@ Configured in `~/.claude/settings.json` for three events: `SubagentStart`, `Suba
 }
 ```
 
+## Team member lifecycle
+
+Team members differ from regular subagents — they persist across multiple interactions.
+
+### Lifecycle events
+
+```
+Team lead spawns teammate (Agent tool with name param)
+  → SubagentStart fires → agent file created (active) + mapping written
+  → SubagentStop fires → agent file updated (stopped)
+  → TeammateIdle fires → mapping lookup → agent file updated (idle)
+
+Lead sends SendMessage to teammate
+  → SubagentStart fires → NEW agent ID, old file deleted, new file created (active)
+  → SubagentStop fires → agent file updated (stopped)
+  → TeammateIdle fires → mapping lookup → agent file updated (idle)
+
+Lead sends shutdown_request via SendMessage
+  → SubagentStart fires → new subprocess for shutdown
+  → Teammate approves → teammate_terminated in JSONL
+  → Server detects termination → marks agent stopped
+  → No SubagentStop hook fires for terminated teammates
+```
+
+### Key differences from regular subagents
+
+| Aspect | Regular Subagent | Team Member |
+|--------|-----------------|-------------|
+| Created by | `Agent` tool call | Team framework (also fires SubagentStart) |
+| Process lifetime | Single task, then exits | Persists across messages, goes idle between |
+| New agent_id per wake | No | Yes (each SendMessage creates new subprocess) |
+| Communication | Returns result to parent | SendMessage / `<teammate-message>` protocol |
+| Idle state | N/A | Normal — waiting for work |
+| Termination detection | SubagentStop hook | JSONL `teammate_terminated` protocol message |
+| Stale timeout | Applied (force-stopped after 15min) | **Exempt** — idle is normal state |
+
+### SendMessage does NOT spawn a process
+
+When the lead uses `SendMessage`, **no new hook fires for the send itself**. The teammate's existing process receives the message. A new `SubagentStart` fires only when the teammate wakes up to process it.
+
+### Stale filtering exemption
+
+Team members are exempt from stale timeout. The server checks team config and skips force-stopping agents whose `type` matches a team member name. This prevents idle teammates from being incorrectly shown as stopped.
+
 ## Server (`server.js`)
 
-### REST endpoint
+### REST endpoints
 
-`GET /api/sessions/:sessionId/agents` — returns array of agent objects. For team sessions, resolves `sessionId` to the leader's UUID via team config before reading files. All agents are returned regardless of age; agents whose `updatedAt` is older than `AGENT_STALE_MS` (5 min) are returned with their status set to `stopped` by the server.
+`GET /api/sessions/:sessionId/agents` — returns agent objects + team colors. For team sessions, resolves `sessionId` to the leader's UUID via team config before reading files. Team members are exempt from stale timeout.
+
+`GET /api/teams/:name` — returns team config including `configPath`.
+
+`GET /api/sessions/:sessionId/agents/:agentId/messages` — returns the subagent's own session log by reading `subagents/agent-{agentId}.jsonl`.
 
 ### File watcher
 
@@ -59,7 +155,17 @@ Watches `~/.claude/agent-activity/` (depth 2). On `add`/`change` of `.json` file
 
 `AGENT_FILE_CAP = 20` — when a new agent file is added and the session directory exceeds the cap, the oldest files (by modification time) are deleted. This prevents unbounded disk growth across long sessions.
 
-## Frontend (`public/index.html`)
+## Frontend (`public/app.js`)
+
+### Agent log button
+
+The clock icon button appears on:
+- `Agent` tool calls (links to subagent session log)
+- `SendMessage` tool calls (resolves recipient name to agent via `currentAgents`)
+- Teammate messages (idle, protocol, regular — resolves `teammateId` to agent)
+- System `teammate_terminated` messages (extracts name from "X has shut down" message)
+
+Clicking opens the agent's session log in the message panel via `viewAgentLog(agentId)`.
 
 ### Display
 
@@ -86,10 +192,6 @@ Shutdown handshake creates duplicate agent instances per worker. Three rounds:
 - If agent started >30s after previous stopped → keep (legitimate re-spawn)
 - Otherwise → filter (shutdown ghost)
 
-### Stale timeout
-
-`AGENT_STALE_MS = 300000` (5 min) — active agents whose `updatedAt` exceeds this threshold are marked as stopped. This is enforced on both the server side (agents returned with `stopped` status) and the frontend. Handles cases where `SubagentStop` never fires.
-
 ### SSE handler
 
 Listens for `type: "agent-update"` events. If `sessionId` matches current session, triggers debounced `fetchAgents()` call.
@@ -100,13 +202,16 @@ Listens for `type: "agent-update"` events. If `sessionId` matches current sessio
 |----------|-------|----------|---------|
 | `AGENT_FILE_CAP` | 20 | server.js | Max agent files per session on disk |
 | `AGENT_LOG_MAX` | 8 | index.html | Max agents shown in footer |
-| `AGENT_STALE_MS` | 300000 | server.js, index.html | Stale timeout for active agents (5 min); server marks stale agents as stopped |
-| `AGENT_TTL_MS` | 3600000 | server.js | Agent freshness for session-level status checks (`checkActiveAgents`/`checkRunningAgents`); does NOT filter agents from detail endpoint |
+| `AGENT_STALE_MS` | 900000 | server.js | Stale timeout (15 min); team members exempt |
+| `AGENT_TTL_MS` | 3600000 | server.js | Agent freshness for session-level status checks; does NOT filter agents from detail endpoint |
 | `AGENT_COOLDOWN_MS` | 180000 | index.html | Cooldown period constant (3 min) |
 
 ## Known limitations
 
-- `SubagentStop` is intermittently unreliable — may not fire for some agents. Mitigated by 5-minute stale timeout.
-- Shutdown handshake spawns transient agent instances that never receive `SubagentStop`. Mitigated by temporal dedup filter.
+- `SubagentStop` is intermittently unreliable — may not fire for some agents. Mitigated by stale timeout.
+- `SubagentStop` does not fire for terminated teammates. Mitigated by server-side JSONL `teammate_terminated` detection.
+- Shutdown handshake spawns transient agent instances that never receive `SubagentStop`. Mitigated by temporal dedup filter + hook-level dedup for team members.
 - Hook `SubagentStart` does not provide agent prompt/description — only `agent_type` is available for identification.
+- `TeammateIdle` provides no `agent_id` — resolved via name→ID mapping files written on `SubagentStart`.
 - Internal agents (e.g. AskUserQuestion) have empty `agent_type` and are excluded.
+- `agent_transcript_path` is only available at `SubagentStop`, not `SubagentStart`.

@@ -436,10 +436,12 @@ async function fetchTasks(sessionId) {
     currentPins = loadPins(sessionId);
     ownerFilter = '';
     lastMessagesHash = '';
+    Object.keys(ownerColorCache).forEach((k) => delete ownerColorCache[k]);
+    Object.keys(teamColorMap).forEach((k) => delete teamColorMap[k]);
     sessionJustSelected = true;
     updateUrl();
     renderSession();
-    fetchAgents(sessionId);
+    await fetchAgents(sessionId);
     if (!agentLogMode) fetchMessages(sessionId);
   } catch (error) {
     console.error('Failed to fetch tasks:', error);
@@ -472,6 +474,7 @@ async function fetchAgents(sessionId) {
     if (hash === lastAgentsHash) return;
     lastAgentsHash = hash;
     currentAgents = agents;
+    updateTeamColors(agents, data.teamColors);
     renderAgentFooter();
   } catch (e) {
     console.error('[fetchAgents]', e);
@@ -494,8 +497,12 @@ function toggleMessagePanel() {
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
-function viewAgentLog(agentId) {
-  const agent = currentAgents.find((a) => a.agentId === agentId);
+async function viewAgentLog(agentId) {
+  let agent = currentAgents.find((a) => a.agentId === agentId);
+  if (!agent && currentSessionId) {
+    await fetchAgents(currentSessionId);
+    agent = currentAgents.find((a) => a.agentId === agentId);
+  }
   if (!agent) return;
   const shortId = agentId.length > 8 ? agentId.slice(0, 8) : agentId;
   agentLogMode = { agentId, sessionId: currentSessionId, agentType: agent.type || 'unknown' };
@@ -704,33 +711,52 @@ function renderMessages(messages) {
           m.tool === 'Agent' && m.agentId
             ? ` <span class="msg-agent-link" title="View agent" onclick="event.stopPropagation();showAgentModal('${escapeHtml(m.agentId)}')">⇗</span>`
             : '';
-        const agentLogBtn = m.tool === 'Agent' && m.agentId ? agentLogButton(m.agentId) : '';
-        const itemClick =
+        let agentLogBtn = '';
+        if (m.tool === 'Agent' && m.agentId) {
+          agentLogBtn = agentLogButton(m.agentId);
+        } else if (m.tool === 'SendMessage' && m.params?.to) {
+          const recipient = currentAgents.find((a) => (a.type || a.name) === m.params.to);
+          if (recipient) agentLogBtn = agentLogButton(recipient.agentId);
+        }
+        const recipientColor =
+          m.tool === 'SendMessage' && m.params?.to ? resolveNamedColor(teamColorMap[m.params.to]) : null;
+        const borderStyle = recipientColor ? `border-left:3px solid ${recipientColor.color};` : '';
+        const combinedStyle = `style="${borderStyle}cursor:pointer"`;
+        const itemClickAttr =
           m.tool === 'Agent' && m.agentId
-            ? `onclick="showAgentModal('${escapeHtml(m.agentId)}')" style="cursor:pointer"`
-            : clickable;
-        return `<div class="msg-item msg-tool" ${itemClick}>
+            ? `onclick="showAgentModal('${escapeHtml(m.agentId)}')" ${combinedStyle}`
+            : `onclick="msgDetailFollowLatest=false;showMsgDetail(${i})" ${combinedStyle}`;
+        return `<div class="msg-item msg-tool" ${itemClickAttr}>
             ${MSG_ICON_TOOL}
             <div class="msg-body"><div class="msg-text">${escapeHtml(m.tool)}${toolDetail}${agentLink}</div><div class="msg-time">${formatDate(m.timestamp)}</div></div>${agentLogBtn}${pinBtn}
           </div>`;
       } else if (m.type === 'teammate') {
-        const nameSpan = `<span class="teammate-name" style="${m.color ? `color:${escapeHtml(m.color)}` : ''}">${escapeHtml(m.teammateId || 'teammate')}</span>`;
+        if (m.teammateId && m.color && !teamColorMap[m.teammateId]) teamColorMap[m.teammateId] = m.color;
+        const tmColor = m.color ? resolveNamedColor(m.color)?.color || m.color : '';
+        const nameSpan = `<span class="teammate-name" style="${tmColor ? `color:${escapeHtml(tmColor)}` : ''}">${escapeHtml(m.teammateId || 'teammate')}</span>`;
+        let tmLookupName = m.teammateId;
+        if (m.teammateId === 'system' && m.protocolType === 'teammate_terminated' && m.protocolData?.message) {
+          const shutMatch = m.protocolData.message.match(/^(.+?) has shut down/);
+          if (shutMatch) tmLookupName = shutMatch[1];
+        }
+        const tmAgent = tmLookupName ? currentAgents.find((a) => (a.type || a.name) === tmLookupName) : null;
+        const tmLogBtn = tmAgent ? agentLogButton(tmAgent.agentId) : '';
         if (m.isIdle) {
           return `<div class="msg-item msg-teammate msg-idle" ${clickable}>
               ${MSG_ICON_IDLE}
-              <div class="msg-body"><div class="msg-text">${nameSpan} <span class="idle-label">${escapeHtml(m.protocolLabel || 'idle')}</span></div><div class="msg-time">${formatDate(m.timestamp)}</div></div>
+              <div class="msg-body"><div class="msg-text">${nameSpan} <span class="idle-label">${escapeHtml(m.protocolLabel || 'idle')}</span></div><div class="msg-time">${formatDate(m.timestamp)}</div></div>${tmLogBtn}
             </div>`;
         }
         if (m.isProtocol) {
           return `<div class="msg-item msg-teammate msg-protocol" ${clickable}>
               ${MSG_ICON_TEAMMATE}
-              <div class="msg-body"><div class="msg-text">${nameSpan} <span class="protocol-label">${escapeHtml(m.protocolLabel || m.protocolType)}</span></div><div class="msg-time">${formatDate(m.timestamp)}</div></div>
+              <div class="msg-body"><div class="msg-text">${nameSpan} <span class="protocol-label">${escapeHtml(m.protocolLabel || m.protocolType)}</span></div><div class="msg-time">${formatDate(m.timestamp)}</div></div>${tmLogBtn}
             </div>`;
         }
         const summaryText = m.summary ? escapeHtml(m.summary) : escapeHtml((m.text || '').slice(0, 80));
         return `<div class="msg-item msg-teammate" ${clickable}>
             ${MSG_ICON_TEAMMATE}
-            <div class="msg-body"><div class="msg-text">${nameSpan} ${summaryText}</div><div class="msg-time">${formatDate(m.timestamp)}</div></div>${pinBtn}
+            <div class="msg-body"><div class="msg-text">${nameSpan} ${summaryText}</div><div class="msg-time">${formatDate(m.timestamp)}</div></div>${tmLogBtn}${pinBtn}
           </div>`;
       }
       return '';
@@ -986,12 +1012,25 @@ function showMsgDetail(idx) {
     } else {
       agentBtn.style.display = 'none';
     }
-    const toolParamsHtml = renderToolParamsHtml(m.params);
-    const toolResultHtml = renderToolResultHtml(m.toolResult, m.toolResultTruncated, m.toolResultFull);
+    const sendProto = m.tool === 'SendMessage' && m.params?.protocol;
+    const toolParamsHtml = renderToolParamsHtml(
+      sendProto ? Object.fromEntries(Object.entries(m.params).filter(([k]) => k !== 'protocol')) : m.params,
+    );
+    const hideResult = m.tool === 'SendMessage' || TASK_TOOLS.has(m.tool);
+    const taskResultHtml = TASK_TOOLS.has(m.tool) ? renderTaskResult(m.toolResult) : '';
+    const toolResultHtml = hideResult
+      ? ''
+      : renderToolResultHtml(m.toolResult, m.toolResultTruncated, m.toolResultFull);
     const hasAgentTabs = m.tool === 'Agent' && m.agentId && (m.agentLastMessage || m.agentPrompt);
     let mainHtml;
-    if (hasAgentTabs) {
+    if (sendProto) {
+      mainHtml = descHtml + renderProtocolDetail(m.params.protocol);
+    } else if (m.tool === 'SendMessage' && fullText) {
+      mainHtml = `${descHtml}<div class="markdown-body">${renderMarkdown(fullText)}</div>`;
+    } else if (hasAgentTabs) {
       mainHtml = descHtml || '';
+    } else if (taskResultHtml) {
+      mainHtml = '';
     } else if (fullText) {
       const detailEscaped = escapeHtml(fullText);
       const detailRendered = m.tool === 'Bash' ? highlightBash(detailEscaped) : detailEscaped;
@@ -999,12 +1038,14 @@ function showMsgDetail(idx) {
     } else {
       mainHtml = '<em>No details</em>';
     }
-    body.innerHTML = mainHtml + toolParamsHtml + (hasAgentTabs ? '' : toolResultHtml) + agentExtraHtml;
+    body.innerHTML = mainHtml + toolParamsHtml + taskResultHtml + (hasAgentTabs ? '' : toolResultHtml) + agentExtraHtml;
   } else if (m.type === 'teammate') {
     document.getElementById('msg-detail-title').textContent = m.teammateId || 'Teammate';
     document.getElementById('msg-detail-agent-btn').style.display = 'none';
     if (m.isProtocol) {
-      body.innerHTML = `<div class="teammate-idle-detail"><span class="protocol-label">${escapeHtml(m.protocolLabel || m.protocolType)}</span></div>`;
+      body.innerHTML = m.protocolData
+        ? renderProtocolDetail(m.protocolData)
+        : `<div class="teammate-idle-detail"><span class="protocol-label">${escapeHtml(m.protocolLabel || m.protocolType)}</span></div>`;
     } else {
       const text = stripAnsi(m.fullText || m.text || '');
       body.innerHTML = renderMarkdown(text);
@@ -1099,6 +1140,69 @@ async function copyWithFeedback(text, btn) {
 //#endregion
 
 //#region TOOL_RENDERING
+const PROTOCOL_SKIP_KEYS = new Set(['type', 'from', 'timestamp', 'paneId', 'backendType']);
+function renderProtocolDetail(data) {
+  if (!data || typeof data !== 'object') return '';
+  const typeBadge = data.type
+    ? `<span class="protocol-type-badge">${escapeHtml(data.type.replace(/_/g, ' '))}</span>`
+    : '';
+  const fields = Object.entries(data)
+    .filter(([k]) => !PROTOCOL_SKIP_KEYS.has(k))
+    .map(([k, v]) => {
+      const label = escapeHtml(
+        k
+          .replace(/([A-Z])/g, ' $1')
+          .replace(/_/g, ' ')
+          .trim()
+          .toLowerCase(),
+      );
+      let val;
+      if (typeof v === 'boolean') {
+        val = `<span class="protocol-bool protocol-bool-${v}">${v ? 'yes' : 'no'}</span>`;
+      } else if (v == null) {
+        val = `<span style="color:var(--text-muted)">null</span>`;
+      } else {
+        val = escapeHtml(String(v));
+      }
+      return `<div class="protocol-field"><span class="protocol-field-key">${label}</span>${val}</div>`;
+    });
+  return `<div class="protocol-detail">${typeBadge}${fields.length ? `<div class="protocol-fields">${fields.join('')}</div>` : ''}</div>`;
+}
+
+const TASK_TOOLS = new Set(['TaskCreate', 'TaskUpdate', 'TaskGet', 'TaskList']);
+function renderTaskResult(toolResult) {
+  if (!toolResult) return '';
+  const lines = toolResult.trim().split('\n');
+  const fields = [];
+  for (const line of lines) {
+    const m = line.match(/^([A-Za-z #]+):\s*(.+)$/);
+    if (m) fields.push([m[1].trim(), m[2].trim()]);
+  }
+  if (!fields.length) return '';
+  const title = fields.find(([k]) => /^Task/.test(k));
+  const status = fields.find(([k]) => k === 'Status');
+  const rest = fields.filter(([k]) => !/^Task/.test(k) && k !== 'Status');
+  const statusColors = {
+    pending: 'var(--text-muted)',
+    in_progress: 'var(--info)',
+    completed: 'var(--success)',
+    deleted: 'var(--danger)',
+  };
+  const sc = status ? statusColors[status[1]] || 'var(--text-muted)' : '';
+  let html = '<div class="protocol-detail">';
+  if (title) html += `<span class="protocol-type-badge">${escapeHtml(title[1])}</span>`;
+  if (status)
+    html += `<span style="display:inline-block;font-size:10px;font-weight:600;color:${sc};text-transform:uppercase;margin-bottom:6px">${escapeHtml(status[1])}</span>`;
+  if (rest.length) {
+    html += '<div class="protocol-fields">';
+    for (const [k, v] of rest) {
+      html += `<div class="protocol-field"><span class="protocol-field-key">${escapeHtml(k.toLowerCase())}</span>${escapeHtml(v)}</div>`;
+    }
+    html += '</div>';
+  }
+  return html + '</div>';
+}
+
 function renderToolParamsHtml(params) {
   if (!params) return '';
   const BLOCK_KEYS = new Set(['old_string', 'new_string', 'content', 'plan']);
@@ -1304,9 +1408,14 @@ function renderAgentFooter() {
       if (overlapped || reSpawn || isActive) filtered.push(group[i]);
     }
   }
-  // Sort by updatedAt desc, keep up to 7 most recent
+  // Sort: active/idle first, then by updatedAt desc
+  const statusOrder = { active: 0, idle: 1, stopped: 2 };
   const visible = filtered
-    .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0))
+    .sort(
+      (a, b) =>
+        (statusOrder[a.status] ?? 2) - (statusOrder[b.status] ?? 2) ||
+        new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0),
+    )
     .slice(0, AGENT_LOG_MAX);
 
   const permFresh = currentWaiting?.timestamp && now - new Date(currentWaiting.timestamp).getTime() < WAITING_TTL_MS;
@@ -1352,7 +1461,9 @@ function renderAgentFooter() {
         const colonIdx = rawType.indexOf(':');
         const typeNs = colonIdx > 0 ? rawType.substring(0, colonIdx + 1) : '';
         const typeName = colonIdx > 0 ? rawType.substring(colonIdx + 1) : rawType;
-        return `<div class="agent-card" onclick="showAgentModal('${a.agentId}')">
+        const agentColor = resolveNamedColor(a.color);
+        const colorStyle = agentColor ? ` style="border-left:3px solid ${agentColor.color}"` : '';
+        return `<div class="agent-card"${colorStyle} onclick="showAgentModal('${a.agentId}')">
           <div class="agent-type-row">${typeNs ? `<span class="agent-type-ns">${escapeHtml(typeNs)}</span>` : ''}<span class="agent-type-name">${escapeHtml(typeName)}</span></div>
           <div class="agent-status-row"><span class="agent-dot ${a.status}"></span><span class="agent-status">${statusText}</span></div>
           ${msgHtml}
@@ -3284,13 +3395,46 @@ const ownerColors = [
   { bg: 'rgba(22, 163, 74, 0.14)', color: '#15803d' }, // green
   { bg: 'rgba(99, 102, 241, 0.14)', color: '#4f46e5' }, // indigo
 ];
+const namedColorMap = {
+  red: { bg: 'rgba(239, 68, 68, 0.14)', color: '#dc2626' },
+  blue: { bg: 'rgba(37, 99, 235, 0.14)', color: '#1d5bbf' },
+  green: { bg: 'rgba(22, 163, 74, 0.14)', color: '#15803d' },
+  purple: { bg: 'rgba(168, 85, 247, 0.14)', color: '#7c3aed' },
+  orange: { bg: 'rgba(234, 88, 12, 0.14)', color: '#c2410c' },
+  pink: { bg: 'rgba(219, 39, 119, 0.14)', color: '#b5246a' },
+  yellow: { bg: 'rgba(202, 138, 4, 0.14)', color: '#92700c' },
+  teal: { bg: 'rgba(14, 165, 133, 0.14)', color: '#0d7d65' },
+  indigo: { bg: 'rgba(99, 102, 241, 0.14)', color: '#4f46e5' },
+  cyan: { bg: 'rgba(6, 182, 212, 0.14)', color: '#0891b2' },
+};
 const ownerColorCache = {};
+const teamColorMap = {};
 function isInternalTask(task) {
   return task.metadata && task.metadata._internal === true;
 }
 
+function resolveNamedColor(colorName) {
+  if (!colorName) return null;
+  return namedColorMap[colorName.toLowerCase()] || null;
+}
+
+function updateTeamColors(agents, colors) {
+  if (colors) Object.assign(teamColorMap, colors);
+  for (const a of agents) {
+    const name = a.type || a.name;
+    if (name && a.color) teamColorMap[name] = a.color;
+  }
+}
+
 function getOwnerColor(name) {
   if (ownerColorCache[name]) return ownerColorCache[name];
+  if (teamColorMap[name]) {
+    const c = resolveNamedColor(teamColorMap[name]);
+    if (c) {
+      ownerColorCache[name] = c;
+      return c;
+    }
+  }
   let hash = 5381;
   for (let i = 0; i < name.length; i++) {
     hash = ((hash * 33) ^ name.charCodeAt(i)) | 0;
@@ -3655,6 +3799,10 @@ function showInfoModal(session, teamConfig, tasks, planContent) {
   if (session.tasksDir) {
     infoRows.push(['Tasks Dir', session.tasksDir, { openPath: session.tasksDir }]);
   }
+  if (teamConfig?.configPath) {
+    const configDir = teamConfig.configPath.replace(/[/\\][^/\\]+$/, '');
+    infoRows.push(['Team Config', teamConfig.configPath, { openPath: configDir, openFile: teamConfig.configPath }]);
+  }
   const clickableStyle =
     "font-family: 'IBM Plex Mono', monospace; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; color: var(--accent-text); text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 3px;";
   const plainStyle =
@@ -3719,10 +3867,12 @@ function showInfoModal(session, teamConfig, tasks, planContent) {
     members.forEach((member) => {
       const taskCount = ownerCounts[member.name] || 0;
       const memberDesc = memberDescriptions[member.name];
+      const mc = resolveNamedColor(member.color);
+      const borderStyle = mc ? ` style="border-left:3px solid ${mc.color}"` : '';
+      const nameStyle = mc ? ` style="color:${mc.color}"` : '';
       html += `
-            <div class="team-member-card">
-              <div class="member-name">🟢 ${escapeHtml(member.name)}</div>
-              <div class="member-detail">Role: ${escapeHtml(member.agentType || 'unknown')}</div>
+            <div class="team-member-card"${borderStyle}>
+              <div class="member-name"${nameStyle}>${escapeHtml(member.name)}</div>
               ${member.model ? `<div class="member-detail">Model: ${escapeHtml(member.model)}</div>` : ''}
               ${memberDesc ? `<div class="member-detail" style="margin-top: 4px; font-style: italic; color: var(--text-secondary);">${escapeHtml(memberDesc.split('\n')[0])}</div>` : ''}
               <div class="member-tasks">Tasks: ${taskCount} assigned</div>

@@ -14,7 +14,8 @@ const {
   readRecentMessages: _readRecentMessagesUncached,
   readSessionInfoFromJsonl,
   buildAgentProgressMap,
-  readCompactSummaries
+  readCompactSummaries,
+  findTerminatedTeammates
 } = require('./lib/parsers');
 
 const isSetupCommand = process.argv.includes('--install') || process.argv.includes('--uninstall');
@@ -56,6 +57,7 @@ const CONTEXT_STATUS_DIR = path.join(CLAUDE_DIR, 'context-status');
 const PERMISSION_TTL_MS = 1800000;
 const AGENT_TTL_MS = 3600000;
 const AGENT_STALE_MS = 900000;
+const SESSION_STALE_MS = 300000;
 
 const WAITING_RESOLVE_GRACE_MS = 15000;
 
@@ -84,9 +86,10 @@ function getContextStatus(sessionId, meta) {
 }
 
 function isAgentFresh(agent) {
-  if (!agent.updatedAt) return true;
   if (isGhostAgent(agent)) return false;
-  return (Date.now() - new Date(agent.updatedAt).getTime()) < AGENT_TTL_MS;
+  const ts = agent.updatedAt || agent.startedAt;
+  if (!ts) return true;
+  return (Date.now() - new Date(ts).getTime()) < AGENT_TTL_MS;
 }
 
 function getSessionLogStat(meta) {
@@ -97,17 +100,20 @@ function getSessionLogStat(meta) {
   } catch (e) { return { mtime: null, hasMessages: false }; }
 }
 
-function checkAgentStatus(agentDir, stale, logMtime) {
+function checkAgentStatus(agentDir, stale, logMtime, isTeam) {
   const result = { hasActive: false, hasRunning: false, waitingForUser: null };
   if (!existsSync(agentDir)) return result;
   result.waitingForUser = checkWaitingForUser(agentDir, logMtime);
   if (result.waitingForUser) result.hasActive = true;
-  if (stale) return result;
+  if (stale && !isTeam) return result;
   try {
     for (const file of readdirSync(agentDir).filter(f => f.endsWith('.json') && !f.startsWith('_'))) {
       try {
         const agent = JSON.parse(readFileSync(path.join(agentDir, file), 'utf8'));
-        if (isAgentFresh(agent)) {
+        if (isTeam && (agent.status === 'active' || agent.status === 'idle')) {
+          result.hasActive = true;
+          if (agent.status === 'active') result.hasRunning = true;
+        } else if (isAgentFresh(agent)) {
           if (agent.status === 'active') { result.hasActive = true; result.hasRunning = true; }
         }
         if (result.hasRunning && result.hasActive) break;
@@ -179,6 +185,7 @@ const messageCache = new Map();
 const MESSAGE_CACHE_TTL = 5000;
 const MAX_CACHE_ENTRIES = 200;
 const progressMapCache = new Map();
+const terminatedCache = new Map();
 const compactSummaryCache = new Map();
 const taskCountsCache = new Map();
 const contextStatusCache = new Map();
@@ -231,6 +238,22 @@ function getProgressMap(jsonlPath) {
     evictStaleCache(progressMapCache);
     return map;
   } catch (_) { return {}; }
+}
+
+function getTerminatedTeammates(jsonlPath) {
+  try {
+    const cached = terminatedCache.get(jsonlPath);
+    if (cached && Date.now() - cached.ts < MESSAGE_CACHE_TTL) return cached.set;
+    const st = statSync(jsonlPath);
+    if (cached && cached.mtime === st.mtimeMs) {
+      cached.ts = Date.now();
+      return cached.set;
+    }
+    const set = findTerminatedTeammates(jsonlPath);
+    terminatedCache.set(jsonlPath, { set, mtime: st.mtimeMs, ts: Date.now() });
+    evictStaleCache(terminatedCache);
+    return set;
+  } catch (_) { return new Set(); }
 }
 
 function readRecentMessages(jsonlPath, limit = 10) {
@@ -439,7 +462,7 @@ app.get('/api/sessions', async (req, res) => {
             const rid = teamConfig?.leadSessionId || entry.name;
             return path.join(AGENT_ACTIVITY_DIR, rid);
           })();
-          const agentStatus = checkAgentStatus(resolvedAgentDir, stale, logMtime);
+          const agentStatus = checkAgentStatus(resolvedAgentDir, stale, logMtime, isTeam);
 
           sessionsMap.set(entry.name, {
             id: entry.name,
@@ -461,7 +484,7 @@ app.get('/api/sessions', async (req, res) => {
             hasActiveAgents: agentStatus.hasActive,
             hasRunningAgents: agentStatus.hasRunning,
             hasWaitingForUser: !!agentStatus.waitingForUser,
-            hasRecentLog: logAge <= AGENT_STALE_MS,
+            hasRecentLog: logAge <= SESSION_STALE_MS,
             jsonlPath: meta.jsonlPath || null,
             tasksDir: sessionPath,
             projectDir: meta.jsonlPath ? path.dirname(meta.jsonlPath) : null,
@@ -485,8 +508,9 @@ app.get('/api/sessions', async (req, res) => {
           if (!modifiedAt || jsonlMtime > modifiedAt) modifiedAt = jsonlMtime;
         }
         const planInfo = getPlanInfo(meta.slug);
+        const metaIsTeam = isTeamSession(sessionId);
         const metaAgentDir = path.join(AGENT_ACTIVITY_DIR, sessionId);
-        const metaAgentStatus = checkAgentStatus(metaAgentDir, stale, logMtime);
+        const metaAgentStatus = checkAgentStatus(metaAgentDir, stale, logMtime, metaIsTeam);
         sessionsMap.set(sessionId, {
           id: sessionId,
           name: getSessionDisplayName(sessionId, meta),
@@ -507,7 +531,7 @@ app.get('/api/sessions', async (req, res) => {
           hasActiveAgents: metaAgentStatus.hasActive,
           hasRunningAgents: metaAgentStatus.hasRunning,
           hasWaitingForUser: !!metaAgentStatus.waitingForUser,
-          hasRecentLog: logAge <= AGENT_STALE_MS,
+          hasRecentLog: logAge <= SESSION_STALE_MS,
           jsonlPath: meta.jsonlPath || null,
           tasksDir: null,
           projectDir: meta.jsonlPath ? path.dirname(meta.jsonlPath) : null,
@@ -563,8 +587,7 @@ app.get('/api/sessions', async (req, res) => {
       }
     }
     for (const leaderId of teamLeaderIds) {
-      const session = sessionsMap.get(leaderId);
-      if (session && session.taskCount === 0) {
+      if (sessionsMap.has(leaderId)) {
         sessionsMap.delete(leaderId);
       }
     }
@@ -780,6 +803,7 @@ app.post('/api/open-in-editor', (req, res) => {
 app.get('/api/teams/:name', (req, res) => {
   const config = loadTeamConfig(req.params.name);
   if (!config) return res.status(404).json({ error: 'Team not found' });
+  config.configPath = path.join(TEAMS_DIR, req.params.name, 'config.json');
   res.json(config);
 });
 
@@ -794,22 +818,60 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
     const logMtime = getSessionLogStat(meta).mtime;
     const sessionStale = logMtime ? (Date.now() - logMtime) > AGENT_STALE_MS : true;
 
+    let teamConfig = loadTeamConfig(req.params.sessionId);
+    if (!teamConfig && existsSync(TEAMS_DIR)) {
+      try {
+        for (const td of readdirSync(TEAMS_DIR, { withFileTypes: true })) {
+          if (!td.isDirectory()) continue;
+          const cfg = loadTeamConfig(td.name);
+          if (cfg && cfg.leadSessionId === sessionId) { teamConfig = cfg; break; }
+        }
+      } catch (_) {}
+    }
+    const isTeam = !!teamConfig;
+    const teamMemberNames = isTeam ? new Set(teamConfig.members.map(m => m.name)) : null;
+
     const files = readdirSync(agentDir).filter(f => f.endsWith('.json') && !f.startsWith('_'));
     const agents = [];
     for (const file of files) {
       try {
         const agent = JSON.parse(readFileSync(path.join(agentDir, file), 'utf8'));
         if (isGhostAgent(agent)) continue;
-        const agentStale = !sessionStale && agent.updatedAt && (Date.now() - new Date(agent.updatedAt).getTime()) > AGENT_STALE_MS;
+        const agentTs = agent.updatedAt || agent.startedAt;
+        const agentStale = !sessionStale && agentTs && (Date.now() - new Date(agentTs).getTime()) > AGENT_STALE_MS;
         if (!isAgentFresh(agent) || sessionStale || agentStale) {
           if (agent.status === 'active' || agent.status === 'idle') {
-            agent.status = 'stopped';
-            if (!agent.stoppedAt) agent.stoppedAt = agent.updatedAt || agent.startedAt;
+            const agentName = agent.type || agent.name;
+            const isTeamMember = isTeam && agentName && teamMemberNames.has(agentName);
+            if (!isTeamMember) {
+              agent.status = 'stopped';
+              if (!agent.stoppedAt) agent.stoppedAt = agent.updatedAt || agent.startedAt;
+            }
           }
         }
         agents.push(agent);
       } catch (e) { /* skip invalid */ }
     }
+    const liveAgents = agents.filter(a => a.status === 'active' || a.status === 'idle');
+    if (liveAgents.length && meta.jsonlPath) {
+      try {
+        const terminated = getTerminatedTeammates(meta.jsonlPath);
+        if (terminated.size) {
+          for (const agent of liveAgents) {
+            const agentName = agent.type || agent.name;
+            if (agentName && terminated.has(agentName)) {
+              const terminatedAt = terminated.get(agentName);
+              if (terminatedAt && agent.startedAt && terminatedAt < agent.startedAt) continue;
+              agent.status = 'stopped';
+              agent.stoppedAt = agent.stoppedAt || new Date().toISOString();
+              const agentFile = path.join(agentDir, agent.agentId + '.json');
+              fs.writeFile(agentFile, JSON.stringify(agent), 'utf8').catch(() => {});
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
     const agentsNeedingPrompt = agents.filter(a => !a.prompt);
     if (agentsNeedingPrompt.length && meta.jsonlPath) {
       try {
@@ -828,8 +890,21 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
         }
       } catch (_) {}
     }
+    const teamColors = {};
+    if (teamConfig?.members) {
+      for (const m of teamConfig.members) {
+        if (m.name && m.color) teamColors[m.name] = m.color;
+      }
+      if (Object.keys(teamColors).length) {
+        for (const agent of agents) {
+          const name = agent.type || agent.name;
+          if (name && teamColors[name]) agent.color = teamColors[name];
+        }
+      }
+    }
+
     const waitingForUser = checkWaitingForUser(agentDir, logMtime);
-    res.json({ agents, waitingForUser });
+    res.json({ agents, waitingForUser, teamColors });
   } catch (e) {
     res.json({ agents: [], waitingForUser: null });
   }

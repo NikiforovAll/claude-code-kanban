@@ -22,6 +22,7 @@
           "model": { "type": ["string", "null"] },
           "joinedAt": { "type": "number" },
           "tmuxPaneId": { "type": "string" },
+          "color": { "type": ["string", "null"] },
           "cwd": { "type": ["string", "null"] },
           "subscriptions": { "type": "array" }
         },
