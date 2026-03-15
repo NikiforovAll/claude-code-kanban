@@ -21,6 +21,9 @@ jobs:
 
       - run: npm ci
 
+      - name: Lint & format check
+        run: npx @biomejs/biome check --error-on-warnings public/app.js public/style.css
+
       - name: Syntax check
         run: node -c server.js
 

@@ -430,6 +430,8 @@ async function fetchTasks(sessionId) {
 
     currentTasks = newTasks;
     if (agentLogMode && sessionId !== currentSessionId) exitAgentLogMode();
+    if (sessionId !== currentSessionId && document.getElementById('scratchpad-modal').classList.contains('visible'))
+      closeScratchpad();
     currentSessionId = sessionId;
     currentPins = loadPins(sessionId);
     ownerFilter = '';
@@ -2662,6 +2664,67 @@ document.getElementById('close-detail').onclick = closeDetailPanel;
 
 //#endregion
 
+//#region SCRATCHPAD
+let _scratchpadSaveTimer = null;
+
+function toggleScratchpad() {
+  const modal = document.getElementById('scratchpad-modal');
+  if (modal.classList.contains('visible')) {
+    closeScratchpad();
+  } else {
+    showScratchpad();
+  }
+}
+
+function showScratchpad() {
+  if (!currentSessionId) return;
+  const modal = document.getElementById('scratchpad-modal');
+  const textarea = document.getElementById('scratchpad-textarea');
+  const charcount = document.getElementById('scratchpad-charcount');
+
+  textarea.value = localStorage.getItem(`scratchpad-${currentSessionId}`) || '';
+  charcount.textContent = `${textarea.value.length} chars`;
+
+  modal.classList.add('visible');
+  textarea.focus();
+
+  const keyHandler = (e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeScratchpad();
+      document.removeEventListener('keydown', keyHandler);
+    }
+  };
+  document.addEventListener('keydown', keyHandler);
+}
+
+function closeScratchpad() {
+  if (_scratchpadSaveTimer) {
+    clearTimeout(_scratchpadSaveTimer);
+    _scratchpadSaveTimer = null;
+  }
+  saveScratchpad();
+  document.getElementById('scratchpad-modal').classList.remove('visible');
+}
+
+function saveScratchpad() {
+  if (!currentSessionId) return;
+  const textarea = document.getElementById('scratchpad-textarea');
+  localStorage.setItem(`scratchpad-${currentSessionId}`, textarea.value);
+}
+
+document.getElementById('scratchpad-textarea').addEventListener('input', () => {
+  const textarea = document.getElementById('scratchpad-textarea');
+  document.getElementById('scratchpad-charcount').textContent = `${textarea.value.length} chars`;
+
+  if (_scratchpadSaveTimer) clearTimeout(_scratchpadSaveTimer);
+  _scratchpadSaveTimer = setTimeout(() => {
+    saveScratchpad();
+    _scratchpadSaveTimer = null;
+  }, 500);
+});
+//#endregion
+
 //#region KEYBOARD_SHORTCUTS
 function matchKey(e, ...keys) {
   if (e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return false;
@@ -2836,6 +2899,11 @@ document.addEventListener('keydown', (e) => {
   if (matchKey(e, 'KeyI') && !e.shiftKey) {
     e.preventDefault();
     if (contextSid) showSessionInfoModal(contextSid);
+    return;
+  }
+  if (matchKey(e, 'KeyN') && !e.shiftKey) {
+    e.preventDefault();
+    toggleScratchpad();
     return;
   }
   if (e.key === '?' || (e.key === '/' && e.shiftKey)) {
