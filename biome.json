@@ -7,7 +7,12 @@
     "lineWidth": 120
   },
   "linter": {
-    "enabled": true
+    "enabled": true,
+    "rules": {
+      "style": {
+        "noDescendingSpecificity": "off"
+      }
+    }
   },
   "javascript": {
     "formatter": {

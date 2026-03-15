@@ -1,2 +1,2 @@
-npx @biomejs/biome check public/app.js public/style.css
+npx @biomejs/biome check --error-on-warnings public/app.js public/style.css
 npm test
