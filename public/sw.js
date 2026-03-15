@@ -1,4 +1,4 @@
-const CACHE_NAME = 'cc-kanban-v1';
+const CACHE_NAME = 'cc-kanban-v2';
 const PRECACHE_URLS = ['/', '/style.css', '/app.js'];
 
 let cachePromise = null;
@@ -9,7 +9,8 @@ function getCache() {
 
 function cacheResponse(request, response) {
   if (response.ok) {
-    getCache().then(cache => cache.put(request, response.clone()));
+    const clone = response.clone();
+    getCache().then(cache => cache.put(request, clone));
   }
   return response;
 }
