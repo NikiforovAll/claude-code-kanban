@@ -1,69 +1,112 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+## Project
 
-## Project Overview
-
-**claude-code-kanban** — A real-time Kanban dashboard for observing Claude Code tasks. Express + chokidar backend, vanilla JS single-file frontend. Zero build step.
+**claude-code-kanban** — Real-time Kanban dashboard for Claude Code tasks. Express + chokidar + vanilla JS. Zero build step. Published as `claude-code-kanban` (npm).
 
 ## Commands
 
 ```bash
-npm start          # Start server on port 3456
-npm run dev        # Start server + auto-open browser
-PORT=8080 npm start  # Custom port
+npm start            # port 3456
+npm run dev          # start + open browser
 ```
 
-No build, lint, or test commands — the app is a single HTML file served by Express.
+No build/lint/test commands.
 
 ## Architecture
 
 ```
-server.js              Express server + chokidar file watchers + SSE
-public/index.html      Entire frontend (CSS + JS + HTML, ~3100 lines)
+server.js           Express + chokidar watchers + SSE
+public/index.html   HTML structure (~570 lines)
+public/style.css    All CSS (~2510 lines)
+public/app.js       All JS (~3520 lines)
 ```
 
-### Data Flow
+**Data flow:** task JSON files → chokidar → SSE → REST fetch → Kanban render (JSON diff to skip no-ops)
 
-```
-Claude Code writes ~/.claude/tasks/{sessionId}/{taskId}.json
-    → chokidar detects change
-    → server broadcasts SSE event
-    → frontend fetches updated data via REST API
-    → re-renders Kanban board (with JSON comparison to skip no-op renders)
-```
+**Server:** 3 chokidar watchers (tasks/teams/projects) · SSE broadcasts · REST API · session cache (10s TTL) · port fallback
 
-### Server (server.js)
+**Frontend:** sidebar (sessions, filters, live feed) · kanban board · task detail panel · SSE debounced (500ms tasks, 2s metadata)
 
-- **3 chokidar watchers**: tasks dir, teams dir, projects dir — filtered to `add/change/unlink` events only
-- **SSE endpoint** (`/api/events`): broadcasts `update`, `team-update`, `metadata-update` events
-- **REST API**: sessions list, session tasks, all tasks, delete task (with dependency check), add note
-- **Caching**: session metadata (10s TTL), team config (5s TTL)
-- **Port fallback**: if default port is in use, falls back to OS-assigned random port
+**CDN deps:** marked.js, DOMPurify, highlight.js, Google Fonts
 
-### Frontend (public/index.html)
+## Conventions
 
-Single-file app with embedded CSS and JS. Key sections:
-- **Sidebar**: session list with progress bars, project/session filters, live updates feed
-- **Main area**: Kanban board (Pending → In Progress → Completed) with task detail panel
-- **SSE handler**: debounced (500ms tasks, 2s metadata) with JSON hash comparison to avoid unnecessary re-renders
+- **Read-only observer** — Claude Code owns task state, dashboard only reads
+- **XSS safety** — `escapeHtml()` for user data, `DOMPurify.sanitize(marked.parse(...))` for markdown
+- **No framework** — multi-file vanilla JS, CSS variables for dark/light theming
+- **`#region` markers** — VS Code foldable `#region`/`#endregion` blocks in `app.js` and `style.css`
 
-Key functions:
-- `fetchSessions()` / `fetchTasks()` — data fetching with change detection
-- `renderKanban()` / `renderSessions()` — DOM rendering
-- `getOwnerColor()` — consistent hash-based agent colors
-- `escapeHtml()` — XSS prevention (always use for user-provided strings)
+### Navigating with regions
 
-### External Dependencies (CDN)
+Find a region: `rg "#region KANBAN" public/`. Read a full region: find `#region`, read until `#endregion`.
 
-- `marked.js` — markdown rendering for task descriptions
-- `DOMPurify` — sanitizes rendered markdown HTML
-- Google Fonts — IBM Plex Mono, Playfair Display
+When modifying a feature, open **both** the JS region and the matching CSS region (names often match: KANBAN, MESSAGE_PANEL, etc).
 
-## Key Conventions
+**app.js regions:**
 
-- **Single-file frontend**: all CSS, JS, HTML live in `public/index.html`. No components, no framework.
-- **Observation over control**: Claude Code owns task state. The viewer only reads and displays.
-- **XSS safety**: always use `escapeHtml()` for any user/task data rendered to DOM. Markdown goes through `DOMPurify.sanitize(marked.parse(...))`.
-- **Dark/light theme**: CSS variables for theming, stored in localStorage.
-- **npm package**: published as `claude-code-kanban` with bin entry `claude-code-kanban`.
+| Region | What lives here |
+|--------|----------------|
+| STATE | Global variables, URL state, reset logic |
+| DOM | Cached DOM element references |
+| DATA_FETCHING | `fetchSessions()`, `fetchTasks()`, `fetchAgents()`, `fetchMessages()` |
+| BULK_DELETE | Session-wide task deletion, topological sort |
+| LIVE_UPDATES | Active task ticker in sidebar |
+| MESSAGE_PANEL | Message log panel: toggle, render, latest message |
+| PINNING | Message/session/agent pin/unpin logic, localStorage |
+| MODALS | Message detail modal, fullscreen toggle |
+| TOAST | Toast notification display |
+| TOOL_RENDERING | Tool call params/result HTML rendering |
+| AGENTS | Agent footer, agent modal, dismiss/copy |
+| RENDERING | `showAllTasks()`, `renderAllTasks()`, `renderSessions()`, `renderSession()`, `renderTaskCard()` |
+| KANBAN | `renderKanban()` — column layout, counts, empty states |
+| DRAG_DROP | Card drag start/end, column drop to change task status |
+| KEYBOARD_NAV | Arrow key navigation: task selection, session list, focus zones |
+| TASK_DETAIL | `showTaskDetail()`, inline editing (title, description), notes, blocked-by |
+| DELETE_TASK | Single task delete with confirmation modal |
+| HELP | Help modal with keyboard shortcut reference |
+| KEYBOARD_SHORTCUTS | `matchKey()`, global `keydown` handler, all hotkeys |
+| SSE | `setupEventSource()`, reconnect, debounced refresh |
+| CONTEXT_WINDOW | Model thresholds, token bar, cost color, context detail panel |
+| UTILS | `formatDate()`, `stripAnsi()`, `escapeHtml()`, `renderMarkdown()`, `getOwnerColor()` |
+| FILTERS | Session filter (active/all), session limit, project filter dropdown |
+| EVENT_DELEGATION | Click handlers for project group collapse/expand |
+| THEME | Dark/light toggle, hljs theme sync, `localStorage` persistence |
+| SIDEBAR_LAYOUT | Collapse/expand sidebar, drag-resize sidebar and panels |
+| PREFERENCES | Load saved filter/limit/project from `localStorage` |
+| SESSION_INFO | Session info modal: metadata grid, team config, plan |
+| PLAN | Plan viewer modal, refresh, open-in-editor |
+| OWNER_FILTER | Per-owner task filter in kanban header |
+| LAYOUT_SYNC | ResizeObserver to sync sidebar/view header heights |
+| PWA | Service worker registration |
+| INIT | Boot sequence: load theme → load state → setup SSE → first fetch |
+
+**style.css regions:**
+
+| Region | What it styles |
+|--------|---------------|
+| VARIABLES | CSS custom properties (colors, fonts) |
+| RESET · SCROLLBAR · LAYOUT | Box model reset, scrollbar, flex app shell |
+| SIDEBAR · SIDEBAR_SECTIONS | Sidebar chrome, collapse, filter dropdowns |
+| LIVE_UPDATES | Active task ticker styles |
+| SESSIONS | Session cards, progress bars, status badges |
+| FOOTER | Sidebar footer |
+| MAIN · EMPTY_STATE · SESSION_VIEW | Main content area, placeholder, session wrapper |
+| HEADER | View header bar, icon buttons |
+| KANBAN | Column grid, column headers, empty column state |
+| TASK_CARD | Card layout, status border, badges, description preview |
+| DETAIL_PANEL | Side panel: fields, markdown, dependency chips |
+| NOTE_FORM | Add-note textarea and submit button |
+| TEAM_BADGE · OWNER_BADGE · TEAM_MODAL | Team/owner indicators, team member cards |
+| OWNER_FILTER | Kanban overlay filter bar |
+| MESSAGE_PANEL | Message log: bubbles, roles, tool blocks |
+| AGENT_FOOTER | Agent status bar, expand/collapse |
+| PERMISSION_PENDING | Pulsing permission badge |
+| LIGHT_THEME | Light-mode variable overrides |
+| INTERACTIVE | Delete hover, column header buttons |
+| SEARCH | Search input, clear button |
+| MODAL | Overlay, dialog, buttons, toast |
+| A11Y | Skip-link, visually-hidden |
+| MEDIA_QUERIES | `prefers-color-scheme` auto-detection |
+| ANIMATIONS | Card fade-in, connection breathing, progress shimmer |
+| PROJECT_GROUPS | Collapsible project headers in session list |
