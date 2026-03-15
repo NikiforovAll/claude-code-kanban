@@ -455,7 +455,7 @@ app.get('/api/sessions', async (req, res) => {
             jsonlPath: meta.jsonlPath || null,
             tasksDir: sessionPath,
             projectDir: meta.jsonlPath ? path.dirname(meta.jsonlPath) : null,
-            contextStatus: (logAge <= AGENT_STALE_MS || agentStatus.hasActive || inProgress > 0 || pinnedIds.has(entry.name)) ? (contextStatusCache.get(entry.name) || null) : null,
+            contextStatus: contextStatusCache.get(entry.name) || null,
             ...planInfo
           });
         }
@@ -501,7 +501,7 @@ app.get('/api/sessions', async (req, res) => {
           jsonlPath: meta.jsonlPath || null,
           tasksDir: null,
           projectDir: meta.jsonlPath ? path.dirname(meta.jsonlPath) : null,
-          contextStatus: (logAge <= AGENT_STALE_MS || metaAgentStatus.hasActive || pinnedIds.has(sessionId)) ? (contextStatusCache.get(sessionId) || null) : null,
+          contextStatus: contextStatusCache.get(sessionId) || null,
           ...planInfo
         });
       }

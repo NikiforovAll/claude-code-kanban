@@ -4174,7 +4174,7 @@
         const memberCount = session.memberCount || 0;
 
         const isSessionPinned = pinnedSessionIds.has(session.id);
-        const showCtx = session.contextStatus && (sessionFilter === 'active' || isSessionPinned);
+        const showCtx = !!session.contextStatus;
         return `
           <button onclick="fetchTasks('${session.id}')" data-session-id="${session.id}" class="session-item ${isActive ? 'active' : ''} ${session.hasWaitingForUser ? 'permission-pending' : ''} ${!session.hasRecentLog && !session.inProgress && !session.hasWaitingForUser ? 'stale' : ''} ${showCtx ? 'has-context' : ''}" title="${tooltip}">
             <span class="session-pin-btn${isSessionPinned ? ' pinned' : ''}" onclick="event.stopPropagation();toggleSessionPin('${escapeHtml(session.id)}')" title="${isSessionPinned ? 'Unpin' : 'Pin'} session">${SESSION_PIN_SVG}</span>
@@ -4273,7 +4273,24 @@
 
         sessionsList.innerHTML = html;
       } else {
-        sessionsList.innerHTML = filteredSessions.map(renderSessionCard).join('');
+        const pinned = filteredSessions.filter(s => pinnedSessionIds.has(s.id));
+        const rest = filteredSessions.filter(s => !pinnedSessionIds.has(s.id));
+        let html = '';
+        if (pinned.length > 0) {
+          const isCollapsed = collapsedProjectGroups.has('__pinned__');
+          html += `
+            <div class="project-group-header${isCollapsed ? ' collapsed' : ''}" data-group-path="__pinned__">
+              <svg class="group-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+              <span class="group-name">Pinned</span>
+              <span class="group-count">${pinned.length}</span>
+            </div>
+            <div class="project-group-sessions${isCollapsed ? ' collapsed' : ''}">
+              ${pinned.map(renderSessionCard).join('')}
+            </div>
+          `;
+        }
+        html += rest.map(renderSessionCard).join('');
+        sessionsList.innerHTML = html;
       }
 
       const navItems = getNavigableItems();
@@ -5413,6 +5430,8 @@
     }
 
 
+    const CONTEXT_COLORS = { green: '#5b9a6b', yellow: '#b8a63e', orange: '#c07840', red: '#b85555' };
+    const COST_THRESHOLDS = { green: 0.5, yellow: 2, orange: 5 };
     const MODEL_THRESHOLDS = [
       { match: /sonnet|haiku/i, yellow: 100000, orange: 130000, red: 150000 },
       { match: /opus/i,         yellow: 100000, orange: 200000, red: 700000 },
@@ -5429,10 +5448,24 @@
 
     function getContextColor(usedTokens, modelName) {
       const t = getModelThresholds(modelName);
-      if (usedTokens < t.yellow) return '#5b9a6b';
-      if (usedTokens < t.orange) return '#b8a63e';
-      if (usedTokens < t.red) return '#c07840';
-      return '#b85555';
+      if (usedTokens < t.yellow) return CONTEXT_COLORS.green;
+      if (usedTokens < t.orange) return CONTEXT_COLORS.yellow;
+      if (usedTokens < t.red) return CONTEXT_COLORS.orange;
+      return CONTEXT_COLORS.red;
+    }
+
+    function getCostColor(usd) {
+      const val = usd || 0;
+      if (val < COST_THRESHOLDS.green) return CONTEXT_COLORS.green;
+      if (val < COST_THRESHOLDS.yellow) return CONTEXT_COLORS.yellow;
+      if (val < COST_THRESHOLDS.orange) return CONTEXT_COLORS.orange;
+      return CONTEXT_COLORS.red;
+    }
+
+    function renderMarkers(markers) {
+      return markers.map(m =>
+        `<div class="context-bar-marker" style="left:${m.pct}%;background:${m.color}" title="${formatTokens(m.tokens / 1000)}"></div>`
+      ).join('');
     }
 
     function formatTokens(k) {
@@ -5446,14 +5479,15 @@
       const cw = raw.context_window || {};
       const size = cw.context_window_size || 0;
       const pct = cw.used_percentage || 0;
-      const modelName = (raw.model || {}).display_name || (raw.model || {}).id || '';
+      const model = raw.model || {};
+      const modelName = model.display_name || model.id || '';
       const thresholds = getModelThresholds(modelName);
       const usedTokens = size > 0 ? (pct / 100) * size : 0;
       const markers = size > 0
         ? [
-            { tokens: thresholds.yellow, pct: (thresholds.yellow / size) * 100, color: '#b8a63e' },
-            { tokens: thresholds.orange, pct: (thresholds.orange / size) * 100, color: '#c07840' },
-            { tokens: thresholds.red,    pct: (thresholds.red / size) * 100,    color: '#b85555' },
+            { tokens: thresholds.yellow, pct: (thresholds.yellow / size) * 100, color: CONTEXT_COLORS.yellow },
+            { tokens: thresholds.orange, pct: (thresholds.orange / size) * 100, color: CONTEXT_COLORS.orange },
+            { tokens: thresholds.red,    pct: (thresholds.red / size) * 100,    color: CONTEXT_COLORS.red },
           ].filter(m => m.pct > 0 && m.pct < 100)
         : [];
       return {
@@ -5472,14 +5506,11 @@
       const ctx = getCtx(raw);
       if (!ctx) return '';
       const color = getContextColor(ctx.usedTokens, ctx.modelName);
-      const markersHtml = ctx.markers.map(m =>
-        `<div class="context-bar-marker" style="left:${m.pct}%;background:${m.color}" title="${formatTokens(m.tokens / 1000)}"></div>`
-      ).join('');
       return `
         <div class="context-bar" style="display:block">
           <div class="context-bar-track">
             <div class="context-bar-fill" style="width:${ctx.pct}%;background:${color}"></div>
-            ${markersHtml}
+            ${renderMarkers(ctx.markers)}
           </div>
           <div class="context-bar-labels">
             <span style="color:${color}">${Math.round(ctx.pct)}% (${formatTokens(ctx.usedTokens / 1000)})</span>
@@ -5502,17 +5533,14 @@
       const cw = raw.context_window || {};
       const usage = cw.current_usage || {};
       const cost = raw.cost || {};
-      const modelName = ctx.modelName;
 
       return `
         <div class="detail-context">
-          <div class="detail-context-title">${modelName ? escapeHtml(modelName) : 'Context Window'}</div>
+          <div class="detail-context-title">${ctx.modelName ? escapeHtml(ctx.modelName) : 'Context Window'}</div>
           <div class="detail-context-bar">
             <div class="context-bar-track">
               <div class="context-bar-fill" style="width:${ctx.pct}%;background:${color}"></div>
-              ${ctx.markers.map(m =>
-                `<div class="context-bar-marker" style="left:${m.pct}%;background:${m.color}" title="${formatTokens(m.tokens / 1000)}"></div>`
-              ).join('')}
+              ${renderMarkers(ctx.markers)}
             </div>
           </div>
           <div class="detail-context-summary">
@@ -5528,10 +5556,10 @@
             <div class="stat-item"><span class="stat-label">Total input</span><span class="stat-value">${formatTokens(ctx.inputTokens / 1000)}</span></div>
             <div class="stat-item"><span class="stat-label">Total output</span><span class="stat-value">${formatTokens(ctx.outputTokens / 1000)}</span></div>
             <div class="stat-divider"></div>
-            <div class="stat-item"><span class="stat-label">Cost</span><span class="stat-value" style="color:${(cost.total_cost_usd || 0) < 0.5 ? '#5b9a6b' : (cost.total_cost_usd || 0) < 2 ? '#b8a63e' : (cost.total_cost_usd || 0) < 5 ? '#c07840' : '#b85555'}">${formatCost(cost.total_cost_usd)}</span></div>
+            <div class="stat-item"><span class="stat-label">Cost</span><span class="stat-value" style="color:${getCostColor(cost.total_cost_usd)}">${formatCost(cost.total_cost_usd)}</span></div>
             <div class="stat-item"><span class="stat-label">Duration</span><span class="stat-value">${formatDuration(cost.total_duration_ms)}</span></div>
             <div class="stat-item"><span class="stat-label">API time</span><span class="stat-value">${formatDuration(cost.total_api_duration_ms)}</span></div>
-            <div class="stat-item"><span class="stat-label">Lines</span><span class="stat-value"><span style="color:#5b9a6b">+${(cost.total_lines_added || 0).toLocaleString()}</span> / <span style="color:#b85555">-${(cost.total_lines_removed || 0).toLocaleString()}</span></span></div>
+            <div class="stat-item"><span class="stat-label">Lines</span><span class="stat-value"><span style="color:${CONTEXT_COLORS.green}">+${(cost.total_lines_added || 0).toLocaleString()}</span> / <span style="color:${CONTEXT_COLORS.red}">-${(cost.total_lines_removed || 0).toLocaleString()}</span></span></div>
           </div>
         </div>`;
     }
