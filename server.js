@@ -55,7 +55,7 @@ const CONTEXT_STATUS_DIR = path.join(CLAUDE_DIR, 'context-status');
 
 const PERMISSION_TTL_MS = 1800000;
 const AGENT_TTL_MS = 3600000;
-const AGENT_STALE_MS = 300000;
+const AGENT_STALE_MS = 900000;
 
 const WAITING_RESOLVE_GRACE_MS = 15000;
 
@@ -77,6 +77,10 @@ function checkWaitingForUser(agentDir, logMtime) {
 function isGhostAgent(agent) {
   if (agent.startedAt !== agent.updatedAt || agent.lastMessage) return false;
   return (Date.now() - new Date(agent.startedAt).getTime()) >= AGENT_STALE_MS;
+}
+
+function getContextStatus(sessionId, meta) {
+  return contextStatusCache.get(sessionId) || (meta?.teamLeaderId ? contextStatusCache.get(meta.teamLeaderId) : null) || null;
 }
 
 function isAgentFresh(agent) {
@@ -427,12 +431,12 @@ app.get('/api/sessions', async (req, res) => {
           }
 
           const isTeam = isTeamSession(entry.name);
-          const memberCount = isTeam ? (loadTeamConfig(entry.name)?.members?.length || 0) : 0;
+          const teamConfig = isTeam ? loadTeamConfig(entry.name) : null;
+          const memberCount = teamConfig?.members?.length || 0;
           const planInfo = getPlanInfo(meta.slug);
 
           const resolvedAgentDir = (() => {
-            const tc = loadTeamConfig(entry.name);
-            const rid = (tc && tc.leadSessionId) ? tc.leadSessionId : entry.name;
+            const rid = teamConfig?.leadSessionId || entry.name;
             return path.join(AGENT_ACTIVITY_DIR, rid);
           })();
           const agentStatus = checkAgentStatus(resolvedAgentDir, stale, logMtime);
@@ -461,7 +465,7 @@ app.get('/api/sessions', async (req, res) => {
             jsonlPath: meta.jsonlPath || null,
             tasksDir: sessionPath,
             projectDir: meta.jsonlPath ? path.dirname(meta.jsonlPath) : null,
-            contextStatus: contextStatusCache.get(entry.name) || (meta.teamLeaderId ? contextStatusCache.get(meta.teamLeaderId) : null) || null,
+            contextStatus: getContextStatus(entry.name, meta),
             ...planInfo
           });
         }
@@ -507,7 +511,7 @@ app.get('/api/sessions', async (req, res) => {
           jsonlPath: meta.jsonlPath || null,
           tasksDir: null,
           projectDir: meta.jsonlPath ? path.dirname(meta.jsonlPath) : null,
-          contextStatus: contextStatusCache.get(sessionId) || (meta.teamLeaderId ? contextStatusCache.get(meta.teamLeaderId) : null) || null,
+          contextStatus: getContextStatus(sessionId, meta),
           ...planInfo
         });
       }
@@ -590,7 +594,7 @@ app.get('/api/sessions', async (req, res) => {
       const s = sessionsMap.get(pid);
       if (s && !s.contextStatus) {
         const meta = metadata[pid];
-        s.contextStatus = contextStatusCache.get(pid) || (meta?.teamLeaderId ? contextStatusCache.get(meta.teamLeaderId) : null) || null;
+        s.contextStatus = getContextStatus(pid, meta);
       }
     }
 
@@ -624,7 +628,7 @@ app.get('/api/sessions', async (req, res) => {
         jsonlPath: meta.jsonlPath || null,
         tasksDir: null,
         projectDir: meta.jsonlPath ? path.dirname(meta.jsonlPath) : null,
-        contextStatus: contextStatusCache.get(pid) || (meta.teamLeaderId ? contextStatusCache.get(meta.teamLeaderId) : null) || null,
+        contextStatus: getContextStatus(pid, meta),
         ...getPlanInfo(meta.slug)
       });
     }
@@ -833,7 +837,7 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
 
 app.post('/api/sessions/:sessionId/agents/:agentId/stop', (req, res) => {
   const sessionId = resolveSessionId(req.params.sessionId);
-  const agentId = path.basename(req.params.agentId).replace(/[^a-zA-Z0-9_-]/g, '');
+  const agentId = sanitizeAgentId(req.params.agentId);
   const agentFile = path.join(AGENT_ACTIVITY_DIR, sessionId, agentId + '.json');
   if (!existsSync(agentFile)) return res.status(404).json({ error: 'Agent not found' });
   try {
@@ -902,27 +906,28 @@ app.get('/api/sessions/:sessionId/agents/:agentId/messages/stream', (req, res) =
     awaitWriteFinish: { stabilityThreshold: 200, pollInterval: 50 }
   });
 
-  const cleanup = () => watcher.close();
+  let closed = false;
+  const cleanup = () => { if (!closed) { closed = true; watcher.close(); } };
+
+  function emitMessages() {
+    const messages = readRecentMessages(subagentJsonl, 50);
+    lastSize = statSync(subagentJsonl).size;
+    res.write(`event: agent-log-update\ndata: ${JSON.stringify({ messages, agentId })}\n\n`);
+  }
 
   watcher.on('change', () => {
     try {
-      const currentSize = statSync(subagentJsonl).size;
-      if (currentSize <= lastSize) return;
-      const messages = readRecentMessages(subagentJsonl, 50);
-      lastSize = currentSize;
-      res.write(`event: agent-log-update\ndata: ${JSON.stringify({ messages, agentId })}\n\n`);
+      if (statSync(subagentJsonl).size <= lastSize) return;
+      emitMessages();
     } catch (_) {}
   });
 
   watcher.on('add', () => {
-    try {
-      const messages = readRecentMessages(subagentJsonl, 50);
-      lastSize = statSync(subagentJsonl).size;
-      res.write(`event: agent-log-update\ndata: ${JSON.stringify({ messages, agentId })}\n\n`);
-    } catch (_) {}
+    try { emitMessages(); } catch (_) {}
   });
 
   req.on('close', cleanup);
+  res.on('close', cleanup);
   res.on('error', cleanup);
 });
 
