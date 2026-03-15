@@ -713,6 +713,25 @@ function renderMessages(messages) {
             ${MSG_ICON_TOOL}
             <div class="msg-body"><div class="msg-text">${escapeHtml(m.tool)}${toolDetail}${agentLink}</div><div class="msg-time">${formatDate(m.timestamp)}</div></div>${agentLogBtn}${pinBtn}
           </div>`;
+      } else if (m.type === 'teammate') {
+        const nameSpan = `<span class="teammate-name" style="${m.color ? `color:${escapeHtml(m.color)}` : ''}">${escapeHtml(m.teammateId || 'teammate')}</span>`;
+        if (m.isIdle) {
+          return `<div class="msg-item msg-teammate msg-idle" ${clickable}>
+              ${MSG_ICON_IDLE}
+              <div class="msg-body"><div class="msg-text">${nameSpan} <span class="idle-label">${escapeHtml(m.protocolLabel || 'idle')}</span></div><div class="msg-time">${formatDate(m.timestamp)}</div></div>
+            </div>`;
+        }
+        if (m.isProtocol) {
+          return `<div class="msg-item msg-teammate msg-protocol" ${clickable}>
+              ${MSG_ICON_TEAMMATE}
+              <div class="msg-body"><div class="msg-text">${nameSpan} <span class="protocol-label">${escapeHtml(m.protocolLabel || m.protocolType)}</span></div><div class="msg-time">${formatDate(m.timestamp)}</div></div>
+            </div>`;
+        }
+        const summaryText = m.summary ? escapeHtml(m.summary) : escapeHtml((m.text || '').slice(0, 80));
+        return `<div class="msg-item msg-teammate" ${clickable}>
+            ${MSG_ICON_TEAMMATE}
+            <div class="msg-body"><div class="msg-text">${nameSpan} ${summaryText}</div><div class="msg-time">${formatDate(m.timestamp)}</div></div>${pinBtn}
+          </div>`;
       }
       return '';
     })
@@ -736,6 +755,10 @@ const MSG_ICON_TOOL =
   '<svg class="msg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>';
 const MSG_ICON_SYSTEM =
   '<svg class="msg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>';
+const MSG_ICON_TEAMMATE =
+  '<svg class="msg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>';
+const MSG_ICON_IDLE =
+  '<svg class="msg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6"/></svg>';
 const AGENT_LOG_ICON =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>';
 function agentLogButton(agentId) {
@@ -977,6 +1000,15 @@ function showMsgDetail(idx) {
       mainHtml = '<em>No details</em>';
     }
     body.innerHTML = mainHtml + toolParamsHtml + (hasAgentTabs ? '' : toolResultHtml) + agentExtraHtml;
+  } else if (m.type === 'teammate') {
+    document.getElementById('msg-detail-title').textContent = m.teammateId || 'Teammate';
+    document.getElementById('msg-detail-agent-btn').style.display = 'none';
+    if (m.isProtocol) {
+      body.innerHTML = `<div class="teammate-idle-detail"><span class="protocol-label">${escapeHtml(m.protocolLabel || m.protocolType)}</span></div>`;
+    } else {
+      const text = stripAnsi(m.fullText || m.text || '');
+      body.innerHTML = renderMarkdown(text);
+    }
   } else {
     const text = stripAnsi(m.fullText || m.text);
     document.getElementById('msg-detail-title').textContent =

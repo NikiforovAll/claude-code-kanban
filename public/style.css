@@ -2115,6 +2115,36 @@ body::before {
   padding: 0;
   font-size: 11px;
 }
+.msg-item.msg-teammate {
+  border-left: 3px solid var(--team);
+}
+.msg-item.msg-protocol {
+  border-left: 3px solid var(--border);
+  opacity: 0.7;
+}
+.msg-item.msg-idle {
+  border-left: 3px solid var(--border);
+  opacity: 0.55;
+}
+.msg-item.msg-idle .msg-icon {
+  width: 12px;
+  height: 12px;
+}
+.teammate-name {
+  font-weight: 600;
+  font-size: 11px;
+}
+.idle-label,
+.protocol-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+.teammate-idle-detail {
+  padding: 12px;
+  text-align: center;
+  color: var(--text-muted);
+}
 .msg-time {
   font-size: 10px;
   color: var(--text-muted);
