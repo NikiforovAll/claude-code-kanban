@@ -99,7 +99,6 @@ function checkAgentStatus(agentDir, stale, logMtime) {
         const agent = JSON.parse(readFileSync(path.join(agentDir, file), 'utf8'));
         if (isAgentFresh(agent)) {
           if (agent.status === 'active') { result.hasActive = true; result.hasRunning = true; }
-          else if (agent.status === 'idle') { result.hasActive = true; }
         }
         if (result.hasRunning && result.hasActive) break;
       } catch (e) { /* skip invalid */ }
@@ -455,7 +454,7 @@ app.get('/api/sessions', async (req, res) => {
             jsonlPath: meta.jsonlPath || null,
             tasksDir: sessionPath,
             projectDir: meta.jsonlPath ? path.dirname(meta.jsonlPath) : null,
-            contextStatus: contextStatusCache.get(entry.name) || null,
+            contextStatus: contextStatusCache.get(entry.name) || (meta.teamLeaderId ? contextStatusCache.get(meta.teamLeaderId) : null) || null,
             ...planInfo
           });
         }
@@ -501,7 +500,7 @@ app.get('/api/sessions', async (req, res) => {
           jsonlPath: meta.jsonlPath || null,
           tasksDir: null,
           projectDir: meta.jsonlPath ? path.dirname(meta.jsonlPath) : null,
-          contextStatus: contextStatusCache.get(sessionId) || null,
+          contextStatus: contextStatusCache.get(sessionId) || (meta.teamLeaderId ? contextStatusCache.get(meta.teamLeaderId) : null) || null,
           ...planInfo
         });
       }
@@ -583,7 +582,8 @@ app.get('/api/sessions', async (req, res) => {
     for (const pid of pinnedIds) {
       const s = sessionsMap.get(pid);
       if (s && !s.contextStatus) {
-        s.contextStatus = contextStatusCache.get(pid) || null;
+        const meta = metadata[pid];
+        s.contextStatus = contextStatusCache.get(pid) || (meta?.teamLeaderId ? contextStatusCache.get(meta.teamLeaderId) : null) || null;
       }
     }
 
@@ -617,7 +617,7 @@ app.get('/api/sessions', async (req, res) => {
         jsonlPath: meta.jsonlPath || null,
         tasksDir: null,
         projectDir: meta.jsonlPath ? path.dirname(meta.jsonlPath) : null,
-        contextStatus: contextStatusCache.get(pid) || null,
+        contextStatus: contextStatusCache.get(pid) || (meta.teamLeaderId ? contextStatusCache.get(meta.teamLeaderId) : null) || null,
         ...getPlanInfo(meta.slug)
       });
     }

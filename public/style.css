@@ -831,32 +831,18 @@ body::before {
   display: flex;
   align-items: center;
   gap: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .view-meta {
   font-size: 12px;
   color: var(--text-tertiary);
   margin-top: 4px;
-}
-
-.latest-message {
-  flex: 1;
-  font-size: 11px;
-  color: var(--text-secondary);
-  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  text-align: right;
-  padding: 0 16px;
-  min-width: 0;
-  display: none;
-}
-.latest-message.visible {
-  display: block;
-}
-.latest-message .lm-label {
-  color: var(--accent);
-  font-weight: 500;
+  white-space: nowrap;
 }
 
 .view-actions {
@@ -1680,6 +1666,23 @@ body::before {
   margin-top: 4px;
 }
 
+#team-modal .modal {
+  max-width: 860px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+#team-modal .modal-body,
+#agent-modal .modal-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  min-height: 0;
+  padding-right: 8px;
+}
+#team-modal .modal-footer {
+  flex-shrink: 0;
+}
+
 .team-modal-desc {
   font-size: 12px;
   color: var(--text-secondary);
@@ -2473,8 +2476,10 @@ body.light .msg-assistant .msg-text {
   border-radius: 12px;
   width: 90%;
   max-width: 500px;
+  max-height: 90vh;
   padding: 24px;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
 }
 
 .modal.fullscreen {
@@ -2550,6 +2555,8 @@ body.light .msg-assistant .msg-text {
 
 .modal-body {
   margin-bottom: 0;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .form-group {

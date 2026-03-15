@@ -19,7 +19,6 @@ let currentWaiting = null;
 let lastAgentsHash = '';
 let messagePanelOpen = false;
 let lastMessagesHash = '';
-let lastInlineMessage = '';
 let currentMessages = [];
 let agentDurationInterval = null;
 let selectedTaskId = null;
@@ -435,8 +434,6 @@ async function fetchTasks(sessionId) {
     currentPins = loadPins(sessionId);
     ownerFilter = '';
     lastMessagesHash = '';
-    lastInlineMessage = '';
-    document.getElementById('latest-message').classList.remove('visible');
     sessionJustSelected = true;
     updateUrl();
     renderSession();
@@ -577,7 +574,6 @@ async function fetchMessages(sessionId) {
       }
     }
     if (agentEnriched) renderAgentFooter();
-    updateLatestMessage(data.messages);
     if (agentLogMode) return;
     currentMessages = data.messages;
     if (messagePanelOpen) renderMessages(data.messages);
@@ -607,33 +603,6 @@ function cleanMessageText(text) {
     .replace(/\n/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
-}
-
-function updateLatestMessage(messages) {
-  const el = document.getElementById('latest-message');
-  let last = null;
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].type === 'assistant' || (messages[i].type === 'user' && !messages[i].systemLabel)) {
-      last = messages[i];
-      break;
-    }
-  }
-  if (!last) {
-    el.classList.remove('visible');
-    lastInlineMessage = '';
-    return;
-  }
-  const label = last.type === 'assistant' ? 'Claude' : 'User';
-  const cleaned = cleanMessageText(last.text);
-  const text = cleaned.length > 120 ? `${cleaned.slice(0, 120)}...` : cleaned;
-  const labelCls = last.type === 'assistant' ? 'lm-label lm-label-assistant' : 'lm-label';
-  const html = `<span class="${labelCls}">${escapeHtml(label)}:</span> ${escapeHtml(text)}`;
-  el.innerHTML = html;
-  el.classList.add('visible');
-  if (lastInlineMessage !== html) {
-    lastInlineMessage = html;
-    renderSessions();
-  }
 }
 
 function renderMsgPinBtn(m, i) {
@@ -1828,7 +1797,7 @@ function renderSession() {
   if (projectName) {
     metaParts.push(projectName);
   }
-  if (session.description && session.gitBranch) {
+  if (session.description && session.description !== displayName) {
     metaParts.push(session.description);
   }
   metaParts.push(formatDate(session.modifiedAt));

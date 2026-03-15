@@ -144,7 +144,6 @@
             <h1 id="session-title" class="view-title">Session</h1>
             <p id="session-meta" class="view-meta"></p>
           </div>
-          <div id="latest-message" class="latest-message"></div>
           <div class="view-actions">
             <div class="view-progress">
               <div class="progress-bar">
@@ -462,7 +461,7 @@
 
   <!-- Team Info Modal -->
   <div id="team-modal" class="modal-overlay" onclick="closeTeamModal()">
-    <div class="modal" onclick="event.stopPropagation()" style="max-width: 640px; max-height: 80vh; display: flex; flex-direction: column;">
+    <div class="modal" onclick="event.stopPropagation()">
       <div class="modal-header">
         <h3 id="team-modal-title" class="modal-title">Team</h3>
         <button class="modal-close" aria-label="Close dialog" onclick="closeTeamModal()">
@@ -471,7 +470,7 @@
           </svg>
         </button>
       </div>
-      <div id="team-modal-body" class="modal-body" style="overflow-y: auto; flex: 0 1 auto; min-height: 0;"></div>
+      <div id="team-modal-body" class="modal-body"></div>
       <div class="modal-footer">
         <button class="btn btn-primary" onclick="closeTeamModal()">Close</button>
       </div>
