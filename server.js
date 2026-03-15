@@ -76,6 +76,7 @@ function checkWaitingForUser(agentDir, logMtime) {
 
 function isAgentFresh(agent) {
   if (!agent.updatedAt) return true;
+  if (agent.startedAt === agent.updatedAt && !agent.lastMessage) return false;
   return (Date.now() - new Date(agent.updatedAt).getTime()) < AGENT_TTL_MS;
 }
 
@@ -201,7 +202,8 @@ function getTaskCounts(sessionPath) {
     } catch (e) { /* skip invalid */ }
   }
 
-  const result = { taskCount: taskFiles.length, completed, inProgress, pending, newestTaskMtime };
+  const taskCount = completed + inProgress + pending;
+  const result = { taskCount, completed, inProgress, pending, newestTaskMtime };
   taskCountsCache.set(sessionPath, result);
   return result;
 }
@@ -788,6 +790,7 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
     for (const file of files) {
       try {
         const agent = JSON.parse(readFileSync(path.join(agentDir, file), 'utf8'));
+        if (agent.startedAt === agent.updatedAt && !agent.lastMessage) continue;
         const agentStale = !sessionStale && agent.updatedAt && (Date.now() - new Date(agent.updatedAt).getTime()) > AGENT_STALE_MS;
         if (!isAgentFresh(agent) || sessionStale || agentStale) {
           if (agent.status === 'active' || agent.status === 'idle') {
