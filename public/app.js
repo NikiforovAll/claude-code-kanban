@@ -2666,10 +2666,12 @@ document.getElementById('close-detail').onclick = closeDetailPanel;
 
 //#region SCRATCHPAD
 let _scratchpadSaveTimer = null;
+const _scratchpadModal = document.getElementById('scratchpad-modal');
+const _scratchpadTextarea = document.getElementById('scratchpad-textarea');
+const _scratchpadCharcount = document.getElementById('scratchpad-charcount');
 
 function toggleScratchpad() {
-  const modal = document.getElementById('scratchpad-modal');
-  if (modal.classList.contains('visible')) {
+  if (_scratchpadModal.classList.contains('visible')) {
     closeScratchpad();
   } else {
     showScratchpad();
@@ -2678,24 +2680,10 @@ function toggleScratchpad() {
 
 function showScratchpad() {
   if (!currentSessionId) return;
-  const modal = document.getElementById('scratchpad-modal');
-  const textarea = document.getElementById('scratchpad-textarea');
-  const charcount = document.getElementById('scratchpad-charcount');
-
-  textarea.value = localStorage.getItem(`scratchpad-${currentSessionId}`) || '';
-  charcount.textContent = `${textarea.value.length} chars`;
-
-  modal.classList.add('visible');
-  textarea.focus();
-
-  const keyHandler = (e) => {
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      closeScratchpad();
-      document.removeEventListener('keydown', keyHandler);
-    }
-  };
-  document.addEventListener('keydown', keyHandler);
+  _scratchpadTextarea.value = localStorage.getItem(`scratchpad-${currentSessionId}`) || '';
+  _scratchpadCharcount.textContent = `${_scratchpadTextarea.value.length} chars`;
+  _scratchpadModal.classList.add('visible');
+  _scratchpadTextarea.focus();
 }
 
 function closeScratchpad() {
@@ -2704,25 +2692,23 @@ function closeScratchpad() {
     _scratchpadSaveTimer = null;
   }
   saveScratchpad();
-  document.getElementById('scratchpad-modal').classList.remove('visible');
+  _scratchpadModal.classList.remove('visible');
 }
 
 function saveScratchpad() {
   if (!currentSessionId) return;
-  const textarea = document.getElementById('scratchpad-textarea');
-  localStorage.setItem(`scratchpad-${currentSessionId}`, textarea.value);
+  localStorage.setItem(`scratchpad-${currentSessionId}`, _scratchpadTextarea.value);
 }
 
-document.getElementById('scratchpad-textarea').addEventListener('input', () => {
-  const textarea = document.getElementById('scratchpad-textarea');
-  document.getElementById('scratchpad-charcount').textContent = `${textarea.value.length} chars`;
-
+_scratchpadTextarea.addEventListener('input', () => {
+  _scratchpadCharcount.textContent = `${_scratchpadTextarea.value.length} chars`;
   if (_scratchpadSaveTimer) clearTimeout(_scratchpadSaveTimer);
   _scratchpadSaveTimer = setTimeout(() => {
     saveScratchpad();
     _scratchpadSaveTimer = null;
   }, 500);
 });
+
 //#endregion
 
 //#region KEYBOARD_SHORTCUTS
@@ -2739,6 +2725,10 @@ document.addEventListener('keydown', (e) => {
   // Modal guard — only Escape, Shift+M, and msg-detail J/K navigation pass through
   if (document.querySelector('.modal-overlay.visible')) {
     if (e.key === 'Escape') {
+      if (_scratchpadModal.classList.contains('visible')) {
+        closeScratchpad();
+        return;
+      }
       // biome-ignore lint/suspicious/useIterableCallbackReturn: forEach side-effect
       document.querySelectorAll('.modal-overlay.visible').forEach((m) => m.classList.remove('visible'));
       msgDetailFollowLatest = false;

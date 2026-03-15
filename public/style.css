@@ -2693,6 +2693,48 @@ select.form-input option:checked {
 
 /* #endregion */
 
+/* #region SCRATCHPAD */
+.scratchpad-modal {
+  width: 90%;
+  max-width: 600px;
+}
+
+.scratchpad-textarea {
+  width: 100%;
+  min-height: 200px;
+  max-height: 50vh;
+  resize: vertical;
+  padding: 12px;
+  font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.scratchpad-textarea:focus {
+  border-color: var(--accent);
+}
+
+.scratchpad-textarea::placeholder {
+  color: var(--text-muted);
+}
+
+.scratchpad-footer {
+  justify-content: space-between;
+}
+
+.scratchpad-charcount {
+  font-size: 12px;
+  color: var(--text-muted);
+  align-self: center;
+}
+/* #endregion */
+
 /* #region A11Y */
 .skip-link {
   position: absolute;

@@ -65,6 +65,7 @@ When modifying a feature, open **both** the JS region and the matching CSS regio
 | TASK_DETAIL | `showTaskDetail()`, inline editing (title, description), notes, blocked-by |
 | DELETE_TASK | Single task delete with confirmation modal |
 | HELP | Help modal with keyboard shortcut reference |
+| SCRATCHPAD | Scratchpad modal: toggle, save, auto-save, per-session localStorage |
 | KEYBOARD_SHORTCUTS | `matchKey()`, global `keydown` handler, all hotkeys |
 | SSE | `setupEventSource()`, reconnect, debounced refresh |
 | CONTEXT_WINDOW | Model thresholds, token bar, cost color, context detail panel |
@@ -106,6 +107,7 @@ When modifying a feature, open **both** the JS region and the matching CSS regio
 | INTERACTIVE | Delete hover, column header buttons |
 | SEARCH | Search input, clear button |
 | MODAL | Overlay, dialog, buttons, toast |
+| SCRATCHPAD | Scratchpad modal textarea and footer styles |
 | A11Y | Skip-link, visually-hidden |
 | MEDIA_QUERIES | `prefers-color-scheme` auto-detection |
 | ANIMATIONS | Card fade-in, connection breathing, progress shimmer |
