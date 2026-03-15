@@ -525,6 +525,12 @@ describe('Parser: buildAgentProgressMap', () => {
     assert.equal(map['tu_bg_agent_01'].prompt, null);
   });
 
+  it('maps teammate_spawned tool_result to agentId', () => {
+    const map = buildAgentProgressMap(jsonlPath);
+    assert.equal(map['tu_team_agent_01'].agentId, 'reviewer@my-team');
+    assert.equal(map['tu_team_agent_01'].prompt, null);
+  });
+
   it('returns empty map for non-existent file', () => {
     const map = buildAgentProgressMap('/nonexistent/path.jsonl');
     assert.deepEqual(map, {});

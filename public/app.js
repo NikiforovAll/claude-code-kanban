@@ -109,10 +109,10 @@ async function fetchSessions() {
   console.log('[fetchSessions] Starting...');
   try {
     const pinnedParam = pinnedSessionIds.size > 0 ? `&pinned=${[...pinnedSessionIds].join(',')}` : '';
-    const res = await fetch(`/api/sessions?limit=${sessionLimit}${pinnedParam}`);
-    const newSessions = await res.json();
-    const tasksRes = await fetch('/api/tasks/all');
-    const newTasks = await tasksRes.json();
+    const [newSessions, newTasks] = await Promise.all([
+      fetch(`/api/sessions?limit=${sessionLimit}${pinnedParam}`).then((r) => r.json()),
+      fetch('/api/tasks/all').then((r) => r.json()),
+    ]);
 
     const sessionsHash = JSON.stringify(newSessions);
     const tasksHash = JSON.stringify(newTasks);
@@ -475,7 +475,9 @@ async function fetchAgents(sessionId) {
     lastAgentsHash = hash;
     currentAgents = agents;
     updateTeamColors(agents, data.teamColors);
+    for (const k of Object.keys(ownerColorCache)) delete ownerColorCache[k];
     renderAgentFooter();
+    if (currentSessionId === sessionId) renderKanban();
   } catch (e) {
     console.error('[fetchAgents]', e);
   }
@@ -3104,9 +3106,12 @@ function setupEventSource() {
     function debouncedRefresh(sessionId, isMetadata) {
       if (isMetadata) {
         clearTimeout(metadataRefreshTimer);
-        metadataRefreshTimer = setTimeout(() => {
+        metadataRefreshTimer = setTimeout(async () => {
           fetchSessions().catch((err) => console.error('[SSE] fetchSessions failed:', err));
-          if (currentSessionId && !agentLogMode) fetchMessages(currentSessionId);
+          if (currentSessionId) {
+            await fetchAgents(currentSessionId);
+            if (!agentLogMode) fetchMessages(currentSessionId);
+          }
         }, 2000);
       } else {
         pendingTaskSessionIds.add(sessionId);
