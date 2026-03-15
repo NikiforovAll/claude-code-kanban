@@ -3638,7 +3638,8 @@ function showInfoModal(session, teamConfig, tasks, planContent) {
     } else {
       html += `<span style="${plainStyle}" title="${copyVal}">${escapeHtml(value)}</span>`;
     }
-    html += `<button onclick="navigator.clipboard.writeText('${copyVal.replace(/'/g, "\\'")}'); this.textContent='✓'; setTimeout(() => this.textContent='Copy', 1000)" style="padding: 2px 8px; font-size: 11px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 4px; color: var(--text-secondary); cursor: pointer; white-space: nowrap;">Copy</button>`;
+    const jsCopyVal = copyVal.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    html += `<button onclick="navigator.clipboard.writeText('${jsCopyVal}'); this.textContent='✓'; setTimeout(() => this.textContent='Copy', 1000)" style="padding: 2px 8px; font-size: 11px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 4px; color: var(--text-secondary); cursor: pointer; white-space: nowrap;">Copy</button>`;
   });
   html += `</div>`;
 
