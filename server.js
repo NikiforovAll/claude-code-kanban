@@ -74,9 +74,14 @@ function checkWaitingForUser(agentDir, logMtime) {
   return null;
 }
 
+function isGhostAgent(agent) {
+  if (agent.startedAt !== agent.updatedAt || agent.lastMessage) return false;
+  return (Date.now() - new Date(agent.startedAt).getTime()) >= AGENT_STALE_MS;
+}
+
 function isAgentFresh(agent) {
   if (!agent.updatedAt) return true;
-  if (agent.startedAt === agent.updatedAt && !agent.lastMessage) return false;
+  if (isGhostAgent(agent)) return false;
   return (Date.now() - new Date(agent.updatedAt).getTime()) < AGENT_TTL_MS;
 }
 
@@ -790,7 +795,7 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
     for (const file of files) {
       try {
         const agent = JSON.parse(readFileSync(path.join(agentDir, file), 'utf8'));
-        if (agent.startedAt === agent.updatedAt && !agent.lastMessage) continue;
+        if (isGhostAgent(agent)) continue;
         const agentStale = !sessionStale && agent.updatedAt && (Date.now() - new Date(agent.updatedAt).getTime()) > AGENT_STALE_MS;
         if (!isAgentFresh(agent) || sessionStale || agentStale) {
           if (agent.status === 'active' || agent.status === 'idle') {
