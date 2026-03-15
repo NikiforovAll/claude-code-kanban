@@ -436,8 +436,8 @@ async function fetchTasks(sessionId) {
     currentPins = loadPins(sessionId);
     ownerFilter = '';
     lastMessagesHash = '';
-    Object.keys(ownerColorCache).forEach((k) => delete ownerColorCache[k]);
-    Object.keys(teamColorMap).forEach((k) => delete teamColorMap[k]);
+    for (const k of Object.keys(ownerColorCache)) delete ownerColorCache[k];
+    for (const k of Object.keys(teamColorMap)) delete teamColorMap[k];
     sessionJustSelected = true;
     updateUrl();
     renderSession();
@@ -1200,7 +1200,7 @@ function renderTaskResult(toolResult) {
     }
     html += '</div>';
   }
-  return html + '</div>';
+  return `${html}</div>`;
 }
 
 function renderToolParamsHtml(params) {
