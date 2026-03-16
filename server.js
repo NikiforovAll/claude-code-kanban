@@ -1199,7 +1199,8 @@ app.post('/api/tasks/:sessionId/:taskId/note', async (req, res) => {
       return res.status(400).json({ error: 'Note cannot be empty' });
     }
 
-    const taskPath = path.join(TASKS_DIR, sessionId, `${taskId}.json`);
+    const sessionDir = getCustomTaskDir(sessionId) || path.join(TASKS_DIR, sessionId);
+    const taskPath = path.join(sessionDir, `${taskId}.json`);
 
     if (!existsSync(taskPath)) {
       return res.status(404).json({ error: 'Task not found' });
@@ -1228,7 +1229,8 @@ app.put('/api/tasks/:sessionId/:taskId', async (req, res) => {
     const { sessionId, taskId } = req.params;
     const { subject, description } = req.body;
 
-    const taskPath = path.join(TASKS_DIR, sessionId, `${taskId}.json`);
+    const sessionDir = getCustomTaskDir(sessionId) || path.join(TASKS_DIR, sessionId);
+    const taskPath = path.join(sessionDir, `${taskId}.json`);
 
     if (!existsSync(taskPath)) {
       return res.status(404).json({ error: 'Task not found' });
@@ -1253,14 +1255,14 @@ app.put('/api/tasks/:sessionId/:taskId', async (req, res) => {
 app.delete('/api/tasks/:sessionId/:taskId', async (req, res) => {
   try {
     const { sessionId, taskId } = req.params;
-    const taskPath = path.join(TASKS_DIR, sessionId, `${taskId}.json`);
+    const sessionPath = getCustomTaskDir(sessionId) || path.join(TASKS_DIR, sessionId);
+    const taskPath = path.join(sessionPath, `${taskId}.json`);
 
     if (!existsSync(taskPath)) {
       return res.status(404).json({ error: 'Task not found' });
     }
 
     // Check if this task blocks other tasks
-    const sessionPath = path.join(TASKS_DIR, sessionId);
     const taskFiles = readdirSync(sessionPath).filter(f => f.endsWith('.json'));
 
     for (const file of taskFiles) {
