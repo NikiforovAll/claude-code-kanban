@@ -787,7 +787,11 @@ app.get('/api/projects/:encodedPath/tasks', (req, res) => {
         try {
           const task = JSON.parse(readFileSync(path.join(dir, file), 'utf8'));
           const key = `${dir}:${task.id}`;
-          if (!seenKeys.has(key)) { seenKeys.add(key); tasks.push(task); }
+          if (!seenKeys.has(key)) {
+            seenKeys.add(key);
+            task._taskDir = path.basename(dir);
+            tasks.push(task);
+          }
         } catch (_) {}
       }
     }

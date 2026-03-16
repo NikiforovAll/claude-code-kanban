@@ -488,13 +488,16 @@ body::before {
   display: block;
   width: 100%;
   padding: 12px 14px;
-  margin-bottom: 2px;
+  margin-bottom: 4px;
   background: transparent;
   border: 1px solid transparent;
   border-radius: 8px;
   text-align: left;
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.12),
+    0 1px 2px rgba(0, 0, 0, 0.08);
 }
 
 .session-item:hover {

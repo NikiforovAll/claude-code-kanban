@@ -502,31 +502,34 @@ async function fetchProjectView(projectPath) {
   if (msgContent) msgContent.innerHTML = '';
   const msgPinned = document.getElementById('message-panel-pinned');
   if (msgPinned) msgPinned.innerHTML = '';
-  currentProjectSessionIds = sessions.filter((s) => s.project === projectPath).map((s) => s.id);
+  const projectSessions = sessions.filter((s) => s.project === projectPath);
+  currentProjectSessionIds = projectSessions.map((s) => s.id);
+  const activeSessionIds = projectSessions.filter(isSessionActive).map((s) => s.id);
 
-  try {
-    const encoded = btoa(projectPath);
-    const res = await fetch(`/api/projects/${encodeURIComponent(encoded)}/tasks`);
-    currentTasks = await res.json();
-  } catch (e) {
-    console.error('[fetchProjectView] tasks:', e);
-    currentTasks = [];
-  }
-
-  const agentResults = await Promise.all(
-    currentProjectSessionIds.map((id) =>
-      fetch(`/api/sessions/${id}/agents`)
-        .then((r) => r.json())
-        .catch(() => ({ agents: [] })),
+  const encoded = btoa(projectPath);
+  const [tasksResult, agentResults] = await Promise.all([
+    fetch(`/api/projects/${encodeURIComponent(encoded)}/tasks`)
+      .then((r) => r.json())
+      .catch((e) => {
+        console.error('[fetchProjectView] tasks:', e);
+        return [];
+      }),
+    Promise.all(
+      activeSessionIds.map((id) =>
+        fetch(`/api/sessions/${id}/agents`)
+          .then((r) => r.json())
+          .catch(() => ({ agents: [] })),
+      ),
     ),
-  );
+  ]);
+  currentTasks = tasksResult;
   const seen = new Set();
   currentAgents = [];
   const mergedColors = {};
   let mergedWaiting = null;
   for (let i = 0; i < agentResults.length; i++) {
     const r = agentResults[i];
-    const sid = currentProjectSessionIds[i];
+    const sid = activeSessionIds[i];
     const agents = r.agents || (Array.isArray(r) ? r : []);
     for (const a of agents) {
       if (a.agentId && !seen.has(a.agentId)) {
@@ -545,6 +548,38 @@ async function fetchProjectView(projectPath) {
   renderAgentFooter();
   renderKanban();
   updateUrl();
+}
+
+async function refreshProjectAgents() {
+  if (!currentProjectPath) return;
+  const projectSessions = sessions.filter((s) => s.project === currentProjectPath);
+  const activeSessionIds = projectSessions.filter(isSessionActive).map((s) => s.id);
+  const agentResults = await Promise.all(
+    activeSessionIds.map((id) =>
+      fetch(`/api/sessions/${id}/agents`)
+        .then((r) => r.json())
+        .catch(() => ({ agents: [] })),
+    ),
+  );
+  const seen = new Set();
+  currentAgents = [];
+  let mergedWaiting = null;
+  for (let i = 0; i < agentResults.length; i++) {
+    const r = agentResults[i];
+    const sid = activeSessionIds[i];
+    const agents = r.agents || (Array.isArray(r) ? r : []);
+    for (const a of agents) {
+      if (a.agentId && !seen.has(a.agentId)) {
+        seen.add(a.agentId);
+        a._sourceSessionId = sid;
+        currentAgents.push(a);
+      }
+    }
+    if (r.teamColors) Object.assign(teamColorMap, r.teamColors);
+    if (r.waitingForUser && !mergedWaiting) mergedWaiting = r.waitingForUser;
+  }
+  currentWaiting = mergedWaiting;
+  renderAgentFooter();
 }
 
 //#endregion
@@ -2067,10 +2102,11 @@ function renderProjectView() {
 
 function renderTaskCard(task) {
   const isBlocked = task.blockedBy && task.blockedBy.length > 0;
-  const taskId = viewMode === 'all' ? `${task.sessionId?.slice(0, 4)}-${task.id}` : task.id;
+  const useSlug = viewMode === 'all' || viewMode === 'project';
+  const taskId = useSlug ? `${(task._taskDir || task.sessionId || '')?.slice(0, 4)}-${task.id}` : task.id;
   const sessionLabel = viewMode === 'all' && task.sessionName ? task.sessionName : null;
   const statusClass = task.status.replace('_', '-');
-  const actualSessionId = task.sessionId || currentSessionId || '';
+  const actualSessionId = task._taskDir || task.sessionId || currentSessionId || '';
 
   return `
         <div
@@ -2161,10 +2197,6 @@ function renderKanban() {
 //#region DRAG_DROP
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
 function onCardDragStart(e) {
-  if (viewMode === 'project') {
-    e.preventDefault();
-    return;
-  }
   const card = e.target.closest('.task-card');
   if (!card) return;
   card.classList.add('dragging');
@@ -2212,7 +2244,9 @@ async function onColumnDrop(e) {
     return;
   }
   const { taskId, sessionId } = data;
-  const task = currentTasks.find((t) => t.id === taskId && (t.sessionId || currentSessionId) === sessionId);
+  const task = currentTasks.find(
+    (t) => t.id === taskId && (t._taskDir === sessionId || (t.sessionId || currentSessionId) === sessionId),
+  );
   if (!task || task.status === newStatus) return;
   try {
     const res = await fetch(`/api/tasks/${sessionId}/${taskId}`, {
@@ -2250,7 +2284,10 @@ function getSelectedCardInfo() {
   for (let ci = 0; ci < COLUMNS.length; ci++) {
     const cards = Array.from(COLUMNS[ci].el.querySelectorAll('.task-card'));
     for (let i = 0; i < cards.length; i++) {
-      if (cards[i].dataset.taskId === selectedTaskId) {
+      if (
+        cards[i].dataset.taskId === selectedTaskId &&
+        (!selectedSessionId || cards[i].dataset.sessionId === selectedSessionId)
+      ) {
         return { colIndex: ci, cardIndex: i, card: cards[i] };
       }
     }
@@ -2510,7 +2547,9 @@ function getAvailableTasksOptions(currentTaskId = null) {
 
 //#region TASK_DETAIL
 async function showTaskDetail(taskId, sessionId = null) {
-  let task = currentTasks.find((t) => t.id === taskId && (!sessionId || t.sessionId === sessionId));
+  let task = currentTasks.find(
+    (t) => t.id === taskId && (!sessionId || t.sessionId === sessionId || t._taskDir === sessionId),
+  );
 
   // If task not found in currentTasks, fetch it from the session
   if (!task && sessionId && sessionId !== 'undefined') {
@@ -2920,6 +2959,12 @@ const _scratchpadModal = document.getElementById('scratchpad-modal');
 const _scratchpadTextarea = document.getElementById('scratchpad-textarea');
 const _scratchpadCharcount = document.getElementById('scratchpad-charcount');
 
+function _scratchpadKey() {
+  if (currentSessionId) return `scratchpad-${currentSessionId}`;
+  if (currentProjectPath) return `scratchpad-project:${currentProjectPath}`;
+  return null;
+}
+
 function toggleScratchpad() {
   if (_scratchpadModal.classList.contains('visible')) {
     closeScratchpad();
@@ -2929,8 +2974,9 @@ function toggleScratchpad() {
 }
 
 function showScratchpad() {
-  if (!currentSessionId) return;
-  _scratchpadTextarea.value = localStorage.getItem(`scratchpad-${currentSessionId}`) || '';
+  const key = _scratchpadKey();
+  if (!key) return;
+  _scratchpadTextarea.value = localStorage.getItem(key) || '';
   _scratchpadCharcount.textContent = `${_scratchpadTextarea.value.length} chars`;
   _scratchpadModal.classList.add('visible');
   _scratchpadTextarea.focus();
@@ -2946,8 +2992,9 @@ function closeScratchpad() {
 }
 
 function saveScratchpad() {
-  if (!currentSessionId) return;
-  localStorage.setItem(`scratchpad-${currentSessionId}`, _scratchpadTextarea.value);
+  const key = _scratchpadKey();
+  if (!key) return;
+  localStorage.setItem(key, _scratchpadTextarea.value);
 }
 
 _scratchpadTextarea.addEventListener('input', () => {
@@ -3253,7 +3300,7 @@ function setupEventSource() {
       if (data.type === 'agent-update') {
         fetchSessions().catch((err) => console.error('[SSE] fetchSessions failed:', err));
         if (viewMode === 'project' && currentProjectSessionIds.includes(data.sessionId)) {
-          fetchProjectView(currentProjectPath);
+          refreshProjectAgents();
         } else if (currentSessionId && data.sessionId === currentSessionId) {
           fetchAgents(currentSessionId);
         }
@@ -3422,6 +3469,10 @@ function renderContextDetail(raw) {
 //#endregion
 
 //#region UTILS
+function isSessionActive(s) {
+  return s.hasRecentLog || s.inProgress > 0 || s.hasActiveAgents || s.hasWaitingForUser;
+}
+
 function formatDate(dateStr) {
   const date = new Date(dateStr);
   const now = new Date();
