@@ -756,6 +756,48 @@ app.get('/api/sessions/:sessionId', async (req, res) => {
   }
 });
 
+// API: Get combined tasks for a project (all sessions + shared task lists)
+app.get('/api/projects/:encodedPath/tasks', (req, res) => {
+  try {
+    const projectPath = Buffer.from(req.params.encodedPath, 'base64').toString('utf8');
+    const metadata = loadSessionMetadata();
+    const { sessionToList } = loadAllTaskMaps();
+
+    const projectSessionIds = Object.entries(metadata)
+      .filter(([, m]) => m.project === projectPath)
+      .map(([id]) => id);
+
+    const taskDirs = new Set();
+    for (const sid of projectSessionIds) {
+      const listName = sessionToList[sid];
+      if (listName) {
+        const dir = path.join(TASKS_DIR, listName);
+        if (existsSync(dir)) taskDirs.add(dir);
+      } else {
+        const dir = path.join(TASKS_DIR, sid);
+        if (existsSync(dir)) taskDirs.add(dir);
+      }
+    }
+
+    const tasks = [];
+    const seenKeys = new Set();
+    for (const dir of taskDirs) {
+      for (const file of readdirSync(dir).filter(f => f.endsWith('.json'))) {
+        try {
+          const task = JSON.parse(readFileSync(path.join(dir, file), 'utf8'));
+          const key = `${dir}:${task.id}`;
+          if (!seenKeys.has(key)) { seenKeys.add(key); tasks.push(task); }
+        } catch (_) {}
+      }
+    }
+    tasks.sort((a, b) => parseInt(a.id) - parseInt(b.id));
+    res.json(tasks);
+  } catch (error) {
+    console.error('Error getting project tasks:', error);
+    res.status(500).json({ error: 'Failed to get project tasks' });
+  }
+});
+
 // API: Get session plan
 app.get('/api/sessions/:sessionId/plan', async (req, res) => {
   try {

@@ -29,6 +29,8 @@ let selectedSessionKbId = null;
 let sessionJustSelected = false;
 let agentLogMode = null;
 let agentLogSSE = null;
+let currentProjectPath = null;
+let currentProjectSessionIds = [];
 
 function getUrlState() {
   const params = new URLSearchParams(window.location.search);
@@ -41,12 +43,14 @@ function getUrlState() {
     owner: params.get('owner'),
     search: params.get('search'),
     messages: params.get('messages') === '1',
+    projectView: params.get('projectView'),
   };
 }
 
 function updateUrl() {
   const params = new URLSearchParams();
   if (viewMode === 'all') params.set('view', 'all');
+  if (viewMode === 'project' && currentProjectPath) params.set('projectView', btoa(currentProjectPath));
   if (currentSessionId) params.set('session', currentSessionId);
   if (sessionFilter !== 'active') params.set('filter', sessionFilter);
   if (sessionLimit !== '20') params.set('limit', sessionLimit);
@@ -70,6 +74,8 @@ function resetState() {
   viewMode = 'all';
   if (agentLogMode) exitAgentLogMode();
   currentSessionId = null;
+  currentProjectPath = null;
+  currentProjectSessionIds = [];
   const searchInput = document.getElementById('search-input');
   if (searchInput) searchInput.value = '';
   document.getElementById('search-clear-btn')?.classList.remove('visible');
@@ -410,6 +416,7 @@ let lastCurrentTasksHash = '';
 async function fetchTasks(sessionId) {
   try {
     viewMode = 'session';
+    document.getElementById('message-toggle')?.style.removeProperty('display');
     const res = await fetch(`/api/sessions/${sessionId}`);
 
     let newTasks;
@@ -483,6 +490,63 @@ async function fetchAgents(sessionId) {
   }
 }
 
+async function fetchProjectView(projectPath) {
+  viewMode = 'project';
+  currentProjectPath = projectPath;
+  currentSessionId = null;
+  currentMessages = [];
+  lastMessagesHash = '';
+  if (messagePanelOpen) toggleMessagePanel();
+  document.getElementById('message-toggle')?.style.setProperty('display', 'none');
+  const msgContent = document.getElementById('message-panel-content');
+  if (msgContent) msgContent.innerHTML = '';
+  const msgPinned = document.getElementById('message-panel-pinned');
+  if (msgPinned) msgPinned.innerHTML = '';
+  currentProjectSessionIds = sessions.filter((s) => s.project === projectPath).map((s) => s.id);
+
+  try {
+    const encoded = btoa(projectPath);
+    const res = await fetch(`/api/projects/${encodeURIComponent(encoded)}/tasks`);
+    currentTasks = await res.json();
+  } catch (e) {
+    console.error('[fetchProjectView] tasks:', e);
+    currentTasks = [];
+  }
+
+  const agentResults = await Promise.all(
+    currentProjectSessionIds.map((id) =>
+      fetch(`/api/sessions/${id}/agents`)
+        .then((r) => r.json())
+        .catch(() => ({ agents: [] })),
+    ),
+  );
+  const seen = new Set();
+  currentAgents = [];
+  const mergedColors = {};
+  let mergedWaiting = null;
+  for (let i = 0; i < agentResults.length; i++) {
+    const r = agentResults[i];
+    const sid = currentProjectSessionIds[i];
+    const agents = r.agents || (Array.isArray(r) ? r : []);
+    for (const a of agents) {
+      if (a.agentId && !seen.has(a.agentId)) {
+        seen.add(a.agentId);
+        a._sourceSessionId = sid;
+        currentAgents.push(a);
+      }
+    }
+    if (r.teamColors) Object.assign(mergedColors, r.teamColors);
+    if (r.waitingForUser && !mergedWaiting) mergedWaiting = r.waitingForUser;
+  }
+  currentWaiting = mergedWaiting;
+  Object.assign(teamColorMap, mergedColors);
+
+  renderProjectView();
+  renderAgentFooter();
+  renderKanban();
+  updateUrl();
+}
+
 //#endregion
 
 //#region MESSAGE_PANEL
@@ -507,8 +571,10 @@ async function viewAgentLog(agentId) {
   }
   if (!agent) return;
   const shortId = agentId.length > 8 ? agentId.slice(0, 8) : agentId;
-  agentLogMode = { agentId, sessionId: currentSessionId, agentType: agent.type || 'unknown' };
+  const agentSessionId = agent._sourceSessionId || currentSessionId;
+  agentLogMode = { agentId, sessionId: agentSessionId, agentType: agent.type || 'unknown' };
   closeAgentModal();
+  document.getElementById('message-toggle')?.style.removeProperty('display');
   if (!messagePanelOpen) toggleMessagePanel();
   const header = document.querySelector('.message-panel-header h3');
   if (header) {
@@ -536,6 +602,11 @@ function exitAgentLogMode() {
   if (agentLogSSE) {
     agentLogSSE.close();
     agentLogSSE = null;
+  }
+  if (viewMode === 'project') {
+    if (messagePanelOpen) toggleMessagePanel();
+    document.getElementById('message-toggle')?.style.setProperty('display', 'none');
+    return;
   }
   const header = document.querySelector('.message-panel-header h3');
   if (header) header.textContent = 'Session Log';
@@ -1851,8 +1922,8 @@ function renderSessions() {
               <svg class="group-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
               <span class="group-name">${escapeHtml(folderName)}</span>
               <span class="group-count">${projectSessions.length}</span>
-              <span class="group-path-toggle" data-group-action="toggle-path" title="Show full path">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+              <span class="project-view-btn" data-project-path="${escapedPath}" title="Open project view — combined tasks from all sessions">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
               </span>
             </div>
             <div class="project-group-breadcrumb" data-full-path="${escapedPath}" title="Click to copy path">${breadcrumbHtml}</div>
@@ -1970,12 +2041,36 @@ function renderSession() {
   renderSessions();
 }
 
+function renderProjectView() {
+  noSession.style.display = 'none';
+  sessionView.classList.add('visible');
+
+  const folderName = currentProjectPath ? currentProjectPath.split(/[/\\]/).pop() : 'Project';
+  sessionTitle.textContent = folderName;
+
+  const metaParts = [`${currentProjectSessionIds.length} sessions`, `${currentTasks.length} tasks`];
+  if (currentProjectPath) metaParts.push(currentProjectPath);
+  sessionMeta.textContent = metaParts.join(' · ');
+
+  const completed = currentTasks.filter((t) => t.status === 'completed').length;
+  const percent = currentTasks.length > 0 ? Math.round((completed / currentTasks.length) * 100) : 0;
+
+  progressPercent.textContent = `${percent}%`;
+  progressBar.style.width = `${percent}%`;
+  const hasInProgress = currentTasks.some((t) => t.status === 'in_progress');
+  progressBar.classList.toggle('shimmer', hasInProgress && percent < 100);
+
+  updateOwnerFilter();
+  renderKanban();
+  renderSessions();
+}
+
 function renderTaskCard(task) {
   const isBlocked = task.blockedBy && task.blockedBy.length > 0;
   const taskId = viewMode === 'all' ? `${task.sessionId?.slice(0, 4)}-${task.id}` : task.id;
   const sessionLabel = viewMode === 'all' && task.sessionName ? task.sessionName : null;
   const statusClass = task.status.replace('_', '-');
-  const actualSessionId = task.sessionId || currentSessionId;
+  const actualSessionId = task.sessionId || currentSessionId || '';
 
   return `
         <div
@@ -2066,6 +2161,10 @@ function renderKanban() {
 //#region DRAG_DROP
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
 function onCardDragStart(e) {
+  if (viewMode === 'project') {
+    e.preventDefault();
+    return;
+  }
   const card = e.target.closest('.task-card');
   if (!card) return;
   card.classList.add('dragging');
@@ -2503,20 +2602,25 @@ async function showTaskDetail(taskId, sessionId = null) {
         </div>
       `;
 
-  // Setup button handlers
+  // Setup button handlers (read-only in project view)
   const deleteBtn = document.getElementById('delete-task-btn');
-  deleteBtn.style.display = '';
-  deleteBtn.onclick = () => deleteTask(task.id, actualSessionId);
+  const isProjectView = viewMode === 'project';
+  deleteBtn.style.display = isProjectView ? 'none' : '';
+  if (!isProjectView) deleteBtn.onclick = () => deleteTask(task.id, actualSessionId);
 
-  // Setup inline editing
-  const titleEl = detailContent.querySelector('.detail-title');
-  if (titleEl) {
-    titleEl.onclick = () => editTitle(titleEl, task, actualSessionId);
-  }
+  const noteSection = detailContent.querySelector('.note-section');
+  if (noteSection && isProjectView) noteSection.style.display = 'none';
 
-  const descEl = detailContent.querySelector('.detail-desc');
-  if (descEl) {
-    descEl.onclick = () => editDescription(descEl, task, actualSessionId);
+  if (!isProjectView) {
+    const titleEl = detailContent.querySelector('.detail-title');
+    if (titleEl) {
+      titleEl.onclick = () => editTitle(titleEl, task, actualSessionId);
+    }
+
+    const descEl = detailContent.querySelector('.detail-desc');
+    if (descEl) {
+      descEl.onclick = () => editDescription(descEl, task, actualSessionId);
+    }
   }
 }
 
@@ -3123,6 +3227,9 @@ function setupEventSource() {
             currentTasks = filterProject ? allTasksCache.filter((t) => matchesProjectFilter(t.project)) : allTasksCache;
             renderAllTasks();
             renderLiveUpdatesFromCache();
+          } else if (viewMode === 'project' && currentProjectPath) {
+            const hasUpdate = currentProjectSessionIds.some((id) => pendingTaskSessionIds.has(id));
+            if (hasUpdate) fetchProjectView(currentProjectPath);
           } else if (currentSessionId && pendingTaskSessionIds.has(currentSessionId)) {
             fetchTasks(currentSessionId);
           }
@@ -3145,7 +3252,9 @@ function setupEventSource() {
 
       if (data.type === 'agent-update') {
         fetchSessions().catch((err) => console.error('[SSE] fetchSessions failed:', err));
-        if (currentSessionId && data.sessionId === currentSessionId) {
+        if (viewMode === 'project' && currentProjectSessionIds.includes(data.sessionId)) {
+          fetchProjectView(currentProjectPath);
+        } else if (currentSessionId && data.sessionId === currentSessionId) {
           fetchAgents(currentSessionId);
         }
       }
@@ -3492,6 +3601,14 @@ document.addEventListener('click', (e) => {
     e.stopPropagation();
     const path = breadcrumb.dataset.fullPath;
     if (path) navigator.clipboard.writeText(path).catch(() => {});
+    return;
+  }
+
+  const projectBtn = e.target.closest('.project-view-btn');
+  if (projectBtn) {
+    e.stopPropagation();
+    const projectPath = projectBtn.dataset.projectPath;
+    if (projectPath) fetchProjectView(projectPath);
     return;
   }
 
@@ -4113,7 +4230,13 @@ if (urlState.search) {
 }
 
 fetchSessions().then(async () => {
-  if (urlState.session) {
+  if (urlState.projectView) {
+    try {
+      await fetchProjectView(atob(urlState.projectView));
+    } catch (_) {
+      showAllTasks();
+    }
+  } else if (urlState.session) {
     await fetchTasks(urlState.session);
   } else {
     showAllTasks();
@@ -4131,7 +4254,13 @@ window.addEventListener('popstate', () => {
   ownerFilter = s.owner || '';
   searchQuery = s.search || '';
   loadPreferences();
-  if (s.session) fetchTasks(s.session);
+  if (s.projectView) {
+    try {
+      fetchProjectView(atob(s.projectView));
+    } catch (_) {
+      showAllTasks();
+    }
+  } else if (s.session) fetchTasks(s.session);
   else showAllTasks();
   if (s.messages !== messagePanelOpen) toggleMessagePanel();
 });

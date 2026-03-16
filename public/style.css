@@ -3009,6 +3009,18 @@ select.form-input option:checked {
   white-space: nowrap;
 }
 
+.project-view-btn {
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  transition: color 0.15s;
+}
+
+.project-view-btn:hover {
+  color: var(--accent);
+}
+
 .project-group-header .group-count {
   font-weight: 400;
   color: var(--text-muted);
