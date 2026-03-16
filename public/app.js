@@ -1765,7 +1765,6 @@ function renderSessions() {
   let filteredSessions = sessions;
   if (sessionFilter === 'active') {
     const ACTIVE_PLAN_MS = 15 * 60 * 1000;
-    const RECENTLY_MODIFIED_MS = 5 * 60 * 1000;
     const now = Date.now();
     const activeSessionIds = new Set();
     filteredSessions = filteredSessions.filter((s) => {
@@ -1776,8 +1775,7 @@ function renderSessions() {
           s.hasActiveAgents ||
           s.hasWaitingForUser ||
           s.hasRecentLog ||
-          (s.hasPlan && !s.planImplementationSessionId && now - new Date(s.modifiedAt).getTime() <= ACTIVE_PLAN_MS) ||
-          now - new Date(s.modifiedAt).getTime() <= RECENTLY_MODIFIED_MS);
+          (s.hasPlan && !s.planImplementationSessionId && now - new Date(s.modifiedAt).getTime() <= ACTIVE_PLAN_MS));
       if (isActive) activeSessionIds.add(s.id);
       return isActive;
     });

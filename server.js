@@ -568,12 +568,27 @@ app.get('/api/sessions', async (req, res) => {
           } else {
             const meta = { ...(metadata[sessionId] || {}) };
             if (!meta.project && info.project) meta.project = info.project;
+            const logStat = getSessionLogStat(meta);
+            const logMtime = logStat.mtime;
+            const logAge = logMtime ? Date.now() - logMtime : Infinity;
+            const stale = logAge > AGENT_STALE_MS;
+            const agentDir = path.join(AGENT_ACTIVITY_DIR, sessionId);
+            const agentStatus = checkAgentStatus(agentDir, stale, logMtime, false);
+            let modifiedAt = counts.newestTaskMtime ? counts.newestTaskMtime.toISOString() : (info.updatedAt || new Date(0).toISOString());
+            if (logMtime) {
+              const jsonlMtime = new Date(logMtime).toISOString();
+              if (jsonlMtime > modifiedAt) modifiedAt = jsonlMtime;
+            }
             sessionsMap.set(sessionId, buildSessionObject(sessionId, meta, {
+              _logStat: logStat,
               taskCount: counts.taskCount,
               completed: counts.completed,
               inProgress: counts.inProgress,
               pending: counts.pending,
-              modifiedAt: counts.newestTaskMtime ? counts.newestTaskMtime.toISOString() : (info.updatedAt || new Date(0).toISOString()),
+              modifiedAt,
+              hasActiveAgents: agentStatus.hasActive,
+              hasRunningAgents: agentStatus.hasRunning,
+              hasWaitingForUser: !!agentStatus.waitingForUser,
               tasksDir: customTaskDir,
               sharedTaskList: taskListName,
             }));
