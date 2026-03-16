@@ -1,8 +1,9 @@
 //#region STATE
 let sessions = [];
 let currentSessionId = null;
+let currentProjectPath = null;
 let currentTasks = [];
-let viewMode = 'session';
+let viewMode = 'session'; // 'session' | 'all' | 'project'
 let sessionFilter = 'active';
 let sessionLimit = '20';
 let filterProject = '__recent__'; // null = all, '__recent__' = last 24h, or project path
@@ -444,6 +445,52 @@ async function fetchTasks(sessionId) {
     currentSessionId = sessionId;
     lastCurrentTasksHash = '';
     updateUrl();
+    renderSession();
+  }
+}
+
+// Project view: loads the shared task board and combined agents for a project
+// with a custom task list (CLAUDE_CODE_TASK_LIST_ID)
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+async function fetchProjectView(projectPath) {
+  try {
+    viewMode = 'project';
+    currentProjectPath = projectPath;
+
+    // Find the primary session for this project (for title/meta display)
+    const primarySession =
+      sessions.find((s) => s.customTaskListProject === projectPath) || sessions.find((s) => s.project === projectPath);
+    currentSessionId = primarySession?.id || null;
+
+    const encoded = encodeURIComponent(projectPath);
+    const [tasksRes, agentsRes] = await Promise.all([
+      fetch(`/api/projects/${encoded}/tasks`),
+      fetch(`/api/projects/${encoded}/agents`),
+    ]);
+
+    currentTasks = tasksRes.ok ? await tasksRes.json() : [];
+    const agentsData = agentsRes.ok ? await agentsRes.json() : { agents: [], waitingForUser: null };
+    currentAgents = agentsData.agents || [];
+    currentWaiting = agentsData.waitingForUser;
+
+    lastCurrentTasksHash = JSON.stringify(currentTasks);
+    ownerFilter = '';
+    lastMessagesHash = '';
+    lastInlineMessage = '';
+    document.getElementById('latest-message').classList.remove('visible');
+    currentPins = currentSessionId ? loadPins(currentSessionId) : {};
+
+    updateUrl();
+    renderSession();
+    renderAgentFooter();
+
+    // Also fetch messages from the primary session
+    if (currentSessionId) {
+      fetchMessages(currentSessionId);
+    }
+  } catch (error) {
+    console.error('Failed to fetch project view:', error);
+    currentTasks = [];
     renderSession();
   }
 }
@@ -1653,10 +1700,15 @@ function renderSessions() {
         .map((p, i) => (i < breadcrumbParts.length - 1 ? `${escapeHtml(p)}<span class="sep">/</span>` : escapeHtml(p)))
         .join('');
 
+      const hasCustomTaskList = projectSessions.some((s) => s.customTaskListProject);
+      const groupNameHtml = hasCustomTaskList
+        ? `<span class="group-name project-board-link" onclick="event.stopPropagation(); fetchProjectView('${escapedPath}')" title="Open project board">${escapeHtml(folderName)}</span>`
+        : `<span class="group-name">${escapeHtml(folderName)}</span>`;
+
       html += `
             <div class="project-group-header${isCollapsed ? ' collapsed' : ''}" data-group-path="${escapedPath}">
               <svg class="group-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-              <span class="group-name">${escapeHtml(folderName)}</span>
+              ${groupNameHtml}
               <span class="group-count">${projectSessions.length}</span>
               <span class="group-path-toggle" data-group-action="toggle-path" title="Show full path">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
@@ -1747,21 +1799,33 @@ function renderSession() {
   const session = sessions.find((s) => s.id === currentSessionId);
   if (!session) return;
 
-  const displayName =
-    session.customTitle || session.name || session.gitBranch || session.description || currentSessionId;
+  let displayName;
+  let metaParts;
+
+  if (viewMode === 'project' && currentProjectPath) {
+    // Project view: show project name as title
+    displayName = currentProjectPath.split('/').pop() || currentProjectPath;
+    metaParts = [`${currentTasks.length} tasks`, 'project board'];
+    const activeSessions = sessions.filter(
+      (s) => s.project === currentProjectPath && (s.hasActiveAgents || s.hasRunningAgents || s.hasRecentLog),
+    );
+    if (activeSessions.length > 0) {
+      metaParts.push(`${activeSessions.length} active session${activeSessions.length > 1 ? 's' : ''}`);
+    }
+  } else {
+    displayName = session.customTitle || session.name || session.gitBranch || session.description || currentSessionId;
+    const projectName = session.project ? session.project.split('/').pop() : null;
+    metaParts = [`${currentTasks.length} tasks`];
+    if (projectName) {
+      metaParts.push(projectName);
+    }
+    if (session.description && session.gitBranch) {
+      metaParts.push(session.description);
+    }
+    metaParts.push(formatDate(session.modifiedAt));
+  }
 
   sessionTitle.textContent = displayName;
-
-  // Build meta text with project path and description
-  const projectName = session.project ? session.project.split('/').pop() : null;
-  const metaParts = [`${currentTasks.length} tasks`];
-  if (projectName) {
-    metaParts.push(projectName);
-  }
-  if (session.description && session.gitBranch) {
-    metaParts.push(session.description);
-  }
-  metaParts.push(formatDate(session.modifiedAt));
   sessionMeta.textContent = metaParts.join(' · ');
 
   const completed = currentTasks.filter((t) => t.status === 'completed').length;
