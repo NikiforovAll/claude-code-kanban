@@ -17,6 +17,7 @@ const AGENT_ACTIVITY_DIR = path.join(CLAUDE_DIR, 'agent-activity');
 
 const HOOK_COMMAND = '~/.claude/hooks/agent-spy.sh';
 const HOOK_EVENTS = [
+  { event: 'SessionStart' },
   { event: 'SubagentStart' },
   { event: 'SubagentStop' },
   { event: 'TeammateIdle' },

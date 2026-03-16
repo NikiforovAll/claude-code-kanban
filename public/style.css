@@ -1578,6 +1578,13 @@ body::before {
   font-weight: 600;
 }
 
+.shared-tasklist-badge {
+  display: inline-flex;
+  align-items: center;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
 .team-info-btn {
   width: 24px;
   height: 24px;

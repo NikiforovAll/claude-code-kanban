@@ -189,11 +189,55 @@ const terminatedCache = new Map();
 const compactSummaryCache = new Map();
 const taskCountsCache = new Map();
 const contextStatusCache = new Map();
+const TASK_MAPS_DIR = path.join(AGENT_ACTIVITY_DIR, '_task-maps');
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function isUUID(s) { return UUID_RE.test(s); }
 
 function evictStaleCache(cache) {
   if (cache.size <= MAX_CACHE_ENTRIES) return;
   const oldest = cache.keys().next().value;
   if (oldest !== undefined) cache.delete(oldest);
+}
+
+let sessionToTaskListCache = null;
+let lastTaskMapScan = 0;
+const TASK_MAP_SCAN_TTL = 5000;
+
+function loadAllTaskMaps() {
+  const now = Date.now();
+  if (sessionToTaskListCache && now - lastTaskMapScan < TASK_MAP_SCAN_TTL) return sessionToTaskListCache;
+
+  const sessionToList = {};
+  const listToSessions = {};
+  if (!existsSync(TASK_MAPS_DIR)) {
+    sessionToTaskListCache = { sessionToList, listToSessions };
+    lastTaskMapScan = now;
+    return sessionToTaskListCache;
+  }
+  try {
+    for (const file of readdirSync(TASK_MAPS_DIR).filter(f => f.endsWith('.json'))) {
+      const taskListName = file.replace(/\.json$/, '');
+      const mapPath = path.join(TASK_MAPS_DIR, file);
+      try {
+        const map = JSON.parse(readFileSync(mapPath, 'utf8'));
+        listToSessions[taskListName] = map;
+        for (const sessionId of Object.keys(map)) {
+          sessionToList[sessionId] = taskListName;
+        }
+      } catch (e) { /* skip invalid */ }
+    }
+  } catch (e) { /* ignore */ }
+  sessionToTaskListCache = { sessionToList, listToSessions };
+  lastTaskMapScan = now;
+  return sessionToTaskListCache;
+}
+
+function getCustomTaskDir(sessionId) {
+  const { sessionToList } = loadAllTaskMaps();
+  const taskListName = sessionToList[sessionId];
+  if (!taskListName) return null;
+  const dir = path.join(TASKS_DIR, taskListName);
+  return existsSync(dir) ? dir : null;
 }
 
 function getTaskCounts(sessionPath) {
@@ -449,7 +493,7 @@ app.get('/api/sessions', async (req, res) => {
       const entries = readdirSync(TASKS_DIR, { withFileTypes: true });
 
       for (const entry of entries) {
-        if (entry.isDirectory()) {
+        if (entry.isDirectory() && isUUID(entry.name)) {
           const sessionPath = path.join(TASKS_DIR, entry.name);
           const stat = statSync(sessionPath);
           const { taskCount, completed, inProgress, pending, newestTaskMtime } = getTaskCounts(sessionPath);
@@ -495,6 +539,44 @@ app.get('/api/sessions', async (req, res) => {
             tasksDir: sessionPath,
             ...planInfo
           }));
+        }
+      }
+
+      // Process custom task lists (non-UUID directories mapped via _task-maps)
+      const { listToSessions } = loadAllTaskMaps();
+      for (const [taskListName, map] of Object.entries(listToSessions)) {
+        const customTaskDir = path.join(TASKS_DIR, taskListName);
+        if (!existsSync(customTaskDir)) continue;
+        const counts = getTaskCounts(customTaskDir);
+
+        for (const [sessionId, info] of Object.entries(map)) {
+          const existing = sessionsMap.get(sessionId);
+          if (existing) {
+            Object.assign(existing, {
+              taskCount: counts.taskCount,
+              completed: counts.completed,
+              inProgress: counts.inProgress,
+              pending: counts.pending,
+              tasksDir: customTaskDir,
+              sharedTaskList: taskListName,
+            });
+            if (counts.newestTaskMtime) {
+              const taskMtime = counts.newestTaskMtime.toISOString();
+              if (taskMtime > existing.modifiedAt) existing.modifiedAt = taskMtime;
+            }
+          } else {
+            const meta = { ...(metadata[sessionId] || {}) };
+            if (!meta.project && info.project) meta.project = info.project;
+            sessionsMap.set(sessionId, buildSessionObject(sessionId, meta, {
+              taskCount: counts.taskCount,
+              completed: counts.completed,
+              inProgress: counts.inProgress,
+              pending: counts.pending,
+              modifiedAt: counts.newestTaskMtime ? counts.newestTaskMtime.toISOString() : (info.updatedAt || new Date(0).toISOString()),
+              tasksDir: customTaskDir,
+              sharedTaskList: taskListName,
+            }));
+          }
         }
       }
     }
@@ -645,7 +727,8 @@ app.get('/api/projects', (req, res) => {
 // API: Get tasks for a session
 app.get('/api/sessions/:sessionId', async (req, res) => {
   try {
-    const sessionPath = path.join(TASKS_DIR, req.params.sessionId);
+    const customDir = getCustomTaskDir(req.params.sessionId);
+    const sessionPath = customDir || path.join(TASKS_DIR, req.params.sessionId);
 
     if (!existsSync(sessionPath)) {
       return res.status(404).json({ error: 'Session not found' });
@@ -1200,20 +1283,43 @@ const watcher = chokidar.watch(TASKS_DIR, {
 watcher.on('all', (event, filePath) => {
   if ((event === 'add' || event === 'change' || event === 'unlink') && filePath.endsWith('.json')) {
     const relativePath = path.relative(TASKS_DIR, filePath);
-    const sessionId = relativePath.split(path.sep)[0];
+    const dirName = relativePath.split(path.sep)[0];
 
-    taskCountsCache.delete(path.join(TASKS_DIR, sessionId));
+    taskCountsCache.delete(path.join(TASKS_DIR, dirName));
 
-    broadcast({
-      type: 'update',
-      event,
-      sessionId,
-      file: path.basename(filePath)
-    });
+    if (isUUID(dirName)) {
+      broadcast({ type: 'update', event, sessionId: dirName, file: path.basename(filePath) });
+    } else {
+      broadcastToMappedSessions(dirName, event, filePath);
+    }
   }
 });
 
+function broadcastToMappedSessions(taskListName, event, filePath) {
+  const { listToSessions } = loadAllTaskMaps();
+  const map = listToSessions[taskListName];
+  if (!map) return;
+  for (const sid of Object.keys(map)) {
+    broadcast({ type: 'update', event, sessionId: sid, file: path.basename(filePath) });
+  }
+}
+
 console.log(`Watching for changes in: ${TASKS_DIR}`);
+
+// Watch task maps directory for session→task-list mapping changes
+const taskMapsWatcher = chokidar.watch(TASK_MAPS_DIR, {
+  persistent: true,
+  ignoreInitial: true,
+  depth: 1
+});
+taskMapsWatcher.on('all', (event, filePath) => {
+  if ((event === 'add' || event === 'change' || event === 'unlink') && filePath.endsWith('.json')) {
+    lastTaskMapScan = 0;
+    const taskListName = path.basename(filePath, '.json');
+    taskCountsCache.delete(path.join(TASKS_DIR, taskListName));
+    broadcastToMappedSessions(taskListName, event, filePath);
+  }
+});
 
 // Watch teams directory for config changes
 const teamsWatcher = chokidar.watch(TEAMS_DIR, {
