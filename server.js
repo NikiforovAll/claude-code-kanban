@@ -15,7 +15,8 @@ const {
   readSessionInfoFromJsonl,
   buildAgentProgressMap,
   readCompactSummaries,
-  findTerminatedTeammates
+  findTerminatedTeammates,
+  extractPromptFromTranscript
 } = require('./lib/parsers');
 
 const isSetupCommand = process.argv.includes('--install') || process.argv.includes('--uninstall');
@@ -904,23 +905,26 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
       } catch (_) {}
     }
 
+    function persistPrompt(agent, prompt) {
+      agent.prompt = prompt;
+      const agentFile = path.join(agentDir, agent.agentId + '.json');
+      fs.writeFile(agentFile, JSON.stringify(agent), 'utf8').catch(() => {});
+    }
+
     const agentsNeedingPrompt = agents.filter(a => !a.prompt);
     if (agentsNeedingPrompt.length && meta.jsonlPath) {
+      let byAgentId = {};
       try {
         const progressMap = getProgressMap(meta.jsonlPath);
-        const byAgentId = {};
         for (const entry of Object.values(progressMap)) {
           if (entry.prompt && !byAgentId[entry.agentId]) byAgentId[entry.agentId] = entry.prompt;
         }
-        for (const agent of agentsNeedingPrompt) {
-          const prompt = byAgentId[agent.agentId];
-          if (prompt) {
-            agent.prompt = prompt;
-            const agentFile = path.join(agentDir, agent.agentId + '.json');
-            fs.writeFile(agentFile, JSON.stringify(agent), 'utf8').catch(() => {});
-          }
-        }
       } catch (_) {}
+      for (const agent of agentsNeedingPrompt) {
+        const prompt = byAgentId[agent.agentId]
+          || (() => { try { return extractPromptFromTranscript(subagentJsonlPath(meta, agent.agentId)); } catch (_) { return null; } })();
+        if (prompt) persistPrompt(agent, prompt);
+      }
     }
     const teamColors = {};
     if (teamConfig?.members) {
