@@ -2835,6 +2835,18 @@ select.form-input option:checked {
   white-space: nowrap;
 }
 
+.project-group-header .group-name.project-board-link {
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 3px;
+}
+
+.project-group-header .group-name.project-board-link:hover {
+  color: var(--accent);
+  text-decoration-style: solid;
+}
+
 .project-group-header .group-count {
   font-weight: 400;
   color: var(--text-muted);

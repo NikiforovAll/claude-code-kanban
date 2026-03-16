@@ -174,6 +174,110 @@ const compactSummaryCache = new Map();
 const taskCountsCache = new Map();
 const contextStatusCache = new Map();
 
+// Maps custom task list directory names to their project paths.
+// Built by scanning task files for metadata.project when the directory
+// name doesn't match any known session UUID.
+// e.g., { "my-project": "/Users/me/projects/my-project" }
+let customTaskListMap = {};
+let lastCustomTaskListScan = 0;
+const CUSTOM_TASK_LIST_SCAN_TTL = 10000;
+
+/**
+ * Scans non-UUID task directories for a metadata.project field in their
+ * task files. When CLAUDE_CODE_TASK_LIST_ID is set, tasks are stored under
+ * a custom directory name instead of a session UUID. This function discovers
+ * which project those tasks belong to so they can be associated with the
+ * correct session.
+ */
+function scanCustomTaskLists(metadata) {
+  const now = Date.now();
+  if (now - lastCustomTaskListScan < CUSTOM_TASK_LIST_SCAN_TTL) {
+    return customTaskListMap;
+  }
+
+  const map = {};
+  if (!existsSync(TASKS_DIR)) return map;
+
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const dirs = readdirSync(TASKS_DIR, { withFileTypes: true }).filter(d => d.isDirectory());
+
+  for (const dir of dirs) {
+    // Skip UUID directories — those are normal session task dirs
+    if (UUID_RE.test(dir.name)) continue;
+    // Skip if already matched to a team session
+    if (metadata[dir.name]) continue;
+
+    const dirPath = path.join(TASKS_DIR, dir.name);
+    const files = readdirSync(dirPath).filter(f => f.endsWith('.json'));
+
+    // Read the first task file that has metadata.project
+    for (const file of files) {
+      try {
+        const task = JSON.parse(readFileSync(path.join(dirPath, file), 'utf8'));
+        if (task.metadata && task.metadata.project) {
+          map[dir.name] = task.metadata.project;
+          break;
+        }
+      } catch (e) { /* skip invalid */ }
+    }
+  }
+
+  customTaskListMap = map;
+  lastCustomTaskListScan = now;
+  return map;
+}
+
+/**
+ * Finds the most recent session for a given project path.
+ * Returns the session ID or null.
+ */
+/**
+ * Builds a reverse map: project path -> custom task list directory name.
+ */
+function getProjectToCustomListMap(metadata) {
+  const customLists = scanCustomTaskLists(metadata);
+  const map = {};
+  for (const [dirName, project] of Object.entries(customLists)) {
+    map[project] = dirName;
+  }
+  return map;
+}
+
+/**
+ * Decodes an encoded project directory name back to a filesystem path.
+ * e.g., "-Users-Robert-Sfeir-projects-foo" -> "/Users/Robert_Sfeir/projects/foo"
+ * Returns null if the input doesn't look encoded.
+ */
+function decodeProjectPath(encoded) {
+  if (!encoded || typeof encoded !== 'string') return null;
+  // Already a real path
+  if (encoded.startsWith('/')) return encoded;
+  // Encoded paths start with "-" (replacing the leading "/")
+  if (!encoded.startsWith('-')) return null;
+  return encoded.replace(/^-/, '/').replace(/-/g, '/');
+}
+
+function findActiveSessionForProject(project, metadata) {
+  let bestId = null;
+  let bestMtime = 0;
+
+  // Try exact match first, then decoded match
+  const decoded = decodeProjectPath(project);
+
+  for (const [sessionId, meta] of Object.entries(metadata)) {
+    const matches = meta.project === project ||
+      (decoded && meta.project === decoded);
+    if (!matches) continue;
+    const mtime = getSessionLogStat(meta).mtime || 0;
+    if (mtime > bestMtime) {
+      bestMtime = mtime;
+      bestId = sessionId;
+    }
+  }
+
+  return bestId;
+}
+
 function evictStaleCache(cache) {
   if (cache.size <= MAX_CACHE_ENTRIES) return;
   const oldest = cache.keys().next().value;
@@ -395,12 +499,19 @@ app.get('/api/sessions', async (req, res) => {
     const metadata = loadSessionMetadata();
     const sessionsMap = new Map();
 
+    // Discover custom task list directories (non-UUID dirs with metadata.project)
+    const customLists = scanCustomTaskLists(metadata);
+
     // First, add sessions that have tasks directories
     if (existsSync(TASKS_DIR)) {
       const entries = readdirSync(TASKS_DIR, { withFileTypes: true });
 
       for (const entry of entries) {
         if (entry.isDirectory()) {
+          // Skip custom task list directories — their tasks will be merged
+          // into the matching session below
+          if (customLists[entry.name]) continue;
+
           const sessionPath = path.join(TASKS_DIR, entry.name);
           const stat = statSync(sessionPath);
           const { taskCount, completed, inProgress, pending, newestTaskMtime } = getTaskCounts(sessionPath);
@@ -544,6 +655,65 @@ app.get('/api/sessions', async (req, res) => {
       } catch (e) { /* ignore */ }
     }
 
+    // Merge custom task list counts into matching project sessions.
+    // When CLAUDE_CODE_TASK_LIST_ID is set, tasks are stored under a custom
+    // directory name. Find the most recent session for that project and merge
+    // the task counts + tasksDir so the kanban displays them correctly.
+    for (const [dirName, project] of Object.entries(customLists)) {
+      const customPath = path.join(TASKS_DIR, dirName);
+      const counts = getTaskCounts(customPath);
+      if (counts.taskCount === 0) continue;
+
+      // Find the most recent session for this project
+      const targetSessionId = findActiveSessionForProject(project, metadata);
+      if (targetSessionId && sessionsMap.has(targetSessionId)) {
+        const session = sessionsMap.get(targetSessionId);
+        session.taskCount += counts.taskCount;
+        session.completed += counts.completed;
+        session.inProgress += counts.inProgress;
+        session.pending += counts.pending;
+        // Point tasksDir to the custom list so task fetching works
+        session.customTasksDir = customPath;
+        session.customTaskListProject = project;
+        if (counts.newestTaskMtime) {
+          const taskMtime = counts.newestTaskMtime.toISOString();
+          if (taskMtime > session.modifiedAt) session.modifiedAt = taskMtime;
+        }
+      } else {
+        // No matching session found — show as standalone project entry
+        const dirStat = statSync(customPath);
+        sessionsMap.set(dirName, {
+          id: dirName,
+          name: dirName,
+          slug: null,
+          project: project,
+          description: `Custom task list: ${dirName}`,
+          gitBranch: null,
+          customTitle: null,
+          taskCount: counts.taskCount,
+          completed: counts.completed,
+          inProgress: counts.inProgress,
+          pending: counts.pending,
+          createdAt: null,
+          modifiedAt: counts.newestTaskMtime ? counts.newestTaskMtime.toISOString() : dirStat.mtime.toISOString(),
+          isTeam: false,
+          memberCount: 0,
+          hasMessages: false,
+          hasActiveAgents: false,
+          hasRunningAgents: false,
+          hasWaitingForUser: false,
+          hasRecentLog: false,
+          jsonlPath: null,
+          tasksDir: customPath,
+          projectDir: null,
+          contextStatus: null,
+          hasPlan: false,
+          planTitle: null,
+          planPath: null,
+        });
+      }
+    }
+
     // Hide leader UUID sessions that are represented by a team session
     const teamLeaderIds = new Set();
     for (const [sid, session] of sessionsMap) {
@@ -659,25 +829,160 @@ app.get('/api/projects', (req, res) => {
   res.json(projects);
 });
 
+// API: Get tasks for a project's custom task list
+// Used by the project view to show the shared task board
+app.get('/api/projects/:encodedPath/tasks', async (req, res) => {
+  try {
+    const encodedPath = req.params.encodedPath;
+    const metadata = loadSessionMetadata();
+    const customListMap = getProjectToCustomListMap(metadata);
+
+    // Try the encoded path as-is, then decode it
+    let customListDir = customListMap[encodedPath];
+    if (!customListDir) {
+      const decoded = decodeProjectPath(encodedPath);
+      if (decoded) customListDir = customListMap[decoded];
+    }
+    // Also try matching by the real project path directly
+    if (!customListDir) {
+      for (const [project, dir] of Object.entries(customListMap)) {
+        if (project === encodedPath || decodeProjectPath(project) === encodedPath) {
+          customListDir = dir;
+          break;
+        }
+      }
+    }
+
+    if (!customListDir) {
+      return res.json([]);
+    }
+
+    const customPath = path.join(TASKS_DIR, customListDir);
+    if (!existsSync(customPath)) {
+      return res.json([]);
+    }
+
+    const taskFiles = readdirSync(customPath).filter(f => f.endsWith('.json'));
+    const tasks = [];
+    for (const file of taskFiles) {
+      try {
+        const task = JSON.parse(readFileSync(path.join(customPath, file), 'utf8'));
+        tasks.push(task);
+      } catch (e) { /* skip invalid */ }
+    }
+    tasks.sort((a, b) => parseInt(a.id) - parseInt(b.id));
+    res.json(tasks);
+  } catch (error) {
+    console.error('Error getting project tasks:', error);
+    res.status(500).json({ error: 'Failed to get project tasks' });
+  }
+});
+
+// API: Get agents across ALL sessions for a project
+// Used by the project view to show combined agents
+app.get('/api/projects/:encodedPath/agents', (req, res) => {
+  try {
+    const encodedPath = req.params.encodedPath;
+    const metadata = loadSessionMetadata();
+    const decoded = decodeProjectPath(encodedPath);
+    const targetProject = decoded || encodedPath;
+
+    // Find all sessions for this project
+    const projectSessionIds = [];
+    for (const [sessionId, meta] of Object.entries(metadata)) {
+      if (meta.project === targetProject || meta.project === encodedPath) {
+        projectSessionIds.push(sessionId);
+      }
+    }
+
+    const allAgents = [];
+    let waitingForUser = null;
+
+    for (const sessionId of projectSessionIds) {
+      const agentDir = path.join(AGENT_ACTIVITY_DIR, sessionId);
+      if (!existsSync(agentDir)) continue;
+
+      const meta = metadata[sessionId] || {};
+      const logMtime = getSessionLogStat(meta).mtime;
+      const sessionStale = logMtime ? (Date.now() - logMtime) > AGENT_STALE_MS : true;
+
+      const files = readdirSync(agentDir).filter(f => f.endsWith('.json') && !f.startsWith('_'));
+      for (const file of files) {
+        try {
+          const agent = JSON.parse(readFileSync(path.join(agentDir, file), 'utf8'));
+          const agentStale = !sessionStale && agent.updatedAt && (Date.now() - new Date(agent.updatedAt).getTime()) > AGENT_STALE_MS;
+          if (!isAgentFresh(agent) || sessionStale || agentStale) {
+            if (agent.status === 'active' || agent.status === 'idle') {
+              agent.status = 'stopped';
+              if (!agent.stoppedAt) agent.stoppedAt = agent.updatedAt || agent.startedAt;
+            }
+          }
+          // Tag with session so the UI can show which session the agent belongs to
+          agent._sessionId = sessionId;
+          const sessionMeta = metadata[sessionId];
+          agent._sessionName = sessionMeta?.slug || sessionMeta?.customTitle || sessionId.slice(0, 8);
+          allAgents.push(agent);
+        } catch (e) { /* skip invalid */ }
+      }
+
+      if (!waitingForUser) {
+        waitingForUser = checkWaitingForUser(agentDir, logMtime);
+      }
+    }
+
+    res.json({ agents: allAgents, waitingForUser });
+  } catch (e) {
+    console.error('Error getting project agents:', e);
+    res.json({ agents: [], waitingForUser: null });
+  }
+});
+
 // API: Get tasks for a session
 app.get('/api/sessions/:sessionId', async (req, res) => {
   try {
     const sessionPath = path.join(TASKS_DIR, req.params.sessionId);
-
-    if (!existsSync(sessionPath)) {
-      return res.status(404).json({ error: 'Session not found' });
-    }
-
-    const taskFiles = readdirSync(sessionPath).filter(f => f.endsWith('.json'));
     const tasks = [];
 
-    for (const file of taskFiles) {
-      try {
-        const task = JSON.parse(readFileSync(path.join(sessionPath, file), 'utf8'));
-        tasks.push(task);
-      } catch (e) {
-        console.error(`Error parsing ${file}:`, e);
+    // Read tasks from the session's own task directory
+    if (existsSync(sessionPath)) {
+      const taskFiles = readdirSync(sessionPath).filter(f => f.endsWith('.json'));
+      for (const file of taskFiles) {
+        try {
+          const task = JSON.parse(readFileSync(path.join(sessionPath, file), 'utf8'));
+          tasks.push(task);
+        } catch (e) {
+          console.error(`Error parsing ${file}:`, e);
+        }
       }
+    }
+
+    // Include custom task list tasks if this session is the primary
+    // (most recent) for its project. This ensures clicking the session
+    // card in the sidebar shows the same tasks as the merged count.
+    const metadata = loadSessionMetadata();
+    const meta = metadata[req.params.sessionId];
+    if (meta?.project) {
+      const customListDir = getProjectToCustomListMap(metadata)[meta.project];
+      if (customListDir) {
+        const primarySession = findActiveSessionForProject(meta.project, metadata);
+        if (primarySession === req.params.sessionId) {
+          const customPath = path.join(TASKS_DIR, customListDir);
+          if (existsSync(customPath)) {
+            const customFiles = readdirSync(customPath).filter(f => f.endsWith('.json'));
+            for (const file of customFiles) {
+              try {
+                const task = JSON.parse(readFileSync(path.join(customPath, file), 'utf8'));
+                task._customTaskList = customListDir;
+                tasks.push(task);
+              } catch (e) { /* skip invalid */ }
+            }
+          }
+        }
+      }
+    }
+
+    if (tasks.length === 0 && !existsSync(sessionPath)) {
+      return res.status(404).json({ error: 'Session not found' });
     }
 
     // Sort by ID (numeric)
