@@ -504,7 +504,9 @@ async function fetchProjectView(projectPath) {
   if (msgPinned) msgPinned.innerHTML = '';
   const projectSessions = sessions.filter((s) => s.project === projectPath);
   currentProjectSessionIds = projectSessions.map((s) => s.id);
-  const activeSessionIds = projectSessions.filter(isSessionActive).map((s) => s.id);
+  const activeSessionIds = projectSessions
+    .filter((s) => isSessionActive(s) || pinnedSessionIds.has(s.id))
+    .map((s) => s.id);
 
   const encoded = btoa(projectPath);
   const [tasksResult, agentResults] = await Promise.all([
@@ -553,7 +555,9 @@ async function fetchProjectView(projectPath) {
 async function refreshProjectAgents() {
   if (!currentProjectPath) return;
   const projectSessions = sessions.filter((s) => s.project === currentProjectPath);
-  const activeSessionIds = projectSessions.filter(isSessionActive).map((s) => s.id);
+  const activeSessionIds = projectSessions
+    .filter((s) => isSessionActive(s) || pinnedSessionIds.has(s.id))
+    .map((s) => s.id);
   const agentResults = await Promise.all(
     activeSessionIds.map((id) =>
       fetch(`/api/sessions/${id}/agents`)
