@@ -1770,8 +1770,7 @@ function renderSessions() {
     filteredSessions = filteredSessions.filter((s) => {
       const isActive =
         s.hasMessages &&
-        (s.pending > 0 ||
-          s.inProgress > 0 ||
+        ((!s.sharedTaskList && (s.pending > 0 || s.inProgress > 0)) ||
           s.hasActiveAgents ||
           s.hasWaitingForUser ||
           s.hasRecentLog ||
