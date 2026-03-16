@@ -14,7 +14,8 @@ const {
   readRecentMessages: _readRecentMessagesUncached,
   readSessionInfoFromJsonl,
   buildAgentProgressMap,
-  readCompactSummaries
+  readCompactSummaries,
+  findTerminatedTeammates
 } = require('./lib/parsers');
 
 const isSetupCommand = process.argv.includes('--install') || process.argv.includes('--uninstall');
@@ -55,7 +56,8 @@ const CONTEXT_STATUS_DIR = path.join(CLAUDE_DIR, 'context-status');
 
 const PERMISSION_TTL_MS = 1800000;
 const AGENT_TTL_MS = 3600000;
-const AGENT_STALE_MS = 300000;
+const AGENT_STALE_MS = 900000;
+const SESSION_STALE_MS = 300000;
 
 const WAITING_RESOLVE_GRACE_MS = 15000;
 
@@ -74,9 +76,20 @@ function checkWaitingForUser(agentDir, logMtime) {
   return null;
 }
 
+function isGhostAgent(agent) {
+  if (agent.startedAt !== agent.updatedAt || agent.lastMessage) return false;
+  return (Date.now() - new Date(agent.startedAt).getTime()) >= AGENT_STALE_MS;
+}
+
+function getContextStatus(sessionId, meta) {
+  return contextStatusCache.get(sessionId) || (meta?.teamLeaderId ? contextStatusCache.get(meta.teamLeaderId) : null) || null;
+}
+
 function isAgentFresh(agent) {
-  if (!agent.updatedAt) return true;
-  return (Date.now() - new Date(agent.updatedAt).getTime()) < AGENT_TTL_MS;
+  if (isGhostAgent(agent)) return false;
+  const ts = agent.updatedAt || agent.startedAt;
+  if (!ts) return true;
+  return (Date.now() - new Date(ts).getTime()) < AGENT_TTL_MS;
 }
 
 function getSessionLogStat(meta) {
@@ -87,19 +100,21 @@ function getSessionLogStat(meta) {
   } catch (e) { return { mtime: null, hasMessages: false }; }
 }
 
-function checkAgentStatus(agentDir, stale, logMtime) {
+function checkAgentStatus(agentDir, stale, logMtime, isTeam) {
   const result = { hasActive: false, hasRunning: false, waitingForUser: null };
   if (!existsSync(agentDir)) return result;
   result.waitingForUser = checkWaitingForUser(agentDir, logMtime);
   if (result.waitingForUser) result.hasActive = true;
-  if (stale) return result;
+  if (stale && !isTeam) return result;
   try {
     for (const file of readdirSync(agentDir).filter(f => f.endsWith('.json') && !f.startsWith('_'))) {
       try {
         const agent = JSON.parse(readFileSync(path.join(agentDir, file), 'utf8'));
-        if (isAgentFresh(agent)) {
+        if (isTeam && (agent.status === 'active' || agent.status === 'idle')) {
+          result.hasActive = true;
+          if (agent.status === 'active') result.hasRunning = true;
+        } else if (isAgentFresh(agent)) {
           if (agent.status === 'active') { result.hasActive = true; result.hasRunning = true; }
-          else if (agent.status === 'idle') { result.hasActive = true; }
         }
         if (result.hasRunning && result.hasActive) break;
       } catch (e) { /* skip invalid */ }
@@ -170,6 +185,7 @@ const messageCache = new Map();
 const MESSAGE_CACHE_TTL = 5000;
 const MAX_CACHE_ENTRIES = 200;
 const progressMapCache = new Map();
+const terminatedCache = new Map();
 const compactSummaryCache = new Map();
 const taskCountsCache = new Map();
 const contextStatusCache = new Map();
@@ -202,41 +218,38 @@ function getTaskCounts(sessionPath) {
     } catch (e) { /* skip invalid */ }
   }
 
-  const result = { taskCount: taskFiles.length, completed, inProgress, pending, newestTaskMtime };
+  const taskCount = completed + inProgress + pending;
+  const result = { taskCount, completed, inProgress, pending, newestTaskMtime };
   taskCountsCache.set(sessionPath, result);
   return result;
 }
 
-function getProgressMap(jsonlPath) {
+function cachedByMtime(cache, filePath, loadFn, fallback) {
   try {
-    const cached = progressMapCache.get(jsonlPath);
-    if (cached && Date.now() - cached.ts < MESSAGE_CACHE_TTL) return cached.map;
-    const st = statSync(jsonlPath);
+    const cached = cache.get(filePath);
+    if (cached && Date.now() - cached.ts < MESSAGE_CACHE_TTL) return cached.data;
+    const st = statSync(filePath);
     if (cached && cached.mtime === st.mtimeMs) {
       cached.ts = Date.now();
-      return cached.map;
+      return cached.data;
     }
-    const map = buildAgentProgressMap(jsonlPath);
-    progressMapCache.set(jsonlPath, { map, mtime: st.mtimeMs, ts: Date.now() });
-    evictStaleCache(progressMapCache);
-    return map;
-  } catch (_) { return {}; }
+    const data = loadFn(filePath);
+    cache.set(filePath, { data, mtime: st.mtimeMs, ts: Date.now() });
+    evictStaleCache(cache);
+    return data;
+  } catch (_) { return fallback; }
+}
+
+function getProgressMap(jsonlPath) {
+  return cachedByMtime(progressMapCache, jsonlPath, buildAgentProgressMap, {});
+}
+
+function getTerminatedTeammates(jsonlPath) {
+  return cachedByMtime(terminatedCache, jsonlPath, findTerminatedTeammates, new Set());
 }
 
 function readRecentMessages(jsonlPath, limit = 10) {
-  try {
-    const stat = statSync(jsonlPath);
-    const cached = messageCache.get(jsonlPath);
-    if (cached && cached.mtime === stat.mtimeMs && Date.now() - cached.ts < MESSAGE_CACHE_TTL) {
-      return cached.messages;
-    }
-    const messages = _readRecentMessagesUncached(jsonlPath, limit);
-    messageCache.set(jsonlPath, { messages, mtime: stat.mtimeMs, ts: Date.now() });
-    evictStaleCache(messageCache);
-    return messages;
-  } catch (e) {
-    return [];
-  }
+  return cachedByMtime(messageCache, jsonlPath, p => _readRecentMessagesUncached(p, limit), []);
 }
 
 /**
@@ -377,6 +390,42 @@ function getSessionDisplayName(sessionId, meta) {
   return null;
 }
 
+function buildSessionObject(id, meta, overrides = {}) {
+  const logStat = overrides._logStat || getSessionLogStat(meta);
+  const logMtime = logStat.mtime;
+  const logAge = logMtime ? Date.now() - logMtime : Infinity;
+  return {
+    id,
+    name: getSessionDisplayName(id, meta),
+    slug: meta.slug || null,
+    project: meta.project || null,
+    description: meta.description || null,
+    gitBranch: meta.gitBranch || null,
+    customTitle: meta.customTitle || null,
+    taskCount: 0,
+    completed: 0,
+    inProgress: 0,
+    pending: 0,
+    createdAt: meta.created || null,
+    modifiedAt: overrides.modifiedAt || new Date(0).toISOString(),
+    isTeam: false,
+    memberCount: 0,
+    hasMessages: logStat.hasMessages,
+    hasActiveAgents: false,
+    hasRunningAgents: false,
+    hasWaitingForUser: false,
+    hasRecentLog: logAge <= SESSION_STALE_MS,
+    jsonlPath: meta.jsonlPath || null,
+    tasksDir: null,
+    projectDir: meta.jsonlPath ? path.dirname(meta.jsonlPath) : null,
+    contextStatus: getContextStatus(id, meta),
+    ...getPlanInfo(meta.slug),
+    ...overrides,
+    // Remove internal-only field
+    _logStat: undefined,
+  };
+}
+
 // API: List all sessions
 app.get('/api/sessions', async (req, res) => {
   // Prevent browser caching
@@ -421,43 +470,31 @@ app.get('/api/sessions', async (req, res) => {
           }
 
           const isTeam = isTeamSession(entry.name);
-          const memberCount = isTeam ? (loadTeamConfig(entry.name)?.members?.length || 0) : 0;
+          const teamConfig = isTeam ? loadTeamConfig(entry.name) : null;
+          const memberCount = teamConfig?.members?.length || 0;
           const planInfo = getPlanInfo(meta.slug);
 
           const resolvedAgentDir = (() => {
-            const tc = loadTeamConfig(entry.name);
-            const rid = (tc && tc.leadSessionId) ? tc.leadSessionId : entry.name;
+            const rid = teamConfig?.leadSessionId || entry.name;
             return path.join(AGENT_ACTIVITY_DIR, rid);
           })();
-          const agentStatus = checkAgentStatus(resolvedAgentDir, stale, logMtime);
+          const agentStatus = checkAgentStatus(resolvedAgentDir, stale, logMtime, isTeam);
 
-          sessionsMap.set(entry.name, {
-            id: entry.name,
-            name: getSessionDisplayName(entry.name, meta),
-            slug: meta.slug || null,
-            project: meta.project || null,
-            description: meta.description || null,
-            gitBranch: meta.gitBranch || null,
-            customTitle: meta.customTitle || null,
+          sessionsMap.set(entry.name, buildSessionObject(entry.name, meta, {
+            _logStat: logStat,
             taskCount,
             completed,
             inProgress,
             pending,
-            createdAt: meta.created || null,
-            modifiedAt: modifiedAt,
+            modifiedAt,
             isTeam,
             memberCount,
-            hasMessages: logStat.hasMessages,
             hasActiveAgents: agentStatus.hasActive,
             hasRunningAgents: agentStatus.hasRunning,
             hasWaitingForUser: !!agentStatus.waitingForUser,
-            hasRecentLog: logAge <= AGENT_STALE_MS,
-            jsonlPath: meta.jsonlPath || null,
             tasksDir: sessionPath,
-            projectDir: meta.jsonlPath ? path.dirname(meta.jsonlPath) : null,
-            contextStatus: contextStatusCache.get(entry.name) || null,
             ...planInfo
-          });
+          }));
         }
       }
     }
@@ -474,36 +511,16 @@ app.get('/api/sessions', async (req, res) => {
           const jsonlMtime = new Date(logMtime).toISOString();
           if (!modifiedAt || jsonlMtime > modifiedAt) modifiedAt = jsonlMtime;
         }
-        const planInfo = getPlanInfo(meta.slug);
+        const metaIsTeam = isTeamSession(sessionId);
         const metaAgentDir = path.join(AGENT_ACTIVITY_DIR, sessionId);
-        const metaAgentStatus = checkAgentStatus(metaAgentDir, stale, logMtime);
-        sessionsMap.set(sessionId, {
-          id: sessionId,
-          name: getSessionDisplayName(sessionId, meta),
-          slug: meta.slug || null,
-          project: meta.project || null,
-          description: meta.description || null,
-          gitBranch: meta.gitBranch || null,
-          customTitle: meta.customTitle || null,
-          taskCount: 0,
-          completed: 0,
-          inProgress: 0,
-          pending: 0,
-          createdAt: meta.created || null,
+        const metaAgentStatus = checkAgentStatus(metaAgentDir, stale, logMtime, metaIsTeam);
+        sessionsMap.set(sessionId, buildSessionObject(sessionId, meta, {
+          _logStat: logStat,
           modifiedAt: modifiedAt || new Date(0).toISOString(),
-          isTeam: false,
-          memberCount: 0,
-          hasMessages: logStat.hasMessages,
           hasActiveAgents: metaAgentStatus.hasActive,
           hasRunningAgents: metaAgentStatus.hasRunning,
           hasWaitingForUser: !!metaAgentStatus.waitingForUser,
-          hasRecentLog: logAge <= AGENT_STALE_MS,
-          jsonlPath: meta.jsonlPath || null,
-          tasksDir: null,
-          projectDir: meta.jsonlPath ? path.dirname(meta.jsonlPath) : null,
-          contextStatus: contextStatusCache.get(sessionId) || null,
-          ...planInfo
-        });
+        }));
       }
     }
 
@@ -517,29 +534,12 @@ app.get('/api/sessions', async (req, res) => {
           const logStat = getSessionLogStat(meta);
           const waiting = checkWaitingForUser(agentDir, logStat.mtime);
           if (!waiting) continue;
-          sessionsMap.set(dir.name, {
-            id: dir.name,
-            name: getSessionDisplayName(dir.name, meta),
-            slug: meta.slug || null,
-            project: meta.project || null,
-            description: meta.description || null,
-            gitBranch: meta.gitBranch || null,
-            customTitle: meta.customTitle || null,
-            taskCount: 0,
-            completed: 0,
-            inProgress: 0,
-            pending: 0,
-            createdAt: meta.created || null,
+          sessionsMap.set(dir.name, buildSessionObject(dir.name, meta, {
+            _logStat: logStat,
             modifiedAt: waiting.timestamp || new Date().toISOString(),
-            isTeam: false,
-            memberCount: 0,
-            hasMessages: logStat.hasMessages,
             hasActiveAgents: true,
             hasWaitingForUser: true,
-            jsonlPath: meta.jsonlPath || null,
-            tasksDir: null,
-            projectDir: meta.jsonlPath ? path.dirname(meta.jsonlPath) : null,
-          });
+          }));
         }
       } catch (e) { /* ignore */ }
     }
@@ -553,8 +553,7 @@ app.get('/api/sessions', async (req, res) => {
       }
     }
     for (const leaderId of teamLeaderIds) {
-      const session = sessionsMap.get(leaderId);
-      if (session && session.taskCount === 0) {
+      if (sessionsMap.has(leaderId)) {
         sessionsMap.delete(leaderId);
       }
     }
@@ -583,7 +582,8 @@ app.get('/api/sessions', async (req, res) => {
     for (const pid of pinnedIds) {
       const s = sessionsMap.get(pid);
       if (s && !s.contextStatus) {
-        s.contextStatus = contextStatusCache.get(pid) || null;
+        const meta = metadata[pid];
+        s.contextStatus = getContextStatus(pid, meta);
       }
     }
 
@@ -592,34 +592,17 @@ app.get('/api/sessions', async (req, res) => {
       if (sessionsMap.has(pid)) continue;
       const meta = metadata[pid];
       if (!meta) continue;
-      const logStat = getSessionLogStat(meta);
-      const logMtime = logStat.mtime;
+      const pinnedLogStat = getSessionLogStat(meta);
+      const pinnedLogMtime = pinnedLogStat.mtime;
       let modifiedAt = meta.created || null;
-      if (logMtime) {
-        const jsonlMtime = new Date(logMtime).toISOString();
+      if (pinnedLogMtime) {
+        const jsonlMtime = new Date(pinnedLogMtime).toISOString();
         if (!modifiedAt || jsonlMtime > modifiedAt) modifiedAt = jsonlMtime;
       }
-      sessionsMap.set(pid, {
-        id: pid,
-        name: getSessionDisplayName(pid, meta),
-        slug: meta.slug || null,
-        project: meta.project || null,
-        description: meta.description || null,
-        gitBranch: meta.gitBranch || null,
-        customTitle: meta.customTitle || null,
-        taskCount: 0, completed: 0, inProgress: 0, pending: 0,
-        createdAt: meta.created || null,
+      sessionsMap.set(pid, buildSessionObject(pid, meta, {
+        _logStat: pinnedLogStat,
         modifiedAt: modifiedAt || new Date(0).toISOString(),
-        isTeam: false, memberCount: 0,
-        hasMessages: logStat.hasMessages,
-        hasActiveAgents: false, hasRunningAgents: false, hasWaitingForUser: false,
-        hasRecentLog: false,
-        jsonlPath: meta.jsonlPath || null,
-        tasksDir: null,
-        projectDir: meta.jsonlPath ? path.dirname(meta.jsonlPath) : null,
-        contextStatus: contextStatusCache.get(pid) || null,
-        ...getPlanInfo(meta.slug)
-      });
+      }));
     }
 
     // Convert map to array and sort by most recently modified
@@ -769,6 +752,7 @@ app.post('/api/open-in-editor', (req, res) => {
 app.get('/api/teams/:name', (req, res) => {
   const config = loadTeamConfig(req.params.name);
   if (!config) return res.status(404).json({ error: 'Team not found' });
+  config.configPath = path.join(TEAMS_DIR, req.params.name, 'config.json');
   res.json(config);
 });
 
@@ -783,21 +767,60 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
     const logMtime = getSessionLogStat(meta).mtime;
     const sessionStale = logMtime ? (Date.now() - logMtime) > AGENT_STALE_MS : true;
 
+    let teamConfig = loadTeamConfig(req.params.sessionId);
+    if (!teamConfig && existsSync(TEAMS_DIR)) {
+      try {
+        for (const td of readdirSync(TEAMS_DIR, { withFileTypes: true })) {
+          if (!td.isDirectory()) continue;
+          const cfg = loadTeamConfig(td.name);
+          if (cfg && cfg.leadSessionId === sessionId) { teamConfig = cfg; break; }
+        }
+      } catch (_) {}
+    }
+    const isTeam = !!teamConfig;
+    const teamMemberNames = isTeam ? new Set(teamConfig.members.map(m => m.name)) : null;
+
     const files = readdirSync(agentDir).filter(f => f.endsWith('.json') && !f.startsWith('_'));
     const agents = [];
     for (const file of files) {
       try {
         const agent = JSON.parse(readFileSync(path.join(agentDir, file), 'utf8'));
-        const agentStale = !sessionStale && agent.updatedAt && (Date.now() - new Date(agent.updatedAt).getTime()) > AGENT_STALE_MS;
+        if (isGhostAgent(agent)) continue;
+        const agentTs = agent.updatedAt || agent.startedAt;
+        const agentStale = !sessionStale && agentTs && (Date.now() - new Date(agentTs).getTime()) > AGENT_STALE_MS;
         if (!isAgentFresh(agent) || sessionStale || agentStale) {
           if (agent.status === 'active' || agent.status === 'idle') {
-            agent.status = 'stopped';
-            if (!agent.stoppedAt) agent.stoppedAt = agent.updatedAt || agent.startedAt;
+            const agentName = agent.type || agent.name;
+            const isTeamMember = isTeam && agentName && teamMemberNames.has(agentName);
+            if (!isTeamMember) {
+              agent.status = 'stopped';
+              if (!agent.stoppedAt) agent.stoppedAt = agent.updatedAt || agent.startedAt;
+            }
           }
         }
         agents.push(agent);
       } catch (e) { /* skip invalid */ }
     }
+    const liveAgents = agents.filter(a => a.status === 'active' || a.status === 'idle');
+    if (liveAgents.length && meta.jsonlPath) {
+      try {
+        const terminated = getTerminatedTeammates(meta.jsonlPath);
+        if (terminated.size) {
+          for (const agent of liveAgents) {
+            const agentName = agent.type || agent.name;
+            if (agentName && terminated.has(agentName)) {
+              const terminatedAt = terminated.get(agentName);
+              if (terminatedAt && agent.startedAt && terminatedAt < agent.startedAt) continue;
+              agent.status = 'stopped';
+              agent.stoppedAt = agent.stoppedAt || new Date().toISOString();
+              const agentFile = path.join(agentDir, agent.agentId + '.json');
+              fs.writeFile(agentFile, JSON.stringify(agent), 'utf8').catch(() => {});
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
     const agentsNeedingPrompt = agents.filter(a => !a.prompt);
     if (agentsNeedingPrompt.length && meta.jsonlPath) {
       try {
@@ -816,8 +839,21 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
         }
       } catch (_) {}
     }
+    const teamColors = {};
+    if (teamConfig?.members) {
+      for (const m of teamConfig.members) {
+        if (m.name && m.color) teamColors[m.name] = m.color;
+      }
+      if (Object.keys(teamColors).length) {
+        for (const agent of agents) {
+          const name = agent.type || agent.name;
+          if (name && teamColors[name]) agent.color = teamColors[name];
+        }
+      }
+    }
+
     const waitingForUser = checkWaitingForUser(agentDir, logMtime);
-    res.json({ agents, waitingForUser });
+    res.json({ agents, waitingForUser, teamColors });
   } catch (e) {
     res.json({ agents: [], waitingForUser: null });
   }
@@ -825,7 +861,7 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
 
 app.post('/api/sessions/:sessionId/agents/:agentId/stop', (req, res) => {
   const sessionId = resolveSessionId(req.params.sessionId);
-  const agentId = path.basename(req.params.agentId).replace(/[^a-zA-Z0-9_-]/g, '');
+  const agentId = sanitizeAgentId(req.params.agentId);
   const agentFile = path.join(AGENT_ACTIVITY_DIR, sessionId, agentId + '.json');
   if (!existsSync(agentFile)) return res.status(404).json({ error: 'Agent not found' });
   try {
@@ -840,6 +876,83 @@ app.post('/api/sessions/:sessionId/agents/:agentId/stop', (req, res) => {
   } catch (e) {
     res.status(500).json({ error: 'Failed to stop agent' });
   }
+});
+
+function sanitizeAgentId(raw) {
+  return path.basename(raw).replace(/[^a-zA-Z0-9_-]/g, '');
+}
+
+function subagentJsonlPath(meta, agentId) {
+  return path.join(
+    path.dirname(meta.jsonlPath),
+    path.basename(meta.jsonlPath, '.jsonl'),
+    'subagents',
+    'agent-' + agentId + '.jsonl'
+  );
+}
+
+app.get('/api/sessions/:sessionId/agents/:agentId/messages', (req, res) => {
+  const sessionId = resolveSessionId(req.params.sessionId);
+  const agentId = sanitizeAgentId(req.params.agentId);
+  const limit = Math.min(parseInt(req.query.limit, 10) || 50, 100);
+  const metadata = loadSessionMetadata();
+  const meta = metadata[sessionId];
+  if (!meta?.jsonlPath) return res.json({ messages: [], agentId });
+  const subagentJsonl = subagentJsonlPath(meta, agentId);
+  if (!existsSync(subagentJsonl)) return res.json({ messages: [], agentId });
+  const messages = readRecentMessages(subagentJsonl, limit);
+  res.json({ messages, agentId });
+});
+
+app.get('/api/sessions/:sessionId/agents/:agentId/messages/stream', (req, res) => {
+  const sessionId = resolveSessionId(req.params.sessionId);
+  const agentId = sanitizeAgentId(req.params.agentId);
+  const metadata = loadSessionMetadata();
+  const meta = metadata[sessionId];
+  if (!meta?.jsonlPath) {
+    res.status(404).json({ error: 'Session not found' });
+    return;
+  }
+  const subagentJsonl = subagentJsonlPath(meta, agentId);
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive'
+  });
+  res.write('\n');
+
+  let lastSize = existsSync(subagentJsonl) ? statSync(subagentJsonl).size : 0;
+
+  const watcher = chokidar.watch(subagentJsonl, {
+    persistent: true,
+    ignoreInitial: true,
+    awaitWriteFinish: { stabilityThreshold: 200, pollInterval: 50 }
+  });
+
+  let closed = false;
+  const cleanup = () => { if (!closed) { closed = true; watcher.close(); } };
+
+  function emitMessages() {
+    const messages = readRecentMessages(subagentJsonl, 50);
+    lastSize = statSync(subagentJsonl).size;
+    res.write(`event: agent-log-update\ndata: ${JSON.stringify({ messages, agentId })}\n\n`);
+  }
+
+  watcher.on('change', () => {
+    try {
+      if (statSync(subagentJsonl).size <= lastSize) return;
+      emitMessages();
+    } catch (_) {}
+  });
+
+  watcher.on('add', () => {
+    try { emitMessages(); } catch (_) {}
+  });
+
+  req.on('close', cleanup);
+  res.on('close', cleanup);
+  res.on('error', cleanup);
 });
 
 app.get('/api/sessions/:sessionId/messages', (req, res) => {

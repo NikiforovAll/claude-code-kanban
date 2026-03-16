@@ -19,7 +19,6 @@ let currentWaiting = null;
 let lastAgentsHash = '';
 let messagePanelOpen = false;
 let lastMessagesHash = '';
-let lastInlineMessage = '';
 let currentMessages = [];
 let agentDurationInterval = null;
 let selectedTaskId = null;
@@ -28,6 +27,8 @@ let focusZone = 'board'; // 'board' | 'sidebar'
 let selectedSessionIdx = -1;
 let selectedSessionKbId = null;
 let sessionJustSelected = false;
+let agentLogMode = null;
+let agentLogSSE = null;
 
 function getUrlState() {
   const params = new URLSearchParams(window.location.search);
@@ -67,6 +68,7 @@ function resetState() {
   ownerFilter = '';
   searchQuery = '';
   viewMode = 'all';
+  if (agentLogMode) exitAgentLogMode();
   currentSessionId = null;
   const searchInput = document.getElementById('search-input');
   if (searchInput) searchInput.value = '';
@@ -107,10 +109,10 @@ async function fetchSessions() {
   console.log('[fetchSessions] Starting...');
   try {
     const pinnedParam = pinnedSessionIds.size > 0 ? `&pinned=${[...pinnedSessionIds].join(',')}` : '';
-    const res = await fetch(`/api/sessions?limit=${sessionLimit}${pinnedParam}`);
-    const newSessions = await res.json();
-    const tasksRes = await fetch('/api/tasks/all');
-    const newTasks = await tasksRes.json();
+    const [newSessions, newTasks] = await Promise.all([
+      fetch(`/api/sessions?limit=${sessionLimit}${pinnedParam}`).then((r) => r.json()),
+      fetch('/api/tasks/all').then((r) => r.json()),
+    ]);
 
     const sessionsHash = JSON.stringify(newSessions);
     const tasksHash = JSON.stringify(newTasks);
@@ -427,17 +429,20 @@ async function fetchTasks(sessionId) {
     lastCurrentTasksHash = hash;
 
     currentTasks = newTasks;
+    if (agentLogMode && sessionId !== currentSessionId) exitAgentLogMode();
+    if (sessionId !== currentSessionId && document.getElementById('scratchpad-modal').classList.contains('visible'))
+      closeScratchpad();
     currentSessionId = sessionId;
     currentPins = loadPins(sessionId);
     ownerFilter = '';
     lastMessagesHash = '';
-    lastInlineMessage = '';
-    document.getElementById('latest-message').classList.remove('visible');
+    for (const k of Object.keys(ownerColorCache)) delete ownerColorCache[k];
+    for (const k of Object.keys(teamColorMap)) delete teamColorMap[k];
     sessionJustSelected = true;
     updateUrl();
     renderSession();
-    fetchAgents(sessionId);
-    fetchMessages(sessionId);
+    await fetchAgents(sessionId);
+    if (!agentLogMode) fetchMessages(sessionId);
   } catch (error) {
     console.error('Failed to fetch tasks:', error);
     currentTasks = [];
@@ -469,7 +474,10 @@ async function fetchAgents(sessionId) {
     if (hash === lastAgentsHash) return;
     lastAgentsHash = hash;
     currentAgents = agents;
+    updateTeamColors(agents, data.teamColors);
+    for (const k of Object.keys(ownerColorCache)) delete ownerColorCache[k];
     renderAgentFooter();
+    if (currentSessionId === sessionId) renderKanban();
   } catch (e) {
     console.error('[fetchAgents]', e);
   }
@@ -491,6 +499,66 @@ function toggleMessagePanel() {
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
+async function viewAgentLog(agentId) {
+  let agent = currentAgents.find((a) => a.agentId === agentId);
+  if (!agent && currentSessionId) {
+    await fetchAgents(currentSessionId);
+    agent = currentAgents.find((a) => a.agentId === agentId);
+  }
+  if (!agent) return;
+  const shortId = agentId.length > 8 ? agentId.slice(0, 8) : agentId;
+  agentLogMode = { agentId, sessionId: currentSessionId, agentType: agent.type || 'unknown' };
+  closeAgentModal();
+  if (!messagePanelOpen) toggleMessagePanel();
+  const header = document.querySelector('.message-panel-header h3');
+  if (header) {
+    header.innerHTML = `<span class="agent-log-title"><button class="agent-log-back" onclick="exitAgentLogMode()" title="Back to session log">&larr;</button> ${escapeHtml(agent.type || 'unknown')} <code class="agent-log-id">(${escapeHtml(shortId)})</code></span>`;
+  }
+  fetchAgentMessages();
+  if (agentLogSSE) {
+    agentLogSSE.close();
+    agentLogSSE = null;
+  }
+  agentLogSSE = new EventSource(`/api/sessions/${agentLogMode.sessionId}/agents/${agentId}/messages/stream`);
+  agentLogSSE.addEventListener('agent-log-update', (e) => {
+    if (!agentLogMode || agentLogMode.agentId !== agentId) return;
+    try {
+      const data = JSON.parse(e.data);
+      currentMessages = data.messages;
+      if (messagePanelOpen) renderMessages(data.messages);
+    } catch (_) {}
+  });
+  agentLogSSE.onerror = () => {};
+}
+
+function exitAgentLogMode() {
+  agentLogMode = null;
+  if (agentLogSSE) {
+    agentLogSSE.close();
+    agentLogSSE = null;
+  }
+  const header = document.querySelector('.message-panel-header h3');
+  if (header) header.textContent = 'Session Log';
+  lastMessagesHash = '';
+  if (currentSessionId) fetchMessages(currentSessionId);
+}
+
+async function fetchAgentMessages() {
+  if (!agentLogMode) return;
+  const { sessionId, agentId } = agentLogMode;
+  try {
+    const res = await fetch(`/api/sessions/${sessionId}/agents/${agentId}/messages?limit=100`);
+    if (!res.ok || !agentLogMode || agentLogMode.agentId !== agentId) return;
+    const data = await res.json();
+    if (!agentLogMode || agentLogMode.agentId !== agentId) return;
+    currentMessages = data.messages;
+    if (messagePanelOpen) renderMessages(data.messages);
+  } catch (e) {
+    console.error('[fetchAgentMessages]', e);
+  }
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
 function openLiveLatestMessage() {
   if (currentMessages.length) {
     msgDetailFollowLatest = true;
@@ -506,7 +574,6 @@ async function fetchMessages(sessionId) {
     const hash = JSON.stringify(data.messages);
     if (hash === lastMessagesHash) return;
     lastMessagesHash = hash;
-    currentMessages = data.messages;
     let agentEnriched = false;
     for (const m of data.messages) {
       if (m.agentId && m.agentPrompt) {
@@ -518,7 +585,8 @@ async function fetchMessages(sessionId) {
       }
     }
     if (agentEnriched) renderAgentFooter();
-    updateLatestMessage(data.messages);
+    if (agentLogMode) return;
+    currentMessages = data.messages;
     if (messagePanelOpen) renderMessages(data.messages);
     if (msgDetailFollowLatest && data.messages.length) {
       showMsgDetail(data.messages.length - 1);
@@ -548,33 +616,6 @@ function cleanMessageText(text) {
     .trim();
 }
 
-function updateLatestMessage(messages) {
-  const el = document.getElementById('latest-message');
-  let last = null;
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].type === 'assistant' || (messages[i].type === 'user' && !messages[i].systemLabel)) {
-      last = messages[i];
-      break;
-    }
-  }
-  if (!last) {
-    el.classList.remove('visible');
-    lastInlineMessage = '';
-    return;
-  }
-  const label = last.type === 'assistant' ? 'Claude' : 'User';
-  const cleaned = cleanMessageText(last.text);
-  const text = cleaned.length > 120 ? `${cleaned.slice(0, 120)}...` : cleaned;
-  const labelCls = last.type === 'assistant' ? 'lm-label lm-label-assistant' : 'lm-label';
-  const html = `<span class="${labelCls}">${escapeHtml(label)}:</span> ${escapeHtml(text)}`;
-  el.innerHTML = html;
-  el.classList.add('visible');
-  if (lastInlineMessage !== html) {
-    lastInlineMessage = html;
-    renderSessions();
-  }
-}
-
 function renderMsgPinBtn(m, i) {
   const pinned = isPinned(m);
   return `<button class="msg-pin-btn${pinned ? ' pinned' : ''}" onclick="event.stopPropagation();togglePin(${i})" title="${pinned ? 'Unpin' : 'Pin'} message">${PIN_SVG}</button>`;
@@ -601,12 +642,14 @@ function renderPinnedSection() {
           </div>`;
       } else if (p.type === 'tool_use') {
         const toolDetail = p.detail ? ` <span style="color:var(--text-muted)">${escapeHtml(p.detail)}</span>` : '';
+        const pinnedAgentLogBtn = p.tool === 'Agent' && p.agentId ? agentLogButton(p.agentId) : '';
         return `<div class="msg-item msg-tool" ${click}>
             ${MSG_ICON_TOOL}
-            <div class="msg-body"><div class="msg-text">${escapeHtml(p.tool || '')}${toolDetail}</div><div class="msg-time">${formatDate(p.timestamp)}</div></div>${unpin}
+            <div class="msg-body"><div class="msg-text">${escapeHtml(p.tool || '')}${toolDetail}</div><div class="msg-time">${formatDate(p.timestamp)}</div></div>${pinnedAgentLogBtn}${unpin}
           </div>`;
       } else if (p.type === 'agent') {
         const agentClick = `onclick="showAgentModal('${escapeHtml(p.agentId)}')" style="cursor:pointer"`;
+        const agentLogBtn = agentLogButton(p.agentId);
         const msgTrunc = p.lastMessage
           ? escapeHtml(
               stripAnsi(p.lastMessage.trim())
@@ -617,7 +660,7 @@ function renderPinnedSection() {
         const agentDetail = msgTrunc ? ` <span style="color:var(--text-muted)">${msgTrunc}</span>` : '';
         return `<div class="msg-item msg-tool" ${agentClick}>
             ${MSG_ICON_TOOL}
-            <div class="msg-body"><div class="msg-text">${escapeHtml(p.agentType || 'Agent')}${agentDetail}</div><div class="msg-time">${formatDate(p.timestamp)}</div></div>${unpin}
+            <div class="msg-body"><div class="msg-text">${escapeHtml(p.agentType || 'Agent')}${agentDetail}</div><div class="msg-time">${formatDate(p.timestamp)}</div></div>${agentLogBtn}${unpin}
           </div>`;
       }
       return '';
@@ -636,7 +679,7 @@ function renderPinnedSection() {
 function renderMessages(messages) {
   const container = document.getElementById('message-panel-content');
   const pinnedContainer = document.getElementById('message-panel-pinned');
-  pinnedContainer.innerHTML = renderPinnedSection();
+  pinnedContainer.innerHTML = agentLogMode ? '' : renderPinnedSection();
   if (!messages.length) {
     container.innerHTML = '<div class="msg-empty">No messages found for this session</div>';
     return;
@@ -670,13 +713,52 @@ function renderMessages(messages) {
           m.tool === 'Agent' && m.agentId
             ? ` <span class="msg-agent-link" title="View agent" onclick="event.stopPropagation();showAgentModal('${escapeHtml(m.agentId)}')">⇗</span>`
             : '';
-        const itemClick =
+        let agentLogBtn = '';
+        if (m.tool === 'Agent' && m.agentId) {
+          agentLogBtn = agentLogButton(m.agentId);
+        } else if (m.tool === 'SendMessage' && m.params?.to) {
+          const recipient = currentAgents.find((a) => (a.type || a.name) === m.params.to);
+          if (recipient) agentLogBtn = agentLogButton(recipient.agentId);
+        }
+        const recipientColor =
+          m.tool === 'SendMessage' && m.params?.to ? resolveNamedColor(teamColorMap[m.params.to]) : null;
+        const borderStyle = recipientColor ? `border-left:3px solid ${recipientColor.color};` : '';
+        const combinedStyle = `style="${borderStyle}cursor:pointer"`;
+        const itemClickAttr =
           m.tool === 'Agent' && m.agentId
-            ? `onclick="showAgentModal('${escapeHtml(m.agentId)}')" style="cursor:pointer"`
-            : clickable;
-        return `<div class="msg-item msg-tool" ${itemClick}>
+            ? `onclick="showAgentModal('${escapeHtml(m.agentId)}')" ${combinedStyle}`
+            : `onclick="msgDetailFollowLatest=false;showMsgDetail(${i})" ${combinedStyle}`;
+        return `<div class="msg-item msg-tool" ${itemClickAttr}>
             ${MSG_ICON_TOOL}
-            <div class="msg-body"><div class="msg-text">${escapeHtml(m.tool)}${toolDetail}${agentLink}</div><div class="msg-time">${formatDate(m.timestamp)}</div></div>${pinBtn}
+            <div class="msg-body"><div class="msg-text">${escapeHtml(m.tool)}${toolDetail}${agentLink}</div><div class="msg-time">${formatDate(m.timestamp)}</div></div>${agentLogBtn}${pinBtn}
+          </div>`;
+      } else if (m.type === 'teammate') {
+        if (m.teammateId && m.color && !teamColorMap[m.teammateId]) teamColorMap[m.teammateId] = m.color;
+        const tmColor = m.color ? resolveNamedColor(m.color)?.color || m.color : '';
+        const nameSpan = `<span class="teammate-name" style="${tmColor ? `color:${escapeHtml(tmColor)}` : ''}">${escapeHtml(m.teammateId || 'teammate')}</span>`;
+        let tmLookupName = m.teammateId;
+        if (m.teammateId === 'system' && m.protocolType === 'teammate_terminated' && m.protocolData?.message) {
+          const shutMatch = m.protocolData.message.match(/^(.+?) has shut down/);
+          if (shutMatch) tmLookupName = shutMatch[1];
+        }
+        const tmAgent = tmLookupName ? currentAgents.find((a) => (a.type || a.name) === tmLookupName) : null;
+        const tmLogBtn = tmAgent ? agentLogButton(tmAgent.agentId) : '';
+        if (m.isIdle) {
+          return `<div class="msg-item msg-teammate msg-idle" ${clickable}>
+              ${MSG_ICON_IDLE}
+              <div class="msg-body"><div class="msg-text">${nameSpan} <span class="idle-label">${escapeHtml(m.protocolLabel || 'idle')}</span></div><div class="msg-time">${formatDate(m.timestamp)}</div></div>${tmLogBtn}
+            </div>`;
+        }
+        if (m.isProtocol) {
+          return `<div class="msg-item msg-teammate msg-protocol" ${clickable}>
+              ${MSG_ICON_TEAMMATE}
+              <div class="msg-body"><div class="msg-text">${nameSpan} <span class="protocol-label">${escapeHtml(m.protocolLabel || m.protocolType)}</span></div><div class="msg-time">${formatDate(m.timestamp)}</div></div>${tmLogBtn}
+            </div>`;
+        }
+        const summaryText = m.summary ? escapeHtml(m.summary) : escapeHtml((m.text || '').slice(0, 80));
+        return `<div class="msg-item msg-teammate" ${clickable}>
+            ${MSG_ICON_TEAMMATE}
+            <div class="msg-body"><div class="msg-text">${nameSpan} ${summaryText}</div><div class="msg-time">${formatDate(m.timestamp)}</div></div>${tmLogBtn}${pinBtn}
           </div>`;
       }
       return '';
@@ -701,6 +783,15 @@ const MSG_ICON_TOOL =
   '<svg class="msg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>';
 const MSG_ICON_SYSTEM =
   '<svg class="msg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>';
+const MSG_ICON_TEAMMATE =
+  '<svg class="msg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>';
+const MSG_ICON_IDLE =
+  '<svg class="msg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6"/></svg>';
+const AGENT_LOG_ICON =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>';
+function agentLogButton(agentId) {
+  return `<button class="msg-agent-log-btn" onclick="event.stopPropagation();viewAgentLog('${escapeHtml(agentId)}')" title="View agent log">${AGENT_LOG_ICON}</button>`;
+}
 
 function getPinId(m) {
   const content = m.type === 'tool_use' ? `${m.tool}:${(m.detail || '').slice(0, 100)}` : (m.text || '').slice(0, 100);
@@ -923,12 +1014,25 @@ function showMsgDetail(idx) {
     } else {
       agentBtn.style.display = 'none';
     }
-    const toolParamsHtml = renderToolParamsHtml(m.params);
-    const toolResultHtml = renderToolResultHtml(m.toolResult, m.toolResultTruncated, m.toolResultFull);
+    const sendProto = m.tool === 'SendMessage' && m.params?.protocol;
+    const toolParamsHtml = renderToolParamsHtml(
+      sendProto ? Object.fromEntries(Object.entries(m.params).filter(([k]) => k !== 'protocol')) : m.params,
+    );
+    const hideResult = m.tool === 'SendMessage' || TASK_TOOLS.has(m.tool);
+    const taskResultHtml = TASK_TOOLS.has(m.tool) ? renderTaskResult(m.toolResult) : '';
+    const toolResultHtml = hideResult
+      ? ''
+      : renderToolResultHtml(m.toolResult, m.toolResultTruncated, m.toolResultFull);
     const hasAgentTabs = m.tool === 'Agent' && m.agentId && (m.agentLastMessage || m.agentPrompt);
     let mainHtml;
-    if (hasAgentTabs) {
+    if (sendProto) {
+      mainHtml = descHtml + renderProtocolDetail(m.params.protocol);
+    } else if (m.tool === 'SendMessage' && fullText) {
+      mainHtml = `${descHtml}<div class="markdown-body">${renderMarkdown(fullText)}</div>`;
+    } else if (hasAgentTabs) {
       mainHtml = descHtml || '';
+    } else if (taskResultHtml) {
+      mainHtml = '';
     } else if (fullText) {
       const detailEscaped = escapeHtml(fullText);
       const detailRendered = m.tool === 'Bash' ? highlightBash(detailEscaped) : detailEscaped;
@@ -936,7 +1040,18 @@ function showMsgDetail(idx) {
     } else {
       mainHtml = '<em>No details</em>';
     }
-    body.innerHTML = mainHtml + toolParamsHtml + (hasAgentTabs ? '' : toolResultHtml) + agentExtraHtml;
+    body.innerHTML = mainHtml + toolParamsHtml + taskResultHtml + (hasAgentTabs ? '' : toolResultHtml) + agentExtraHtml;
+  } else if (m.type === 'teammate') {
+    document.getElementById('msg-detail-title').textContent = m.teammateId || 'Teammate';
+    document.getElementById('msg-detail-agent-btn').style.display = 'none';
+    if (m.isProtocol) {
+      body.innerHTML = m.protocolData
+        ? renderProtocolDetail(m.protocolData)
+        : `<div class="teammate-idle-detail"><span class="protocol-label">${escapeHtml(m.protocolLabel || m.protocolType)}</span></div>`;
+    } else {
+      const text = stripAnsi(m.fullText || m.text || '');
+      body.innerHTML = renderMarkdown(text);
+    }
   } else {
     const text = stripAnsi(m.fullText || m.text);
     document.getElementById('msg-detail-title').textContent =
@@ -1027,9 +1142,72 @@ async function copyWithFeedback(text, btn) {
 //#endregion
 
 //#region TOOL_RENDERING
+const PROTOCOL_SKIP_KEYS = new Set(['type', 'from', 'timestamp', 'paneId', 'backendType']);
+function renderProtocolDetail(data) {
+  if (!data || typeof data !== 'object') return '';
+  const typeBadge = data.type
+    ? `<span class="protocol-type-badge">${escapeHtml(data.type.replace(/_/g, ' '))}</span>`
+    : '';
+  const fields = Object.entries(data)
+    .filter(([k]) => !PROTOCOL_SKIP_KEYS.has(k))
+    .map(([k, v]) => {
+      const label = escapeHtml(
+        k
+          .replace(/([A-Z])/g, ' $1')
+          .replace(/_/g, ' ')
+          .trim()
+          .toLowerCase(),
+      );
+      let val;
+      if (typeof v === 'boolean') {
+        val = `<span class="protocol-bool protocol-bool-${v}">${v ? 'yes' : 'no'}</span>`;
+      } else if (v == null) {
+        val = `<span style="color:var(--text-muted)">null</span>`;
+      } else {
+        val = escapeHtml(String(v));
+      }
+      return `<div class="protocol-field"><span class="protocol-field-key">${label}</span>${val}</div>`;
+    });
+  return `<div class="protocol-detail">${typeBadge}${fields.length ? `<div class="protocol-fields">${fields.join('')}</div>` : ''}</div>`;
+}
+
+const TASK_TOOLS = new Set(['TaskCreate', 'TaskUpdate', 'TaskGet', 'TaskList']);
+function renderTaskResult(toolResult) {
+  if (!toolResult) return '';
+  const lines = toolResult.trim().split('\n');
+  const fields = [];
+  for (const line of lines) {
+    const m = line.match(/^([A-Za-z #]+):\s*(.+)$/);
+    if (m) fields.push([m[1].trim(), m[2].trim()]);
+  }
+  if (!fields.length) return '';
+  const title = fields.find(([k]) => /^Task/.test(k));
+  const status = fields.find(([k]) => k === 'Status');
+  const rest = fields.filter(([k]) => !/^Task/.test(k) && k !== 'Status');
+  const statusColors = {
+    pending: 'var(--text-muted)',
+    in_progress: 'var(--info)',
+    completed: 'var(--success)',
+    deleted: 'var(--danger)',
+  };
+  const sc = status ? statusColors[status[1]] || 'var(--text-muted)' : '';
+  let html = '<div class="protocol-detail">';
+  if (title) html += `<span class="protocol-type-badge">${escapeHtml(title[1])}</span>`;
+  if (status)
+    html += `<span style="display:inline-block;font-size:10px;font-weight:600;color:${sc};text-transform:uppercase;margin-bottom:6px">${escapeHtml(status[1])}</span>`;
+  if (rest.length) {
+    html += '<div class="protocol-fields">';
+    for (const [k, v] of rest) {
+      html += `<div class="protocol-field"><span class="protocol-field-key">${escapeHtml(k.toLowerCase())}</span>${escapeHtml(v)}</div>`;
+    }
+    html += '</div>';
+  }
+  return `${html}</div>`;
+}
+
 function renderToolParamsHtml(params) {
   if (!params) return '';
-  const BLOCK_KEYS = new Set(['old_string', 'new_string', 'content']);
+  const BLOCK_KEYS = new Set(['old_string', 'new_string', 'content', 'plan']);
   const badges = [],
     blocks = [];
   for (const [k, v] of Object.entries(params)) {
@@ -1079,6 +1257,12 @@ function renderToolParamsHtml(params) {
           <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:2px">content${writeMoreBtn}</div>
           <pre class="msg-detail-pre" style="max-height:300px;overflow:auto">${escapeHtml(truncContent)}</pre>
           ${fullBlock}
+        </div>`;
+  }
+  if (params.plan) {
+    html += `<div style="margin-top:8px;padding-top:6px;border-top:1px solid var(--border)">
+          <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:4px">Plan</div>
+          <div class="markdown-body">${renderMarkdown(params.plan)}</div>
         </div>`;
   }
   return html;
@@ -1226,9 +1410,14 @@ function renderAgentFooter() {
       if (overlapped || reSpawn || isActive) filtered.push(group[i]);
     }
   }
-  // Sort by updatedAt desc, keep up to 7 most recent
+  // Sort: active/idle first, then by updatedAt desc
+  const statusOrder = { active: 0, idle: 1, stopped: 2 };
   const visible = filtered
-    .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0))
+    .sort(
+      (a, b) =>
+        (statusOrder[a.status] ?? 2) - (statusOrder[b.status] ?? 2) ||
+        new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0),
+    )
     .slice(0, AGENT_LOG_MAX);
 
   const permFresh = currentWaiting?.timestamp && now - new Date(currentWaiting.timestamp).getTime() < WAITING_TTL_MS;
@@ -1274,7 +1463,9 @@ function renderAgentFooter() {
         const colonIdx = rawType.indexOf(':');
         const typeNs = colonIdx > 0 ? rawType.substring(0, colonIdx + 1) : '';
         const typeName = colonIdx > 0 ? rawType.substring(colonIdx + 1) : rawType;
-        return `<div class="agent-card" onclick="showAgentModal('${a.agentId}')">
+        const agentColor = resolveNamedColor(a.color);
+        const colorStyle = agentColor ? ` style="border-left:3px solid ${agentColor.color}"` : '';
+        return `<div class="agent-card"${colorStyle} onclick="showAgentModal('${a.agentId}')">
           <div class="agent-type-row">${typeNs ? `<span class="agent-type-ns">${escapeHtml(typeNs)}</span>` : ''}<span class="agent-type-name">${escapeHtml(typeName)}</span></div>
           <div class="agent-status-row"><span class="agent-dot ${a.status}"></span><span class="agent-status">${statusText}</span></div>
           ${msgHtml}
@@ -1411,6 +1602,7 @@ function closeAgentModal() {
 async function showAllTasks() {
   try {
     viewMode = 'all';
+    if (agentLogMode) exitAgentLogMode();
     currentSessionId = null;
     ownerFilter = '';
     currentAgents = [];
@@ -1758,7 +1950,7 @@ function renderSession() {
   if (projectName) {
     metaParts.push(projectName);
   }
-  if (session.description && session.gitBranch) {
+  if (session.description && session.description !== displayName) {
     metaParts.push(session.description);
   }
   metaParts.push(formatDate(session.modifiedAt));
@@ -2617,6 +2809,53 @@ document.getElementById('close-detail').onclick = closeDetailPanel;
 
 //#endregion
 
+//#region SCRATCHPAD
+let _scratchpadSaveTimer = null;
+const _scratchpadModal = document.getElementById('scratchpad-modal');
+const _scratchpadTextarea = document.getElementById('scratchpad-textarea');
+const _scratchpadCharcount = document.getElementById('scratchpad-charcount');
+
+function toggleScratchpad() {
+  if (_scratchpadModal.classList.contains('visible')) {
+    closeScratchpad();
+  } else {
+    showScratchpad();
+  }
+}
+
+function showScratchpad() {
+  if (!currentSessionId) return;
+  _scratchpadTextarea.value = localStorage.getItem(`scratchpad-${currentSessionId}`) || '';
+  _scratchpadCharcount.textContent = `${_scratchpadTextarea.value.length} chars`;
+  _scratchpadModal.classList.add('visible');
+  _scratchpadTextarea.focus();
+}
+
+function closeScratchpad() {
+  if (_scratchpadSaveTimer) {
+    clearTimeout(_scratchpadSaveTimer);
+    _scratchpadSaveTimer = null;
+  }
+  saveScratchpad();
+  _scratchpadModal.classList.remove('visible');
+}
+
+function saveScratchpad() {
+  if (!currentSessionId) return;
+  localStorage.setItem(`scratchpad-${currentSessionId}`, _scratchpadTextarea.value);
+}
+
+_scratchpadTextarea.addEventListener('input', () => {
+  _scratchpadCharcount.textContent = `${_scratchpadTextarea.value.length} chars`;
+  if (_scratchpadSaveTimer) clearTimeout(_scratchpadSaveTimer);
+  _scratchpadSaveTimer = setTimeout(() => {
+    saveScratchpad();
+    _scratchpadSaveTimer = null;
+  }, 500);
+});
+
+//#endregion
+
 //#region KEYBOARD_SHORTCUTS
 function matchKey(e, ...keys) {
   if (e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return false;
@@ -2631,6 +2870,10 @@ document.addEventListener('keydown', (e) => {
   // Modal guard — only Escape, Shift+M, and msg-detail J/K navigation pass through
   if (document.querySelector('.modal-overlay.visible')) {
     if (e.key === 'Escape') {
+      if (_scratchpadModal.classList.contains('visible')) {
+        closeScratchpad();
+        return;
+      }
       // biome-ignore lint/suspicious/useIterableCallbackReturn: forEach side-effect
       document.querySelectorAll('.modal-overlay.visible').forEach((m) => m.classList.remove('visible'));
       msgDetailFollowLatest = false;
@@ -2773,6 +3016,7 @@ document.addEventListener('keydown', (e) => {
 
   if (e.key === 'Escape') {
     if (detailPanel.classList.contains('visible')) closeDetailPanel();
+    else if (agentLogMode) exitAgentLogMode();
     else if (messagePanelOpen) toggleMessagePanel();
     return;
   }
@@ -2790,6 +3034,11 @@ document.addEventListener('keydown', (e) => {
   if (matchKey(e, 'KeyI') && !e.shiftKey) {
     e.preventDefault();
     if (contextSid) showSessionInfoModal(contextSid);
+    return;
+  }
+  if (matchKey(e, 'KeyN') && !e.shiftKey) {
+    e.preventDefault();
+    toggleScratchpad();
     return;
   }
   if (e.key === '?' || (e.key === '/' && e.shiftKey)) {
@@ -2857,9 +3106,12 @@ function setupEventSource() {
     function debouncedRefresh(sessionId, isMetadata) {
       if (isMetadata) {
         clearTimeout(metadataRefreshTimer);
-        metadataRefreshTimer = setTimeout(() => {
+        metadataRefreshTimer = setTimeout(async () => {
           fetchSessions().catch((err) => console.error('[SSE] fetchSessions failed:', err));
-          if (currentSessionId) fetchMessages(currentSessionId);
+          if (currentSessionId) {
+            await fetchAgents(currentSessionId);
+            if (!agentLogMode) fetchMessages(currentSessionId);
+          }
         }, 2000);
       } else {
         pendingTaskSessionIds.add(sessionId);
@@ -3148,13 +3400,46 @@ const ownerColors = [
   { bg: 'rgba(22, 163, 74, 0.14)', color: '#15803d' }, // green
   { bg: 'rgba(99, 102, 241, 0.14)', color: '#4f46e5' }, // indigo
 ];
+const namedColorMap = {
+  red: { bg: 'rgba(239, 68, 68, 0.14)', color: '#dc2626' },
+  blue: { bg: 'rgba(37, 99, 235, 0.14)', color: '#1d5bbf' },
+  green: { bg: 'rgba(22, 163, 74, 0.14)', color: '#15803d' },
+  purple: { bg: 'rgba(168, 85, 247, 0.14)', color: '#7c3aed' },
+  orange: { bg: 'rgba(234, 88, 12, 0.14)', color: '#c2410c' },
+  pink: { bg: 'rgba(219, 39, 119, 0.14)', color: '#b5246a' },
+  yellow: { bg: 'rgba(202, 138, 4, 0.14)', color: '#92700c' },
+  teal: { bg: 'rgba(14, 165, 133, 0.14)', color: '#0d7d65' },
+  indigo: { bg: 'rgba(99, 102, 241, 0.14)', color: '#4f46e5' },
+  cyan: { bg: 'rgba(6, 182, 212, 0.14)', color: '#0891b2' },
+};
 const ownerColorCache = {};
+const teamColorMap = {};
 function isInternalTask(task) {
   return task.metadata && task.metadata._internal === true;
 }
 
+function resolveNamedColor(colorName) {
+  if (!colorName) return null;
+  return namedColorMap[colorName.toLowerCase()] || null;
+}
+
+function updateTeamColors(agents, colors) {
+  if (colors) Object.assign(teamColorMap, colors);
+  for (const a of agents) {
+    const name = a.type || a.name;
+    if (name && a.color) teamColorMap[name] = a.color;
+  }
+}
+
 function getOwnerColor(name) {
   if (ownerColorCache[name]) return ownerColorCache[name];
+  if (teamColorMap[name]) {
+    const c = resolveNamedColor(teamColorMap[name]);
+    if (c) {
+      ownerColorCache[name] = c;
+      return c;
+    }
+  }
   let hash = 5381;
   for (let i = 0; i < name.length; i++) {
     hash = ((hash * 33) ^ name.charCodeAt(i)) | 0;
@@ -3519,6 +3804,10 @@ function showInfoModal(session, teamConfig, tasks, planContent) {
   if (session.tasksDir) {
     infoRows.push(['Tasks Dir', session.tasksDir, { openPath: session.tasksDir }]);
   }
+  if (teamConfig?.configPath) {
+    const configDir = teamConfig.configPath.replace(/[/\\][^/\\]+$/, '');
+    infoRows.push(['Team Config', teamConfig.configPath, { openPath: configDir, openFile: teamConfig.configPath }]);
+  }
   const clickableStyle =
     "font-family: 'IBM Plex Mono', monospace; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; color: var(--accent-text); text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 3px;";
   const plainStyle =
@@ -3534,7 +3823,8 @@ function showInfoModal(session, teamConfig, tasks, planContent) {
     } else {
       html += `<span style="${plainStyle}" title="${copyVal}">${escapeHtml(value)}</span>`;
     }
-    html += `<button onclick="navigator.clipboard.writeText('${copyVal.replace(/'/g, "\\'")}'); this.textContent='✓'; setTimeout(() => this.textContent='Copy', 1000)" style="padding: 2px 8px; font-size: 11px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 4px; color: var(--text-secondary); cursor: pointer; white-space: nowrap;">Copy</button>`;
+    const jsCopyVal = copyVal.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    html += `<button onclick="navigator.clipboard.writeText('${jsCopyVal}'); this.textContent='✓'; setTimeout(() => this.textContent='Copy', 1000)" style="padding: 2px 8px; font-size: 11px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 4px; color: var(--text-secondary); cursor: pointer; white-space: nowrap;">Copy</button>`;
   });
   html += `</div>`;
 
@@ -3582,10 +3872,12 @@ function showInfoModal(session, teamConfig, tasks, planContent) {
     members.forEach((member) => {
       const taskCount = ownerCounts[member.name] || 0;
       const memberDesc = memberDescriptions[member.name];
+      const mc = resolveNamedColor(member.color);
+      const borderStyle = mc ? ` style="border-left:3px solid ${mc.color}"` : '';
+      const nameStyle = mc ? ` style="color:${mc.color}"` : '';
       html += `
-            <div class="team-member-card">
-              <div class="member-name">🟢 ${escapeHtml(member.name)}</div>
-              <div class="member-detail">Role: ${escapeHtml(member.agentType || 'unknown')}</div>
+            <div class="team-member-card"${borderStyle}>
+              <div class="member-name"${nameStyle}>${escapeHtml(member.name)}</div>
               ${member.model ? `<div class="member-detail">Model: ${escapeHtml(member.model)}</div>` : ''}
               ${memberDesc ? `<div class="member-detail" style="margin-top: 4px; font-style: italic; color: var(--text-secondary);">${escapeHtml(memberDesc.split('\n')[0])}</div>` : ''}
               <div class="member-tasks">Tasks: ${taskCount} assigned</div>

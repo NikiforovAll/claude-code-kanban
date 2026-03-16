@@ -4,13 +4,14 @@
 
 INPUT=$(cat)
 
-# Single jq call to extract all routing fields (was 3-4 separate calls)
+# Single jq call to extract all routing fields
 eval "$(echo "$INPUT" | jq -r '
   @sh "SESSION_ID=\(.session_id // "")",
   @sh "AGENT_ID=\(.agent_id // "")",
   @sh "EVENT=\(.hook_event_name // "")",
   @sh "TOOL_NAME=\(.tool_name // "")",
-  @sh "AGENT_TYPE_RAW=\(.agent_type // "")"
+  @sh "AGENT_TYPE_RAW=\(.agent_type // "")",
+  @sh "TEAMMATE_NAME=\(.teammate_name // "")"
 ')"
 
 [ -z "$SESSION_ID" ] && exit 0
@@ -42,6 +43,26 @@ if [ "$EVENT" = "PermissionRequest" ] || { [ "$EVENT" = "PreToolUse" ] && [ "$TO
   exit 0
 fi
 
+# TeammateIdle has no agent_id — resolve via name→id mapping file
+if [ "$EVENT" = "TeammateIdle" ] && [ -z "$AGENT_ID" ] && [ -n "$TEAMMATE_NAME" ]; then
+  DIR="$HOME/.claude/agent-activity/$SESSION_ID"
+  MAP_FILE="$DIR/_name-${TEAMMATE_NAME}.id"
+  [ ! -f "$MAP_FILE" ] && exit 0
+  AGENT_ID=$(cat "$MAP_FILE")
+  [ -z "$AGENT_ID" ] && exit 0
+  FILE="$DIR/$AGENT_ID.json"
+  TS=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+  STARTED_AT="$TS"
+  if [ -f "$FILE" ]; then
+    PREV_START=$(jq -r '.startedAt // ""' "$FILE" 2>/dev/null)
+    [ -n "$PREV_START" ] && STARTED_AT="$PREV_START"
+  fi
+  cat > "$FILE" <<EOF
+{"agentId":"$AGENT_ID","type":"$TEAMMATE_NAME","status":"idle","startedAt":"$STARTED_AT","updatedAt":"$TS"}
+EOF
+  exit 0
+fi
+
 [ -z "$AGENT_ID" ] && exit 0
 
 DIR="$HOME/.claude/agent-activity/$SESSION_ID"
@@ -64,6 +85,16 @@ if [ "$EVENT" = "SubagentStart" ]; then
   cat > "$FILE" <<EOF
 {"agentId":"$AGENT_ID","type":"$AGENT_TYPE_RAW","status":"active","startedAt":"$TS","updatedAt":"$TS"}
 EOF
+  # Write name→id mapping for TeammateIdle resolution
+  # Remove previous incarnation's agent file to avoid duplicates
+  if [ -n "$AGENT_TYPE_RAW" ]; then
+    MAP_FILE="$DIR/_name-${AGENT_TYPE_RAW}.id"
+    if [ -f "$MAP_FILE" ]; then
+      OLD_ID=$(cat "$MAP_FILE")
+      [ -n "$OLD_ID" ] && [ "$OLD_ID" != "$AGENT_ID" ] && rm -f "$DIR/$OLD_ID.json"
+    fi
+    echo -n "$AGENT_ID" > "$MAP_FILE"
+  fi
 
 elif [ "$EVENT" = "SubagentStop" ]; then
   AGENT_TYPE="$AGENT_TYPE_RAW"
