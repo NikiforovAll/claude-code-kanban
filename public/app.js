@@ -1920,7 +1920,37 @@ function renderSessions() {
         ungrouped.push(session);
       }
     }
-    if (pinnedSessionIds.size > 0) {
+    const groupPinned = localStorage.getItem('groupPinnedSessions') !== 'false';
+    const renderGroupSessions = (sessions, pinKey) => {
+      if (!groupPinned || pinnedSessionIds.size === 0) return sessions.map(renderSessionCard).join('');
+      const gPinned = sessions.filter((s) => pinnedSessionIds.has(s.id));
+      if (gPinned.length === 0) return sessions.map(renderSessionCard).join('');
+      const gUnpinned = sessions.filter((s) => !pinnedSessionIds.has(s.id));
+      const pinCollapsed = collapsedProjectGroups.has(pinKey);
+      return (
+        '<div class="pinned-sub-section">' +
+        '<div class="pinned-sub-header' +
+        (pinCollapsed ? ' collapsed' : '') +
+        '" data-group-path="' +
+        escapeHtml(pinKey) +
+        '">' +
+        '<svg class="group-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>' +
+        '<span class="pinned-sub-label">Pinned</span>' +
+        '<span class="group-count">' +
+        gPinned.length +
+        '</span>' +
+        '<span class="pinned-ungroup-btn" title="Ungroup pinned sessions">&times;</span>' +
+        '</div>' +
+        '<div class="pinned-sub-items' +
+        (pinCollapsed ? ' collapsed' : '') +
+        '">' +
+        gPinned.map(renderSessionCard).join('') +
+        '</div>' +
+        '</div>' +
+        gUnpinned.map(renderSessionCard).join('')
+      );
+    };
+    if (!groupPinned && pinnedSessionIds.size > 0) {
       const pinSort = (a, b) => (pinnedSessionIds.has(b.id) ? 1 : 0) - (pinnedSessionIds.has(a.id) ? 1 : 0);
       for (const [, arr] of groups) arr.sort(pinSort);
       ungrouped.sort(pinSort);
@@ -1941,6 +1971,15 @@ function renderSessions() {
     const sortedGroups = stableGroupOrder.map((p) => [p, groups.get(p)]);
 
     let html = '';
+    if (!groupPinned && pinnedSessionIds.size > 0) {
+      const hasPinnedInView = filteredSessions.some((s) => pinnedSessionIds.has(s.id));
+      if (hasPinnedInView) {
+        html += `<div class="pinned-regroup-banner">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="3"/><path d="M5 10l7-7 7 7"/><line x1="4" y1="21" x2="20" y2="21"/></svg>
+          Group pinned sessions
+        </div>`;
+      }
+    }
     for (const [projectPath, projectSessions] of sortedGroups) {
       const folderName = projectPath.split(/[/\\]/).pop();
       const isCollapsed = collapsedProjectGroups.has(projectPath);
@@ -1964,7 +2003,7 @@ function renderSessions() {
             </div>
             <div class="project-group-breadcrumb" data-full-path="${escapedPath}" title="Click to copy path">${breadcrumbHtml}</div>
             <div class="project-group-sessions${isCollapsed ? ' collapsed' : ''}">
-              ${projectSessions.map(renderSessionCard).join('')}
+              ${renderGroupSessions(projectSessions, `__pinned_${projectPath}__`)}
             </div>
           `;
     }
@@ -1978,7 +2017,7 @@ function renderSessions() {
               <span class="group-count">${ungrouped.length}</span>
             </div>
             <div class="project-group-sessions${isCollapsed ? ' collapsed' : ''}">
-              ${ungrouped.map(renderSessionCard).join('')}
+              ${renderGroupSessions(ungrouped, '__pinned___ungrouped__')}
             </div>
           `;
     } else {
@@ -2338,8 +2377,9 @@ function getKbId(el) {
 }
 
 function getGroupSessionsContainer(header) {
+  const cls = header.classList.contains('pinned-sub-header') ? 'pinned-sub-items' : 'project-group-sessions';
   let el = header.nextElementSibling;
-  while (el && !el.classList.contains('project-group-sessions')) el = el.nextElementSibling;
+  while (el && !el.classList.contains(cls)) el = el.nextElementSibling;
   return el;
 }
 
@@ -2351,7 +2391,10 @@ function getNavigableItems() {
       if (!collapsedProjectGroups.has(el.dataset.groupPath)) {
         const container = getGroupSessionsContainer(el);
         if (container) {
-          for (const s of container.querySelectorAll('.session-item')) items.push(s);
+          for (const s of container.querySelectorAll('.session-item')) {
+            if (s.closest('.pinned-sub-items.collapsed')) continue;
+            items.push(s);
+          }
         }
       }
     } else if (el.classList.contains('session-item')) {
@@ -3661,6 +3704,25 @@ document.addEventListener('click', (e) => {
     e.stopPropagation();
     const projectPath = projectBtn.dataset.projectPath;
     if (projectPath) fetchProjectView(projectPath);
+    return;
+  }
+
+  if (e.target.closest('.pinned-ungroup-btn')) {
+    e.stopPropagation();
+    localStorage.setItem('groupPinnedSessions', 'false');
+    renderSessions();
+    return;
+  }
+
+  if (e.target.closest('.pinned-regroup-banner')) {
+    localStorage.setItem('groupPinnedSessions', 'true');
+    renderSessions();
+    return;
+  }
+
+  const pinnedSubHeader = e.target.closest('.pinned-sub-header');
+  if (pinnedSubHeader) {
+    setGroupCollapsed(pinnedSubHeader, !collapsedProjectGroups.has(pinnedSubHeader.dataset.groupPath));
     return;
   }
 
