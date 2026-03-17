@@ -60,21 +60,23 @@ Configured in `~/.claude/settings.json` for six events: `SubagentStart`, `Subage
 
 **File layout:** `~/.claude/agent-activity/{sessionId}/{agentId}.json` — one file per agent, grouped by session.
 
-**SubagentStart:** Creates file with `status: "active"`. Skips internal agents (empty `agent_type`, e.g. AskUserQuestion). Also writes a name→ID mapping file `_name-{agent_type}.id` for TeammateIdle resolution, and removes previous incarnation's agent file if the mapping pointed to a different ID (dedup).
+**SubagentStart:** Creates file with `status: "active"`. Skips internal agents (empty `agent_type`, e.g. AskUserQuestion). Also writes a name→ID mapping file `_name-{agent_type}.id` for TeammateIdle resolution. If the mapping pointed to a different ID, the old agent file is deleted **only if its status is not `active`** — this preserves parallel subagents of the same type while still deduplicating teammate re-spawns (which transition `active → idle → re-spawn`).
 
 **SubagentStop:** Overwrites file with `status: "stopped"`, preserves `startedAt` from existing file, captures `last_assistant_message`. Falls back to reading `type` from existing file if `agent_type` is empty.
 
 **TeammateIdle:** Has no `agent_id` — resolves it by reading the `_name-{teammate_name}.id` mapping file. Updates the agent file to `status: "idle"`, preserves `startedAt`.
 
-### Name→ID mapping (teammate dedup)
+### Name→ID mapping (teammate dedup vs parallel subagents)
 
-Team members get a new `agent_id` each time they wake up (each `SendMessage` creates a new subprocess). To avoid duplicate agent entries:
+Team members get a new `agent_id` each time they wake up (each `SendMessage` creates a new subprocess). To avoid duplicate agent entries while supporting parallel subagents:
 
 1. `SubagentStart` writes `_name-{type}.id` containing the `agent_id`
-2. If a mapping file already exists with a different ID, the old agent JSON file is deleted
+2. If a mapping file already exists with a different ID, the old agent's status is checked:
+   - **`active`** → old file is **kept** (parallel subagent of the same type, e.g. multiple Explore agents)
+   - **`idle`/`stopped`/missing** → old file is **deleted** (teammate re-spawn)
 3. `TeammateIdle` reads the mapping to find the correct agent file to update
 
-This ensures only the latest incarnation of each teammate is tracked.
+**Why status-based:** Teammates transition `active → idle → re-spawn` — the old instance is always `idle` (not `active`) when the new one starts. Parallel subagents are `active` simultaneously.
 
 ### Agent JSON schema
 
@@ -138,9 +140,13 @@ Team members are exempt from stale timeout. The server checks team config and sk
 
 ### REST endpoints
 
-`GET /api/sessions/:sessionId/agents` — returns agent objects + team colors. For team sessions, resolves `sessionId` to the leader's UUID via team config before reading files. Team members are exempt from stale timeout.
+`GET /api/sessions/:sessionId/agents` — returns agent objects + team colors. For team sessions, resolves `sessionId` to the leader's UUID via team config before reading files. Team members are exempt from stale timeout. Model extraction reads `obj.message.model` (or `obj.model`) from the subagent's JSONL transcript and persists it back to the agent file.
 
 `GET /api/teams/:name` — returns team config including `configPath`.
+
+### Team session detection
+
+Team sessions are detected by scanning `TEAMS_DIR` (`~/.claude/teams/`) after building the sessions map. Each team config has a `leadSessionId` — the leader's UUID session is enriched with `isTeam: true`, `teamName`, and `memberCount`. The team-named duplicate session (created from the task directory `~/.claude/tasks/{teamName}/`) is removed from the response. The frontend uses `session.teamName` to fetch team config via `/api/teams/{teamName}`.
 
 `GET /api/sessions/:sessionId/agents/:agentId/messages` — returns the subagent's own session log by reading `subagents/agent-{agentId}.jsonl`.
 
@@ -196,6 +202,22 @@ Shutdown handshake creates duplicate agent instances per worker. Three rounds:
 
 Listens for `type: "agent-update"` events. If `sessionId` matches current session, triggers debounced `fetchAgents()` call.
 
+### Poll interval (chokidar reliability workaround)
+
+On Windows, chokidar's `add` events for new files are unreliable when multiple files are created in rapid succession (e.g., parallel agent spawning). The `change` event (file update) fires reliably.
+
+**Symptom:** Only 1 of N parallel agents appears in the footer; the rest appear when any agent finishes (the `SubagentStop` rewrite triggers a `change` event which causes a re-fetch that discovers all agents).
+
+**Fix:** `agentPollInterval` — a 3-second polling interval that re-fetches agents while any are active/idle. Runs alongside the 1-second `agentDurationInterval` (which only re-renders elapsed time from cached data). The poll stops when all agents are stopped or invisible. `fetchAgents()` uses `lastAgentsHash` to bail when data is unchanged, so the poll adds minimal overhead.
+
+### Agent ID resolution for team members
+
+Message `agentId` values for team members use the format `name@team` (e.g., `reuse-reviewer@code-review`), while agent-activity files use hex IDs (e.g., `aa5faea19f7e3202d`). `findAgentById()` resolves this by extracting the name before `@` and matching against `agent.type`.
+
+### `<teammate-message>` wrapper stripping
+
+Team member prompts are wrapped in `<teammate-message teammate_id="..." summary="...">` XML by the Claude Code team framework. `stripTeammateWrapper()` extracts the inner content for display in agent cards and the agent modal.
+
 ## Configuration constants
 
 | Constant | Value | Location | Purpose |
@@ -208,10 +230,13 @@ Listens for `type: "agent-update"` events. If `sessionId` matches current sessio
 
 ## Known limitations
 
+- **chokidar `add` unreliable on Windows** — file creation events are dropped when multiple agents spawn in parallel. Mitigated by 3s poll interval.
 - `SubagentStop` is intermittently unreliable — may not fire for some agents. Mitigated by stale timeout.
 - `SubagentStop` does not fire for terminated teammates. Mitigated by server-side JSONL `teammate_terminated` detection.
 - Shutdown handshake spawns transient agent instances that never receive `SubagentStop`. Mitigated by temporal dedup filter + hook-level dedup for team members.
-- Hook `SubagentStart` does not provide agent prompt/description — only `agent_type` is available for identification.
+- Hook `SubagentStart` does not provide agent prompt/description — only `agent_type` is available for identification. Prompt is extracted from the parent session's JSONL transcript (progress map) or the subagent's own transcript.
+- Hook `SubagentStart` does not provide `teammate_name` — cannot distinguish teammates from parallel subagents by field alone. Resolved by checking old agent's status (`active` = parallel, `idle`/`stopped` = re-spawn).
 - `TeammateIdle` provides no `agent_id` — resolved via name→ID mapping files written on `SubagentStart`.
 - Internal agents (e.g. AskUserQuestion) have empty `agent_type` and are excluded.
 - `agent_transcript_path` is only available at `SubagentStop`, not `SubagentStart`.
+- Team member prompts contain `<teammate-message>` XML wrapper that must be stripped for display.

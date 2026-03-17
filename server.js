@@ -62,6 +62,11 @@ const SESSION_STALE_MS = 300000;
 
 const WAITING_RESOLVE_GRACE_MS = 15000;
 
+function persistAgent(dir, agent) {
+  const file = path.join(dir, agent.agentId + '.json');
+  fs.writeFile(file, JSON.stringify(agent), 'utf8').catch(() => {});
+}
+
 function checkWaitingForUser(agentDir, logMtime) {
   try {
     const data = JSON.parse(readFileSync(path.join(agentDir, '_waiting.json'), 'utf8'));
@@ -236,9 +241,24 @@ function loadAllTaskMaps() {
 function getCustomTaskDir(sessionId) {
   const { sessionToList } = loadAllTaskMaps();
   const taskListName = sessionToList[sessionId];
-  if (!taskListName) return null;
-  const dir = path.join(TASKS_DIR, taskListName);
-  return existsSync(dir) ? dir : null;
+  if (taskListName) {
+    const dir = path.join(TASKS_DIR, taskListName);
+    if (existsSync(dir)) return dir;
+  }
+  // Check team-named task directory (teams store tasks under ~/.claude/tasks/<teamName>/)
+  if (existsSync(TEAMS_DIR)) {
+    try {
+      for (const dir of readdirSync(TEAMS_DIR, { withFileTypes: true })) {
+        if (!dir.isDirectory()) continue;
+        const cfg = loadTeamConfig(dir.name);
+        if (cfg?.leadSessionId === sessionId) {
+          const teamTaskDir = path.join(TASKS_DIR, dir.name);
+          if (existsSync(teamTaskDir)) return teamTaskDir;
+        }
+      }
+    } catch (_) {}
+  }
+  return null;
 }
 
 function getTaskCounts(sessionPath) {
@@ -638,18 +658,45 @@ app.get('/api/sessions', async (req, res) => {
       } catch (e) { /* ignore */ }
     }
 
-    // Hide leader UUID sessions that are represented by a team session
+    // Enrich leader sessions with team info and remove team-named duplicates
     const teamLeaderIds = new Set();
-    for (const [sid, session] of sessionsMap) {
-      if (session.isTeam) {
-        const cfg = loadTeamConfig(sid);
-        if (cfg?.leadSessionId) teamLeaderIds.add(cfg.leadSessionId);
-      }
-    }
-    for (const leaderId of teamLeaderIds) {
-      if (sessionsMap.has(leaderId)) {
-        sessionsMap.delete(leaderId);
-      }
+    if (existsSync(TEAMS_DIR)) {
+      try {
+        for (const dir of readdirSync(TEAMS_DIR, { withFileTypes: true })) {
+          if (!dir.isDirectory()) continue;
+          // Remove team-named duplicate session (e.g., "code-review") — leader is the canonical entry
+          if (sessionsMap.has(dir.name)) sessionsMap.delete(dir.name);
+          const cfg = loadTeamConfig(dir.name);
+          if (!cfg?.leadSessionId) continue;
+          const leaderId = cfg.leadSessionId;
+          const existing = sessionsMap.get(leaderId);
+          if (existing) {
+            existing.isTeam = true;
+            existing.teamName = dir.name;
+            existing.memberCount = cfg.members?.length || 0;
+            existing.name = existing.name || cfg.name || dir.name;
+            teamLeaderIds.add(leaderId);
+            // Attach team-named task directory if present
+            const teamTaskDir = path.join(TASKS_DIR, dir.name);
+            if (!existing.tasksDir && existsSync(teamTaskDir)) {
+              const counts = getTaskCounts(teamTaskDir);
+              existing.taskCount = counts.taskCount;
+              existing.completed = counts.completed;
+              existing.inProgress = counts.inProgress;
+              existing.pending = counts.pending;
+              existing.tasksDir = teamTaskDir;
+              existing.sharedTaskList = dir.name;
+            }
+            // Re-check agent status with isTeam=true
+            const agentDir = path.join(AGENT_ACTIVITY_DIR, leaderId);
+            const logStat = getSessionLogStat(metadata[leaderId] || {});
+            const logAge = logStat.mtime ? Date.now() - logStat.mtime : Infinity;
+            const agentStatus = checkAgentStatus(agentDir, logAge > AGENT_STALE_MS, logStat.mtime, true);
+            existing.hasActiveAgents = agentStatus.hasActive;
+            existing.hasRunningAgents = agentStatus.hasRunning;
+          }
+        }
+      } catch (_) {}
     }
 
     // Correlate plan sessions with their implementation sessions (same slug)
@@ -954,8 +1001,7 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
               if (terminatedAt && agent.startedAt && terminatedAt < agent.startedAt) continue;
               agent.status = 'stopped';
               agent.stoppedAt = agent.stoppedAt || new Date().toISOString();
-              const agentFile = path.join(agentDir, agent.agentId + '.json');
-              fs.writeFile(agentFile, JSON.stringify(agent), 'utf8').catch(() => {});
+              persistAgent(agentDir, agent);
             }
           }
         }
@@ -964,8 +1010,7 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
 
     function persistPrompt(agent, prompt) {
       agent.prompt = prompt;
-      const agentFile = path.join(agentDir, agent.agentId + '.json');
-      fs.writeFile(agentFile, JSON.stringify(agent), 'utf8').catch(() => {});
+      persistAgent(agentDir, agent);
     }
 
     const agentsNeedingPrompt = agents.filter(a => !a.prompt);
@@ -981,6 +1026,28 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
         const prompt = byAgentId[agent.agentId]
           || (() => { try { return extractPromptFromTranscript(subagentJsonlPath(meta, agent.agentId)); } catch (_) { return null; } })();
         if (prompt) persistPrompt(agent, prompt);
+      }
+    }
+
+    const agentsNeedingModel = agents.filter(a => !a.model);
+    if (agentsNeedingModel.length && meta.jsonlPath) {
+      for (const agent of agentsNeedingModel) {
+        try {
+          const jsonl = subagentJsonlPath(meta, agent.agentId);
+          const content = readFileSync(jsonl, 'utf8');
+          for (const line of content.split('\n')) {
+            if (!line.trim()) continue;
+            try {
+              const obj = JSON.parse(line);
+              const model = obj.model || (obj.message && obj.message.model);
+              if (model) {
+                agent.model = model;
+                persistAgent(agentDir, agent);
+                break;
+              }
+            } catch (_) {}
+          }
+        } catch (_) {}
       }
     }
     const teamColors = {};
@@ -1012,7 +1079,7 @@ app.post('/api/sessions/:sessionId/agents/:agentId/stop', (req, res) => {
     const agent = JSON.parse(readFileSync(agentFile, 'utf8'));
     agent.status = 'stopped';
     agent.stoppedAt = new Date().toISOString();
-    writeFileSync(agentFile, JSON.stringify(agent), 'utf8');
+    writeFileSync(agentFile, JSON.stringify(agent), 'utf8'); // sync — response depends on write
     // Also remove waiting state if present
     const waitingFile = path.join(AGENT_ACTIVITY_DIR, sessionId, '_waiting.json');
     if (existsSync(waitingFile)) unlinkSync(waitingFile);
@@ -1124,7 +1191,7 @@ app.get('/api/sessions/:sessionId/messages', (req, res) => {
           const prompt = msg.agentPrompt || entry.prompt;
           if (prompt && !agent.prompt) {
             agent.prompt = prompt;
-            fs.writeFile(agentFile, JSON.stringify(agent), 'utf8').catch(() => {});
+            persistAgent(agentDir, agent);
           }
         } catch (_) {}
       }

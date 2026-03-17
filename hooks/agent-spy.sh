@@ -104,12 +104,17 @@ if [ "$EVENT" = "SubagentStart" ]; then
 {"agentId":"$AGENT_ID","type":"$AGENT_TYPE_RAW","status":"active","startedAt":"$TS","updatedAt":"$TS"}
 EOF
   # Write name→id mapping for TeammateIdle resolution
-  # Remove previous incarnation's agent file to avoid duplicates
+  # Delete previous file only if not active (idle/stopped = teammate re-spawn, active = parallel subagent)
   if [ -n "$AGENT_TYPE_RAW" ]; then
     MAP_FILE="$DIR/_name-${AGENT_TYPE_RAW}.id"
     if [ -f "$MAP_FILE" ]; then
       OLD_ID=$(cat "$MAP_FILE")
-      [ -n "$OLD_ID" ] && [ "$OLD_ID" != "$AGENT_ID" ] && rm -f "$DIR/$OLD_ID.json"
+      if [ -n "$OLD_ID" ] && [ "$OLD_ID" != "$AGENT_ID" ]; then
+        OLD_FILE="$DIR/$OLD_ID.json"
+        OLD_STATUS=""
+        [ -f "$OLD_FILE" ] && OLD_STATUS=$(jq -r '.status // ""' "$OLD_FILE" 2>/dev/null)
+        [ "$OLD_STATUS" != "active" ] && rm -f "$OLD_FILE"
+      fi
     fi
     echo -n "$AGENT_ID" > "$MAP_FILE"
   fi

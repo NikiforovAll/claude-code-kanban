@@ -21,6 +21,7 @@ let messagePanelOpen = false;
 let lastMessagesHash = '';
 let currentMessages = [];
 let agentDurationInterval = null;
+let agentPollInterval = null;
 let selectedTaskId = null;
 let selectedSessionId = null;
 let focusZone = 'board'; // 'board' | 'sidebar'
@@ -112,7 +113,6 @@ let lastTasksHash = '';
 
 //#region DATA_FETCHING
 async function fetchSessions() {
-  console.log('[fetchSessions] Starting...');
   try {
     const pinnedParam = pinnedSessionIds.size > 0 ? `&pinned=${[...pinnedSessionIds].join(',')}` : '';
     const [newSessions, newTasks] = await Promise.all([
@@ -123,7 +123,6 @@ async function fetchSessions() {
     const sessionsHash = JSON.stringify(newSessions);
     const tasksHash = JSON.stringify(newTasks);
     if (sessionsHash === lastSessionsHash && tasksHash === lastTasksHash) {
-      console.log('[fetchSessions] No changes, skipping render');
       return;
     }
     lastSessionsHash = sessionsHash;
@@ -131,9 +130,7 @@ async function fetchSessions() {
 
     sessions = newSessions;
     allTasksCache = newTasks;
-    console.log('[fetchSessions] Sessions loaded:', sessions.length);
     renderSessions();
-    console.log('[fetchSessions] Render complete');
     renderLiveUpdatesFromCache();
   } catch (error) {
     console.error('Failed to fetch sessions:', error);
@@ -430,7 +427,6 @@ async function fetchTasks(sessionId) {
 
     const hash = JSON.stringify(newTasks);
     if (sessionId === currentSessionId && hash === lastCurrentTasksHash) {
-      console.log('[fetchTasks] No changes, skipping render');
       return;
     }
     lastCurrentTasksHash = hash;
@@ -583,6 +579,9 @@ async function refreshProjectAgents() {
     if (r.waitingForUser && !mergedWaiting) mergedWaiting = r.waitingForUser;
   }
   currentWaiting = mergedWaiting;
+  const hash = JSON.stringify({ agents: currentAgents, waiting: currentWaiting });
+  if (hash === lastAgentsHash) return;
+  lastAgentsHash = hash;
   renderAgentFooter();
 }
 
@@ -603,15 +602,16 @@ function toggleMessagePanel() {
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
 async function viewAgentLog(agentId) {
-  let agent = currentAgents.find((a) => a.agentId === agentId);
+  let agent = findAgentById(agentId);
   if (!agent && currentSessionId) {
     await fetchAgents(currentSessionId);
-    agent = currentAgents.find((a) => a.agentId === agentId);
+    agent = findAgentById(agentId);
   }
   if (!agent) return;
-  const shortId = agentId.length > 8 ? agentId.slice(0, 8) : agentId;
+  const resolvedId = agent.agentId;
+  const shortId = resolvedId.length > 8 ? resolvedId.slice(0, 8) : resolvedId;
   const agentSessionId = agent._sourceSessionId || currentSessionId;
-  agentLogMode = { agentId, sessionId: agentSessionId, agentType: agent.type || 'unknown' };
+  agentLogMode = { agentId: resolvedId, sessionId: agentSessionId, agentType: agent.type || 'unknown' };
   closeAgentModal();
   document.getElementById('message-toggle')?.style.removeProperty('display');
   if (!messagePanelOpen) toggleMessagePanel();
@@ -624,9 +624,9 @@ async function viewAgentLog(agentId) {
     agentLogSSE.close();
     agentLogSSE = null;
   }
-  agentLogSSE = new EventSource(`/api/sessions/${agentLogMode.sessionId}/agents/${agentId}/messages/stream`);
+  agentLogSSE = new EventSource(`/api/sessions/${agentLogMode.sessionId}/agents/${resolvedId}/messages/stream`);
   agentLogSSE.addEventListener('agent-log-update', (e) => {
-    if (!agentLogMode || agentLogMode.agentId !== agentId) return;
+    if (!agentLogMode || agentLogMode.agentId !== resolvedId) return;
     try {
       const data = JSON.parse(e.data);
       currentMessages = data.messages;
@@ -762,7 +762,7 @@ function renderPinnedSection() {
         const agentLogBtn = agentLogButton(p.agentId);
         const msgTrunc = p.lastMessage
           ? escapeHtml(
-              stripAnsi(p.lastMessage.trim())
+              stripAnsi(stripTeammateWrapper(p.lastMessage.trim()))
                 .replace(/[\r\n]+/g, ' ')
                 .slice(0, 60),
             )
@@ -1539,6 +1539,8 @@ function renderAgentFooter() {
     footer.classList.remove('visible');
     clearInterval(agentDurationInterval);
     agentDurationInterval = null;
+    clearInterval(agentPollInterval);
+    agentPollInterval = null;
     return;
   }
 
@@ -1567,7 +1569,7 @@ function renderAgentFooter() {
             : a.status === 'idle'
               ? `idle · ${formatDuration(elapsed)}`
               : `active · ${formatDuration(elapsed)}`;
-        const promptTrimmed = stripAnsi((a.prompt || '').trim()).replace(/[\r\n]+/g, ' ');
+        const promptTrimmed = stripAnsi(stripTeammateWrapper((a.prompt || '').trim())).replace(/[\r\n]+/g, ' ');
         const promptTrunc = promptTrimmed.length > 60 ? `${promptTrimmed.substring(0, 60)}…` : promptTrimmed;
         const msgHtml = promptTrunc
           ? `<div class="agent-message" title="${escapeHtml(promptTrimmed)}">${escapeHtml(promptTrunc)}</div>`
@@ -1589,8 +1591,19 @@ function renderAgentFooter() {
   clearInterval(agentDurationInterval);
   if (visible.some((a) => a.status === 'active' || a.status === 'idle')) {
     agentDurationInterval = setInterval(() => renderAgentFooter(), 1000);
+    if (!agentPollInterval) {
+      agentPollInterval = setInterval(() => {
+        if (viewMode === 'project' && currentProjectPath) {
+          refreshProjectAgents();
+        } else if (currentSessionId) {
+          fetchAgents(currentSessionId);
+        }
+      }, 3000);
+    }
   } else {
     agentDurationInterval = setInterval(() => renderAgentFooter(), 10000);
+    clearInterval(agentPollInterval);
+    agentPollInterval = null;
   }
 }
 
@@ -1644,9 +1657,19 @@ async function dismissAgent(agentId) {
   }
 }
 
+function findAgentById(agentId) {
+  let agent = currentAgents.find((a) => a.agentId === agentId);
+  if (!agent) {
+    const atIdx = agentId.indexOf('@');
+    const memberName = atIdx > 0 ? agentId.substring(0, atIdx) : null;
+    if (memberName) agent = currentAgents.find((a) => a.type === memberName);
+  }
+  return agent || null;
+}
+
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
 function showAgentModal(agentId) {
-  const agent = currentAgents.find((a) => a.agentId === agentId);
+  const agent = findAgentById(agentId);
   if (!agent) return;
   currentAgentModalId = agentId;
   const modal = document.getElementById('agent-modal');
@@ -1665,6 +1688,8 @@ function showAgentModal(agentId) {
     ['Agent ID', `<code style="font-size:12px;color:var(--text-tertiary)">${escapeHtml(agent.agentId)}</code>`],
     ['Duration', formatDuration(elapsed)],
   ];
+  if (agent.model)
+    rows.push(['Model', `<code style="font-size:12px;color:var(--text-tertiary)">${escapeHtml(agent.model)}</code>`]);
   if (started) rows.push(['Started', started.toLocaleTimeString()]);
   if (stopped) rows.push(['Stopped', stopped.toLocaleTimeString()]);
 
@@ -1680,7 +1705,7 @@ function showAgentModal(agentId) {
       .join('') +
     `</table>`;
 
-  const promptText = agentMsg?.agentPrompt || agent.prompt || null;
+  const promptText = stripTeammateWrapper(agentMsg?.agentPrompt || agent.prompt || null);
   const responseText = agent.lastMessage ? stripAnsi(agent.lastMessage.trim()) : null;
   _agentModalPromptText = promptText;
   _agentModalResponseText = responseText;
@@ -3336,7 +3361,6 @@ function setupEventSource() {
 
     eventSource.onmessage = (event) => {
       const data = JSON.parse(event.data);
-      console.log('[SSE] Event received:', data);
       if (data.type === 'update' || data.type === 'metadata-update') {
         if (data.type === 'metadata-update') projectsCacheDirty = true;
         debouncedRefresh(data.sessionId, data.type === 'metadata-update');
@@ -3365,7 +3389,6 @@ function setupEventSource() {
       }
 
       if (data.type === 'team-update') {
-        console.log('[SSE] Team update:', data.teamName);
         debouncedRefresh(data.teamName, false);
       }
     };
@@ -3541,6 +3564,12 @@ function formatDate(dateStr) {
 function stripAnsi(text) {
   // biome-ignore lint/suspicious/noControlCharactersInRegex: \x1b is intentional for ANSI escape sequence stripping
   return typeof text === 'string' ? text.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '') : text;
+}
+
+function stripTeammateWrapper(text) {
+  if (typeof text !== 'string') return text;
+  const match = text.match(/^<teammate-message[^>]*>\n?([\s\S]*?)(?:<\/teammate-message>\s*)?$/);
+  return match ? match[1].trim() : text;
 }
 
 function escapeHtml(text) {
@@ -3973,8 +4002,9 @@ async function showSessionInfoModal(sessionId) {
   // Fetch team config
   let teamConfig = null;
   if (session.isTeam) {
+    const teamId = session.teamName || sessionId;
     promises.push(
-      fetch(`/api/teams/${sessionId}`)
+      fetch(`/api/teams/${teamId}`)
         .then((r) => (r.ok ? r.json() : null))
         .catch(() => null)
         .then((data) => {
