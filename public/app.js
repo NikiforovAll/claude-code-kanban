@@ -1510,14 +1510,17 @@ function renderAgentFooter() {
   for (const group of Object.values(byType)) {
     group.sort((a, b) => new Date(a.startedAt || 0) - new Date(b.startedAt || 0));
     filtered.push(group[0]);
+    let maxStop = group[0].stoppedAt ? new Date(group[0].stoppedAt).getTime() : Infinity;
     for (let i = 1; i < group.length; i++) {
-      const prev = group[i - 1];
-      const prevStop = prev.stoppedAt ? new Date(prev.stoppedAt).getTime() : Infinity;
-      const curStart = new Date(group[i].startedAt || 0).getTime();
-      const overlapped = curStart < prevStop;
-      const reSpawn = curStart - prevStop > 30000;
-      const isActive = group[i].status === 'active' || group[i].status === 'idle';
-      if (overlapped || reSpawn || isActive) filtered.push(group[i]);
+      const cur = group[i];
+      const hasContent = cur.prompt || cur.lastMessage;
+      const curStart = new Date(cur.startedAt || 0).getTime();
+      const overlapped = curStart < maxStop;
+      const reSpawn = curStart - maxStop > 30000;
+      const isActive = cur.status === 'active' || cur.status === 'idle';
+      if (overlapped || reSpawn || isActive || hasContent) filtered.push(cur);
+      const curStop = cur.stoppedAt ? new Date(cur.stoppedAt).getTime() : Infinity;
+      if (curStop > maxStop) maxStop = curStop;
     }
   }
   // Sort: active/idle first, then by updatedAt desc
@@ -3297,7 +3300,9 @@ function setupEventSource() {
 
     let taskRefreshTimer = null;
     let metadataRefreshTimer = null;
+    let agentRefreshTimer = null;
     const pendingTaskSessionIds = new Set();
+    const pendingAgentSessionIds = new Set();
 
     function debouncedRefresh(sessionId, isMetadata) {
       if (isMetadata) {
@@ -3342,12 +3347,17 @@ function setupEventSource() {
       }
 
       if (data.type === 'agent-update') {
-        fetchSessions().catch((err) => console.error('[SSE] fetchSessions failed:', err));
-        if (viewMode === 'project' && currentProjectSessionIds.includes(data.sessionId)) {
-          refreshProjectAgents();
-        } else if (currentSessionId && data.sessionId === currentSessionId) {
-          fetchAgents(currentSessionId);
-        }
+        pendingAgentSessionIds.add(data.sessionId);
+        clearTimeout(agentRefreshTimer);
+        agentRefreshTimer = setTimeout(() => {
+          fetchSessions().catch((err) => console.error('[SSE] fetchSessions failed:', err));
+          if (viewMode === 'project' && currentProjectSessionIds.some((id) => pendingAgentSessionIds.has(id))) {
+            refreshProjectAgents();
+          } else if (currentSessionId && pendingAgentSessionIds.has(currentSessionId)) {
+            fetchAgents(currentSessionId);
+          }
+          pendingAgentSessionIds.clear();
+        }, 500);
       }
 
       if (data.type === 'context-update') {

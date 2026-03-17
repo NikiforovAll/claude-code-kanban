@@ -1438,7 +1438,8 @@ plansWatcher.on('all', (event, filePath) => {
 const agentActivityWatcher = chokidar.watch(AGENT_ACTIVITY_DIR, {
   persistent: true,
   ignoreInitial: true,
-  depth: 2
+  depth: 2,
+  awaitWriteFinish: { stabilityThreshold: 150, pollInterval: 50 }
 });
 
 const AGENT_FILE_CAP = 20;
