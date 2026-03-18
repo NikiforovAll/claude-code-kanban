@@ -15,7 +15,8 @@ const {
   readSessionInfoFromJsonl,
   buildAgentProgressMap,
   readCompactSummaries,
-  findTerminatedTeammates
+  findTerminatedTeammates,
+  extractPromptFromTranscript
 } = require('./lib/parsers');
 
 const isSetupCommand = process.argv.includes('--install') || process.argv.includes('--uninstall');
@@ -60,6 +61,11 @@ const AGENT_STALE_MS = 900000;
 const SESSION_STALE_MS = 300000;
 
 const WAITING_RESOLVE_GRACE_MS = 15000;
+
+function persistAgent(dir, agent) {
+  const file = path.join(dir, agent.agentId + '.json');
+  fs.writeFile(file, JSON.stringify(agent), 'utf8').catch(() => {});
+}
 
 function checkWaitingForUser(agentDir, logMtime) {
   try {
@@ -189,11 +195,70 @@ const terminatedCache = new Map();
 const compactSummaryCache = new Map();
 const taskCountsCache = new Map();
 const contextStatusCache = new Map();
+const TASK_MAPS_DIR = path.join(AGENT_ACTIVITY_DIR, '_task-maps');
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function isUUID(s) { return UUID_RE.test(s); }
 
 function evictStaleCache(cache) {
   if (cache.size <= MAX_CACHE_ENTRIES) return;
   const oldest = cache.keys().next().value;
   if (oldest !== undefined) cache.delete(oldest);
+}
+
+let sessionToTaskListCache = null;
+let lastTaskMapScan = 0;
+const TASK_MAP_SCAN_TTL = 5000;
+
+function loadAllTaskMaps() {
+  const now = Date.now();
+  if (sessionToTaskListCache && now - lastTaskMapScan < TASK_MAP_SCAN_TTL) return sessionToTaskListCache;
+
+  const sessionToList = {};
+  const listToSessions = {};
+  if (!existsSync(TASK_MAPS_DIR)) {
+    sessionToTaskListCache = { sessionToList, listToSessions };
+    lastTaskMapScan = now;
+    return sessionToTaskListCache;
+  }
+  try {
+    for (const file of readdirSync(TASK_MAPS_DIR).filter(f => f.endsWith('.json'))) {
+      const taskListName = file.replace(/\.json$/, '');
+      const mapPath = path.join(TASK_MAPS_DIR, file);
+      try {
+        const map = JSON.parse(readFileSync(mapPath, 'utf8'));
+        listToSessions[taskListName] = map;
+        for (const sessionId of Object.keys(map)) {
+          sessionToList[sessionId] = taskListName;
+        }
+      } catch (e) { /* skip invalid */ }
+    }
+  } catch (e) { /* ignore */ }
+  sessionToTaskListCache = { sessionToList, listToSessions };
+  lastTaskMapScan = now;
+  return sessionToTaskListCache;
+}
+
+function getCustomTaskDir(sessionId) {
+  const { sessionToList } = loadAllTaskMaps();
+  const taskListName = sessionToList[sessionId];
+  if (taskListName) {
+    const dir = path.join(TASKS_DIR, taskListName);
+    if (existsSync(dir)) return dir;
+  }
+  // Check team-named task directory (teams store tasks under ~/.claude/tasks/<teamName>/)
+  if (existsSync(TEAMS_DIR)) {
+    try {
+      for (const dir of readdirSync(TEAMS_DIR, { withFileTypes: true })) {
+        if (!dir.isDirectory()) continue;
+        const cfg = loadTeamConfig(dir.name);
+        if (cfg?.leadSessionId === sessionId) {
+          const teamTaskDir = path.join(TASKS_DIR, dir.name);
+          if (existsSync(teamTaskDir)) return teamTaskDir;
+        }
+      }
+    } catch (_) {}
+  }
+  return null;
 }
 
 function getTaskCounts(sessionPath) {
@@ -449,7 +514,7 @@ app.get('/api/sessions', async (req, res) => {
       const entries = readdirSync(TASKS_DIR, { withFileTypes: true });
 
       for (const entry of entries) {
-        if (entry.isDirectory()) {
+        if (entry.isDirectory() && isUUID(entry.name)) {
           const sessionPath = path.join(TASKS_DIR, entry.name);
           const stat = statSync(sessionPath);
           const { taskCount, completed, inProgress, pending, newestTaskMtime } = getTaskCounts(sessionPath);
@@ -495,6 +560,55 @@ app.get('/api/sessions', async (req, res) => {
             tasksDir: sessionPath,
             ...planInfo
           }));
+        }
+      }
+
+      // Process custom task lists (non-UUID directories mapped via _task-maps)
+      const { listToSessions } = loadAllTaskMaps();
+      for (const [taskListName, map] of Object.entries(listToSessions)) {
+        const customTaskDir = path.join(TASKS_DIR, taskListName);
+        if (!existsSync(customTaskDir)) continue;
+        const counts = getTaskCounts(customTaskDir);
+
+        for (const [sessionId, info] of Object.entries(map)) {
+          const existing = sessionsMap.get(sessionId);
+          if (existing) {
+            Object.assign(existing, {
+              taskCount: counts.taskCount,
+              completed: counts.completed,
+              inProgress: counts.inProgress,
+              pending: counts.pending,
+              tasksDir: customTaskDir,
+              sharedTaskList: taskListName,
+            });
+          } else {
+            const meta = { ...(metadata[sessionId] || {}) };
+            if (!meta.project && info.project) meta.project = info.project;
+            const logStat = getSessionLogStat(meta);
+            const logMtime = logStat.mtime;
+            const logAge = logMtime ? Date.now() - logMtime : Infinity;
+            const stale = logAge > AGENT_STALE_MS;
+            const agentDir = path.join(AGENT_ACTIVITY_DIR, sessionId);
+            const agentStatus = checkAgentStatus(agentDir, stale, logMtime, false);
+            let modifiedAt = info.updatedAt || new Date(0).toISOString();
+            if (logMtime) {
+              const jsonlMtime = new Date(logMtime).toISOString();
+              if (jsonlMtime > modifiedAt) modifiedAt = jsonlMtime;
+            }
+            sessionsMap.set(sessionId, buildSessionObject(sessionId, meta, {
+              _logStat: logStat,
+              taskCount: counts.taskCount,
+              completed: counts.completed,
+              inProgress: counts.inProgress,
+              pending: counts.pending,
+              modifiedAt,
+              hasActiveAgents: agentStatus.hasActive,
+              hasRunningAgents: agentStatus.hasRunning,
+              hasWaitingForUser: !!agentStatus.waitingForUser,
+              tasksDir: customTaskDir,
+              sharedTaskList: taskListName,
+            }));
+          }
         }
       }
     }
@@ -544,18 +658,45 @@ app.get('/api/sessions', async (req, res) => {
       } catch (e) { /* ignore */ }
     }
 
-    // Hide leader UUID sessions that are represented by a team session
+    // Enrich leader sessions with team info and remove team-named duplicates
     const teamLeaderIds = new Set();
-    for (const [sid, session] of sessionsMap) {
-      if (session.isTeam) {
-        const cfg = loadTeamConfig(sid);
-        if (cfg?.leadSessionId) teamLeaderIds.add(cfg.leadSessionId);
-      }
-    }
-    for (const leaderId of teamLeaderIds) {
-      if (sessionsMap.has(leaderId)) {
-        sessionsMap.delete(leaderId);
-      }
+    if (existsSync(TEAMS_DIR)) {
+      try {
+        for (const dir of readdirSync(TEAMS_DIR, { withFileTypes: true })) {
+          if (!dir.isDirectory()) continue;
+          // Remove team-named duplicate session (e.g., "code-review") — leader is the canonical entry
+          if (sessionsMap.has(dir.name)) sessionsMap.delete(dir.name);
+          const cfg = loadTeamConfig(dir.name);
+          if (!cfg?.leadSessionId) continue;
+          const leaderId = cfg.leadSessionId;
+          const existing = sessionsMap.get(leaderId);
+          if (existing) {
+            existing.isTeam = true;
+            existing.teamName = dir.name;
+            existing.memberCount = cfg.members?.length || 0;
+            existing.name = existing.name || cfg.name || dir.name;
+            teamLeaderIds.add(leaderId);
+            // Attach team-named task directory if present
+            const teamTaskDir = path.join(TASKS_DIR, dir.name);
+            if (!existing.tasksDir && existsSync(teamTaskDir)) {
+              const counts = getTaskCounts(teamTaskDir);
+              existing.taskCount = counts.taskCount;
+              existing.completed = counts.completed;
+              existing.inProgress = counts.inProgress;
+              existing.pending = counts.pending;
+              existing.tasksDir = teamTaskDir;
+              existing.sharedTaskList = dir.name;
+            }
+            // Re-check agent status with isTeam=true
+            const agentDir = path.join(AGENT_ACTIVITY_DIR, leaderId);
+            const logStat = getSessionLogStat(metadata[leaderId] || {});
+            const logAge = logStat.mtime ? Date.now() - logStat.mtime : Infinity;
+            const agentStatus = checkAgentStatus(agentDir, logAge > AGENT_STALE_MS, logStat.mtime, true);
+            existing.hasActiveAgents = agentStatus.hasActive;
+            existing.hasRunningAgents = agentStatus.hasRunning;
+          }
+        }
+      } catch (_) {}
     }
 
     // Correlate plan sessions with their implementation sessions (same slug)
@@ -645,7 +786,8 @@ app.get('/api/projects', (req, res) => {
 // API: Get tasks for a session
 app.get('/api/sessions/:sessionId', async (req, res) => {
   try {
-    const sessionPath = path.join(TASKS_DIR, req.params.sessionId);
+    const customDir = getCustomTaskDir(req.params.sessionId);
+    const sessionPath = customDir || path.join(TASKS_DIR, req.params.sessionId);
 
     if (!existsSync(sessionPath)) {
       return res.status(404).json({ error: 'Session not found' });
@@ -670,6 +812,52 @@ app.get('/api/sessions/:sessionId', async (req, res) => {
   } catch (error) {
     console.error('Error getting session:', error);
     res.status(500).json({ error: 'Failed to get session' });
+  }
+});
+
+// API: Get combined tasks for a project (all sessions + shared task lists)
+app.get('/api/projects/:encodedPath/tasks', (req, res) => {
+  try {
+    const projectPath = Buffer.from(req.params.encodedPath, 'base64').toString('utf8');
+    const metadata = loadSessionMetadata();
+    const { sessionToList } = loadAllTaskMaps();
+
+    const projectSessionIds = Object.entries(metadata)
+      .filter(([, m]) => m.project === projectPath)
+      .map(([id]) => id);
+
+    const taskDirs = new Set();
+    for (const sid of projectSessionIds) {
+      const listName = sessionToList[sid];
+      if (listName) {
+        const dir = path.join(TASKS_DIR, listName);
+        if (existsSync(dir)) taskDirs.add(dir);
+      } else {
+        const dir = path.join(TASKS_DIR, sid);
+        if (existsSync(dir)) taskDirs.add(dir);
+      }
+    }
+
+    const tasks = [];
+    const seenKeys = new Set();
+    for (const dir of taskDirs) {
+      for (const file of readdirSync(dir).filter(f => f.endsWith('.json'))) {
+        try {
+          const task = JSON.parse(readFileSync(path.join(dir, file), 'utf8'));
+          const key = `${dir}:${task.id}`;
+          if (!seenKeys.has(key)) {
+            seenKeys.add(key);
+            task._taskDir = path.basename(dir);
+            tasks.push(task);
+          }
+        } catch (_) {}
+      }
+    }
+    tasks.sort((a, b) => parseInt(a.id) - parseInt(b.id));
+    res.json(tasks);
+  } catch (error) {
+    console.error('Error getting project tasks:', error);
+    res.status(500).json({ error: 'Failed to get project tasks' });
   }
 });
 
@@ -813,31 +1001,54 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
               if (terminatedAt && agent.startedAt && terminatedAt < agent.startedAt) continue;
               agent.status = 'stopped';
               agent.stoppedAt = agent.stoppedAt || new Date().toISOString();
-              const agentFile = path.join(agentDir, agent.agentId + '.json');
-              fs.writeFile(agentFile, JSON.stringify(agent), 'utf8').catch(() => {});
+              persistAgent(agentDir, agent);
             }
           }
         }
       } catch (_) {}
     }
 
+    function persistPrompt(agent, prompt) {
+      agent.prompt = prompt;
+      persistAgent(agentDir, agent);
+    }
+
     const agentsNeedingPrompt = agents.filter(a => !a.prompt);
     if (agentsNeedingPrompt.length && meta.jsonlPath) {
+      let byAgentId = {};
       try {
         const progressMap = getProgressMap(meta.jsonlPath);
-        const byAgentId = {};
         for (const entry of Object.values(progressMap)) {
           if (entry.prompt && !byAgentId[entry.agentId]) byAgentId[entry.agentId] = entry.prompt;
         }
-        for (const agent of agentsNeedingPrompt) {
-          const prompt = byAgentId[agent.agentId];
-          if (prompt) {
-            agent.prompt = prompt;
-            const agentFile = path.join(agentDir, agent.agentId + '.json');
-            fs.writeFile(agentFile, JSON.stringify(agent), 'utf8').catch(() => {});
-          }
-        }
       } catch (_) {}
+      for (const agent of agentsNeedingPrompt) {
+        const prompt = byAgentId[agent.agentId]
+          || (() => { try { return extractPromptFromTranscript(subagentJsonlPath(meta, agent.agentId)); } catch (_) { return null; } })();
+        if (prompt) persistPrompt(agent, prompt);
+      }
+    }
+
+    const agentsNeedingModel = agents.filter(a => !a.model);
+    if (agentsNeedingModel.length && meta.jsonlPath) {
+      for (const agent of agentsNeedingModel) {
+        try {
+          const jsonl = subagentJsonlPath(meta, agent.agentId);
+          const content = readFileSync(jsonl, 'utf8');
+          for (const line of content.split('\n')) {
+            if (!line.trim()) continue;
+            try {
+              const obj = JSON.parse(line);
+              const model = obj.model || (obj.message && obj.message.model);
+              if (model) {
+                agent.model = model;
+                persistAgent(agentDir, agent);
+                break;
+              }
+            } catch (_) {}
+          }
+        } catch (_) {}
+      }
     }
     const teamColors = {};
     if (teamConfig?.members) {
@@ -868,7 +1079,7 @@ app.post('/api/sessions/:sessionId/agents/:agentId/stop', (req, res) => {
     const agent = JSON.parse(readFileSync(agentFile, 'utf8'));
     agent.status = 'stopped';
     agent.stoppedAt = new Date().toISOString();
-    writeFileSync(agentFile, JSON.stringify(agent), 'utf8');
+    writeFileSync(agentFile, JSON.stringify(agent), 'utf8'); // sync — response depends on write
     // Also remove waiting state if present
     const waitingFile = path.join(AGENT_ACTIVITY_DIR, sessionId, '_waiting.json');
     if (existsSync(waitingFile)) unlinkSync(waitingFile);
@@ -980,7 +1191,7 @@ app.get('/api/sessions/:sessionId/messages', (req, res) => {
           const prompt = msg.agentPrompt || entry.prompt;
           if (prompt && !agent.prompt) {
             agent.prompt = prompt;
-            fs.writeFile(agentFile, JSON.stringify(agent), 'utf8').catch(() => {});
+            persistAgent(agentDir, agent);
           }
         } catch (_) {}
       }
@@ -1066,7 +1277,8 @@ app.post('/api/tasks/:sessionId/:taskId/note', async (req, res) => {
       return res.status(400).json({ error: 'Note cannot be empty' });
     }
 
-    const taskPath = path.join(TASKS_DIR, sessionId, `${taskId}.json`);
+    const sessionDir = getCustomTaskDir(sessionId) || path.join(TASKS_DIR, sessionId);
+    const taskPath = path.join(sessionDir, `${taskId}.json`);
 
     if (!existsSync(taskPath)) {
       return res.status(404).json({ error: 'Task not found' });
@@ -1095,7 +1307,8 @@ app.put('/api/tasks/:sessionId/:taskId', async (req, res) => {
     const { sessionId, taskId } = req.params;
     const { subject, description } = req.body;
 
-    const taskPath = path.join(TASKS_DIR, sessionId, `${taskId}.json`);
+    const sessionDir = getCustomTaskDir(sessionId) || path.join(TASKS_DIR, sessionId);
+    const taskPath = path.join(sessionDir, `${taskId}.json`);
 
     if (!existsSync(taskPath)) {
       return res.status(404).json({ error: 'Task not found' });
@@ -1120,14 +1333,14 @@ app.put('/api/tasks/:sessionId/:taskId', async (req, res) => {
 app.delete('/api/tasks/:sessionId/:taskId', async (req, res) => {
   try {
     const { sessionId, taskId } = req.params;
-    const taskPath = path.join(TASKS_DIR, sessionId, `${taskId}.json`);
+    const sessionPath = getCustomTaskDir(sessionId) || path.join(TASKS_DIR, sessionId);
+    const taskPath = path.join(sessionPath, `${taskId}.json`);
 
     if (!existsSync(taskPath)) {
       return res.status(404).json({ error: 'Task not found' });
     }
 
     // Check if this task blocks other tasks
-    const sessionPath = path.join(TASKS_DIR, sessionId);
     const taskFiles = readdirSync(sessionPath).filter(f => f.endsWith('.json'));
 
     for (const file of taskFiles) {
@@ -1200,20 +1413,43 @@ const watcher = chokidar.watch(TASKS_DIR, {
 watcher.on('all', (event, filePath) => {
   if ((event === 'add' || event === 'change' || event === 'unlink') && filePath.endsWith('.json')) {
     const relativePath = path.relative(TASKS_DIR, filePath);
-    const sessionId = relativePath.split(path.sep)[0];
+    const dirName = relativePath.split(path.sep)[0];
 
-    taskCountsCache.delete(path.join(TASKS_DIR, sessionId));
+    taskCountsCache.delete(path.join(TASKS_DIR, dirName));
 
-    broadcast({
-      type: 'update',
-      event,
-      sessionId,
-      file: path.basename(filePath)
-    });
+    if (isUUID(dirName)) {
+      broadcast({ type: 'update', event, sessionId: dirName, file: path.basename(filePath) });
+    } else {
+      broadcastToMappedSessions(dirName, event, filePath);
+    }
   }
 });
 
+function broadcastToMappedSessions(taskListName, event, filePath) {
+  const { listToSessions } = loadAllTaskMaps();
+  const map = listToSessions[taskListName];
+  if (!map) return;
+  for (const sid of Object.keys(map)) {
+    broadcast({ type: 'update', event, sessionId: sid, file: path.basename(filePath) });
+  }
+}
+
 console.log(`Watching for changes in: ${TASKS_DIR}`);
+
+// Watch task maps directory for session→task-list mapping changes
+const taskMapsWatcher = chokidar.watch(TASK_MAPS_DIR, {
+  persistent: true,
+  ignoreInitial: true,
+  depth: 1
+});
+taskMapsWatcher.on('all', (event, filePath) => {
+  if ((event === 'add' || event === 'change' || event === 'unlink') && filePath.endsWith('.json')) {
+    lastTaskMapScan = 0;
+    const taskListName = path.basename(filePath, '.json');
+    taskCountsCache.delete(path.join(TASKS_DIR, taskListName));
+    broadcastToMappedSessions(taskListName, event, filePath);
+  }
+});
 
 // Watch teams directory for config changes
 const teamsWatcher = chokidar.watch(TEAMS_DIR, {
@@ -1269,7 +1505,8 @@ plansWatcher.on('all', (event, filePath) => {
 const agentActivityWatcher = chokidar.watch(AGENT_ACTIVITY_DIR, {
   persistent: true,
   ignoreInitial: true,
-  depth: 2
+  depth: 2,
+  awaitWriteFinish: { stabilityThreshold: 150, pollInterval: 50 }
 });
 
 const AGENT_FILE_CAP = 20;

@@ -21,6 +21,7 @@ let messagePanelOpen = false;
 let lastMessagesHash = '';
 let currentMessages = [];
 let agentDurationInterval = null;
+let agentPollInterval = null;
 let selectedTaskId = null;
 let selectedSessionId = null;
 let focusZone = 'board'; // 'board' | 'sidebar'
@@ -29,6 +30,8 @@ let selectedSessionKbId = null;
 let sessionJustSelected = false;
 let agentLogMode = null;
 let agentLogSSE = null;
+let currentProjectPath = null;
+let currentProjectSessionIds = [];
 
 function getUrlState() {
   const params = new URLSearchParams(window.location.search);
@@ -41,12 +44,14 @@ function getUrlState() {
     owner: params.get('owner'),
     search: params.get('search'),
     messages: params.get('messages') === '1',
+    projectView: params.get('projectView'),
   };
 }
 
 function updateUrl() {
   const params = new URLSearchParams();
   if (viewMode === 'all') params.set('view', 'all');
+  if (viewMode === 'project' && currentProjectPath) params.set('projectView', btoa(currentProjectPath));
   if (currentSessionId) params.set('session', currentSessionId);
   if (sessionFilter !== 'active') params.set('filter', sessionFilter);
   if (sessionLimit !== '20') params.set('limit', sessionLimit);
@@ -70,6 +75,8 @@ function resetState() {
   viewMode = 'all';
   if (agentLogMode) exitAgentLogMode();
   currentSessionId = null;
+  currentProjectPath = null;
+  currentProjectSessionIds = [];
   const searchInput = document.getElementById('search-input');
   if (searchInput) searchInput.value = '';
   document.getElementById('search-clear-btn')?.classList.remove('visible');
@@ -106,7 +113,6 @@ let lastTasksHash = '';
 
 //#region DATA_FETCHING
 async function fetchSessions() {
-  console.log('[fetchSessions] Starting...');
   try {
     const pinnedParam = pinnedSessionIds.size > 0 ? `&pinned=${[...pinnedSessionIds].join(',')}` : '';
     const [newSessions, newTasks] = await Promise.all([
@@ -117,7 +123,6 @@ async function fetchSessions() {
     const sessionsHash = JSON.stringify(newSessions);
     const tasksHash = JSON.stringify(newTasks);
     if (sessionsHash === lastSessionsHash && tasksHash === lastTasksHash) {
-      console.log('[fetchSessions] No changes, skipping render');
       return;
     }
     lastSessionsHash = sessionsHash;
@@ -125,9 +130,7 @@ async function fetchSessions() {
 
     sessions = newSessions;
     allTasksCache = newTasks;
-    console.log('[fetchSessions] Sessions loaded:', sessions.length);
     renderSessions();
-    console.log('[fetchSessions] Render complete');
     renderLiveUpdatesFromCache();
   } catch (error) {
     console.error('Failed to fetch sessions:', error);
@@ -410,6 +413,7 @@ let lastCurrentTasksHash = '';
 async function fetchTasks(sessionId) {
   try {
     viewMode = 'session';
+    document.getElementById('message-toggle')?.style.removeProperty('display');
     const res = await fetch(`/api/sessions/${sessionId}`);
 
     let newTasks;
@@ -423,7 +427,6 @@ async function fetchTasks(sessionId) {
 
     const hash = JSON.stringify(newTasks);
     if (sessionId === currentSessionId && hash === lastCurrentTasksHash) {
-      console.log('[fetchTasks] No changes, skipping render');
       return;
     }
     lastCurrentTasksHash = hash;
@@ -483,6 +486,105 @@ async function fetchAgents(sessionId) {
   }
 }
 
+async function fetchProjectView(projectPath) {
+  viewMode = 'project';
+  currentProjectPath = projectPath;
+  currentSessionId = null;
+  currentMessages = [];
+  lastMessagesHash = '';
+  if (messagePanelOpen) toggleMessagePanel();
+  document.getElementById('message-toggle')?.style.setProperty('display', 'none');
+  const msgContent = document.getElementById('message-panel-content');
+  if (msgContent) msgContent.innerHTML = '';
+  const msgPinned = document.getElementById('message-panel-pinned');
+  if (msgPinned) msgPinned.innerHTML = '';
+  const projectSessions = sessions.filter((s) => s.project === projectPath);
+  currentProjectSessionIds = projectSessions.map((s) => s.id);
+  const activeSessionIds = projectSessions
+    .filter((s) => isSessionActive(s) || pinnedSessionIds.has(s.id))
+    .map((s) => s.id);
+
+  const encoded = btoa(projectPath);
+  const [tasksResult, agentResults] = await Promise.all([
+    fetch(`/api/projects/${encodeURIComponent(encoded)}/tasks`)
+      .then((r) => r.json())
+      .catch((e) => {
+        console.error('[fetchProjectView] tasks:', e);
+        return [];
+      }),
+    Promise.all(
+      activeSessionIds.map((id) =>
+        fetch(`/api/sessions/${id}/agents`)
+          .then((r) => r.json())
+          .catch(() => ({ agents: [] })),
+      ),
+    ),
+  ]);
+  currentTasks = tasksResult;
+  const seen = new Set();
+  currentAgents = [];
+  const mergedColors = {};
+  let mergedWaiting = null;
+  for (let i = 0; i < agentResults.length; i++) {
+    const r = agentResults[i];
+    const sid = activeSessionIds[i];
+    const agents = r.agents || (Array.isArray(r) ? r : []);
+    for (const a of agents) {
+      if (a.agentId && !seen.has(a.agentId)) {
+        seen.add(a.agentId);
+        a._sourceSessionId = sid;
+        currentAgents.push(a);
+      }
+    }
+    if (r.teamColors) Object.assign(mergedColors, r.teamColors);
+    if (r.waitingForUser && !mergedWaiting) mergedWaiting = r.waitingForUser;
+  }
+  currentWaiting = mergedWaiting;
+  Object.assign(teamColorMap, mergedColors);
+
+  renderProjectView();
+  renderAgentFooter();
+  renderKanban();
+  updateUrl();
+}
+
+async function refreshProjectAgents() {
+  if (!currentProjectPath) return;
+  const projectSessions = sessions.filter((s) => s.project === currentProjectPath);
+  const activeSessionIds = projectSessions
+    .filter((s) => isSessionActive(s) || pinnedSessionIds.has(s.id))
+    .map((s) => s.id);
+  const agentResults = await Promise.all(
+    activeSessionIds.map((id) =>
+      fetch(`/api/sessions/${id}/agents`)
+        .then((r) => r.json())
+        .catch(() => ({ agents: [] })),
+    ),
+  );
+  const seen = new Set();
+  currentAgents = [];
+  let mergedWaiting = null;
+  for (let i = 0; i < agentResults.length; i++) {
+    const r = agentResults[i];
+    const sid = activeSessionIds[i];
+    const agents = r.agents || (Array.isArray(r) ? r : []);
+    for (const a of agents) {
+      if (a.agentId && !seen.has(a.agentId)) {
+        seen.add(a.agentId);
+        a._sourceSessionId = sid;
+        currentAgents.push(a);
+      }
+    }
+    if (r.teamColors) Object.assign(teamColorMap, r.teamColors);
+    if (r.waitingForUser && !mergedWaiting) mergedWaiting = r.waitingForUser;
+  }
+  currentWaiting = mergedWaiting;
+  const hash = JSON.stringify({ agents: currentAgents, waiting: currentWaiting });
+  if (hash === lastAgentsHash) return;
+  lastAgentsHash = hash;
+  renderAgentFooter();
+}
+
 //#endregion
 
 //#region MESSAGE_PANEL
@@ -500,15 +602,18 @@ function toggleMessagePanel() {
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
 async function viewAgentLog(agentId) {
-  let agent = currentAgents.find((a) => a.agentId === agentId);
+  let agent = findAgentById(agentId);
   if (!agent && currentSessionId) {
     await fetchAgents(currentSessionId);
-    agent = currentAgents.find((a) => a.agentId === agentId);
+    agent = findAgentById(agentId);
   }
   if (!agent) return;
-  const shortId = agentId.length > 8 ? agentId.slice(0, 8) : agentId;
-  agentLogMode = { agentId, sessionId: currentSessionId, agentType: agent.type || 'unknown' };
+  const resolvedId = agent.agentId;
+  const shortId = resolvedId.length > 8 ? resolvedId.slice(0, 8) : resolvedId;
+  const agentSessionId = agent._sourceSessionId || currentSessionId;
+  agentLogMode = { agentId: resolvedId, sessionId: agentSessionId, agentType: agent.type || 'unknown' };
   closeAgentModal();
+  document.getElementById('message-toggle')?.style.removeProperty('display');
   if (!messagePanelOpen) toggleMessagePanel();
   const header = document.querySelector('.message-panel-header h3');
   if (header) {
@@ -519,9 +624,9 @@ async function viewAgentLog(agentId) {
     agentLogSSE.close();
     agentLogSSE = null;
   }
-  agentLogSSE = new EventSource(`/api/sessions/${agentLogMode.sessionId}/agents/${agentId}/messages/stream`);
+  agentLogSSE = new EventSource(`/api/sessions/${agentLogMode.sessionId}/agents/${resolvedId}/messages/stream`);
   agentLogSSE.addEventListener('agent-log-update', (e) => {
-    if (!agentLogMode || agentLogMode.agentId !== agentId) return;
+    if (!agentLogMode || agentLogMode.agentId !== resolvedId) return;
     try {
       const data = JSON.parse(e.data);
       currentMessages = data.messages;
@@ -536,6 +641,11 @@ function exitAgentLogMode() {
   if (agentLogSSE) {
     agentLogSSE.close();
     agentLogSSE = null;
+  }
+  if (viewMode === 'project') {
+    if (messagePanelOpen) toggleMessagePanel();
+    document.getElementById('message-toggle')?.style.setProperty('display', 'none');
+    return;
   }
   const header = document.querySelector('.message-panel-header h3');
   if (header) header.textContent = 'Session Log';
@@ -652,7 +762,7 @@ function renderPinnedSection() {
         const agentLogBtn = agentLogButton(p.agentId);
         const msgTrunc = p.lastMessage
           ? escapeHtml(
-              stripAnsi(p.lastMessage.trim())
+              stripAnsi(stripTeammateWrapper(p.lastMessage.trim()))
                 .replace(/[\r\n]+/g, ' ')
                 .slice(0, 60),
             )
@@ -1400,14 +1510,17 @@ function renderAgentFooter() {
   for (const group of Object.values(byType)) {
     group.sort((a, b) => new Date(a.startedAt || 0) - new Date(b.startedAt || 0));
     filtered.push(group[0]);
+    let maxStop = group[0].stoppedAt ? new Date(group[0].stoppedAt).getTime() : Infinity;
     for (let i = 1; i < group.length; i++) {
-      const prev = group[i - 1];
-      const prevStop = prev.stoppedAt ? new Date(prev.stoppedAt).getTime() : Infinity;
-      const curStart = new Date(group[i].startedAt || 0).getTime();
-      const overlapped = curStart < prevStop;
-      const reSpawn = curStart - prevStop > 30000;
-      const isActive = group[i].status === 'active' || group[i].status === 'idle';
-      if (overlapped || reSpawn || isActive) filtered.push(group[i]);
+      const cur = group[i];
+      const hasContent = cur.prompt || cur.lastMessage;
+      const curStart = new Date(cur.startedAt || 0).getTime();
+      const overlapped = curStart < maxStop;
+      const reSpawn = curStart - maxStop > 30000;
+      const isActive = cur.status === 'active' || cur.status === 'idle';
+      if (overlapped || reSpawn || isActive || hasContent) filtered.push(cur);
+      const curStop = cur.stoppedAt ? new Date(cur.stoppedAt).getTime() : Infinity;
+      if (curStop > maxStop) maxStop = curStop;
     }
   }
   // Sort: active/idle first, then by updatedAt desc
@@ -1426,6 +1539,8 @@ function renderAgentFooter() {
     footer.classList.remove('visible');
     clearInterval(agentDurationInterval);
     agentDurationInterval = null;
+    clearInterval(agentPollInterval);
+    agentPollInterval = null;
     return;
   }
 
@@ -1454,7 +1569,7 @@ function renderAgentFooter() {
             : a.status === 'idle'
               ? `idle · ${formatDuration(elapsed)}`
               : `active · ${formatDuration(elapsed)}`;
-        const promptTrimmed = stripAnsi((a.prompt || '').trim()).replace(/[\r\n]+/g, ' ');
+        const promptTrimmed = stripAnsi(stripTeammateWrapper((a.prompt || '').trim())).replace(/[\r\n]+/g, ' ');
         const promptTrunc = promptTrimmed.length > 60 ? `${promptTrimmed.substring(0, 60)}…` : promptTrimmed;
         const msgHtml = promptTrunc
           ? `<div class="agent-message" title="${escapeHtml(promptTrimmed)}">${escapeHtml(promptTrunc)}</div>`
@@ -1476,8 +1591,19 @@ function renderAgentFooter() {
   clearInterval(agentDurationInterval);
   if (visible.some((a) => a.status === 'active' || a.status === 'idle')) {
     agentDurationInterval = setInterval(() => renderAgentFooter(), 1000);
+    if (!agentPollInterval) {
+      agentPollInterval = setInterval(() => {
+        if (viewMode === 'project' && currentProjectPath) {
+          refreshProjectAgents();
+        } else if (currentSessionId) {
+          fetchAgents(currentSessionId);
+        }
+      }, 3000);
+    }
   } else {
     agentDurationInterval = setInterval(() => renderAgentFooter(), 10000);
+    clearInterval(agentPollInterval);
+    agentPollInterval = null;
   }
 }
 
@@ -1531,9 +1657,19 @@ async function dismissAgent(agentId) {
   }
 }
 
+function findAgentById(agentId) {
+  let agent = currentAgents.find((a) => a.agentId === agentId);
+  if (!agent) {
+    const atIdx = agentId.indexOf('@');
+    const memberName = atIdx > 0 ? agentId.substring(0, atIdx) : null;
+    if (memberName) agent = currentAgents.find((a) => a.type === memberName);
+  }
+  return agent || null;
+}
+
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
 function showAgentModal(agentId) {
-  const agent = currentAgents.find((a) => a.agentId === agentId);
+  const agent = findAgentById(agentId);
   if (!agent) return;
   currentAgentModalId = agentId;
   const modal = document.getElementById('agent-modal');
@@ -1552,6 +1688,8 @@ function showAgentModal(agentId) {
     ['Agent ID', `<code style="font-size:12px;color:var(--text-tertiary)">${escapeHtml(agent.agentId)}</code>`],
     ['Duration', formatDuration(elapsed)],
   ];
+  if (agent.model)
+    rows.push(['Model', `<code style="font-size:12px;color:var(--text-tertiary)">${escapeHtml(agent.model)}</code>`]);
   if (started) rows.push(['Started', started.toLocaleTimeString()]);
   if (stopped) rows.push(['Stopped', stopped.toLocaleTimeString()]);
 
@@ -1567,7 +1705,7 @@ function showAgentModal(agentId) {
       .join('') +
     `</table>`;
 
-  const promptText = agentMsg?.agentPrompt || agent.prompt || null;
+  const promptText = stripTeammateWrapper(agentMsg?.agentPrompt || agent.prompt || null);
   const responseText = agent.lastMessage ? stripAnsi(agent.lastMessage.trim()) : null;
   _agentModalPromptText = promptText;
   _agentModalResponseText = responseText;
@@ -1659,19 +1797,16 @@ function renderSessions() {
   let filteredSessions = sessions;
   if (sessionFilter === 'active') {
     const ACTIVE_PLAN_MS = 15 * 60 * 1000;
-    const RECENTLY_MODIFIED_MS = 5 * 60 * 1000;
     const now = Date.now();
     const activeSessionIds = new Set();
     filteredSessions = filteredSessions.filter((s) => {
       const isActive =
         s.hasMessages &&
-        (s.pending > 0 ||
-          s.inProgress > 0 ||
+        ((!s.sharedTaskList && (s.pending > 0 || s.inProgress > 0)) ||
           s.hasActiveAgents ||
           s.hasWaitingForUser ||
           s.hasRecentLog ||
-          (s.hasPlan && !s.planImplementationSessionId && now - new Date(s.modifiedAt).getTime() <= ACTIVE_PLAN_MS) ||
-          now - new Date(s.modifiedAt).getTime() <= RECENTLY_MODIFIED_MS);
+          (s.hasPlan && !s.planImplementationSessionId && now - new Date(s.modifiedAt).getTime() <= ACTIVE_PLAN_MS));
       if (isActive) activeSessionIds.add(s.id);
       return isActive;
     });
@@ -1784,6 +1919,7 @@ function renderSessions() {
             <div class="session-progress">
               <span class="session-indicators">
                 ${isTeam ? `<span class="team-badge" title="${memberCount} team members"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>${memberCount}</span>` : ''}
+                ${session.sharedTaskList ? `<span class="shared-tasklist-badge" title="Shared task list: ${escapeHtml(session.sharedTaskList)}"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></span>` : ''}
                 ${isTeam || session.project || showCtx ? `<span class="team-info-btn" onclick="event.stopPropagation(); showSessionInfoModal('${session.id}')" title="View session info">ℹ</span>` : ''}
                 ${session.hasPlan ? `<span class="plan-indicator" onclick="event.stopPropagation(); openPlanForSession('${session.id}')" title="View plan"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span>` : ''}
                 ${session.hasRunningAgents ? '<span class="agent-badge" title="Active agents">🤖</span>' : ''}
@@ -1812,7 +1948,37 @@ function renderSessions() {
         ungrouped.push(session);
       }
     }
-    if (pinnedSessionIds.size > 0) {
+    const groupPinned = localStorage.getItem('groupPinnedSessions') !== 'false';
+    const renderGroupSessions = (sessions, pinKey) => {
+      if (!groupPinned || pinnedSessionIds.size === 0) return sessions.map(renderSessionCard).join('');
+      const gPinned = sessions.filter((s) => pinnedSessionIds.has(s.id));
+      if (gPinned.length === 0) return sessions.map(renderSessionCard).join('');
+      const gUnpinned = sessions.filter((s) => !pinnedSessionIds.has(s.id));
+      const pinCollapsed = collapsedProjectGroups.has(pinKey);
+      return (
+        '<div class="pinned-sub-section">' +
+        '<div class="pinned-sub-header' +
+        (pinCollapsed ? ' collapsed' : '') +
+        '" data-group-path="' +
+        escapeHtml(pinKey) +
+        '">' +
+        '<svg class="group-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>' +
+        '<span class="pinned-sub-label">Pinned</span>' +
+        '<span class="group-count">' +
+        gPinned.length +
+        '</span>' +
+        '<span class="pinned-ungroup-btn" title="Ungroup pinned sessions">&times;</span>' +
+        '</div>' +
+        '<div class="pinned-sub-items' +
+        (pinCollapsed ? ' collapsed' : '') +
+        '">' +
+        gPinned.map(renderSessionCard).join('') +
+        '</div>' +
+        '</div>' +
+        gUnpinned.map(renderSessionCard).join('')
+      );
+    };
+    if (!groupPinned && pinnedSessionIds.size > 0) {
       const pinSort = (a, b) => (pinnedSessionIds.has(b.id) ? 1 : 0) - (pinnedSessionIds.has(a.id) ? 1 : 0);
       for (const [, arr] of groups) arr.sort(pinSort);
       ungrouped.sort(pinSort);
@@ -1833,6 +1999,15 @@ function renderSessions() {
     const sortedGroups = stableGroupOrder.map((p) => [p, groups.get(p)]);
 
     let html = '';
+    if (!groupPinned && pinnedSessionIds.size > 0) {
+      const hasPinnedInView = filteredSessions.some((s) => pinnedSessionIds.has(s.id));
+      if (hasPinnedInView) {
+        html += `<div class="pinned-regroup-banner">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="3"/><path d="M5 10l7-7 7 7"/><line x1="4" y1="21" x2="20" y2="21"/></svg>
+          Group pinned sessions
+        </div>`;
+      }
+    }
     for (const [projectPath, projectSessions] of sortedGroups) {
       const folderName = projectPath.split(/[/\\]/).pop();
       const isCollapsed = collapsedProjectGroups.has(projectPath);
@@ -1850,13 +2025,13 @@ function renderSessions() {
               <svg class="group-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
               <span class="group-name">${escapeHtml(folderName)}</span>
               <span class="group-count">${projectSessions.length}</span>
-              <span class="group-path-toggle" data-group-action="toggle-path" title="Show full path">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+              <span class="project-view-btn" data-project-path="${escapedPath}" title="Open project view — combined tasks from all sessions">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
               </span>
             </div>
             <div class="project-group-breadcrumb" data-full-path="${escapedPath}" title="Click to copy path">${breadcrumbHtml}</div>
             <div class="project-group-sessions${isCollapsed ? ' collapsed' : ''}">
-              ${projectSessions.map(renderSessionCard).join('')}
+              ${renderGroupSessions(projectSessions, `__pinned_${projectPath}__`)}
             </div>
           `;
     }
@@ -1870,7 +2045,7 @@ function renderSessions() {
               <span class="group-count">${ungrouped.length}</span>
             </div>
             <div class="project-group-sessions${isCollapsed ? ' collapsed' : ''}">
-              ${ungrouped.map(renderSessionCard).join('')}
+              ${renderGroupSessions(ungrouped, '__pinned___ungrouped__')}
             </div>
           `;
     } else {
@@ -1969,12 +2144,37 @@ function renderSession() {
   renderSessions();
 }
 
+function renderProjectView() {
+  noSession.style.display = 'none';
+  sessionView.classList.add('visible');
+
+  const folderName = currentProjectPath ? currentProjectPath.split(/[/\\]/).pop() : 'Project';
+  sessionTitle.textContent = folderName;
+
+  const metaParts = [`${currentProjectSessionIds.length} sessions`, `${currentTasks.length} tasks`];
+  if (currentProjectPath) metaParts.push(currentProjectPath);
+  sessionMeta.textContent = metaParts.join(' · ');
+
+  const completed = currentTasks.filter((t) => t.status === 'completed').length;
+  const percent = currentTasks.length > 0 ? Math.round((completed / currentTasks.length) * 100) : 0;
+
+  progressPercent.textContent = `${percent}%`;
+  progressBar.style.width = `${percent}%`;
+  const hasInProgress = currentTasks.some((t) => t.status === 'in_progress');
+  progressBar.classList.toggle('shimmer', hasInProgress && percent < 100);
+
+  updateOwnerFilter();
+  renderKanban();
+  renderSessions();
+}
+
 function renderTaskCard(task) {
   const isBlocked = task.blockedBy && task.blockedBy.length > 0;
-  const taskId = viewMode === 'all' ? `${task.sessionId?.slice(0, 4)}-${task.id}` : task.id;
+  const useSlug = viewMode === 'all' || viewMode === 'project';
+  const taskId = useSlug ? `${(task._taskDir || task.sessionId || '')?.slice(0, 4)}-${task.id}` : task.id;
   const sessionLabel = viewMode === 'all' && task.sessionName ? task.sessionName : null;
   const statusClass = task.status.replace('_', '-');
-  const actualSessionId = task.sessionId || currentSessionId;
+  const actualSessionId = task._taskDir || task.sessionId || currentSessionId || '';
 
   return `
         <div
@@ -2112,7 +2312,9 @@ async function onColumnDrop(e) {
     return;
   }
   const { taskId, sessionId } = data;
-  const task = currentTasks.find((t) => t.id === taskId && (t.sessionId || currentSessionId) === sessionId);
+  const task = currentTasks.find(
+    (t) => t.id === taskId && (t._taskDir === sessionId || (t.sessionId || currentSessionId) === sessionId),
+  );
   if (!task || task.status === newStatus) return;
   try {
     const res = await fetch(`/api/tasks/${sessionId}/${taskId}`, {
@@ -2150,7 +2352,10 @@ function getSelectedCardInfo() {
   for (let ci = 0; ci < COLUMNS.length; ci++) {
     const cards = Array.from(COLUMNS[ci].el.querySelectorAll('.task-card'));
     for (let i = 0; i < cards.length; i++) {
-      if (cards[i].dataset.taskId === selectedTaskId) {
+      if (
+        cards[i].dataset.taskId === selectedTaskId &&
+        (!selectedSessionId || cards[i].dataset.sessionId === selectedSessionId)
+      ) {
         return { colIndex: ci, cardIndex: i, card: cards[i] };
       }
     }
@@ -2200,8 +2405,9 @@ function getKbId(el) {
 }
 
 function getGroupSessionsContainer(header) {
+  const cls = header.classList.contains('pinned-sub-header') ? 'pinned-sub-items' : 'project-group-sessions';
   let el = header.nextElementSibling;
-  while (el && !el.classList.contains('project-group-sessions')) el = el.nextElementSibling;
+  while (el && !el.classList.contains(cls)) el = el.nextElementSibling;
   return el;
 }
 
@@ -2213,7 +2419,10 @@ function getNavigableItems() {
       if (!collapsedProjectGroups.has(el.dataset.groupPath)) {
         const container = getGroupSessionsContainer(el);
         if (container) {
-          for (const s of container.querySelectorAll('.session-item')) items.push(s);
+          for (const s of container.querySelectorAll('.session-item')) {
+            if (s.closest('.pinned-sub-items.collapsed')) continue;
+            items.push(s);
+          }
         }
       }
     } else if (el.classList.contains('session-item')) {
@@ -2410,7 +2619,9 @@ function getAvailableTasksOptions(currentTaskId = null) {
 
 //#region TASK_DETAIL
 async function showTaskDetail(taskId, sessionId = null) {
-  let task = currentTasks.find((t) => t.id === taskId && (!sessionId || t.sessionId === sessionId));
+  let task = currentTasks.find(
+    (t) => t.id === taskId && (!sessionId || t.sessionId === sessionId || t._taskDir === sessionId),
+  );
 
   // If task not found in currentTasks, fetch it from the session
   if (!task && sessionId && sessionId !== 'undefined') {
@@ -2502,20 +2713,25 @@ async function showTaskDetail(taskId, sessionId = null) {
         </div>
       `;
 
-  // Setup button handlers
+  // Setup button handlers (read-only in project view)
   const deleteBtn = document.getElementById('delete-task-btn');
-  deleteBtn.style.display = '';
-  deleteBtn.onclick = () => deleteTask(task.id, actualSessionId);
+  const isProjectView = viewMode === 'project';
+  deleteBtn.style.display = isProjectView ? 'none' : '';
+  if (!isProjectView) deleteBtn.onclick = () => deleteTask(task.id, actualSessionId);
 
-  // Setup inline editing
-  const titleEl = detailContent.querySelector('.detail-title');
-  if (titleEl) {
-    titleEl.onclick = () => editTitle(titleEl, task, actualSessionId);
-  }
+  const noteSection = detailContent.querySelector('.note-section');
+  if (noteSection && isProjectView) noteSection.style.display = 'none';
 
-  const descEl = detailContent.querySelector('.detail-desc');
-  if (descEl) {
-    descEl.onclick = () => editDescription(descEl, task, actualSessionId);
+  if (!isProjectView) {
+    const titleEl = detailContent.querySelector('.detail-title');
+    if (titleEl) {
+      titleEl.onclick = () => editTitle(titleEl, task, actualSessionId);
+    }
+
+    const descEl = detailContent.querySelector('.detail-desc');
+    if (descEl) {
+      descEl.onclick = () => editDescription(descEl, task, actualSessionId);
+    }
   }
 }
 
@@ -2815,6 +3031,12 @@ const _scratchpadModal = document.getElementById('scratchpad-modal');
 const _scratchpadTextarea = document.getElementById('scratchpad-textarea');
 const _scratchpadCharcount = document.getElementById('scratchpad-charcount');
 
+function _scratchpadKey() {
+  if (currentSessionId) return `scratchpad-${currentSessionId}`;
+  if (currentProjectPath) return `scratchpad-project:${currentProjectPath}`;
+  return null;
+}
+
 function toggleScratchpad() {
   if (_scratchpadModal.classList.contains('visible')) {
     closeScratchpad();
@@ -2824,8 +3046,9 @@ function toggleScratchpad() {
 }
 
 function showScratchpad() {
-  if (!currentSessionId) return;
-  _scratchpadTextarea.value = localStorage.getItem(`scratchpad-${currentSessionId}`) || '';
+  const key = _scratchpadKey();
+  if (!key) return;
+  _scratchpadTextarea.value = localStorage.getItem(key) || '';
   _scratchpadCharcount.textContent = `${_scratchpadTextarea.value.length} chars`;
   _scratchpadModal.classList.add('visible');
   _scratchpadTextarea.focus();
@@ -2841,8 +3064,9 @@ function closeScratchpad() {
 }
 
 function saveScratchpad() {
-  if (!currentSessionId) return;
-  localStorage.setItem(`scratchpad-${currentSessionId}`, _scratchpadTextarea.value);
+  const key = _scratchpadKey();
+  if (!key) return;
+  localStorage.setItem(key, _scratchpadTextarea.value);
 }
 
 _scratchpadTextarea.addEventListener('input', () => {
@@ -3101,7 +3325,9 @@ function setupEventSource() {
 
     let taskRefreshTimer = null;
     let metadataRefreshTimer = null;
+    let agentRefreshTimer = null;
     const pendingTaskSessionIds = new Set();
+    const pendingAgentSessionIds = new Set();
 
     function debouncedRefresh(sessionId, isMetadata) {
       if (isMetadata) {
@@ -3122,6 +3348,9 @@ function setupEventSource() {
             currentTasks = filterProject ? allTasksCache.filter((t) => matchesProjectFilter(t.project)) : allTasksCache;
             renderAllTasks();
             renderLiveUpdatesFromCache();
+          } else if (viewMode === 'project' && currentProjectPath) {
+            const hasUpdate = currentProjectSessionIds.some((id) => pendingTaskSessionIds.has(id));
+            if (hasUpdate) fetchProjectView(currentProjectPath);
           } else if (currentSessionId && pendingTaskSessionIds.has(currentSessionId)) {
             fetchTasks(currentSessionId);
           }
@@ -3132,7 +3361,6 @@ function setupEventSource() {
 
     eventSource.onmessage = (event) => {
       const data = JSON.parse(event.data);
-      console.log('[SSE] Event received:', data);
       if (data.type === 'update' || data.type === 'metadata-update') {
         if (data.type === 'metadata-update') projectsCacheDirty = true;
         debouncedRefresh(data.sessionId, data.type === 'metadata-update');
@@ -3143,10 +3371,17 @@ function setupEventSource() {
       }
 
       if (data.type === 'agent-update') {
-        fetchSessions().catch((err) => console.error('[SSE] fetchSessions failed:', err));
-        if (currentSessionId && data.sessionId === currentSessionId) {
-          fetchAgents(currentSessionId);
-        }
+        pendingAgentSessionIds.add(data.sessionId);
+        clearTimeout(agentRefreshTimer);
+        agentRefreshTimer = setTimeout(() => {
+          fetchSessions().catch((err) => console.error('[SSE] fetchSessions failed:', err));
+          if (viewMode === 'project' && currentProjectSessionIds.some((id) => pendingAgentSessionIds.has(id))) {
+            refreshProjectAgents();
+          } else if (currentSessionId && pendingAgentSessionIds.has(currentSessionId)) {
+            fetchAgents(currentSessionId);
+          }
+          pendingAgentSessionIds.clear();
+        }, 500);
       }
 
       if (data.type === 'context-update') {
@@ -3154,7 +3389,6 @@ function setupEventSource() {
       }
 
       if (data.type === 'team-update') {
-        console.log('[SSE] Team update:', data.teamName);
         debouncedRefresh(data.teamName, false);
       }
     };
@@ -3312,6 +3546,10 @@ function renderContextDetail(raw) {
 //#endregion
 
 //#region UTILS
+function isSessionActive(s) {
+  return s.hasRecentLog || s.inProgress > 0 || s.hasActiveAgents || s.hasWaitingForUser;
+}
+
 function formatDate(dateStr) {
   const date = new Date(dateStr);
   const now = new Date();
@@ -3326,6 +3564,12 @@ function formatDate(dateStr) {
 function stripAnsi(text) {
   // biome-ignore lint/suspicious/noControlCharactersInRegex: \x1b is intentional for ANSI escape sequence stripping
   return typeof text === 'string' ? text.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '') : text;
+}
+
+function stripTeammateWrapper(text) {
+  if (typeof text !== 'string') return text;
+  const match = text.match(/^<teammate-message[^>]*>\n?([\s\S]*?)(?:<\/teammate-message>\s*)?$/);
+  return match ? match[1].trim() : text;
 }
 
 function escapeHtml(text) {
@@ -3491,6 +3735,33 @@ document.addEventListener('click', (e) => {
     e.stopPropagation();
     const path = breadcrumb.dataset.fullPath;
     if (path) navigator.clipboard.writeText(path).catch(() => {});
+    return;
+  }
+
+  const projectBtn = e.target.closest('.project-view-btn');
+  if (projectBtn) {
+    e.stopPropagation();
+    const projectPath = projectBtn.dataset.projectPath;
+    if (projectPath) fetchProjectView(projectPath);
+    return;
+  }
+
+  if (e.target.closest('.pinned-ungroup-btn')) {
+    e.stopPropagation();
+    localStorage.setItem('groupPinnedSessions', 'false');
+    renderSessions();
+    return;
+  }
+
+  if (e.target.closest('.pinned-regroup-banner')) {
+    localStorage.setItem('groupPinnedSessions', 'true');
+    renderSessions();
+    return;
+  }
+
+  const pinnedSubHeader = e.target.closest('.pinned-sub-header');
+  if (pinnedSubHeader) {
+    setGroupCollapsed(pinnedSubHeader, !collapsedProjectGroups.has(pinnedSubHeader.dataset.groupPath));
     return;
   }
 
@@ -3731,8 +4002,9 @@ async function showSessionInfoModal(sessionId) {
   // Fetch team config
   let teamConfig = null;
   if (session.isTeam) {
+    const teamId = session.teamName || sessionId;
     promises.push(
-      fetch(`/api/teams/${sessionId}`)
+      fetch(`/api/teams/${teamId}`)
         .then((r) => (r.ok ? r.json() : null))
         .catch(() => null)
         .then((data) => {
@@ -3803,6 +4075,9 @@ function showInfoModal(session, teamConfig, tasks, planContent) {
   }
   if (session.tasksDir) {
     infoRows.push(['Tasks Dir', session.tasksDir, { openPath: session.tasksDir }]);
+  }
+  if (session.sharedTaskList) {
+    infoRows.push(['Shared Tasks', session.sharedTaskList]);
   }
   if (teamConfig?.configPath) {
     const configDir = teamConfig.configPath.replace(/[/\\][^/\\]+$/, '');
@@ -4109,7 +4384,13 @@ if (urlState.search) {
 }
 
 fetchSessions().then(async () => {
-  if (urlState.session) {
+  if (urlState.projectView) {
+    try {
+      await fetchProjectView(atob(urlState.projectView));
+    } catch (_) {
+      showAllTasks();
+    }
+  } else if (urlState.session) {
     await fetchTasks(urlState.session);
   } else {
     showAllTasks();
@@ -4127,7 +4408,13 @@ window.addEventListener('popstate', () => {
   ownerFilter = s.owner || '';
   searchQuery = s.search || '';
   loadPreferences();
-  if (s.session) fetchTasks(s.session);
+  if (s.projectView) {
+    try {
+      fetchProjectView(atob(s.projectView));
+    } catch (_) {
+      showAllTasks();
+    }
+  } else if (s.session) fetchTasks(s.session);
   else showAllTasks();
   if (s.messages !== messagePanelOpen) toggleMessagePanel();
 });

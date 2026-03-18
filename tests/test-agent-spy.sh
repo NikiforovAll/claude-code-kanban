@@ -150,6 +150,26 @@ assert_json "$ACTIVITY_DIR/s4/t1.json" ".updatedAt" "$(jq -r '.updatedAt' "$ACTI
 UPDATED=$(jq -r '.updatedAt' "$ACTIVITY_DIR/s3/a1.json")
 [[ "$UPDATED" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] && pass "updatedAt is ISO format" || fail "updatedAt format" "got '$UPDATED'"
 
+# ─── Session Map (CLAUDE_CODE_TASK_LIST_ID) ──────────────────────
+echo "Session map (custom task list):"
+
+MAPS_DIR="$TMPDIR/.claude/agent-activity/_task-maps"
+
+# SessionStart with CLAUDE_CODE_TASK_LIST_ID writes task map
+CLAUDE_CODE_TASK_LIST_ID=my-project run_hook '{"session_id":"s-map1","agent_id":"","hook_event_name":"SessionStart","tool_name":"","cwd":"/home/user/dev/app"}'
+MAP_FILE="$MAPS_DIR/my-project.json"
+assert_file "$MAP_FILE" "creates task map file on SessionStart"
+assert_json "$MAP_FILE" '.["s-map1"].project' "/home/user/dev/app" "session mapped with correct project"
+
+# Second session adds to the same map
+CLAUDE_CODE_TASK_LIST_ID=my-project run_hook '{"session_id":"s-map2","agent_id":"","hook_event_name":"SessionStart","tool_name":"","cwd":"/home/user/dev/app"}'
+assert_json "$MAP_FILE" '.["s-map1"].project' "/home/user/dev/app" "first session still in map"
+assert_json "$MAP_FILE" '.["s-map2"].project' "/home/user/dev/app" "second session added to map"
+
+# Without CLAUDE_CODE_TASK_LIST_ID, no task map is written
+run_hook '{"session_id":"s-noenv","agent_id":"","hook_event_name":"SessionStart","tool_name":"","cwd":"/tmp"}'
+assert_no_file "$MAPS_DIR/no-env.json" "no map without CLAUDE_CODE_TASK_LIST_ID"
+
 # ─── Summary ─────────────────────────────────────────────────────
 echo ""
 echo "Results: $PASS passed, $FAIL failed"

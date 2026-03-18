@@ -488,13 +488,16 @@ body::before {
   display: block;
   width: 100%;
   padding: 12px 14px;
-  margin-bottom: 2px;
+  margin-bottom: 4px;
   background: transparent;
   border: 1px solid transparent;
   border-radius: 8px;
   text-align: left;
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.12),
+    0 1px 2px rgba(0, 0, 0, 0.08);
 }
 
 .session-item:hover {
@@ -1576,6 +1579,13 @@ body::before {
 
 .team-badge .member-count {
   font-weight: 600;
+}
+
+.shared-tasklist-badge {
+  display: inline-flex;
+  align-items: center;
+  color: var(--accent);
+  flex-shrink: 0;
 }
 
 .team-info-btn {
@@ -3002,6 +3012,18 @@ select.form-input option:checked {
   white-space: nowrap;
 }
 
+.project-view-btn {
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  transition: color 0.15s;
+}
+
+.project-view-btn:hover {
+  color: var(--accent);
+}
+
 .project-group-header .group-count {
   font-weight: 400;
   color: var(--text-muted);
@@ -3059,6 +3081,80 @@ select.form-input option:checked {
 
 .project-group-sessions.collapsed {
   display: none;
+}
+
+.pinned-sub-section {
+  margin-bottom: 2px;
+}
+
+.pinned-sub-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px 3px 18px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.pinned-sub-header:hover {
+  color: var(--text-secondary);
+}
+
+.pinned-sub-header .group-chevron {
+  transition: transform 0.15s ease;
+  flex-shrink: 0;
+}
+
+.pinned-sub-header.collapsed .group-chevron {
+  transform: rotate(-90deg);
+}
+
+.pinned-sub-label {
+  font-weight: 500;
+  letter-spacing: 0.3px;
+}
+
+.pinned-ungroup-btn {
+  margin-left: auto;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0 2px;
+  opacity: 0;
+  transition:
+    opacity 0.15s,
+    color 0.15s;
+}
+
+.pinned-sub-header:hover .pinned-ungroup-btn {
+  opacity: 1;
+}
+
+.pinned-ungroup-btn:hover {
+  color: var(--accent);
+}
+
+.pinned-sub-items.collapsed {
+  display: none;
+}
+
+.pinned-regroup-banner {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  font-size: 10px;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.15s;
+}
+
+.pinned-regroup-banner:hover {
+  color: var(--accent);
 }
 
 /* Session list hover accent bar */
