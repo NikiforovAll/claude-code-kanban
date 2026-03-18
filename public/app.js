@@ -1953,8 +1953,10 @@ function renderSessions() {
       if (!groupPinned || pinnedSessionIds.size === 0) return sessions.map(renderSessionCard).join('');
       const gPinned = sessions.filter((s) => pinnedSessionIds.has(s.id));
       if (gPinned.length === 0) return sessions.map(renderSessionCard).join('');
-      const gUnpinned = sessions.filter((s) => !pinnedSessionIds.has(s.id));
+      const gIdlePinned = gPinned.filter((s) => !isSessionActive(s));
+      const gUnpinned = sessions.filter((s) => !pinnedSessionIds.has(s.id) || isSessionActive(s));
       const pinCollapsed = collapsedProjectGroups.has(pinKey);
+      if (gIdlePinned.length === 0 && !pinCollapsed) return gUnpinned.map(renderSessionCard).join('');
       return (
         '<div class="pinned-sub-section">' +
         '<div class="pinned-sub-header' +
@@ -1965,21 +1967,22 @@ function renderSessions() {
         '<svg class="group-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>' +
         '<span class="pinned-sub-label">Pinned</span>' +
         '<span class="group-count">' +
-        gPinned.length +
+        gIdlePinned.length +
         '</span>' +
         '<span class="pinned-ungroup-btn" title="Ungroup pinned sessions">&times;</span>' +
         '</div>' +
         '<div class="pinned-sub-items' +
         (pinCollapsed ? ' collapsed' : '') +
         '">' +
-        gPinned.map(renderSessionCard).join('') +
+        gIdlePinned.map(renderSessionCard).join('') +
         '</div>' +
         '</div>' +
         gUnpinned.map(renderSessionCard).join('')
       );
     };
     if (!groupPinned && pinnedSessionIds.size > 0) {
-      const pinSort = (a, b) => (pinnedSessionIds.has(b.id) ? 1 : 0) - (pinnedSessionIds.has(a.id) ? 1 : 0);
+      const isIdlePin = (s) => pinnedSessionIds.has(s.id) && !isSessionActive(s);
+      const pinSort = (a, b) => (isIdlePin(b) ? 1 : 0) - (isIdlePin(a) ? 1 : 0);
       for (const [, arr] of groups) arr.sort(pinSort);
       ungrouped.sort(pinSort);
     }
@@ -2054,19 +2057,20 @@ function renderSessions() {
 
     sessionsList.innerHTML = html;
   } else {
-    const pinned = filteredSessions.filter((s) => pinnedSessionIds.has(s.id));
-    const rest = filteredSessions.filter((s) => !pinnedSessionIds.has(s.id));
+    const idlePinned = filteredSessions.filter((s) => pinnedSessionIds.has(s.id) && !isSessionActive(s));
+    const rest = filteredSessions.filter((s) => !pinnedSessionIds.has(s.id) || isSessionActive(s));
     let html = '';
-    if (pinned.length > 0) {
-      const isCollapsed = collapsedProjectGroups.has('__pinned__');
+    const isCollapsed = collapsedProjectGroups.has('__pinned__');
+    const hasPinned = pinnedSessionIds.size > 0 && filteredSessions.some((s) => pinnedSessionIds.has(s.id));
+    if (idlePinned.length > 0 || (hasPinned && isCollapsed)) {
       html += `
             <div class="project-group-header${isCollapsed ? ' collapsed' : ''}" data-group-path="__pinned__">
               <svg class="group-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
               <span class="group-name">Pinned</span>
-              <span class="group-count">${pinned.length}</span>
+              <span class="group-count">${idlePinned.length}</span>
             </div>
             <div class="project-group-sessions${isCollapsed ? ' collapsed' : ''}">
-              ${pinned.map(renderSessionCard).join('')}
+              ${idlePinned.map(renderSessionCard).join('')}
             </div>
           `;
     }
