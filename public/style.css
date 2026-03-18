@@ -2570,10 +2570,10 @@ body.light .msg-assistant .msg-text {
 }
 
 .modal.fullscreen {
-  width: 76vw;
-  max-width: 76vw;
-  height: 85vh;
-  max-height: 85vh;
+  width: 90vw;
+  max-width: 90vw;
+  height: 92vh;
+  max-height: 92vh;
 }
 
 .modal.plan-modal {
@@ -2582,6 +2582,17 @@ body.light .msg-assistant .msg-text {
   max-height: 85vh;
   display: flex;
   flex-direction: column;
+}
+
+.modal.plan-modal.fullscreen {
+  width: 90vw;
+  max-width: 90vw;
+  height: 92vh;
+  max-height: 92vh;
+}
+
+.modal-sm {
+  max-width: 440px;
 }
 
 @keyframes live-border-pulse {
