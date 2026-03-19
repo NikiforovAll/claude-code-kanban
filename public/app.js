@@ -116,6 +116,7 @@ async function fetchSessions() {
   try {
     const allPinnedIds = new Set([...pinnedSessionIds, ...stickySessionIds]);
     if (revealedPlanSessionId) allPinnedIds.add(revealedPlanSessionId);
+    if (revealedStorageSessionId) allPinnedIds.add(revealedStorageSessionId);
     const pinnedParam = allPinnedIds.size > 0 ? `&pinned=${[...allPinnedIds].join(',')}` : '';
     const [newSessions, newTasks] = await Promise.all([
       fetch(`/api/sessions?limit=${sessionLimit}${pinnedParam}`).then((r) => r.json()),
@@ -439,6 +440,9 @@ async function fetchTasks(sessionId) {
       closeScratchpad();
     if (revealedPlanSessionId && sessionId !== revealedPlanSessionId) {
       revealedPlanSessionId = null;
+    }
+    if (revealedStorageSessionId && sessionId !== revealedStorageSessionId) {
+      revealedStorageSessionId = null;
     }
     currentSessionId = sessionId;
     currentPins = loadPins(sessionId);
@@ -1774,6 +1778,7 @@ function closeAgentModal() {
 
 //#region RENDERING
 let revealedPlanSessionId = null;
+let revealedStorageSessionId = null;
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
 async function revealPlanSession(planSessionId) {
   if (revealedPlanSessionId === planSessionId) {
@@ -1867,6 +1872,10 @@ function renderSessions() {
     if (revealedPlanSessionId && !filteredSessions.some((s) => s.id === revealedPlanSessionId)) {
       const planSession = sessions.find((s) => s.id === revealedPlanSessionId);
       if (planSession) filteredSessions.push(planSession);
+    }
+    if (revealedStorageSessionId && !filteredSessions.some((s) => s.id === revealedStorageSessionId)) {
+      const storageSession = sessions.find((s) => s.id === revealedStorageSessionId);
+      if (storageSession) filteredSessions.push(storageSession);
     }
   }
   if (filterProject) {
@@ -3324,9 +3333,16 @@ function _renderStorageSessions() {
   return html;
 }
 
-function _storageViewSession(id) {
+async function _storageViewSession(id) {
   closeStorageManager();
-  fetchTasks(id);
+  revealedStorageSessionId = id;
+  if (!sessions.some((s) => s.id === id)) {
+    lastSessionsHash = '';
+    await fetchSessions();
+  }
+  await fetchTasks(id);
+  const el = document.querySelector(`.session-item[data-session-id="${CSS.escape(id)}"]`);
+  if (el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
 
 function _storageUnpinSession(id) {
