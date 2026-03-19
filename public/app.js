@@ -115,6 +115,7 @@ let lastTasksHash = '';
 async function fetchSessions() {
   try {
     const allPinnedIds = new Set([...pinnedSessionIds, ...stickySessionIds]);
+    if (revealedPlanSessionId) allPinnedIds.add(revealedPlanSessionId);
     const pinnedParam = allPinnedIds.size > 0 ? `&pinned=${[...allPinnedIds].join(',')}` : '';
     const [newSessions, newTasks] = await Promise.all([
       fetch(`/api/sessions?limit=${sessionLimit}${pinnedParam}`).then((r) => r.json()),
@@ -438,7 +439,6 @@ async function fetchTasks(sessionId) {
       closeScratchpad();
     if (revealedPlanSessionId && sessionId !== revealedPlanSessionId) {
       revealedPlanSessionId = null;
-      renderSessions();
     }
     currentSessionId = sessionId;
     currentPins = loadPins(sessionId);
@@ -1775,18 +1775,20 @@ function closeAgentModal() {
 //#region RENDERING
 let revealedPlanSessionId = null;
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
-function revealPlanSession(planSessionId) {
+async function revealPlanSession(planSessionId) {
   if (revealedPlanSessionId === planSessionId) {
     revealedPlanSessionId = null;
-  } else {
-    revealedPlanSessionId = planSessionId;
+    renderSessions();
+    return;
   }
-  renderSessions();
-  if (revealedPlanSessionId) {
-    fetchTasks(planSessionId);
-    const el = document.querySelector(`.session-item[data-session-id="${CSS.escape(planSessionId)}"]`);
-    if (el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  revealedPlanSessionId = planSessionId;
+  if (!sessions.some((s) => s.id === planSessionId)) {
+    lastSessionsHash = '';
+    await fetchSessions();
   }
+  await fetchTasks(planSessionId);
+  const el = document.querySelector(`.session-item[data-session-id="${CSS.escape(planSessionId)}"]`);
+  if (el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
 
 async function showAllTasks() {
