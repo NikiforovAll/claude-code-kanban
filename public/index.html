@@ -161,6 +161,11 @@
                 <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
               </svg>
             </button>
+            <button class="icon-btn" onclick="showStorageManager()" title="Storage manager (Shift+S)" aria-label="Storage manager">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
+              </svg>
+            </button>
             <button id="theme-toggle" class="icon-btn" onclick="toggleTheme()" title="Toggle theme" aria-label="Toggle theme">
               <svg id="theme-icon-dark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/>
@@ -391,6 +396,10 @@
                 <td style="padding: 4px 0; color: var(--text-primary);">Toggle scratchpad</td>
               </tr>
               <tr>
+                <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">Shift+S</kbd></td>
+                <td style="padding: 4px 0; color: var(--text-primary);">Storage manager</td>
+              </tr>
+              <tr>
                 <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">J/K</kbd></td>
                 <td style="padding: 4px 0; color: var(--text-primary);">Navigate messages in detail modal</td>
               </tr>
@@ -589,6 +598,29 @@
       <div class="modal-footer scratchpad-footer">
         <span id="scratchpad-charcount" class="scratchpad-charcount">0 chars</span>
         <button class="btn btn-primary" onclick="closeScratchpad()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="storage-modal" class="modal-overlay" onclick="closeStorageManager()">
+    <div class="modal storage-modal" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <h3 class="modal-title">Storage Manager</h3>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span id="storage-total" class="storage-total"></span>
+          <button class="modal-close" aria-label="Close dialog" onclick="closeStorageManager()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="storage-tabs">
+        <button class="storage-tab active" data-tab="sessions" onclick="switchStorageTab('sessions')">Sessions</button>
+        <button class="storage-tab" data-tab="scratchpads" onclick="switchStorageTab('scratchpads')">Scratchpads</button>
+      </div>
+      <div class="modal-body" id="storage-modal-body" style="overflow-y:auto;min-height:200px;max-height:60vh;padding-top:16px;padding-right:8px;"></div>
+      <div class="modal-footer">
+        <button id="storage-cleanup-btn" class="btn btn-secondary" onclick="cleanupOrphanedStorage()">Clean Orphaned</button>
+        <button class="btn btn-primary" onclick="closeStorageManager()">Close</button>
       </div>
     </div>
   </div>

@@ -1962,6 +1962,14 @@ body::before {
   fill: var(--accent);
   stroke: var(--accent);
 }
+.session-pin-btn.sticky {
+  opacity: 1;
+  color: var(--warning);
+}
+.session-pin-btn.sticky svg {
+  fill: var(--warning);
+  stroke: var(--warning);
+}
 .pinned-sessions-divider {
   height: 1px;
   margin: 4px 8px;
@@ -2830,6 +2838,196 @@ select.form-input option:checked {
   font-size: 12px;
   color: var(--text-muted);
   align-self: center;
+}
+/* #endregion */
+
+/* #region STORAGE_MANAGER */
+.storage-modal {
+  width: 90%;
+  max-width: 860px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.storage-project-group {
+  margin-bottom: 12px;
+}
+
+.storage-project-header {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  padding: 8px 10px;
+  background: var(--bg-elevated);
+  border-radius: 6px;
+  margin-bottom: 4px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.storage-project-header .storage-item-meta {
+  font-weight: 400;
+}
+
+.storage-session-group {
+  padding-left: 12px;
+  border-left: 2px solid color-mix(in srgb, var(--border) 60%, transparent);
+  margin-left: 8px;
+  margin-bottom: 8px;
+}
+
+.storage-total {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--mono);
+}
+
+.storage-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  margin: -4px -24px 0;
+  padding: 0 24px;
+  flex-shrink: 0;
+}
+
+.storage-tab {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  padding: 8px 16px;
+  font-size: 13px;
+  font-family: var(--mono);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition:
+    color 0.15s,
+    border-color 0.15s;
+}
+
+.storage-tab:hover {
+  color: var(--text-primary);
+}
+
+.storage-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.storage-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+  gap: 8px;
+}
+
+.storage-item:last-child {
+  border-bottom: none;
+}
+
+.storage-item-clickable {
+  cursor: pointer;
+}
+
+.storage-item-clickable:hover {
+  background: var(--bg-hover);
+  border-radius: 4px;
+}
+
+.storage-item-id {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.storage-item-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.storage-item-badge {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+  flex-shrink: 0;
+  font-family: var(--mono);
+}
+
+.storage-item-badge.orphan {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+.storage-item-badge.pinned {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent);
+}
+
+.storage-item-badge.sticky {
+  background: rgba(234, 179, 8, 0.15);
+  color: #eab308;
+}
+
+.storage-item-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.storage-item-actions button {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  font-family: var(--mono);
+  transition: all 0.15s;
+}
+
+.storage-item-actions button:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.storage-item-actions button.danger:hover {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+.storage-group-header {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 12px 0 4px;
+  font-weight: 600;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.storage-group-header:first-child {
+  padding-top: 0;
+}
+
+.storage-empty {
+  text-align: center;
+  padding: 32px 0;
+  color: var(--text-muted);
+  font-size: 13px;
 }
 /* #endregion */
 

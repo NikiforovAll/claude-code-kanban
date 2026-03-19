@@ -114,7 +114,8 @@ let lastTasksHash = '';
 //#region DATA_FETCHING
 async function fetchSessions() {
   try {
-    const pinnedParam = pinnedSessionIds.size > 0 ? `&pinned=${[...pinnedSessionIds].join(',')}` : '';
+    const allPinnedIds = new Set([...pinnedSessionIds, ...stickySessionIds]);
+    const pinnedParam = allPinnedIds.size > 0 ? `&pinned=${[...allPinnedIds].join(',')}` : '';
     const [newSessions, newTasks] = await Promise.all([
       fetch(`/api/sessions?limit=${sessionLimit}${pinnedParam}`).then((r) => r.json()),
       fetch('/api/tasks/all').then((r) => r.json()),
@@ -500,9 +501,7 @@ async function fetchProjectView(projectPath) {
   if (msgPinned) msgPinned.innerHTML = '';
   const projectSessions = sessions.filter((s) => s.project === projectPath);
   currentProjectSessionIds = projectSessions.map((s) => s.id);
-  const activeSessionIds = projectSessions
-    .filter((s) => isSessionActive(s) || pinnedSessionIds.has(s.id))
-    .map((s) => s.id);
+  const activeSessionIds = projectSessions.filter((s) => isSessionActive(s) || isAnyPinned(s.id)).map((s) => s.id);
 
   const encoded = btoa(projectPath);
   const [tasksResult, agentResults] = await Promise.all([
@@ -551,9 +550,7 @@ async function fetchProjectView(projectPath) {
 async function refreshProjectAgents() {
   if (!currentProjectPath) return;
   const projectSessions = sessions.filter((s) => s.project === currentProjectPath);
-  const activeSessionIds = projectSessions
-    .filter((s) => isSessionActive(s) || pinnedSessionIds.has(s.id))
-    .map((s) => s.id);
+  const activeSessionIds = projectSessions.filter((s) => isSessionActive(s) || isAnyPinned(s.id)).map((s) => s.id);
   const agentResults = await Promise.all(
     activeSessionIds.map((id) =>
       fetch(`/api/sessions/${id}/agents`)
@@ -758,7 +755,6 @@ function renderPinnedSection() {
             <div class="msg-body"><div class="msg-text">${escapeHtml(p.tool || '')}${toolDetail}</div><div class="msg-time">${formatDate(p.timestamp)}</div></div>${pinnedAgentLogBtn}${unpin}
           </div>`;
       } else if (p.type === 'agent') {
-        const agentClick = `onclick="showAgentModal('${escapeHtml(p.agentId)}')" style="cursor:pointer"`;
         const agentLogBtn = agentLogButton(p.agentId);
         const msgTrunc = p.lastMessage
           ? escapeHtml(
@@ -768,7 +764,7 @@ function renderPinnedSection() {
             )
           : '';
         const agentDetail = msgTrunc ? ` <span style="color:var(--text-muted)">${msgTrunc}</span>` : '';
-        return `<div class="msg-item msg-tool" ${agentClick}>
+        return `<div class="msg-item msg-tool" ${click}>
             ${MSG_ICON_TOOL}
             <div class="msg-body"><div class="msg-text">${escapeHtml(p.agentType || 'Agent')}${agentDetail}</div><div class="msg-time">${formatDate(p.timestamp)}</div></div>${agentLogBtn}${unpin}
           </div>`;
@@ -1019,27 +1015,8 @@ function showPinnedMsgDetail(pinIdx) {
   }
   currentMsgDetailIdx = null;
   currentPinDetailId = pin.id;
+  _renderPinToDetail(pin);
   const body = document.getElementById('msg-detail-body');
-  const agentBtn = document.getElementById('msg-detail-agent-btn');
-  if (pin.type === 'tool_use') {
-    document.getElementById('msg-detail-title').textContent = pin.tool || 'Tool';
-    const fullText = pin.fullDetail || pin.detail || '';
-    const pinParamsHtml = renderToolParamsHtml(pin.params);
-    const pinResultHtml = renderToolResultHtml(pin.toolResult, pin.toolResultTruncated, pin.toolResultFull);
-    const pinDetailEscaped = escapeHtml(fullText);
-    const pinDetailRendered = pin.tool === 'Bash' ? highlightBash(pinDetailEscaped) : pinDetailEscaped;
-    body.innerHTML =
-      (fullText ? `<pre class="msg-detail-pre">${pinDetailRendered}</pre>` : '<em>No details</em>') +
-      pinParamsHtml +
-      pinResultHtml;
-    agentBtn.style.display = 'none';
-  } else {
-    const text = stripAnsi(pin.fullText || pin.text || '');
-    document.getElementById('msg-detail-title').textContent = pin.type === 'assistant' ? 'Claude' : 'User';
-    agentBtn.style.display = 'none';
-    body.innerHTML = renderMarkdown(text);
-  }
-  document.getElementById('msg-detail-meta').textContent = formatDate(pin.timestamp);
   const pinModal = document.getElementById('msg-detail-modal').querySelector('.modal');
   autoSizeModal(pinModal, body);
   const pinBtn = document.getElementById('msg-detail-pin-btn');
@@ -1073,6 +1050,7 @@ function togglePinnedCollapse() {
 
 //#region PINNING
 let pinnedSessionIds = new Set();
+let stickySessionIds = new Set();
 
 function loadPinnedSessions() {
   try {
@@ -1082,16 +1060,70 @@ function loadPinnedSessions() {
   }
 }
 
-function savePinnedSessions() {
-  localStorage.setItem('pinned-sessions', JSON.stringify([...pinnedSessionIds]));
+function loadStickySessions() {
+  try {
+    return new Set(JSON.parse(localStorage.getItem('sticky-sessions')) || []);
+  } catch {
+    return new Set();
+  }
 }
 
+function savePinnedSessions() {
+  localStorage.setItem('pinned-sessions', JSON.stringify([...pinnedSessionIds]));
+  localStorage.setItem('sticky-sessions', JSON.stringify([...stickySessionIds]));
+}
+
+// unpinned → pinned → sticky → unpinned
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
 function toggleSessionPin(sessionId) {
-  if (pinnedSessionIds.has(sessionId)) pinnedSessionIds.delete(sessionId);
-  else pinnedSessionIds.add(sessionId);
+  if (stickySessionIds.has(sessionId)) {
+    stickySessionIds.delete(sessionId);
+    pinnedSessionIds.delete(sessionId);
+  } else if (pinnedSessionIds.has(sessionId)) {
+    pinnedSessionIds.delete(sessionId);
+    stickySessionIds.add(sessionId);
+  } else {
+    pinnedSessionIds.add(sessionId);
+  }
   savePinnedSessions();
   renderSessions();
+}
+
+function getSessionPinState(sessionId) {
+  if (stickySessionIds.has(sessionId)) return 'sticky';
+  if (pinnedSessionIds.has(sessionId)) return 'pinned';
+  return 'none';
+}
+
+function isAnyPinned(sessionId) {
+  return pinnedSessionIds.has(sessionId) || stickySessionIds.has(sessionId);
+}
+
+function _renderPinToDetail(pin) {
+  const body = document.getElementById('msg-detail-body');
+  const agentBtn = document.getElementById('msg-detail-agent-btn');
+  agentBtn.style.display = 'none';
+  if (pin.type === 'tool_use') {
+    document.getElementById('msg-detail-title').textContent = pin.tool || 'Tool';
+    const fullText = pin.fullDetail || pin.detail || '';
+    const pinParamsHtml = renderToolParamsHtml(pin.params);
+    const pinResultHtml = renderToolResultHtml(pin.toolResult, pin.toolResultTruncated, pin.toolResultFull);
+    const pinDetailEscaped = escapeHtml(fullText);
+    const pinDetailRendered = pin.tool === 'Bash' ? highlightBash(pinDetailEscaped) : pinDetailEscaped;
+    body.innerHTML =
+      (fullText ? `<pre class="msg-detail-pre">${pinDetailRendered}</pre>` : '<em>No details</em>') +
+      pinParamsHtml +
+      pinResultHtml;
+  } else if (pin.type === 'agent') {
+    document.getElementById('msg-detail-title').textContent = pin.agentType || 'Agent';
+    const lastMsg = stripAnsi(pin.lastMessage || '');
+    body.innerHTML = lastMsg ? renderMarkdown(lastMsg) : '<em>No agent message</em>';
+  } else {
+    const text = stripAnsi(pin.fullText || pin.text || '');
+    document.getElementById('msg-detail-title').textContent = pin.type === 'assistant' ? 'Claude' : 'User';
+    body.innerHTML = renderMarkdown(text);
+  }
+  document.getElementById('msg-detail-meta').textContent = formatDate(pin.timestamp);
 }
 
 const SESSION_PIN_SVG = PIN_SVG.replace('width="14" height="14"', 'width="12" height="12"');
@@ -1850,10 +1882,10 @@ function renderSessions() {
     });
   }
 
-  // Always include pinned sessions even if they don't match filters
-  if (pinnedSessionIds.size > 0 && !searchQuery) {
+  // Always include pinned/sticky sessions even if they don't match filters
+  if ((pinnedSessionIds.size > 0 || stickySessionIds.size > 0) && !searchQuery) {
     const filteredIds = new Set(filteredSessions.map((s) => s.id));
-    const missingPinned = sessions.filter((s) => pinnedSessionIds.has(s.id) && !filteredIds.has(s.id));
+    const missingPinned = sessions.filter((s) => isAnyPinned(s.id) && !filteredIds.has(s.id));
     if (missingPinned.length) filteredSessions = [...missingPinned, ...filteredSessions];
   }
 
@@ -1907,11 +1939,13 @@ function renderSessions() {
     const isTeam = session.isTeam;
     const memberCount = session.memberCount || 0;
 
-    const isSessionPinned = pinnedSessionIds.has(session.id);
+    const pinState = getSessionPinState(session.id);
+    const pinClass = pinState === 'sticky' ? ' sticky' : pinState === 'pinned' ? ' pinned' : '';
+    const pinTitle = pinState === 'sticky' ? 'Unpin' : pinState === 'pinned' ? 'Sticky pin' : 'Pin';
     const showCtx = !!session.contextStatus;
     return `
           <button onclick="fetchTasks('${session.id}')" data-session-id="${session.id}" class="session-item ${isActive ? 'active' : ''} ${session.hasWaitingForUser ? 'permission-pending' : ''} ${!session.hasRecentLog && !session.inProgress && !session.hasWaitingForUser ? 'stale' : ''} ${showCtx ? 'has-context' : ''}" title="${tooltip}">
-            <span class="session-pin-btn${isSessionPinned ? ' pinned' : ''}" onclick="event.stopPropagation();toggleSessionPin('${escapeHtml(session.id)}')" title="${isSessionPinned ? 'Unpin' : 'Pin'} session">${SESSION_PIN_SVG}</span>
+            <span class="session-pin-btn${pinClass}" onclick="event.stopPropagation();toggleSessionPin('${escapeHtml(session.id)}')" title="${pinTitle} session">${SESSION_PIN_SVG}</span>
             <div class="session-name">${escapeHtml(primaryName)}</div>
             ${secondaryName ? `<div class="session-secondary">${escapeHtml(secondaryName)}</div>` : ''}
             ${gitBranch ? `<div class="session-branch">${gitBranch}</div>` : ''}
@@ -1951,10 +1985,12 @@ function renderSessions() {
     const groupPinned = localStorage.getItem('groupPinnedSessions') !== 'false';
     const renderGroupSessions = (sessions, pinKey) => {
       if (!groupPinned || pinnedSessionIds.size === 0) return sessions.map(renderSessionCard).join('');
-      const gPinned = sessions.filter((s) => pinnedSessionIds.has(s.id));
+      const gPinned = sessions.filter((s) => pinnedSessionIds.has(s.id) && !stickySessionIds.has(s.id));
       if (gPinned.length === 0) return sessions.map(renderSessionCard).join('');
       const gIdlePinned = gPinned.filter((s) => !isSessionActive(s));
-      const gUnpinned = sessions.filter((s) => !pinnedSessionIds.has(s.id) || isSessionActive(s));
+      const gUnpinned = sessions.filter(
+        (s) => !pinnedSessionIds.has(s.id) || isSessionActive(s) || stickySessionIds.has(s.id),
+      );
       const pinCollapsed = collapsedProjectGroups.has(pinKey);
       if (gIdlePinned.length === 0 && !pinCollapsed) return gUnpinned.map(renderSessionCard).join('');
       return (
@@ -1980,9 +2016,10 @@ function renderSessions() {
         gUnpinned.map(renderSessionCard).join('')
       );
     };
-    if (!groupPinned && pinnedSessionIds.size > 0) {
-      const isIdlePin = (s) => pinnedSessionIds.has(s.id) && !isSessionActive(s);
-      const pinSort = (a, b) => (isIdlePin(b) ? 1 : 0) - (isIdlePin(a) ? 1 : 0);
+    if (!groupPinned && (pinnedSessionIds.size > 0 || stickySessionIds.size > 0)) {
+      const pinWeight = (s) =>
+        stickySessionIds.has(s.id) ? 2 : pinnedSessionIds.has(s.id) && !isSessionActive(s) ? 1 : 0;
+      const pinSort = (a, b) => pinWeight(b) - pinWeight(a);
       for (const [, arr] of groups) arr.sort(pinSort);
       ungrouped.sort(pinSort);
     }
@@ -2057,9 +2094,17 @@ function renderSessions() {
 
     sessionsList.innerHTML = html;
   } else {
+    const sticky = filteredSessions.filter((s) => stickySessionIds.has(s.id));
     const idlePinned = filteredSessions.filter((s) => pinnedSessionIds.has(s.id) && !isSessionActive(s));
-    const rest = filteredSessions.filter((s) => !pinnedSessionIds.has(s.id) || isSessionActive(s));
+    const rest = filteredSessions.filter(
+      (s) =>
+        (!pinnedSessionIds.has(s.id) && !stickySessionIds.has(s.id)) ||
+        (pinnedSessionIds.has(s.id) && isSessionActive(s)),
+    );
     let html = '';
+    if (sticky.length > 0) {
+      html += sticky.map(renderSessionCard).join('');
+    }
     const isCollapsed = collapsedProjectGroups.has('__pinned__');
     const hasPinned = pinnedSessionIds.size > 0 && filteredSessions.some((s) => pinnedSessionIds.has(s.id));
     if (idlePinned.length > 0 || (hasPinned && isCollapsed)) {
@@ -3035,7 +3080,10 @@ const _scratchpadModal = document.getElementById('scratchpad-modal');
 const _scratchpadTextarea = document.getElementById('scratchpad-textarea');
 const _scratchpadCharcount = document.getElementById('scratchpad-charcount');
 
+let _scratchpadKeyOverride = null;
+
 function _scratchpadKey() {
+  if (_scratchpadKeyOverride) return _scratchpadKeyOverride;
   if (currentSessionId) return `scratchpad-${currentSessionId}`;
   if (currentProjectPath) return `scratchpad-project:${currentProjectPath}`;
   return null;
@@ -3049,7 +3097,8 @@ function toggleScratchpad() {
   }
 }
 
-function showScratchpad() {
+function showScratchpad(keyOverride) {
+  _scratchpadKeyOverride = keyOverride || null;
   const key = _scratchpadKey();
   if (!key) return;
   _scratchpadTextarea.value = localStorage.getItem(key) || '';
@@ -3064,13 +3113,19 @@ function closeScratchpad() {
     _scratchpadSaveTimer = null;
   }
   saveScratchpad();
+  _scratchpadKeyOverride = null;
   _scratchpadModal.classList.remove('visible');
 }
 
 function saveScratchpad() {
   const key = _scratchpadKey();
   if (!key) return;
-  localStorage.setItem(key, _scratchpadTextarea.value);
+  const val = _scratchpadTextarea.value;
+  if (val.trim()) {
+    localStorage.setItem(key, val);
+  } else {
+    localStorage.removeItem(key);
+  }
 }
 
 _scratchpadTextarea.addEventListener('input', () => {
@@ -3082,6 +3137,367 @@ _scratchpadTextarea.addEventListener('input', () => {
   }, 500);
 });
 
+//#endregion
+
+//#region STORAGE_MANAGER
+
+function _getStorageTotalSize() {
+  let bytes = 0;
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    bytes += k.length + localStorage.getItem(k).length;
+  }
+  return bytes * 2; // UTF-16
+}
+
+function _updateStorageTotal() {
+  const el = document.getElementById('storage-total');
+  if (el) el.textContent = `${(_getStorageTotalSize() / 1024).toFixed(1)} KB`;
+}
+
+function _getKnownSessionIds() {
+  return new Set(sessions.map((s) => s.id));
+}
+
+function _sessionLabel(session, id) {
+  return session ? escapeHtml(session.name || session.slug || id.slice(0, 12)) : escapeHtml(id.slice(0, 12));
+}
+
+function _groupByProject(sessionIds) {
+  const sessionMap = new Map(sessions.map((s) => [s.id, s]));
+  const groups = new Map();
+  const orphans = [];
+  for (const id of sessionIds) {
+    const session = sessionMap.get(id);
+    if (!session) {
+      orphans.push({ id, session: null });
+      continue;
+    }
+    const project = session.project || '(no project)';
+    if (!groups.has(project)) groups.set(project, []);
+    groups.get(project).push({ id, session });
+  }
+  return { groups, orphans };
+}
+
+function _projectLabel(project) {
+  if (project === '(no project)') return '(no project)';
+  return project.split(/[/\\]/).pop() || project;
+}
+
+function _escapeForJsAttr(str) {
+  const jsEscaped = str.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n').replace(/\r/g, '\\r');
+  return escapeHtml(jsEscaped);
+}
+
+function _renderProjectGroup(label, meta, innerHtml) {
+  return `<div class="storage-project-group">
+    <div class="storage-project-header">
+      <span>${label}</span>
+      <span class="storage-item-meta">${meta}</span>
+    </div>
+    <div class="storage-session-group">${innerHtml}</div>
+  </div>`;
+}
+
+function _renderOrphanGroup(count, innerHtml) {
+  return _renderProjectGroup('Orphaned', `<span class="storage-item-badge orphan">${count}</span>`, innerHtml);
+}
+
+function showStorageManager() {
+  _updateStorageTotal();
+  _updateOrphanedCount();
+  document.querySelectorAll('.storage-tab').forEach((t) => {
+    t.classList.toggle('active', t.dataset.tab === 'sessions');
+  });
+  _renderStorageTab();
+  document.getElementById('storage-modal').classList.add('visible');
+}
+
+function closeStorageManager() {
+  document.getElementById('storage-modal').classList.remove('visible');
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+function switchStorageTab(tab) {
+  document.querySelectorAll('.storage-tab').forEach((t) => {
+    t.classList.toggle('active', t.dataset.tab === tab);
+  });
+  _renderStorageTab();
+}
+
+function _renderStorageTab() {
+  const body = document.getElementById('storage-modal-body');
+  const tab = document.querySelector('.storage-tab.active')?.dataset.tab || 'sessions';
+  if (tab === 'sessions') body.innerHTML = _renderStorageSessions();
+  else if (tab === 'scratchpads') body.innerHTML = _renderStorageScratchpads();
+}
+
+function _renderStorageSessions() {
+  const pinnedIds = [...new Set([...pinnedSessionIds, ...stickySessionIds])];
+
+  const msgMap = new Map();
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (!key.startsWith('pinned-messages-')) continue;
+    const sid = key.slice('pinned-messages-'.length);
+    try {
+      const pins = JSON.parse(localStorage.getItem(key)) || [];
+      if (pins.length) msgMap.set(sid, { pins, key });
+    } catch {}
+  }
+
+  const allIds = [...new Set([...pinnedIds, ...msgMap.keys()])];
+  if (!allIds.length) return '<div class="storage-empty">No pinned sessions or messages</div>';
+  const { groups, orphans } = _groupByProject(allIds);
+
+  function renderMessageItems(id) {
+    const g = msgMap.get(id);
+    if (!g) return '';
+    const eid = escapeHtml(id);
+    const header = `<div class="storage-group-header" style="padding-left:12px;">
+      <span>${g.pins.length} pinned message${g.pins.length > 1 ? 's' : ''}</span>
+      <div class="storage-item-actions">
+        <button class="danger" onclick="_storageClearSessionPins('${eid}')">Clear All</button>
+      </div>
+    </div>`;
+    const items = g.pins
+      .map((p) => {
+        const type = escapeHtml(p.type || '?');
+        const text = escapeHtml((p.text || p.tool || p.agentType || '').slice(0, 60));
+        const pinId = _escapeForJsAttr(p.id || '');
+        const sid = _escapeForJsAttr(id);
+        return `<div class="storage-item storage-item-clickable" style="padding-left:24px;" onclick="_storagePreviewPin('${sid}','${pinId}')">
+        <span class="storage-item-badge">${type}</span>
+        <span class="storage-item-id">${text}</span>
+        <span class="storage-item-meta">${formatDate(p.timestamp)}</span>
+        <div class="storage-item-actions">
+          <button onclick="event.stopPropagation();_storagePreviewPin('${sid}','${pinId}')">View</button>
+          <button class="danger" onclick="event.stopPropagation();_storageUnpinMessage('${sid}','${pinId}')">Unpin</button>
+        </div>
+      </div>`;
+      })
+      .join('');
+    return header + items;
+  }
+
+  function renderSessionItem({ id, session }) {
+    const isPinned = isAnyPinned(id);
+    const eid = escapeHtml(id);
+    const actions = isPinned
+      ? `<button onclick="_storageViewSession('${eid}')">View</button>
+         <button class="danger" onclick="_storageUnpinSession('${eid}')">Unpin</button>`
+      : `<button onclick="_storageViewSession('${eid}')">View</button>`;
+    return `<div class="storage-group-header">
+      <span>${_sessionLabel(session, id)}</span>
+      <div class="storage-item-actions">${actions}</div>
+    </div>${renderMessageItems(id)}`;
+  }
+
+  let html = '';
+  for (const [project, items] of groups) {
+    const count = items.length;
+    html += _renderProjectGroup(
+      escapeHtml(_projectLabel(project)),
+      `${count} session${count > 1 ? 's' : ''}`,
+      items.map(renderSessionItem).join(''),
+    );
+  }
+  if (orphans.length) {
+    html += _renderOrphanGroup(orphans.length, orphans.map(renderSessionItem).join(''));
+  }
+  return html;
+}
+
+function _storageViewSession(id) {
+  closeStorageManager();
+  fetchTasks(id);
+}
+
+function _storageUnpinSession(id) {
+  pinnedSessionIds.delete(id);
+  stickySessionIds.delete(id);
+  savePinnedSessions();
+  renderSessions();
+  _renderStorageTab();
+  _updateStorageTotal();
+}
+
+function _storageClearSessionPins(sessionId) {
+  localStorage.removeItem(`pinned-messages-${sessionId}`);
+  if (currentSessionId === sessionId) {
+    currentPins = [];
+    const el = document.getElementById('message-panel-pinned');
+    if (el) el.innerHTML = '';
+  }
+  _renderStorageTab();
+  _updateStorageTotal();
+}
+
+function _storageUnpinMessage(sessionId, pinId) {
+  const key = `pinned-messages-${sessionId}`;
+  try {
+    const pins = JSON.parse(localStorage.getItem(key)) || [];
+    const idx = pins.findIndex((p) => p.id === pinId);
+    if (idx < 0) return;
+    pins.splice(idx, 1);
+    if (pins.length) localStorage.setItem(key, JSON.stringify(pins));
+    else localStorage.removeItem(key);
+    if (currentSessionId === sessionId) {
+      currentPins = pins;
+      const el = document.getElementById('message-panel-pinned');
+      if (el) el.innerHTML = renderPinnedSection();
+    }
+  } catch {}
+  _renderStorageTab();
+  _updateStorageTotal();
+}
+
+function _renderStorageScratchpads() {
+  const allItems = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (!key.startsWith('scratchpad-')) continue;
+    const val = localStorage.getItem(key) || '';
+    const isProject = key.startsWith('scratchpad-project:');
+    const id = isProject ? key.slice('scratchpad-project:'.length) : key.slice('scratchpad-'.length);
+    allItems.push({ key, id, isProject, chars: val.length });
+  }
+  if (!allItems.length) return '<div class="storage-empty">No scratchpads</div>';
+
+  const projectItems = allItems.filter((i) => i.isProject);
+  const sessionItems = allItems.filter((i) => !i.isProject);
+  const sessionIds = sessionItems.map((i) => i.id);
+  const { groups: projectGroups, orphans } = _groupByProject(sessionIds);
+  const scratchBySession = new Map(sessionItems.map((i) => [i.id, i]));
+
+  function renderScratchItem(item) {
+    const session = !item.isProject ? sessions.find((s) => s.id === item.id) : null;
+    const typeBadge = item.isProject
+      ? '<span class="storage-item-badge">project</span>'
+      : '<span class="storage-item-badge">session</span>';
+    const jsKey = _escapeForJsAttr(item.key);
+    const label = item.isProject ? escapeHtml(_projectLabel(item.id)) : _sessionLabel(session, item.id);
+    return `<div class="storage-item">
+      <span class="storage-item-id" title="${escapeHtml(item.id)}">${label}</span>
+      ${typeBadge}
+      <span class="storage-item-meta">${item.chars} chars</span>
+      <div class="storage-item-actions">
+        <button onclick="_storagePreviewScratchpad('${jsKey}')">View</button>
+        <button class="danger" onclick="_storageDeleteScratchpad('${jsKey}')">Delete</button>
+      </div>
+    </div>`;
+  }
+
+  let html = '';
+
+  if (projectItems.length) {
+    html += _renderProjectGroup(
+      'Project Scratchpads',
+      `${projectItems.length}`,
+      projectItems.map(renderScratchItem).join(''),
+    );
+  }
+
+  for (const [project, items] of projectGroups) {
+    const matching = items.map((i) => scratchBySession.get(i.id)).filter(Boolean);
+    if (!matching.length) continue;
+    html += _renderProjectGroup(
+      escapeHtml(_projectLabel(project)),
+      `${matching.length} scratchpad${matching.length > 1 ? 's' : ''}`,
+      matching.map(renderScratchItem).join(''),
+    );
+  }
+
+  if (orphans.length) {
+    const orphanItems = orphans.map((i) => scratchBySession.get(i.id)).filter(Boolean);
+    if (orphanItems.length) {
+      html += _renderOrphanGroup(orphanItems.length, orphanItems.map(renderScratchItem).join(''));
+    }
+  }
+  return html;
+}
+
+function _storagePreviewScratchpad(key) {
+  closeStorageManager();
+  showScratchpad(key);
+}
+
+function _storagePreviewPin(sessionId, pinId) {
+  closeStorageManager();
+  const key = `pinned-messages-${sessionId}`;
+  try {
+    const pins = JSON.parse(localStorage.getItem(key)) || [];
+    const pin = pins.find((p) => p.id === pinId);
+    if (!pin) return;
+    document.getElementById('msg-detail-pin-btn').style.display = 'none';
+    currentMsgDetailIdx = null;
+    currentPinDetailId = null;
+    _renderPinToDetail(pin);
+    document.getElementById('msg-detail-modal').classList.add('visible');
+  } catch (e) {
+    console.error('_storagePreviewPin error:', e);
+  }
+}
+
+function _storageDeleteScratchpad(key) {
+  localStorage.removeItem(key);
+  _renderStorageTab();
+  _updateStorageTotal();
+}
+
+function _findOrphanedKeys() {
+  const known = _getKnownSessionIds();
+  if (!known.size) return [];
+  const orphaned = [];
+  for (const id of pinnedSessionIds) if (!known.has(id)) orphaned.push(`__pinned__${id}`);
+  for (const id of stickySessionIds) if (!known.has(id)) orphaned.push(`__sticky__${id}`);
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key.startsWith('pinned-messages-')) {
+      if (!known.has(key.slice('pinned-messages-'.length))) orphaned.push(key);
+    } else if (key.startsWith('scratchpad-') && !key.startsWith('scratchpad-project:')) {
+      if (!known.has(key.slice('scratchpad-'.length))) orphaned.push(key);
+    }
+  }
+  return orphaned;
+}
+
+function _updateOrphanedCount() {
+  const btn = document.getElementById('storage-cleanup-btn');
+  if (!btn) return;
+  const count = _findOrphanedKeys().length;
+  btn.textContent = count ? `Clean Orphaned (${count})` : 'Clean Orphaned';
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML onclick
+function cleanupOrphanedStorage() {
+  if (!sessions.length) {
+    showToast('Sessions not loaded yet — try again after they appear');
+    return;
+  }
+  const orphaned = _findOrphanedKeys();
+  let pinsChanged = false;
+  for (const key of orphaned) {
+    if (key.startsWith('__pinned__')) {
+      pinnedSessionIds.delete(key.slice('__pinned__'.length));
+      pinsChanged = true;
+    } else if (key.startsWith('__sticky__')) {
+      stickySessionIds.delete(key.slice('__sticky__'.length));
+      pinsChanged = true;
+    } else {
+      localStorage.removeItem(key);
+    }
+  }
+  if (pinsChanged) savePinnedSessions();
+  const removed = orphaned.length;
+
+  showToast(removed ? `Cleaned ${removed} orphaned item${removed > 1 ? 's' : ''}` : 'No orphaned items found');
+  renderSessions();
+  _renderStorageTab();
+  _updateStorageTotal();
+  _updateOrphanedCount();
+}
 //#endregion
 
 //#region KEYBOARD_SHORTCUTS
@@ -3153,6 +3569,11 @@ document.addEventListener('keydown', (e) => {
       msgDetailFollowLatest = true;
       showMsgDetail(currentMessages.length - 1);
     }
+    return;
+  }
+  if (e.code === 'KeyS' && e.shiftKey) {
+    e.preventDefault();
+    showStorageManager();
     return;
   }
 
@@ -4102,7 +4523,7 @@ function showInfoModal(session, teamConfig, tasks, planContent) {
     } else {
       html += `<span style="${plainStyle}" title="${copyVal}">${escapeHtml(value)}</span>`;
     }
-    const jsCopyVal = copyVal.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const jsCopyVal = _escapeForJsAttr(copyVal);
     html += `<button onclick="navigator.clipboard.writeText('${jsCopyVal}'); this.textContent='✓'; setTimeout(() => this.textContent='Copy', 1000)" style="padding: 2px 8px; font-size: 11px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 4px; color: var(--text-secondary); cursor: pointer; white-space: nowrap;">Copy</button>`;
   });
   html += `</div>`;
@@ -4380,6 +4801,7 @@ searchQuery = urlState.search || '';
 
 loadPreferences();
 pinnedSessionIds = loadPinnedSessions();
+stickySessionIds = loadStickySessions();
 setupEventSource();
 
 if (urlState.search) {
