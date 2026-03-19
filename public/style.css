@@ -568,6 +568,11 @@ body::before {
   text-overflow: ellipsis;
 }
 
+.session-item.plan-reveal {
+  outline: 1.5px solid var(--plan);
+  background: var(--plan-dim);
+}
+
 .session-progress {
   display: flex;
   align-items: center;

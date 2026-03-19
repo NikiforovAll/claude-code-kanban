@@ -436,6 +436,10 @@ async function fetchTasks(sessionId) {
     if (agentLogMode && sessionId !== currentSessionId) exitAgentLogMode();
     if (sessionId !== currentSessionId && document.getElementById('scratchpad-modal').classList.contains('visible'))
       closeScratchpad();
+    if (revealedPlanSessionId && sessionId !== revealedPlanSessionId) {
+      revealedPlanSessionId = null;
+      renderSessions();
+    }
     currentSessionId = sessionId;
     currentPins = loadPins(sessionId);
     ownerFilter = '';
@@ -1769,6 +1773,22 @@ function closeAgentModal() {
 //#endregion
 
 //#region RENDERING
+let revealedPlanSessionId = null;
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+function revealPlanSession(planSessionId) {
+  if (revealedPlanSessionId === planSessionId) {
+    revealedPlanSessionId = null;
+  } else {
+    revealedPlanSessionId = planSessionId;
+  }
+  renderSessions();
+  if (revealedPlanSessionId) {
+    fetchTasks(planSessionId);
+    const el = document.querySelector(`.session-item[data-session-id="${CSS.escape(planSessionId)}"]`);
+    if (el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+}
+
 async function showAllTasks() {
   try {
     viewMode = 'all';
@@ -1842,16 +1862,9 @@ function renderSessions() {
       if (isActive) activeSessionIds.add(s.id);
       return isActive;
     });
-    // Include plan sessions whose implementation is active
-    const planSessions = sessions.filter(
-      (s) =>
-        s.planImplementationSessionId &&
-        activeSessionIds.has(s.planImplementationSessionId) &&
-        !activeSessionIds.has(s.id),
-    );
-    if (planSessions.length) {
-      filteredSessions = filteredSessions.concat(planSessions);
-      filteredSessions.sort((a, b) => new Date(b.modifiedAt) - new Date(a.modifiedAt));
+    if (revealedPlanSessionId && !filteredSessions.some((s) => s.id === revealedPlanSessionId)) {
+      const planSession = sessions.find((s) => s.id === revealedPlanSessionId);
+      if (planSession) filteredSessions.push(planSession);
     }
   }
   if (filterProject) {
@@ -1957,7 +1970,7 @@ function renderSessions() {
                 ${isTeam || session.project || showCtx ? `<span class="team-info-btn" onclick="event.stopPropagation(); showSessionInfoModal('${session.id}')" title="View session info">ℹ</span>` : ''}
                 ${session.hasPlan ? `<span class="plan-indicator" onclick="event.stopPropagation(); openPlanForSession('${session.id}')" title="View plan"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span>` : ''}
                 ${session.hasRunningAgents ? '<span class="agent-badge" title="Active agents">🤖</span>' : ''}
-                ${session.planSourceSessionId ? `<span class="plan-indicator" title="Implements plan — click to view plan session" onclick="event.stopPropagation(); fetchTasks('${escapeHtml(session.planSourceSessionId)}')">📋</span>` : ''}
+                ${session.planSourceSessionId ? `<span class="plan-indicator" title="Implements plan — click to reveal plan session" onclick="event.stopPropagation(); revealPlanSession('${escapeHtml(session.planSourceSessionId)}')">📋</span>` : ''}
                 ${session.hasWaitingForUser ? '<span class="agent-badge" title="Waiting for user">❓</span>' : ''}
                 ${isLive ? '<span class="pulse"></span>' : ''}
               </span>
