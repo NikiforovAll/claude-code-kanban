@@ -30,8 +30,20 @@ let selectedSessionKbId = null;
 let sessionJustSelected = false;
 let agentLogMode = null;
 let agentLogSSE = null;
+let msgHasMore = false;
+let msgLoadingMore = false;
+let msgUserScrolledUp = false;
+const MSG_MAX_LOADED = 200;
 let currentProjectPath = null;
 let currentProjectSessionIds = [];
+
+function resetMessageScrollState() {
+  msgUserScrolledUp = false;
+  msgHasMore = false;
+  msgLoadingMore = false;
+  currentMessages = [];
+  lastMessagesHash = '';
+}
 
 function getUrlState() {
   const params = new URLSearchParams(window.location.search);
@@ -77,6 +89,7 @@ function resetState() {
   currentSessionId = null;
   currentProjectPath = null;
   currentProjectSessionIds = [];
+  resetMessageScrollState();
   const searchInput = document.getElementById('search-input');
   if (searchInput) searchInput.value = '';
   document.getElementById('search-clear-btn')?.classList.remove('visible');
@@ -447,7 +460,7 @@ async function fetchTasks(sessionId) {
     currentSessionId = sessionId;
     currentPins = loadPins(sessionId);
     ownerFilter = '';
-    lastMessagesHash = '';
+    resetMessageScrollState();
     for (const k of Object.keys(ownerColorCache)) delete ownerColorCache[k];
     for (const k of Object.keys(teamColorMap)) delete teamColorMap[k];
     sessionJustSelected = true;
@@ -686,9 +699,6 @@ async function fetchMessages(sessionId) {
     const res = await fetch(`/api/sessions/${sessionId}/messages?limit=15`);
     if (!res.ok) return;
     const data = await res.json();
-    const hash = JSON.stringify(data.messages);
-    if (hash === lastMessagesHash) return;
-    lastMessagesHash = hash;
     let agentEnriched = false;
     for (const m of data.messages) {
       if (m.agentId && m.agentPrompt) {
@@ -701,13 +711,69 @@ async function fetchMessages(sessionId) {
     }
     if (agentEnriched) renderAgentFooter();
     if (agentLogMode) return;
-    currentMessages = data.messages;
-    if (messagePanelOpen) renderMessages(data.messages);
-    if (msgDetailFollowLatest && data.messages.length) {
-      showMsgDetail(data.messages.length - 1);
+
+    if (!msgUserScrolledUp) {
+      const hash = JSON.stringify(data.messages);
+      if (hash === lastMessagesHash) return;
+      lastMessagesHash = hash;
+      msgHasMore = data.hasMore !== false;
+      currentMessages = data.messages;
+      if (messagePanelOpen) renderMessages(data.messages);
+    } else {
+      if (data.messages.length && currentMessages.length) {
+        const lastKnown = currentMessages[currentMessages.length - 1].timestamp;
+        const newMsgs = data.messages.filter((m) => m.timestamp > lastKnown);
+        if (newMsgs.length) {
+          currentMessages = [...currentMessages, ...newMsgs];
+          if (currentMessages.length > MSG_MAX_LOADED) {
+            currentMessages = currentMessages.slice(-MSG_MAX_LOADED);
+            msgHasMore = true;
+          }
+          if (messagePanelOpen) renderMessages(currentMessages);
+        }
+      }
+    }
+
+    if (msgDetailFollowLatest && currentMessages.length) {
+      showMsgDetail(currentMessages.length - 1);
     }
   } catch (e) {
     console.error('[fetchMessages]', e);
+  }
+}
+
+async function loadOlderMessages() {
+  if (msgLoadingMore || !msgHasMore || !currentMessages.length) return;
+  msgLoadingMore = true;
+  const container = document.getElementById('message-panel-content');
+  const loader = document.createElement('div');
+  loader.className = 'msg-loading-more';
+  loader.textContent = 'Loading...';
+  container.prepend(loader);
+  try {
+    const before = currentMessages[0].timestamp;
+    const res = await fetch(`/api/sessions/${currentSessionId}/messages?limit=15&before=${encodeURIComponent(before)}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    msgHasMore = data.hasMore;
+    if (data.messages.length) {
+      loader.remove();
+      const prevHeight = container.scrollHeight;
+      currentMessages = [...data.messages, ...currentMessages];
+      if (currentMessages.length > MSG_MAX_LOADED) {
+        currentMessages = currentMessages.slice(0, MSG_MAX_LOADED);
+      }
+      renderMessages(currentMessages);
+      container.scrollTop = container.scrollHeight - prevHeight;
+    }
+  } catch (e) {
+    console.error('[loadOlderMessages]', e);
+  } finally {
+    if (loader.parentNode) loader.remove();
+    // Delay resetting the flag so scroll events during layout don't re-trigger
+    requestAnimationFrame(() => {
+      msgLoadingMore = false;
+    });
   }
 }
 
@@ -879,7 +945,16 @@ function renderMessages(messages) {
     })
     .join('');
   container.innerHTML = msgsHtml;
-  container.scrollTop = container.scrollHeight;
+  if (!msgUserScrolledUp) container.scrollTop = container.scrollHeight;
+  // Auto-load more if content doesn't overflow yet
+  if (
+    msgHasMore &&
+    !msgLoadingMore &&
+    currentMessages.length < MSG_MAX_LOADED &&
+    container.scrollHeight <= container.clientHeight
+  ) {
+    loadOlderMessages();
+  }
 }
 
 let currentMsgDetailIdx = null;
@@ -4834,6 +4909,42 @@ initSidebarResize();
 loadPanelWidths();
 initPanelResize('detail-panel', 'detail-panel-resize', '--detail-panel-width', 'detail-panel-width');
 initPanelResize('message-panel', 'message-panel-resize', '--message-panel-width', 'message-panel-width');
+
+const msgContentEl = document.getElementById('message-panel-content');
+const jumpLatestBtn = document.createElement('button');
+jumpLatestBtn.id = 'msg-jump-latest';
+jumpLatestBtn.className = 'msg-jump-latest';
+jumpLatestBtn.style.display = 'none';
+jumpLatestBtn.textContent = '\u2193 Latest';
+jumpLatestBtn.onclick = function () {
+  msgContentEl.scrollTop = msgContentEl.scrollHeight;
+  msgUserScrolledUp = false;
+  this.style.display = 'none';
+};
+msgContentEl.parentElement.appendChild(jumpLatestBtn);
+
+let msgScrollThrottled = false;
+msgContentEl.addEventListener('scroll', () => {
+  if (msgScrollThrottled) return;
+  msgScrollThrottled = true;
+  requestAnimationFrame(() => {
+    msgScrollThrottled = false;
+    const el = msgContentEl;
+    if (el.scrollTop === 0 && msgHasMore && !msgLoadingMore) {
+      loadOlderMessages();
+    }
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
+    msgUserScrolledUp = !nearBottom;
+    jumpLatestBtn.style.display = msgUserScrolledUp ? '' : 'none';
+  });
+});
+// Load older messages on wheel-up when content doesn't overflow
+msgContentEl.addEventListener('wheel', function (e) {
+  if (e.deltaY < 0 && this.scrollTop === 0 && msgHasMore && !msgLoadingMore) {
+    loadOlderMessages();
+  }
+});
+
 fetch('/api/version')
   .then((r) => r.json())
   .then((d) => {
@@ -4872,6 +4983,10 @@ fetchSessions().then(async () => {
   }
   if (urlState.messages && currentSessionId) {
     toggleMessagePanel();
+    // Re-render after panel layout settles so scroll dimensions are correct
+    requestAnimationFrame(() => {
+      if (currentMessages.length) renderMessages(currentMessages);
+    });
   }
 });
 

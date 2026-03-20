@@ -12,6 +12,7 @@ const { spawn } = require('child_process');
 
 const {
   readRecentMessages: _readRecentMessagesUncached,
+  readMessagesPage: _readMessagesPageUncached,
   readSessionInfoFromJsonl,
   buildAgentProgressMap,
   readCompactSummaries,
@@ -289,32 +290,32 @@ function getTaskCounts(sessionPath) {
   return result;
 }
 
-function cachedByMtime(cache, filePath, loadFn, fallback) {
+function cachedByMtime(cache, cacheKey, filePath, loadFn, fallback) {
   try {
-    const cached = cache.get(filePath);
+    const cached = cache.get(cacheKey);
     if (cached && Date.now() - cached.ts < MESSAGE_CACHE_TTL) return cached.data;
     const st = statSync(filePath);
     if (cached && cached.mtime === st.mtimeMs) {
       cached.ts = Date.now();
       return cached.data;
     }
-    const data = loadFn(filePath);
-    cache.set(filePath, { data, mtime: st.mtimeMs, ts: Date.now() });
+    const data = loadFn();
+    cache.set(cacheKey, { data, mtime: st.mtimeMs, ts: Date.now() });
     evictStaleCache(cache);
     return data;
   } catch (_) { return fallback; }
 }
 
 function getProgressMap(jsonlPath) {
-  return cachedByMtime(progressMapCache, jsonlPath, buildAgentProgressMap, {});
+  return cachedByMtime(progressMapCache, jsonlPath, jsonlPath, () => buildAgentProgressMap(jsonlPath), {});
 }
 
 function getTerminatedTeammates(jsonlPath) {
-  return cachedByMtime(terminatedCache, jsonlPath, findTerminatedTeammates, new Set());
+  return cachedByMtime(terminatedCache, jsonlPath, jsonlPath, () => findTerminatedTeammates(jsonlPath), new Set());
 }
 
 function readRecentMessages(jsonlPath, limit = 10) {
-  return cachedByMtime(messageCache, jsonlPath, p => _readRecentMessagesUncached(p, limit), []);
+  return cachedByMtime(messageCache, `${jsonlPath}:${limit}`, jsonlPath, () => _readRecentMessagesUncached(jsonlPath, limit), []);
 }
 
 /**
@@ -664,11 +665,11 @@ app.get('/api/sessions', async (req, res) => {
       try {
         for (const dir of readdirSync(TEAMS_DIR, { withFileTypes: true })) {
           if (!dir.isDirectory()) continue;
-          // Remove team-named duplicate session (e.g., "code-review") — leader is the canonical entry
-          if (sessionsMap.has(dir.name)) sessionsMap.delete(dir.name);
           const cfg = loadTeamConfig(dir.name);
           if (!cfg?.leadSessionId) continue;
           const leaderId = cfg.leadSessionId;
+          // Only remove team-named duplicate when leader is a different session
+          if (sessionsMap.has(dir.name) && dir.name !== leaderId) sessionsMap.delete(dir.name);
           const existing = sessionsMap.get(leaderId);
           if (existing) {
             existing.isTeam = true;
@@ -1168,11 +1169,21 @@ app.get('/api/sessions/:sessionId/agents/:agentId/messages/stream', (req, res) =
 
 app.get('/api/sessions/:sessionId/messages', (req, res) => {
   const limit = Math.min(parseInt(req.query.limit, 10) || 10, 50);
+  const before = req.query.before || null;
   const metadata = loadSessionMetadata();
   const meta = metadata[req.params.sessionId];
   const jsonlPath = meta?.jsonlPath;
-  if (!jsonlPath) return res.json({ messages: [], sessionId: req.params.sessionId });
-  const messages = readRecentMessages(jsonlPath, limit);
+  if (!jsonlPath) return res.json({ messages: [], hasMore: false, sessionId: req.params.sessionId });
+  let messages, hasMore;
+  if (before) {
+    const page = _readMessagesPageUncached(jsonlPath, limit, before);
+    messages = page.messages;
+    hasMore = page.hasMore;
+  } else {
+    messages = readRecentMessages(jsonlPath, limit + 1);
+    hasMore = messages.length > limit;
+    if (hasMore) messages = messages.slice(-limit);
+  }
   const agentMessages = messages.filter(m => m.tool === 'Agent' && m.toolUseId);
   if (agentMessages.length) {
     const progressMap = getProgressMap(jsonlPath);
@@ -1219,7 +1230,7 @@ app.get('/api/sessions/:sessionId/messages', (req, res) => {
     if (msg.toolUseId) delete msg.toolUseId;
     delete msg.promptId;
   }
-  res.json({ messages, sessionId: req.params.sessionId });
+  res.json({ messages, hasMore, sessionId: req.params.sessionId });
 });
 
 app.get('/api/version', (req, res) => {
