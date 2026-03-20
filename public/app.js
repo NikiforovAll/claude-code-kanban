@@ -43,6 +43,8 @@ function resetMessageScrollState() {
   msgLoadingMore = false;
   currentMessages = [];
   lastMessagesHash = '';
+  const btn = document.getElementById('msg-jump-latest');
+  if (btn) btn.style.display = 'none';
 }
 
 function getUrlState() {
@@ -630,6 +632,7 @@ async function viewAgentLog(agentId) {
   const shortId = resolvedId.length > 8 ? resolvedId.slice(0, 8) : resolvedId;
   const agentSessionId = agent._sourceSessionId || currentSessionId;
   agentLogMode = { agentId: resolvedId, sessionId: agentSessionId, agentType: agent.type || 'unknown' };
+  resetMessageScrollState();
   closeAgentModal();
   document.getElementById('message-toggle')?.style.removeProperty('display');
   if (!messagePanelOpen) toggleMessagePanel();
@@ -667,7 +670,7 @@ function exitAgentLogMode() {
   }
   const header = document.querySelector('.message-panel-header h3');
   if (header) header.textContent = 'Session Log';
-  lastMessagesHash = '';
+  resetMessageScrollState();
   if (currentSessionId) fetchMessages(currentSessionId);
 }
 
@@ -743,7 +746,7 @@ async function fetchMessages(sessionId) {
 }
 
 async function loadOlderMessages() {
-  if (msgLoadingMore || !msgHasMore || !currentMessages.length) return;
+  if (agentLogMode || msgLoadingMore || !msgHasMore || !currentMessages.length) return;
   msgLoadingMore = true;
   const container = document.getElementById('message-panel-content');
   const loader = document.createElement('div');
@@ -755,7 +758,7 @@ async function loadOlderMessages() {
     const res = await fetch(`/api/sessions/${currentSessionId}/messages?limit=15&before=${encodeURIComponent(before)}`);
     if (!res.ok) return;
     const data = await res.json();
-    msgHasMore = data.hasMore;
+    msgHasMore = data.hasMore && data.messages.length > 0;
     if (data.messages.length) {
       loader.remove();
       const prevHeight = container.scrollHeight;
@@ -770,9 +773,12 @@ async function loadOlderMessages() {
     console.error('[loadOlderMessages]', e);
   } finally {
     if (loader.parentNode) loader.remove();
-    // Delay resetting the flag so scroll events during layout don't re-trigger
     requestAnimationFrame(() => {
       msgLoadingMore = false;
+      // Chain auto-load if content still doesn't overflow
+      if (msgHasMore && currentMessages.length < MSG_MAX_LOADED && container.scrollHeight <= container.clientHeight) {
+        loadOlderMessages();
+      }
     });
   }
 }
@@ -944,7 +950,11 @@ function renderMessages(messages) {
       return '';
     })
     .join('');
-  container.innerHTML = msgsHtml;
+  const limitBanner =
+    currentMessages.length >= MSG_MAX_LOADED
+      ? `<div class="msg-limit-banner">Showing last ${MSG_MAX_LOADED} messages</div>`
+      : '';
+  container.innerHTML = limitBanner + msgsHtml;
   if (!msgUserScrolledUp) container.scrollTop = container.scrollHeight;
   // Auto-load more if content doesn't overflow yet
   if (
