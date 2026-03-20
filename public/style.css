@@ -1834,6 +1834,38 @@ body::before {
 .msg-tool .msg-text {
   color: var(--text-secondary);
 }
+.tool-count-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--hover);
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 8px;
+  margin-left: 5px;
+  font-family: var(--font-mono, monospace);
+}
+.msg-tool-group-items {
+  display: none;
+  flex-direction: column;
+  gap: 2px;
+  padding-left: 22px;
+  margin-top: 2px;
+}
+.msg-tool-group-items.show {
+  display: flex;
+}
+.msg-tool-grouped {
+  padding: 3px 8px;
+  min-height: auto;
+  font-size: 10px;
+  opacity: 0.8;
+}
+.msg-tool-grouped .msg-time {
+  font-size: 9px;
+}
 .msg-agent-link {
   color: var(--accent);
   font-size: 0.85rem;

@@ -829,7 +829,7 @@ function renderPinnedSection() {
           </div>`;
       } else if (p.type === 'tool_use') {
         const toolDetail = getToolDetail(p.tool, p.params, p.detail);
-        const pinnedAgentLogBtn = p.tool === 'Agent' && p.agentId ? agentLogButton(p.agentId) : '';
+        const pinnedAgentLogBtn = resolveAgentLogBtn(p);
         return `<div class="msg-item msg-tool" ${click}>
             ${getToolIcon(p.tool)}
             <div class="msg-body"><div class="msg-text">${escapeHtml(p.tool || '')}${toolDetail}</div><div class="msg-time">${formatDate(p.timestamp)}</div></div>${pinnedAgentLogBtn}${unpin}
@@ -862,6 +862,139 @@ function renderPinnedSection() {
       </div>`;
 }
 
+function resolveAgentLogBtn(m) {
+  if (m.tool === 'Agent' && m.agentId) return agentLogButton(m.agentId);
+  if (m.tool === 'SendMessage' && m.params?.to) {
+    const recipient = currentAgents.find((a) => (a.type || a.name) === m.params.to);
+    if (recipient) return agentLogButton(recipient.agentId);
+  }
+  return '';
+}
+
+function toolGroupKey(m) {
+  return m.type === 'tool_use' ? `${m.tool}\0${m.detail || ''}` : null;
+}
+
+function renderToolItem(m, i, compact) {
+  const toolDetail = getToolDetail(m.tool, m.params, m.detail);
+  const agentLink =
+    m.tool === 'Agent' && m.agentId
+      ? ` <span class="msg-agent-link" title="View agent" onclick="event.stopPropagation();showAgentModal('${escapeHtml(m.agentId)}')">⇗</span>`
+      : '';
+  const agentLogBtn = resolveAgentLogBtn(m);
+  const recipientColor = m.tool === 'SendMessage' && m.params?.to ? resolveNamedColor(teamColorMap[m.params.to]) : null;
+  const borderStyle = recipientColor ? `border-left:3px solid ${recipientColor.color};` : '';
+  const compactClass = compact ? ' msg-tool-grouped' : '';
+  const combinedStyle = `style="${borderStyle}cursor:pointer"`;
+  const itemClickAttr =
+    m.tool === 'Agent' && m.agentId
+      ? `onclick="showAgentModal('${escapeHtml(m.agentId)}')" ${combinedStyle}`
+      : `onclick="msgDetailFollowLatest=false;showMsgDetail(${i})" ${combinedStyle}`;
+  const pinBtn = renderMsgPinBtn(m, i);
+  return `<div class="msg-item msg-tool${compactClass}" ${itemClickAttr}>
+      ${getToolIcon(m.tool)}
+      <div class="msg-body"><div class="msg-text">${escapeHtml(m.tool)}${toolDetail}${agentLink}</div><div class="msg-time">${formatDate(m.timestamp)}</div></div>${agentLogBtn}${pinBtn}
+    </div>`;
+}
+
+function renderMessageList(messages) {
+  const parts = [];
+  let i = 0;
+  while (i < messages.length) {
+    const m = messages[i];
+
+    if (m.type === 'tool_use') {
+      const key = toolGroupKey(m);
+      let runEnd = i + 1;
+      while (runEnd < messages.length && toolGroupKey(messages[runEnd]) === key) runEnd++;
+      const count = runEnd - i;
+
+      if (count >= 2) {
+        const first = messages[i];
+        const last = messages[runEnd - 1];
+        const toolDetail = getToolDetail(first.tool, first.params, first.detail);
+        const gid = `tool-group-${i}`;
+        const timeRange = `${formatDate(first.timestamp)} – ${formatDate(last.timestamp)}`;
+        const grpAgentLogBtn = resolveAgentLogBtn(first);
+        const grpPinBtn = renderMsgPinBtn(first, i);
+        parts.push(`<div class="msg-tool-group">
+            <div class="msg-item msg-tool msg-tool-group-header" onclick="toggleToolGroup('${gid}')" style="cursor:pointer">
+              ${getToolIcon(first.tool)}
+              <div class="msg-body"><div class="msg-text">${escapeHtml(first.tool)}${toolDetail}<span class="tool-count-badge">×${count}</span></div><div class="msg-time">${timeRange}</div></div>${grpAgentLogBtn}${grpPinBtn}
+            </div>
+            <div class="msg-tool-group-items" id="${gid}">${Array.from({ length: count }, (_, j) => renderToolItem(messages[i + j], i + j, true)).join('')}</div>
+          </div>`);
+        i = runEnd;
+        continue;
+      }
+
+      parts.push(renderToolItem(m, i, false));
+      i++;
+      continue;
+    }
+
+    const clickable = `onclick="msgDetailFollowLatest=false;showMsgDetail(${i})" style="cursor:pointer"`;
+    const pinBtn = renderMsgPinBtn(m, i);
+    if (m.type === 'user') {
+      if (m.systemLabel) {
+        parts.push(`<div class="msg-item msg-system" ${clickable}>
+            ${MSG_ICON_SYSTEM}
+            <div class="msg-body"><div class="msg-text"><code>${escapeHtml(m.systemLabel)}</code></div><div class="msg-time">${formatDate(m.timestamp)}</div></div>${pinBtn}
+          </div>`);
+      } else {
+        const cmd = parseCommandMessage(m.text);
+        const displayText = cmd ? cmd : escapeHtml(cleanMessageText(m.text));
+        const isCmd = !!cmd;
+        parts.push(`<div class="msg-item msg-user${isCmd ? ' msg-cmd' : ''}" ${clickable}>
+            ${MSG_ICON_USER}
+            <div class="msg-body"><div class="msg-text">${isCmd ? `<code>${escapeHtml(displayText)}</code>` : displayText}</div><div class="msg-time">${formatDate(m.timestamp)}</div></div>${pinBtn}
+          </div>`);
+      }
+    } else if (m.type === 'assistant') {
+      parts.push(`<div class="msg-item msg-assistant" ${clickable}>
+          ${MSG_ICON_ASSISTANT}
+          <div class="msg-body"><div class="msg-text">${escapeHtml(cleanMessageText(m.text))}</div><div class="msg-time">${m.model ? `${escapeHtml(m.model)} · ` : ''}${formatDate(m.timestamp)}</div></div>${pinBtn}
+        </div>`);
+    } else if (m.type === 'teammate') {
+      if (m.teammateId && m.color && !teamColorMap[m.teammateId]) teamColorMap[m.teammateId] = m.color;
+      const tmColor = m.color ? resolveNamedColor(m.color)?.color || m.color : '';
+      const nameSpan = `<span class="teammate-name" style="${tmColor ? `color:${escapeHtml(tmColor)}` : ''}">${escapeHtml(m.teammateId || 'teammate')}</span>`;
+      let tmLookupName = m.teammateId;
+      if (m.teammateId === 'system' && m.protocolType === 'teammate_terminated' && m.protocolData?.message) {
+        const shutMatch = m.protocolData.message.match(/^(.+?) has shut down/);
+        if (shutMatch) tmLookupName = shutMatch[1];
+      }
+      const tmAgent = tmLookupName ? currentAgents.find((a) => (a.type || a.name) === tmLookupName) : null;
+      const tmLogBtn = tmAgent ? agentLogButton(tmAgent.agentId) : '';
+      if (m.isIdle) {
+        parts.push(`<div class="msg-item msg-teammate msg-idle" ${clickable}>
+            ${MSG_ICON_IDLE}
+            <div class="msg-body"><div class="msg-text">${nameSpan} <span class="idle-label">${escapeHtml(m.protocolLabel || 'idle')}</span></div><div class="msg-time">${formatDate(m.timestamp)}</div></div>${tmLogBtn}
+          </div>`);
+      } else if (m.isProtocol) {
+        parts.push(`<div class="msg-item msg-teammate msg-protocol" ${clickable}>
+            ${MSG_ICON_TEAMMATE}
+            <div class="msg-body"><div class="msg-text">${nameSpan} <span class="protocol-label">${escapeHtml(m.protocolLabel || m.protocolType)}</span></div><div class="msg-time">${formatDate(m.timestamp)}</div></div>${tmLogBtn}
+          </div>`);
+      } else {
+        const summaryText = m.summary ? escapeHtml(m.summary) : escapeHtml((m.text || '').slice(0, 80));
+        parts.push(`<div class="msg-item msg-teammate" ${clickable}>
+            ${MSG_ICON_TEAMMATE}
+            <div class="msg-body"><div class="msg-text">${nameSpan} ${summaryText}</div><div class="msg-time">${formatDate(m.timestamp)}</div></div>${tmLogBtn}${pinBtn}
+          </div>`);
+      }
+    }
+    i++;
+  }
+  return parts.join('');
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML onclick
+function toggleToolGroup(id) {
+  const el = document.getElementById(id);
+  if (el) el.classList.toggle('show');
+}
+
 function renderMessages(messages) {
   const container = document.getElementById('message-panel-content');
   const pinnedContainer = document.getElementById('message-panel-pinned');
@@ -870,86 +1003,7 @@ function renderMessages(messages) {
     container.innerHTML = '<div class="msg-empty">No messages found for this session</div>';
     return;
   }
-  const msgsHtml = messages
-    .map((m, i) => {
-      const pinBtn = renderMsgPinBtn(m, i);
-      const clickable = `onclick="msgDetailFollowLatest=false;showMsgDetail(${i})" style="cursor:pointer"`;
-      if (m.type === 'user') {
-        if (m.systemLabel) {
-          return `<div class="msg-item msg-system" ${clickable}>
-              ${MSG_ICON_SYSTEM}
-              <div class="msg-body"><div class="msg-text"><code>${escapeHtml(m.systemLabel)}</code></div><div class="msg-time">${formatDate(m.timestamp)}</div></div>${pinBtn}
-            </div>`;
-        }
-        const cmd = parseCommandMessage(m.text);
-        const displayText = cmd ? cmd : escapeHtml(cleanMessageText(m.text));
-        const isCmd = !!cmd;
-        return `<div class="msg-item msg-user${isCmd ? ' msg-cmd' : ''}" ${clickable}>
-            ${MSG_ICON_USER}
-            <div class="msg-body"><div class="msg-text">${isCmd ? `<code>${escapeHtml(displayText)}</code>` : displayText}</div><div class="msg-time">${formatDate(m.timestamp)}</div></div>${pinBtn}
-          </div>`;
-      } else if (m.type === 'assistant') {
-        return `<div class="msg-item msg-assistant" ${clickable}>
-            ${MSG_ICON_ASSISTANT}
-            <div class="msg-body"><div class="msg-text">${escapeHtml(cleanMessageText(m.text))}</div><div class="msg-time">${m.model ? `${escapeHtml(m.model)} · ` : ''}${formatDate(m.timestamp)}</div></div>${pinBtn}
-          </div>`;
-      } else if (m.type === 'tool_use') {
-        const toolDetail = getToolDetail(m.tool, m.params, m.detail);
-        const agentLink =
-          m.tool === 'Agent' && m.agentId
-            ? ` <span class="msg-agent-link" title="View agent" onclick="event.stopPropagation();showAgentModal('${escapeHtml(m.agentId)}')">⇗</span>`
-            : '';
-        let agentLogBtn = '';
-        if (m.tool === 'Agent' && m.agentId) {
-          agentLogBtn = agentLogButton(m.agentId);
-        } else if (m.tool === 'SendMessage' && m.params?.to) {
-          const recipient = currentAgents.find((a) => (a.type || a.name) === m.params.to);
-          if (recipient) agentLogBtn = agentLogButton(recipient.agentId);
-        }
-        const recipientColor =
-          m.tool === 'SendMessage' && m.params?.to ? resolveNamedColor(teamColorMap[m.params.to]) : null;
-        const borderStyle = recipientColor ? `border-left:3px solid ${recipientColor.color};` : '';
-        const combinedStyle = `style="${borderStyle}cursor:pointer"`;
-        const itemClickAttr =
-          m.tool === 'Agent' && m.agentId
-            ? `onclick="showAgentModal('${escapeHtml(m.agentId)}')" ${combinedStyle}`
-            : `onclick="msgDetailFollowLatest=false;showMsgDetail(${i})" ${combinedStyle}`;
-        return `<div class="msg-item msg-tool" ${itemClickAttr}>
-            ${getToolIcon(m.tool)}
-            <div class="msg-body"><div class="msg-text">${escapeHtml(m.tool)}${toolDetail}${agentLink}</div><div class="msg-time">${formatDate(m.timestamp)}</div></div>${agentLogBtn}${pinBtn}
-          </div>`;
-      } else if (m.type === 'teammate') {
-        if (m.teammateId && m.color && !teamColorMap[m.teammateId]) teamColorMap[m.teammateId] = m.color;
-        const tmColor = m.color ? resolveNamedColor(m.color)?.color || m.color : '';
-        const nameSpan = `<span class="teammate-name" style="${tmColor ? `color:${escapeHtml(tmColor)}` : ''}">${escapeHtml(m.teammateId || 'teammate')}</span>`;
-        let tmLookupName = m.teammateId;
-        if (m.teammateId === 'system' && m.protocolType === 'teammate_terminated' && m.protocolData?.message) {
-          const shutMatch = m.protocolData.message.match(/^(.+?) has shut down/);
-          if (shutMatch) tmLookupName = shutMatch[1];
-        }
-        const tmAgent = tmLookupName ? currentAgents.find((a) => (a.type || a.name) === tmLookupName) : null;
-        const tmLogBtn = tmAgent ? agentLogButton(tmAgent.agentId) : '';
-        if (m.isIdle) {
-          return `<div class="msg-item msg-teammate msg-idle" ${clickable}>
-              ${MSG_ICON_IDLE}
-              <div class="msg-body"><div class="msg-text">${nameSpan} <span class="idle-label">${escapeHtml(m.protocolLabel || 'idle')}</span></div><div class="msg-time">${formatDate(m.timestamp)}</div></div>${tmLogBtn}
-            </div>`;
-        }
-        if (m.isProtocol) {
-          return `<div class="msg-item msg-teammate msg-protocol" ${clickable}>
-              ${MSG_ICON_TEAMMATE}
-              <div class="msg-body"><div class="msg-text">${nameSpan} <span class="protocol-label">${escapeHtml(m.protocolLabel || m.protocolType)}</span></div><div class="msg-time">${formatDate(m.timestamp)}</div></div>${tmLogBtn}
-            </div>`;
-        }
-        const summaryText = m.summary ? escapeHtml(m.summary) : escapeHtml((m.text || '').slice(0, 80));
-        return `<div class="msg-item msg-teammate" ${clickable}>
-            ${MSG_ICON_TEAMMATE}
-            <div class="msg-body"><div class="msg-text">${nameSpan} ${summaryText}</div><div class="msg-time">${formatDate(m.timestamp)}</div></div>${tmLogBtn}${pinBtn}
-          </div>`;
-      }
-      return '';
-    })
-    .join('');
+  const msgsHtml = renderMessageList(messages);
   const limitBanner =
     currentMessages.length >= MSG_MAX_LOADED
       ? `<div class="msg-limit-banner">Showing last ${MSG_MAX_LOADED} messages</div>`
@@ -1322,14 +1376,25 @@ function showMsgDetail(idx) {
       body.innerHTML = renderMarkdown(text);
     }
   } else {
-    const text = stripAnsi(m.fullText || m.text);
+    const rawText = stripAnsi(m.fullText || m.text);
+    const cmd = m.type === 'user' ? parseCommandMessage(rawText) : null;
     document.getElementById('msg-detail-title').textContent =
       m.type === 'assistant' ? 'Claude' : m.systemLabel ? 'System' : 'User';
     document.getElementById('msg-detail-agent-btn').style.display = 'none';
     if (m.compactSummary) {
       body.innerHTML = renderMarkdown(m.compactSummary);
+    } else if (cmd) {
+      const argsMatch = rawText.match(/<command-args>([^<]*)<\/command-args>/);
+      const args = argsMatch?.[1].trim() ? argsMatch[1].trim() : null;
+      const cleanBody = rawText
+        .replace(/<command-[^>]+>[\s\S]*?<\/command-[^>]+>/g, '')
+        .replace(/<local-command-[^>]+>[\s\S]*?<\/local-command-[^>]+>/g, '')
+        .trim();
+      let cmdHtml = `<code>${escapeHtml(cmd)}${args ? ` ${escapeHtml(args)}` : ''}</code>`;
+      if (cleanBody) cmdHtml += `<div style="margin-top:10px">${renderMarkdown(cleanBody)}</div>`;
+      body.innerHTML = cmdHtml;
     } else {
-      body.innerHTML = renderMarkdown(text);
+      body.innerHTML = renderMarkdown(rawText);
     }
   }
   const modal = document.getElementById('msg-detail-modal').querySelector('.modal');
