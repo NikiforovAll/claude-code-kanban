@@ -756,7 +756,7 @@ function renderPinnedSection() {
             <div class="msg-body"><div class="msg-text">${escapeHtml(cleanMessageText(p.text || ''))}</div><div class="msg-time">${formatDate(p.timestamp)}</div></div>${unpin}
           </div>`;
       } else if (p.type === 'tool_use') {
-        const toolDetail = p.detail ? ` <span style="color:var(--text-muted)">${escapeHtml(p.detail)}</span>` : '';
+        const toolDetail = getToolDetail(p.tool, p.params, p.detail);
         const pinnedAgentLogBtn = p.tool === 'Agent' && p.agentId ? agentLogButton(p.agentId) : '';
         return `<div class="msg-item msg-tool" ${click}>
             ${MSG_ICON_TOOL}
@@ -822,7 +822,7 @@ function renderMessages(messages) {
             <div class="msg-body"><div class="msg-text">${escapeHtml(cleanMessageText(m.text))}</div><div class="msg-time">${m.model ? `${escapeHtml(m.model)} · ` : ''}${formatDate(m.timestamp)}</div></div>${pinBtn}
           </div>`;
       } else if (m.type === 'tool_use') {
-        const toolDetail = m.detail ? ` <span style="color:var(--text-muted)">${escapeHtml(m.detail)}</span>` : '';
+        const toolDetail = getToolDetail(m.tool, m.params, m.detail);
         const agentLink =
           m.tool === 'Agent' && m.agentId
             ? ` <span class="msg-agent-link" title="View agent" onclick="event.stopPropagation();showAgentModal('${escapeHtml(m.agentId)}')">⇗</span>`
@@ -1188,7 +1188,7 @@ function showMsgDetail(idx) {
       const detailRendered = m.tool === 'Bash' ? highlightBash(detailEscaped) : detailEscaped;
       mainHtml = `${descHtml}<pre class="msg-detail-pre">${detailRendered}</pre>`;
     } else {
-      mainHtml = '<em>No details</em>';
+      mainHtml = TASK_TOOLS.has(m.tool) ? '' : '<em>No details</em>';
     }
     body.innerHTML = mainHtml + toolParamsHtml + taskResultHtml + (hasAgentTabs ? '' : toolResultHtml) + agentExtraHtml;
   } else if (m.type === 'teammate') {
@@ -1322,6 +1322,32 @@ function renderProtocolDetail(data) {
 }
 
 const TASK_TOOLS = new Set(['TaskCreate', 'TaskUpdate', 'TaskGet', 'TaskList']);
+const TASK_STATUS_COLORS = {
+  pending: 'var(--text-muted)',
+  in_progress: 'var(--info)',
+  completed: 'var(--success)',
+  deleted: 'var(--danger)',
+};
+function formatTaskStatusBadge(status) {
+  const color = TASK_STATUS_COLORS[status] || 'var(--text-muted)';
+  return `<span style="color:${color};font-weight:600;text-transform:uppercase;font-size:0.85em">${escapeHtml(status)}</span>`;
+}
+function formatTaskToolDetail(params) {
+  if (!params) return '';
+  const parts = [];
+  if (params.taskId) {
+    const id = String(params.taskId).replace(/^#/, '');
+    parts.push(`<span style="color:var(--text-muted)">#${escapeHtml(id)}</span>`);
+  }
+  if (params.status) parts.push(formatTaskStatusBadge(params.status));
+  if (params.subject) parts.push(`<span style="color:var(--text-secondary)">${escapeHtml(params.subject)}</span>`);
+  return parts.length ? ` ${parts.join(' ')}` : '';
+}
+function getToolDetail(tool, params, detail) {
+  if (TASK_TOOLS.has(tool)) return formatTaskToolDetail(params);
+  if (detail) return ` <span style="color:var(--text-muted)">${escapeHtml(detail)}</span>`;
+  return '';
+}
 function renderTaskResult(toolResult) {
   if (!toolResult) return '';
   const lines = toolResult.trim().split('\n');
@@ -1334,17 +1360,9 @@ function renderTaskResult(toolResult) {
   const title = fields.find(([k]) => /^Task/.test(k));
   const status = fields.find(([k]) => k === 'Status');
   const rest = fields.filter(([k]) => !/^Task/.test(k) && k !== 'Status');
-  const statusColors = {
-    pending: 'var(--text-muted)',
-    in_progress: 'var(--info)',
-    completed: 'var(--success)',
-    deleted: 'var(--danger)',
-  };
-  const sc = status ? statusColors[status[1]] || 'var(--text-muted)' : '';
   let html = '<div class="protocol-detail">';
   if (title) html += `<span class="protocol-type-badge">${escapeHtml(title[1])}</span>`;
-  if (status)
-    html += `<span style="display:inline-block;font-size:10px;font-weight:600;color:${sc};text-transform:uppercase;margin-bottom:6px">${escapeHtml(status[1])}</span>`;
+  if (status) html += `<span style="display:inline-block;margin-bottom:6px">${formatTaskStatusBadge(status[1])}</span>`;
   if (rest.length) {
     html += '<div class="protocol-fields">';
     for (const [k, v] of rest) {
