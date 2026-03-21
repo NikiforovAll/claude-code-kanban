@@ -1653,6 +1653,13 @@ function makeExpandToggle(_truncatedHtml, fullHtml, opts = {}) {
 }
 
 function autoSizeModal(modal, body) {
+  modal.style.maxWidth = '';
+  modal.classList.remove('has-mermaid');
+  const hasMermaid = body.querySelector('pre.mermaid') !== null;
+  if (hasMermaid) {
+    modal.classList.add('has-mermaid');
+    return;
+  }
   const hasTable = body.querySelector('table') !== null;
   const hasPre = body.querySelector('pre') !== null;
   const desired = hasTable ? 1100 : body.textContent.length > 2000 || hasPre ? 960 : 860;
@@ -1745,8 +1752,9 @@ function renderAgentFooter() {
   // or started >30s after previous stopped (legitimate re-spawn). Filter the rest.
   const byType = {};
   for (const a of agents) {
-    if (!byType[a.type]) byType[a.type] = [];
-    byType[a.type].push(a);
+    const groupKey = a.agentName || a.type;
+    if (!byType[groupKey]) byType[groupKey] = [];
+    byType[groupKey].push(a);
   }
   const filtered = [];
   for (const group of Object.values(byType)) {
@@ -1820,10 +1828,15 @@ function renderAgentFooter() {
         const colonIdx = rawType.indexOf(':');
         const typeNs = colonIdx > 0 ? rawType.substring(0, colonIdx + 1) : '';
         const typeName = colonIdx > 0 ? rawType.substring(colonIdx + 1) : rawType;
+        const agentNameVal = a.agentName || null;
+        const nameColor = agentNameVal ? getOwnerColor(agentNameVal) : null;
+        const nameBadgeHtml = nameColor
+          ? `<span class="task-owner-badge task-owner-badge--compact" style="background:${nameColor.bg};color:${nameColor.color}">${escapeHtml(agentNameVal)}</span>`
+          : '';
         const agentColor = resolveNamedColor(a.color);
         const colorStyle = agentColor ? ` style="border-left:3px solid ${agentColor.color}"` : '';
         return `<div class="agent-card"${colorStyle} onclick="showAgentModal('${a.agentId}')">
-          <div class="agent-type-row">${typeNs ? `<span class="agent-type-ns">${escapeHtml(typeNs)}</span>` : ''}<span class="agent-type-name">${escapeHtml(typeName)}</span></div>
+          <div class="agent-type-row">${typeNs ? `<span class="agent-type-ns">${escapeHtml(typeNs)}</span>` : ''}<span class="agent-type-name">${escapeHtml(typeName)}</span>${nameBadgeHtml}</div>
           <div class="agent-status-row"><span class="agent-dot ${a.status}"></span><span class="agent-status">${statusText}</span></div>
           ${msgHtml}
         </div>`;
@@ -1923,13 +1936,21 @@ function showAgentModal(agentId) {
   const elapsed = stopped && started ? stopped.getTime() - started.getTime() : started ? now - started.getTime() : 0;
 
   const statusDot = `<span class="agent-dot ${agent.status}" style="display:inline-block;vertical-align:middle;margin-right:6px;"></span>`;
-  title.innerHTML = `${statusDot} ${escapeHtml(agent.type || 'unknown')}`;
+  const modalNameLabel = agent.agentName ? ` · ${escapeHtml(agent.agentName)}` : '';
+  title.innerHTML = `${statusDot} ${escapeHtml(agent.type || 'unknown')}${modalNameLabel}`;
 
   const rows = [
     ['Status', agent.status],
     ['Agent ID', `<code style="font-size:12px;color:var(--text-tertiary)">${escapeHtml(agent.agentId)}</code>`],
     ['Duration', formatDuration(elapsed)],
   ];
+  if (agent.agentName) {
+    const ownerColor = getOwnerColor(agent.agentName);
+    rows.push([
+      'Owner',
+      `<span class="task-owner-badge" style="background:${ownerColor.bg};color:${ownerColor.color}">${escapeHtml(agent.agentName)}</span>`,
+    ]);
+  }
   if (agent.model)
     rows.push(['Model', `<code style="font-size:12px;color:var(--text-tertiary)">${escapeHtml(agent.model)}</code>`]);
   if (started) rows.push(['Started', started.toLocaleTimeString()]);
@@ -4243,6 +4264,33 @@ function renderMarkdown(text) {
   return `<pre style="white-space:pre-wrap;margin:0;">${escapeHtml(text)}</pre>`;
 }
 
+function isLightTheme() {
+  const saved = localStorage.getItem('theme');
+  return (
+    document.body.classList.contains('light') || (!saved && window.matchMedia('(prefers-color-scheme: light)').matches)
+  );
+}
+
+function getMermaidTheme() {
+  return isLightTheme() ? 'default' : 'dark';
+}
+
+function initMermaidBlocks(container) {
+  if (typeof mermaid === 'undefined') return;
+  const blocks = (container || document).querySelectorAll('pre.mermaid:not([data-processed])');
+  if (blocks.length) mermaid.run({ nodes: [...blocks] });
+}
+
+function reinitMermaidTheme() {
+  if (typeof mermaid === 'undefined') return;
+  mermaid.initialize({ startOnLoad: false, theme: getMermaidTheme() });
+  document.querySelectorAll('pre.mermaid[data-processed]').forEach((el) => {
+    el.removeAttribute('data-processed');
+    el.innerHTML = escapeHtml(el.getAttribute('data-original') || '');
+  });
+  initMermaidBlocks();
+}
+
 const _agentTabTexts = {};
 
 function renderAgentTabs(promptHtml, responseHtml, promptText, responseText) {
@@ -4506,22 +4554,21 @@ function toggleTheme() {
   updateThemeIcon();
   updateThemeColor(!isCurrentlyLight);
   syncHljsTheme();
+  reinitMermaidTheme();
 }
 
 function syncHljsTheme() {
-  const isLight = document.body.classList.contains('light');
-  const dark = document.getElementById('hljs-theme-dark');
-  const light = document.getElementById('hljs-theme-light');
-  if (dark) dark.disabled = isLight;
-  if (light) light.disabled = !isLight;
+  const light = isLightTheme();
+  const dark$ = document.getElementById('hljs-theme-dark');
+  const light$ = document.getElementById('hljs-theme-light');
+  if (dark$) dark$.disabled = light;
+  if (light$) light$.disabled = !light;
 }
 
 function updateThemeIcon() {
-  const saved = localStorage.getItem('theme');
-  const isLight =
-    document.body.classList.contains('light') || (!saved && window.matchMedia('(prefers-color-scheme: light)').matches);
-  document.getElementById('theme-icon-dark').style.display = isLight ? 'none' : 'block';
-  document.getElementById('theme-icon-light').style.display = isLight ? 'block' : 'none';
+  const light = isLightTheme();
+  document.getElementById('theme-icon-dark').style.display = light ? 'none' : 'block';
+  document.getElementById('theme-icon-light').style.display = light ? 'block' : 'none';
 }
 
 function loadTheme() {
@@ -4996,6 +5043,9 @@ document.addEventListener('DOMContentLoaded', () => {
   if (typeof marked !== 'undefined' && typeof hljs !== 'undefined') {
     const renderer = new marked.Renderer();
     renderer.code = ({ text, lang }) => {
+      if (lang === 'mermaid') {
+        return `<pre class="mermaid" data-original="${escapeHtml(text)}">${escapeHtml(text)}</pre>`;
+      }
       let highlighted;
       if (lang && hljs.getLanguage(lang)) {
         highlighted = hljs.highlight(text, { language: lang }).value;
@@ -5005,6 +5055,20 @@ document.addEventListener('DOMContentLoaded', () => {
       return `<pre><code class="hljs language-${escapeHtml(lang || '')}">${highlighted}</code></pre>`;
     };
     marked.use({ renderer });
+  }
+
+  if (typeof mermaid !== 'undefined') {
+    mermaid.initialize({ startOnLoad: false, theme: getMermaidTheme() });
+    let mermaidPending = false;
+    const mo = new MutationObserver(() => {
+      if (mermaidPending) return;
+      mermaidPending = true;
+      queueMicrotask(() => {
+        mermaidPending = false;
+        initMermaidBlocks();
+      });
+    });
+    mo.observe(document.body, { childList: true, subtree: true });
   }
 });
 

@@ -2418,6 +2418,13 @@ body::before {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.task-owner-badge--compact {
+  font-size: 9px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
 .agent-status-row {
   display: flex;
   align-items: center;
@@ -3163,6 +3170,22 @@ select.form-input option:checked {
   }
 }
 
+/* #endregion */
+
+/* #region MERMAID */
+pre.mermaid {
+  text-align: center;
+  background: transparent;
+  overflow-x: auto;
+}
+pre.mermaid svg {
+  max-width: 100%;
+}
+.modal.has-mermaid {
+  width: 80vw;
+  max-width: 80vw;
+  max-height: 90vh;
+}
 /* #endregion */
 
 /* #region ANIMATIONS */
