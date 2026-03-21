@@ -1254,17 +1254,26 @@ function savePinnedSessions() {
   localStorage.setItem('sticky-sessions', JSON.stringify([...stickySessionIds]));
 }
 
-// unpinned → pinned → sticky → unpinned
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
 function toggleSessionPin(sessionId) {
+  if (pinnedSessionIds.has(sessionId)) {
+    pinnedSessionIds.delete(sessionId);
+    stickySessionIds.delete(sessionId);
+  } else {
+    pinnedSessionIds.add(sessionId);
+  }
+  savePinnedSessions();
+  renderSessions();
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+function toggleSessionSticky(sessionId) {
   if (stickySessionIds.has(sessionId)) {
     stickySessionIds.delete(sessionId);
     pinnedSessionIds.delete(sessionId);
-  } else if (pinnedSessionIds.has(sessionId)) {
-    pinnedSessionIds.delete(sessionId);
-    stickySessionIds.add(sessionId);
   } else {
     pinnedSessionIds.add(sessionId);
+    stickySessionIds.add(sessionId);
   }
   savePinnedSessions();
   renderSessions();
@@ -2188,7 +2197,7 @@ function renderSessions() {
 
     const pinState = getSessionPinState(session.id);
     const pinClass = pinState === 'sticky' ? ' sticky' : pinState === 'pinned' ? ' pinned' : '';
-    const pinTitle = pinState === 'sticky' ? 'Unpin' : pinState === 'pinned' ? 'Sticky pin' : 'Pin';
+    const pinTitle = pinState === 'pinned' || pinState === 'sticky' ? 'Unpin' : 'Pin';
     const showCtx = !!session.contextStatus;
     return `
           <button onclick="fetchTasks('${session.id}')" data-session-id="${session.id}" class="session-item ${isActive ? 'active' : ''} ${session.hasWaitingForUser ? 'permission-pending' : ''} ${!session.hasRecentLog && !session.inProgress && !session.hasWaitingForUser ? 'stale' : ''} ${showCtx ? 'has-context' : ''}" title="${tooltip}">
@@ -4742,7 +4751,19 @@ async function showSessionInfoModal(sessionId) {
   showInfoModal(session, teamConfig, tasks, planContent);
 }
 
+let _infoModalSessionId = null;
 let _pendingPlanContent = null;
+
+function updateStickyBtnState() {
+  const stickyBtn = document.getElementById('session-info-sticky-btn');
+  if (!stickyBtn || !_infoModalSessionId) return;
+  const isSticky = stickySessionIds.has(_infoModalSessionId);
+  stickyBtn.style.display = '';
+  stickyBtn.classList.toggle('active', isSticky);
+  stickyBtn.title = isSticky ? 'Remove sticky pin' : 'Sticky pin — always show at top';
+  const svg = stickyBtn.querySelector('svg');
+  if (svg) svg.setAttribute('fill', isSticky ? 'currentColor' : 'none');
+}
 
 function showInfoModal(session, teamConfig, tasks, planContent) {
   const modal = document.getElementById('team-modal');
@@ -4881,6 +4902,8 @@ function showInfoModal(session, teamConfig, tasks, planContent) {
   }
 
   bodyEl.innerHTML = html;
+  _infoModalSessionId = session.id;
+  updateStickyBtnState();
   modal.classList.add('visible');
 
   const keyHandler = (e) => {

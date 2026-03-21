@@ -2009,6 +2009,9 @@ body::before {
   fill: var(--warning);
   stroke: var(--warning);
 }
+#session-info-sticky-btn.active {
+  color: var(--warning);
+}
 .pinned-sessions-divider {
   height: 1px;
   margin: 4px 8px;

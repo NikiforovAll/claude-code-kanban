@@ -483,11 +483,16 @@
     <div class="modal" onclick="event.stopPropagation()">
       <div class="modal-header">
         <h3 id="team-modal-title" class="modal-title">Team</h3>
-        <button class="modal-close" aria-label="Close dialog" onclick="closeTeamModal()">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M18 6L6 18M6 6l12 12"/>
-          </svg>
-        </button>
+        <div style="display:flex;align-items:center;gap:4px;">
+          <button id="session-info-sticky-btn" class="icon-btn" style="display:none" title="Sticky pin — always show at top" onclick="toggleSessionSticky(_infoModalSessionId); updateStickyBtnState()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 L15 9 L22 9 L17 14 L19 22 L12 18 L5 22 L7 14 L2 9 L9 9 Z"/></svg>
+          </button>
+          <button class="modal-close" aria-label="Close dialog" onclick="closeTeamModal()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M18 6L6 18M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
       </div>
       <div id="team-modal-body" class="modal-body"></div>
       <div class="modal-footer">
