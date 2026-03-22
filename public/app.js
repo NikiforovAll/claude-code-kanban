@@ -358,7 +358,7 @@ function fuzzyMatch(text, query) {
   if (text.includes(query)) return true;
 
   // Split by common delimiters to search in individual words
-  const words = text.split(/[\s\-_/.]+/);
+  const words = text.split(/[\s\-_/.\\]+/);
 
   // Check if query matches start of any word
   for (const word of words) {
@@ -2116,30 +2116,34 @@ function renderSessions() {
 
   // Apply search filter
   if (searchQuery) {
-    filteredSessions = filteredSessions.filter((session) => {
-      // Search in session name and ID
-      if (session.name && fuzzyMatch(session.name, searchQuery)) return true;
-      if (session.id && fuzzyMatch(session.id, searchQuery)) return true;
+    const taskMatchIds = new Set();
+    for (const t of allTasksCache) {
+      if (
+        (t.subject && fuzzyMatch(t.subject, searchQuery)) ||
+        (t.description && fuzzyMatch(t.description, searchQuery)) ||
+        (t.activeForm && fuzzyMatch(t.activeForm, searchQuery))
+      )
+        taskMatchIds.add(t.sessionId);
+    }
+    const matchesSearch = (s) =>
+      (s.name && fuzzyMatch(s.name, searchQuery)) ||
+      (s.id && fuzzyMatch(s.id, searchQuery)) ||
+      (s.project && fuzzyMatch(s.project, searchQuery)) ||
+      (s.description && fuzzyMatch(s.description, searchQuery)) ||
+      taskMatchIds.has(s.id);
 
-      // Search in project path
-      if (session.project && fuzzyMatch(session.project, searchQuery)) return true;
+    filteredSessions = filteredSessions.filter(matchesSearch);
 
-      // Search in description
-      if (session.description && fuzzyMatch(session.description, searchQuery)) return true;
-
-      // Search in tasks for this session
-      const sessionTasks = allTasksCache.filter((t) => t.sessionId === session.id);
-      return sessionTasks.some(
-        (task) =>
-          (task.subject && fuzzyMatch(task.subject, searchQuery)) ||
-          (task.description && fuzzyMatch(task.description, searchQuery)) ||
-          (task.activeForm && fuzzyMatch(task.activeForm, searchQuery)),
-      );
-    });
+    // Re-add pinned/sticky sessions that match the query but were excluded by active filter
+    if (pinnedSessionIds.size > 0 || stickySessionIds.size > 0) {
+      const filteredIds = new Set(filteredSessions.map((s) => s.id));
+      const missingPinned = sessions.filter((s) => isAnyPinned(s.id) && !filteredIds.has(s.id) && matchesSearch(s));
+      if (missingPinned.length) filteredSessions = [...missingPinned, ...filteredSessions];
+    }
   }
 
-  // Always include pinned/sticky sessions even if they don't match filters
-  if ((pinnedSessionIds.size > 0 || stickySessionIds.size > 0) && !searchQuery) {
+  // Include pinned/sticky sessions even if they don't match active/recent filter
+  if (!searchQuery && (pinnedSessionIds.size > 0 || stickySessionIds.size > 0)) {
     const filteredIds = new Set(filteredSessions.map((s) => s.id));
     const missingPinned = sessions.filter((s) => isAnyPinned(s.id) && !filteredIds.has(s.id));
     if (missingPinned.length) filteredSessions = [...missingPinned, ...filteredSessions];
