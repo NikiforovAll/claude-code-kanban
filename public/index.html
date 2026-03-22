@@ -20,6 +20,7 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/styles/github-dark.min.css" id="hljs-theme-dark">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/styles/github.min.css" id="hljs-theme-light" disabled>
   <script defer src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/highlight.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
   <script defer src="/app.js"></script>
 </head>
 <body>
@@ -159,6 +160,11 @@
             <button id="scratchpad-toggle" class="icon-btn" onclick="toggleScratchpad()" title="Scratchpad (N)" aria-label="Toggle scratchpad">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
+              </svg>
+            </button>
+            <button class="icon-btn" onclick="showStorageManager()" title="Storage manager (Shift+S)" aria-label="Storage manager">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
               </svg>
             </button>
             <button id="theme-toggle" class="icon-btn" onclick="toggleTheme()" title="Toggle theme" aria-label="Toggle theme">
@@ -391,6 +397,10 @@
                 <td style="padding: 4px 0; color: var(--text-primary);">Toggle scratchpad</td>
               </tr>
               <tr>
+                <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">Shift+S</kbd></td>
+                <td style="padding: 4px 0; color: var(--text-primary);">Storage manager</td>
+              </tr>
+              <tr>
                 <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">J/K</kbd></td>
                 <td style="padding: 4px 0; color: var(--text-primary);">Navigate messages in detail modal</td>
               </tr>
@@ -406,7 +416,7 @@
 
   <!-- Delete Confirmation Modal -->
   <div id="delete-confirm-modal" class="modal-overlay" onclick="closeDeleteConfirmModal()">
-    <div class="modal" onclick="event.stopPropagation()" style="max-width: 400px;">
+    <div class="modal modal-sm" onclick="event.stopPropagation()">
       <div class="modal-header">
         <h3 class="modal-title">Delete Task</h3>
         <button class="modal-close" aria-label="Close dialog" onclick="closeDeleteConfirmModal()">
@@ -427,7 +437,7 @@
 
   <!-- Delete All Session Tasks Confirmation Modal -->
   <div id="delete-session-tasks-modal" class="modal-overlay" onclick="closeDeleteSessionTasksModal()">
-    <div class="modal" onclick="event.stopPropagation()" style="max-width: 500px;">
+    <div class="modal" onclick="event.stopPropagation()">
       <div class="modal-header">
         <h3 class="modal-title">Delete All Tasks</h3>
         <button class="modal-close" aria-label="Close dialog" onclick="closeDeleteSessionTasksModal()">
@@ -449,7 +459,7 @@
 
   <!-- Delete Result Modal -->
   <div id="delete-result-modal" class="modal-overlay" onclick="closeDeleteResultModal()">
-    <div class="modal" onclick="event.stopPropagation()" style="max-width: 500px;">
+    <div class="modal" onclick="event.stopPropagation()">
       <div class="modal-header">
         <h3 class="modal-title">Deletion Result</h3>
         <button class="modal-close" aria-label="Close dialog" onclick="closeDeleteResultModal()">
@@ -473,11 +483,16 @@
     <div class="modal" onclick="event.stopPropagation()">
       <div class="modal-header">
         <h3 id="team-modal-title" class="modal-title">Team</h3>
-        <button class="modal-close" aria-label="Close dialog" onclick="closeTeamModal()">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M18 6L6 18M6 6l12 12"/>
-          </svg>
-        </button>
+        <div style="display:flex;align-items:center;gap:4px;">
+          <button id="session-info-sticky-btn" class="icon-btn" style="display:none" title="Sticky pin — always show at top" onclick="toggleSessionSticky(_infoModalSessionId); updateStickyBtnState()">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 L15 9 L22 9 L17 14 L19 22 L12 18 L5 22 L7 14 L2 9 L9 9 Z"/></svg>
+          </button>
+          <button class="modal-close" aria-label="Close dialog" onclick="closeTeamModal()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M18 6L6 18M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
       </div>
       <div id="team-modal-body" class="modal-body"></div>
       <div class="modal-footer">
@@ -517,7 +532,7 @@
 
   <!-- Blocked Task Warning Modal -->
   <div id="blocked-task-modal" class="modal-overlay" onclick="closeBlockedTaskModal()">
-    <div class="modal" onclick="event.stopPropagation()" style="max-width: 450px;">
+    <div class="modal modal-sm" onclick="event.stopPropagation()">
       <div class="modal-header">
         <h3 class="modal-title" style="display: flex; align-items: center; gap: 8px;">
           <svg viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2" style="width: 20px; height: 20px;">
@@ -589,6 +604,29 @@
       <div class="modal-footer scratchpad-footer">
         <span id="scratchpad-charcount" class="scratchpad-charcount">0 chars</span>
         <button class="btn btn-primary" onclick="closeScratchpad()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="storage-modal" class="modal-overlay" onclick="closeStorageManager()">
+    <div class="modal storage-modal" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <h3 class="modal-title">Storage Manager</h3>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span id="storage-total" class="storage-total"></span>
+          <button class="modal-close" aria-label="Close dialog" onclick="closeStorageManager()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="storage-tabs">
+        <button class="storage-tab active" data-tab="sessions" onclick="switchStorageTab('sessions')">Sessions</button>
+        <button class="storage-tab" data-tab="scratchpads" onclick="switchStorageTab('scratchpads')">Scratchpads</button>
+      </div>
+      <div class="modal-body" id="storage-modal-body" style="overflow-y:auto;min-height:200px;max-height:60vh;padding-top:16px;padding-right:8px;"></div>
+      <div class="modal-footer">
+        <button id="storage-cleanup-btn" class="btn btn-secondary" onclick="cleanupOrphanedStorage()">Clean Orphaned</button>
+        <button class="btn btn-primary" onclick="closeStorageManager()">Close</button>
       </div>
     </div>
   </div>

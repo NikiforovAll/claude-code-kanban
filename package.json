@@ -1,6 +1,6 @@
 {
   "name": "claude-code-kanban",
-  "version": "2.2.0-rc.6",
+  "version": "2.2.0-rc.16",
   "description": "A web-based Kanban board for viewing Claude Code tasks with agent teams support",
   "main": "server.js",
   "bin": {
@@ -8,7 +8,7 @@
   },
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js --open",
+    "dev": "node --watch server.js",
     "test": "node --test test/contracts.test.js",
     "test:hooks": "bash tests/test-agent-spy.sh",
     "validate:schemas": "node test/validate-live-schemas.js",

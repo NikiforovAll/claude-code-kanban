@@ -30,8 +30,22 @@ let selectedSessionKbId = null;
 let sessionJustSelected = false;
 let agentLogMode = null;
 let agentLogSSE = null;
+let msgHasMore = false;
+let msgLoadingMore = false;
+let msgUserScrolledUp = false;
+const MSG_MAX_LOADED = 200;
 let currentProjectPath = null;
 let currentProjectSessionIds = [];
+
+function resetMessageScrollState() {
+  msgUserScrolledUp = false;
+  msgHasMore = false;
+  msgLoadingMore = false;
+  currentMessages = [];
+  lastMessagesHash = '';
+  const btn = document.getElementById('msg-jump-latest');
+  if (btn) btn.style.display = 'none';
+}
 
 function getUrlState() {
   const params = new URLSearchParams(window.location.search);
@@ -77,6 +91,7 @@ function resetState() {
   currentSessionId = null;
   currentProjectPath = null;
   currentProjectSessionIds = [];
+  resetMessageScrollState();
   const searchInput = document.getElementById('search-input');
   if (searchInput) searchInput.value = '';
   document.getElementById('search-clear-btn')?.classList.remove('visible');
@@ -114,7 +129,10 @@ let lastTasksHash = '';
 //#region DATA_FETCHING
 async function fetchSessions() {
   try {
-    const pinnedParam = pinnedSessionIds.size > 0 ? `&pinned=${[...pinnedSessionIds].join(',')}` : '';
+    const allPinnedIds = new Set([...pinnedSessionIds, ...stickySessionIds]);
+    if (revealedPlanSessionId) allPinnedIds.add(revealedPlanSessionId);
+    if (revealedStorageSessionId) allPinnedIds.add(revealedStorageSessionId);
+    const pinnedParam = allPinnedIds.size > 0 ? `&pinned=${[...allPinnedIds].join(',')}` : '';
     const [newSessions, newTasks] = await Promise.all([
       fetch(`/api/sessions?limit=${sessionLimit}${pinnedParam}`).then((r) => r.json()),
       fetch('/api/tasks/all').then((r) => r.json()),
@@ -340,7 +358,7 @@ function fuzzyMatch(text, query) {
   if (text.includes(query)) return true;
 
   // Split by common delimiters to search in individual words
-  const words = text.split(/[\s\-_/.]+/);
+  const words = text.split(/[\s\-_/.\\]+/);
 
   // Check if query matches start of any word
   for (const word of words) {
@@ -435,10 +453,16 @@ async function fetchTasks(sessionId) {
     if (agentLogMode && sessionId !== currentSessionId) exitAgentLogMode();
     if (sessionId !== currentSessionId && document.getElementById('scratchpad-modal').classList.contains('visible'))
       closeScratchpad();
+    if (revealedPlanSessionId && sessionId !== revealedPlanSessionId) {
+      revealedPlanSessionId = null;
+    }
+    if (revealedStorageSessionId && sessionId !== revealedStorageSessionId) {
+      revealedStorageSessionId = null;
+    }
     currentSessionId = sessionId;
     currentPins = loadPins(sessionId);
     ownerFilter = '';
-    lastMessagesHash = '';
+    resetMessageScrollState();
     for (const k of Object.keys(ownerColorCache)) delete ownerColorCache[k];
     for (const k of Object.keys(teamColorMap)) delete teamColorMap[k];
     sessionJustSelected = true;
@@ -500,9 +524,7 @@ async function fetchProjectView(projectPath) {
   if (msgPinned) msgPinned.innerHTML = '';
   const projectSessions = sessions.filter((s) => s.project === projectPath);
   currentProjectSessionIds = projectSessions.map((s) => s.id);
-  const activeSessionIds = projectSessions
-    .filter((s) => isSessionActive(s) || pinnedSessionIds.has(s.id))
-    .map((s) => s.id);
+  const activeSessionIds = projectSessions.filter((s) => isSessionActive(s) || isAnyPinned(s.id)).map((s) => s.id);
 
   const encoded = btoa(projectPath);
   const [tasksResult, agentResults] = await Promise.all([
@@ -551,9 +573,7 @@ async function fetchProjectView(projectPath) {
 async function refreshProjectAgents() {
   if (!currentProjectPath) return;
   const projectSessions = sessions.filter((s) => s.project === currentProjectPath);
-  const activeSessionIds = projectSessions
-    .filter((s) => isSessionActive(s) || pinnedSessionIds.has(s.id))
-    .map((s) => s.id);
+  const activeSessionIds = projectSessions.filter((s) => isSessionActive(s) || isAnyPinned(s.id)).map((s) => s.id);
   const agentResults = await Promise.all(
     activeSessionIds.map((id) =>
       fetch(`/api/sessions/${id}/agents`)
@@ -612,6 +632,7 @@ async function viewAgentLog(agentId) {
   const shortId = resolvedId.length > 8 ? resolvedId.slice(0, 8) : resolvedId;
   const agentSessionId = agent._sourceSessionId || currentSessionId;
   agentLogMode = { agentId: resolvedId, sessionId: agentSessionId, agentType: agent.type || 'unknown' };
+  resetMessageScrollState();
   closeAgentModal();
   document.getElementById('message-toggle')?.style.removeProperty('display');
   if (!messagePanelOpen) toggleMessagePanel();
@@ -649,7 +670,7 @@ function exitAgentLogMode() {
   }
   const header = document.querySelector('.message-panel-header h3');
   if (header) header.textContent = 'Session Log';
-  lastMessagesHash = '';
+  resetMessageScrollState();
   if (currentSessionId) fetchMessages(currentSessionId);
 }
 
@@ -681,9 +702,6 @@ async function fetchMessages(sessionId) {
     const res = await fetch(`/api/sessions/${sessionId}/messages?limit=15`);
     if (!res.ok) return;
     const data = await res.json();
-    const hash = JSON.stringify(data.messages);
-    if (hash === lastMessagesHash) return;
-    lastMessagesHash = hash;
     let agentEnriched = false;
     for (const m of data.messages) {
       if (m.agentId && m.agentPrompt) {
@@ -696,13 +714,72 @@ async function fetchMessages(sessionId) {
     }
     if (agentEnriched) renderAgentFooter();
     if (agentLogMode) return;
-    currentMessages = data.messages;
-    if (messagePanelOpen) renderMessages(data.messages);
-    if (msgDetailFollowLatest && data.messages.length) {
-      showMsgDetail(data.messages.length - 1);
+
+    if (!msgUserScrolledUp) {
+      const hash = JSON.stringify(data.messages);
+      if (hash === lastMessagesHash) return;
+      lastMessagesHash = hash;
+      msgHasMore = data.hasMore !== false;
+      currentMessages = data.messages;
+      if (messagePanelOpen) renderMessages(data.messages);
+    } else {
+      if (data.messages.length && currentMessages.length) {
+        const lastKnown = currentMessages[currentMessages.length - 1].timestamp;
+        const newMsgs = data.messages.filter((m) => m.timestamp > lastKnown);
+        if (newMsgs.length) {
+          currentMessages = [...currentMessages, ...newMsgs];
+          if (currentMessages.length > MSG_MAX_LOADED) {
+            currentMessages = currentMessages.slice(-MSG_MAX_LOADED);
+            msgHasMore = true;
+          }
+          if (messagePanelOpen) renderMessages(currentMessages);
+        }
+      }
+    }
+
+    if (msgDetailFollowLatest && currentMessages.length) {
+      showMsgDetail(currentMessages.length - 1);
     }
   } catch (e) {
     console.error('[fetchMessages]', e);
+  }
+}
+
+async function loadOlderMessages() {
+  if (agentLogMode || msgLoadingMore || !msgHasMore || !currentMessages.length) return;
+  msgLoadingMore = true;
+  const container = document.getElementById('message-panel-content');
+  const loader = document.createElement('div');
+  loader.className = 'msg-loading-more';
+  loader.textContent = 'Loading...';
+  container.prepend(loader);
+  try {
+    const before = currentMessages[0].timestamp;
+    const res = await fetch(`/api/sessions/${currentSessionId}/messages?limit=15&before=${encodeURIComponent(before)}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    msgHasMore = data.hasMore && data.messages.length > 0;
+    if (data.messages.length) {
+      loader.remove();
+      const prevHeight = container.scrollHeight;
+      currentMessages = [...data.messages, ...currentMessages];
+      if (currentMessages.length > MSG_MAX_LOADED) {
+        currentMessages = currentMessages.slice(0, MSG_MAX_LOADED);
+      }
+      renderMessages(currentMessages);
+      container.scrollTop = container.scrollHeight - prevHeight;
+    }
+  } catch (e) {
+    console.error('[loadOlderMessages]', e);
+  } finally {
+    if (loader.parentNode) loader.remove();
+    requestAnimationFrame(() => {
+      msgLoadingMore = false;
+      // Chain auto-load if content still doesn't overflow
+      if (msgHasMore && currentMessages.length < MSG_MAX_LOADED && container.scrollHeight <= container.clientHeight) {
+        loadOlderMessages();
+      }
+    });
   }
 }
 
@@ -751,14 +828,13 @@ function renderPinnedSection() {
             <div class="msg-body"><div class="msg-text">${escapeHtml(cleanMessageText(p.text || ''))}</div><div class="msg-time">${formatDate(p.timestamp)}</div></div>${unpin}
           </div>`;
       } else if (p.type === 'tool_use') {
-        const toolDetail = p.detail ? ` <span style="color:var(--text-muted)">${escapeHtml(p.detail)}</span>` : '';
-        const pinnedAgentLogBtn = p.tool === 'Agent' && p.agentId ? agentLogButton(p.agentId) : '';
+        const toolDetail = getToolDetail(p.tool, p.params, p.detail);
+        const pinnedAgentLogBtn = resolveAgentLogBtn(p);
         return `<div class="msg-item msg-tool" ${click}>
-            ${MSG_ICON_TOOL}
+            ${getToolIcon(p.tool)}
             <div class="msg-body"><div class="msg-text">${escapeHtml(p.tool || '')}${toolDetail}</div><div class="msg-time">${formatDate(p.timestamp)}</div></div>${pinnedAgentLogBtn}${unpin}
           </div>`;
       } else if (p.type === 'agent') {
-        const agentClick = `onclick="showAgentModal('${escapeHtml(p.agentId)}')" style="cursor:pointer"`;
         const agentLogBtn = agentLogButton(p.agentId);
         const msgTrunc = p.lastMessage
           ? escapeHtml(
@@ -768,7 +844,7 @@ function renderPinnedSection() {
             )
           : '';
         const agentDetail = msgTrunc ? ` <span style="color:var(--text-muted)">${msgTrunc}</span>` : '';
-        return `<div class="msg-item msg-tool" ${agentClick}>
+        return `<div class="msg-item msg-tool" ${click}>
             ${MSG_ICON_TOOL}
             <div class="msg-body"><div class="msg-text">${escapeHtml(p.agentType || 'Agent')}${agentDetail}</div><div class="msg-time">${formatDate(p.timestamp)}</div></div>${agentLogBtn}${unpin}
           </div>`;
@@ -786,6 +862,139 @@ function renderPinnedSection() {
       </div>`;
 }
 
+function resolveAgentLogBtn(m) {
+  if (m.tool === 'Agent' && m.agentId) return agentLogButton(m.agentId);
+  if (m.tool === 'SendMessage' && m.params?.to) {
+    const recipient = currentAgents.find((a) => (a.type || a.name) === m.params.to);
+    if (recipient) return agentLogButton(recipient.agentId);
+  }
+  return '';
+}
+
+function toolGroupKey(m) {
+  return m.type === 'tool_use' ? `${m.tool}\0${m.detail || ''}` : null;
+}
+
+function renderToolItem(m, i, compact) {
+  const toolDetail = getToolDetail(m.tool, m.params, m.detail);
+  const agentLink =
+    m.tool === 'Agent' && m.agentId
+      ? ` <span class="msg-agent-link" title="View agent" onclick="event.stopPropagation();showAgentModal('${escapeHtml(m.agentId)}')">⇗</span>`
+      : '';
+  const agentLogBtn = resolveAgentLogBtn(m);
+  const recipientColor = m.tool === 'SendMessage' && m.params?.to ? resolveNamedColor(teamColorMap[m.params.to]) : null;
+  const borderStyle = recipientColor ? `border-left:3px solid ${recipientColor.color};` : '';
+  const compactClass = compact ? ' msg-tool-grouped' : '';
+  const combinedStyle = `style="${borderStyle}cursor:pointer"`;
+  const itemClickAttr =
+    m.tool === 'Agent' && m.agentId
+      ? `onclick="showAgentModal('${escapeHtml(m.agentId)}')" ${combinedStyle}`
+      : `onclick="msgDetailFollowLatest=false;showMsgDetail(${i})" ${combinedStyle}`;
+  const pinBtn = renderMsgPinBtn(m, i);
+  return `<div class="msg-item msg-tool${compactClass}" ${itemClickAttr}>
+      ${getToolIcon(m.tool)}
+      <div class="msg-body"><div class="msg-text">${escapeHtml(m.tool)}${toolDetail}${agentLink}</div><div class="msg-time">${formatDate(m.timestamp)}</div></div>${agentLogBtn}${pinBtn}
+    </div>`;
+}
+
+function renderMessageList(messages) {
+  const parts = [];
+  let i = 0;
+  while (i < messages.length) {
+    const m = messages[i];
+
+    if (m.type === 'tool_use') {
+      const key = toolGroupKey(m);
+      let runEnd = i + 1;
+      while (runEnd < messages.length && toolGroupKey(messages[runEnd]) === key) runEnd++;
+      const count = runEnd - i;
+
+      if (count >= 2) {
+        const first = messages[i];
+        const last = messages[runEnd - 1];
+        const toolDetail = getToolDetail(first.tool, first.params, first.detail);
+        const gid = `tool-group-${i}`;
+        const timeRange = `${formatDate(first.timestamp)} – ${formatDate(last.timestamp)}`;
+        const grpAgentLogBtn = resolveAgentLogBtn(first);
+        const grpPinBtn = renderMsgPinBtn(first, i);
+        parts.push(`<div class="msg-tool-group">
+            <div class="msg-item msg-tool msg-tool-group-header" onclick="toggleToolGroup('${gid}')" style="cursor:pointer">
+              ${getToolIcon(first.tool)}
+              <div class="msg-body"><div class="msg-text">${escapeHtml(first.tool)}${toolDetail}<span class="tool-count-badge">×${count}</span></div><div class="msg-time">${timeRange}</div></div>${grpAgentLogBtn}${grpPinBtn}
+            </div>
+            <div class="msg-tool-group-items" id="${gid}">${Array.from({ length: count }, (_, j) => renderToolItem(messages[i + j], i + j, true)).join('')}</div>
+          </div>`);
+        i = runEnd;
+        continue;
+      }
+
+      parts.push(renderToolItem(m, i, false));
+      i++;
+      continue;
+    }
+
+    const clickable = `onclick="msgDetailFollowLatest=false;showMsgDetail(${i})" style="cursor:pointer"`;
+    const pinBtn = renderMsgPinBtn(m, i);
+    if (m.type === 'user') {
+      if (m.systemLabel) {
+        parts.push(`<div class="msg-item msg-system" ${clickable}>
+            ${MSG_ICON_SYSTEM}
+            <div class="msg-body"><div class="msg-text"><code>${escapeHtml(m.systemLabel)}</code></div><div class="msg-time">${formatDate(m.timestamp)}</div></div>${pinBtn}
+          </div>`);
+      } else {
+        const cmd = parseCommandMessage(m.text);
+        const displayText = cmd ? cmd : escapeHtml(cleanMessageText(m.text));
+        const isCmd = !!cmd;
+        parts.push(`<div class="msg-item msg-user${isCmd ? ' msg-cmd' : ''}" ${clickable}>
+            ${MSG_ICON_USER}
+            <div class="msg-body"><div class="msg-text">${isCmd ? `<code>${escapeHtml(displayText)}</code>` : displayText}</div><div class="msg-time">${formatDate(m.timestamp)}</div></div>${pinBtn}
+          </div>`);
+      }
+    } else if (m.type === 'assistant') {
+      parts.push(`<div class="msg-item msg-assistant" ${clickable}>
+          ${MSG_ICON_ASSISTANT}
+          <div class="msg-body"><div class="msg-text">${escapeHtml(cleanMessageText(m.text))}</div><div class="msg-time">${m.model ? `${escapeHtml(m.model)} · ` : ''}${formatDate(m.timestamp)}</div></div>${pinBtn}
+        </div>`);
+    } else if (m.type === 'teammate') {
+      if (m.teammateId && m.color && !teamColorMap[m.teammateId]) teamColorMap[m.teammateId] = m.color;
+      const tmColor = m.color ? resolveNamedColor(m.color)?.color || m.color : '';
+      const nameSpan = `<span class="teammate-name" style="${tmColor ? `color:${escapeHtml(tmColor)}` : ''}">${escapeHtml(m.teammateId || 'teammate')}</span>`;
+      let tmLookupName = m.teammateId;
+      if (m.teammateId === 'system' && m.protocolType === 'teammate_terminated' && m.protocolData?.message) {
+        const shutMatch = m.protocolData.message.match(/^(.+?) has shut down/);
+        if (shutMatch) tmLookupName = shutMatch[1];
+      }
+      const tmAgent = tmLookupName ? currentAgents.find((a) => (a.type || a.name) === tmLookupName) : null;
+      const tmLogBtn = tmAgent ? agentLogButton(tmAgent.agentId) : '';
+      if (m.isIdle) {
+        parts.push(`<div class="msg-item msg-teammate msg-idle" ${clickable}>
+            ${MSG_ICON_IDLE}
+            <div class="msg-body"><div class="msg-text">${nameSpan} <span class="idle-label">${escapeHtml(m.protocolLabel || 'idle')}</span></div><div class="msg-time">${formatDate(m.timestamp)}</div></div>${tmLogBtn}
+          </div>`);
+      } else if (m.isProtocol) {
+        parts.push(`<div class="msg-item msg-teammate msg-protocol" ${clickable}>
+            ${MSG_ICON_TEAMMATE}
+            <div class="msg-body"><div class="msg-text">${nameSpan} <span class="protocol-label">${escapeHtml(m.protocolLabel || m.protocolType)}</span></div><div class="msg-time">${formatDate(m.timestamp)}</div></div>${tmLogBtn}
+          </div>`);
+      } else {
+        const summaryText = m.summary ? escapeHtml(m.summary) : escapeHtml((m.text || '').slice(0, 80));
+        parts.push(`<div class="msg-item msg-teammate" ${clickable}>
+            ${MSG_ICON_TEAMMATE}
+            <div class="msg-body"><div class="msg-text">${nameSpan} ${summaryText}</div><div class="msg-time">${formatDate(m.timestamp)}</div></div>${tmLogBtn}${pinBtn}
+          </div>`);
+      }
+    }
+    i++;
+  }
+  return parts.join('');
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML onclick
+function toggleToolGroup(id) {
+  const el = document.getElementById(id);
+  if (el) el.classList.toggle('show');
+}
+
 function renderMessages(messages) {
   const container = document.getElementById('message-panel-content');
   const pinnedContainer = document.getElementById('message-panel-pinned');
@@ -794,88 +1003,22 @@ function renderMessages(messages) {
     container.innerHTML = '<div class="msg-empty">No messages found for this session</div>';
     return;
   }
-  const msgsHtml = messages
-    .map((m, i) => {
-      const pinBtn = renderMsgPinBtn(m, i);
-      const clickable = `onclick="msgDetailFollowLatest=false;showMsgDetail(${i})" style="cursor:pointer"`;
-      if (m.type === 'user') {
-        if (m.systemLabel) {
-          return `<div class="msg-item msg-system" ${clickable}>
-              ${MSG_ICON_SYSTEM}
-              <div class="msg-body"><div class="msg-text"><code>${escapeHtml(m.systemLabel)}</code></div><div class="msg-time">${formatDate(m.timestamp)}</div></div>${pinBtn}
-            </div>`;
-        }
-        const cmd = parseCommandMessage(m.text);
-        const displayText = cmd ? cmd : escapeHtml(cleanMessageText(m.text));
-        const isCmd = !!cmd;
-        return `<div class="msg-item msg-user${isCmd ? ' msg-cmd' : ''}" ${clickable}>
-            ${MSG_ICON_USER}
-            <div class="msg-body"><div class="msg-text">${isCmd ? `<code>${escapeHtml(displayText)}</code>` : displayText}</div><div class="msg-time">${formatDate(m.timestamp)}</div></div>${pinBtn}
-          </div>`;
-      } else if (m.type === 'assistant') {
-        return `<div class="msg-item msg-assistant" ${clickable}>
-            ${MSG_ICON_ASSISTANT}
-            <div class="msg-body"><div class="msg-text">${escapeHtml(cleanMessageText(m.text))}</div><div class="msg-time">${m.model ? `${escapeHtml(m.model)} · ` : ''}${formatDate(m.timestamp)}</div></div>${pinBtn}
-          </div>`;
-      } else if (m.type === 'tool_use') {
-        const toolDetail = m.detail ? ` <span style="color:var(--text-muted)">${escapeHtml(m.detail)}</span>` : '';
-        const agentLink =
-          m.tool === 'Agent' && m.agentId
-            ? ` <span class="msg-agent-link" title="View agent" onclick="event.stopPropagation();showAgentModal('${escapeHtml(m.agentId)}')">⇗</span>`
-            : '';
-        let agentLogBtn = '';
-        if (m.tool === 'Agent' && m.agentId) {
-          agentLogBtn = agentLogButton(m.agentId);
-        } else if (m.tool === 'SendMessage' && m.params?.to) {
-          const recipient = currentAgents.find((a) => (a.type || a.name) === m.params.to);
-          if (recipient) agentLogBtn = agentLogButton(recipient.agentId);
-        }
-        const recipientColor =
-          m.tool === 'SendMessage' && m.params?.to ? resolveNamedColor(teamColorMap[m.params.to]) : null;
-        const borderStyle = recipientColor ? `border-left:3px solid ${recipientColor.color};` : '';
-        const combinedStyle = `style="${borderStyle}cursor:pointer"`;
-        const itemClickAttr =
-          m.tool === 'Agent' && m.agentId
-            ? `onclick="showAgentModal('${escapeHtml(m.agentId)}')" ${combinedStyle}`
-            : `onclick="msgDetailFollowLatest=false;showMsgDetail(${i})" ${combinedStyle}`;
-        return `<div class="msg-item msg-tool" ${itemClickAttr}>
-            ${MSG_ICON_TOOL}
-            <div class="msg-body"><div class="msg-text">${escapeHtml(m.tool)}${toolDetail}${agentLink}</div><div class="msg-time">${formatDate(m.timestamp)}</div></div>${agentLogBtn}${pinBtn}
-          </div>`;
-      } else if (m.type === 'teammate') {
-        if (m.teammateId && m.color && !teamColorMap[m.teammateId]) teamColorMap[m.teammateId] = m.color;
-        const tmColor = m.color ? resolveNamedColor(m.color)?.color || m.color : '';
-        const nameSpan = `<span class="teammate-name" style="${tmColor ? `color:${escapeHtml(tmColor)}` : ''}">${escapeHtml(m.teammateId || 'teammate')}</span>`;
-        let tmLookupName = m.teammateId;
-        if (m.teammateId === 'system' && m.protocolType === 'teammate_terminated' && m.protocolData?.message) {
-          const shutMatch = m.protocolData.message.match(/^(.+?) has shut down/);
-          if (shutMatch) tmLookupName = shutMatch[1];
-        }
-        const tmAgent = tmLookupName ? currentAgents.find((a) => (a.type || a.name) === tmLookupName) : null;
-        const tmLogBtn = tmAgent ? agentLogButton(tmAgent.agentId) : '';
-        if (m.isIdle) {
-          return `<div class="msg-item msg-teammate msg-idle" ${clickable}>
-              ${MSG_ICON_IDLE}
-              <div class="msg-body"><div class="msg-text">${nameSpan} <span class="idle-label">${escapeHtml(m.protocolLabel || 'idle')}</span></div><div class="msg-time">${formatDate(m.timestamp)}</div></div>${tmLogBtn}
-            </div>`;
-        }
-        if (m.isProtocol) {
-          return `<div class="msg-item msg-teammate msg-protocol" ${clickable}>
-              ${MSG_ICON_TEAMMATE}
-              <div class="msg-body"><div class="msg-text">${nameSpan} <span class="protocol-label">${escapeHtml(m.protocolLabel || m.protocolType)}</span></div><div class="msg-time">${formatDate(m.timestamp)}</div></div>${tmLogBtn}
-            </div>`;
-        }
-        const summaryText = m.summary ? escapeHtml(m.summary) : escapeHtml((m.text || '').slice(0, 80));
-        return `<div class="msg-item msg-teammate" ${clickable}>
-            ${MSG_ICON_TEAMMATE}
-            <div class="msg-body"><div class="msg-text">${nameSpan} ${summaryText}</div><div class="msg-time">${formatDate(m.timestamp)}</div></div>${tmLogBtn}${pinBtn}
-          </div>`;
-      }
-      return '';
-    })
-    .join('');
-  container.innerHTML = msgsHtml;
-  container.scrollTop = container.scrollHeight;
+  const msgsHtml = renderMessageList(messages);
+  const limitBanner =
+    currentMessages.length >= MSG_MAX_LOADED
+      ? `<div class="msg-limit-banner">Showing last ${MSG_MAX_LOADED} messages</div>`
+      : '';
+  container.innerHTML = limitBanner + msgsHtml;
+  if (!msgUserScrolledUp) container.scrollTop = container.scrollHeight;
+  // Auto-load more if content doesn't overflow yet
+  if (
+    msgHasMore &&
+    !msgLoadingMore &&
+    currentMessages.length < MSG_MAX_LOADED &&
+    container.scrollHeight <= container.clientHeight
+  ) {
+    loadOlderMessages();
+  }
 }
 
 let currentMsgDetailIdx = null;
@@ -897,6 +1040,40 @@ const MSG_ICON_TEAMMATE =
   '<svg class="msg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>';
 const MSG_ICON_IDLE =
   '<svg class="msg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6"/></svg>';
+const ICON_TASK =
+  '<svg class="msg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>';
+const ICON_WEB =
+  '<svg class="msg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>';
+const TOOL_ICONS = {
+  Bash: '<svg class="msg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="18" rx="2"/><polyline points="7 10 10 13 7 16"/><line x1="13" y1="16" x2="17" y2="16"/></svg>',
+  Read: '<svg class="msg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>',
+  Write:
+    '<svg class="msg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>',
+  Edit: '<svg class="msg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>',
+  Glob: '<svg class="msg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><circle cx="14" cy="14" r="3"/><line x1="16.5" y1="16.5" x2="19" y2="19"/></svg>',
+  Grep: '<svg class="msg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>',
+  Agent: MSG_ICON_TEAMMATE,
+  SendMessage:
+    '<svg class="msg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>',
+  TaskCreate: ICON_TASK,
+  TaskUpdate: ICON_TASK,
+  TaskGet: ICON_TASK,
+  TaskList: ICON_TASK,
+  ToolSearch:
+    '<svg class="msg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>',
+  AskUserQuestion:
+    '<svg class="msg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
+  Skill:
+    '<svg class="msg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>',
+  WebFetch: ICON_WEB,
+  WebSearch: ICON_WEB,
+  NotebookEdit:
+    '<svg class="msg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>',
+  LSP: '<svg class="msg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>',
+};
+function getToolIcon(toolName) {
+  return TOOL_ICONS[toolName] || MSG_ICON_TOOL;
+}
 const AGENT_LOG_ICON =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>';
 function agentLogButton(agentId) {
@@ -1019,27 +1196,8 @@ function showPinnedMsgDetail(pinIdx) {
   }
   currentMsgDetailIdx = null;
   currentPinDetailId = pin.id;
+  _renderPinToDetail(pin);
   const body = document.getElementById('msg-detail-body');
-  const agentBtn = document.getElementById('msg-detail-agent-btn');
-  if (pin.type === 'tool_use') {
-    document.getElementById('msg-detail-title').textContent = pin.tool || 'Tool';
-    const fullText = pin.fullDetail || pin.detail || '';
-    const pinParamsHtml = renderToolParamsHtml(pin.params);
-    const pinResultHtml = renderToolResultHtml(pin.toolResult, pin.toolResultTruncated, pin.toolResultFull);
-    const pinDetailEscaped = escapeHtml(fullText);
-    const pinDetailRendered = pin.tool === 'Bash' ? highlightBash(pinDetailEscaped) : pinDetailEscaped;
-    body.innerHTML =
-      (fullText ? `<pre class="msg-detail-pre">${pinDetailRendered}</pre>` : '<em>No details</em>') +
-      pinParamsHtml +
-      pinResultHtml;
-    agentBtn.style.display = 'none';
-  } else {
-    const text = stripAnsi(pin.fullText || pin.text || '');
-    document.getElementById('msg-detail-title').textContent = pin.type === 'assistant' ? 'Claude' : 'User';
-    agentBtn.style.display = 'none';
-    body.innerHTML = renderMarkdown(text);
-  }
-  document.getElementById('msg-detail-meta').textContent = formatDate(pin.timestamp);
   const pinModal = document.getElementById('msg-detail-modal').querySelector('.modal');
   autoSizeModal(pinModal, body);
   const pinBtn = document.getElementById('msg-detail-pin-btn');
@@ -1073,6 +1231,7 @@ function togglePinnedCollapse() {
 
 //#region PINNING
 let pinnedSessionIds = new Set();
+let stickySessionIds = new Set();
 
 function loadPinnedSessions() {
   try {
@@ -1082,16 +1241,79 @@ function loadPinnedSessions() {
   }
 }
 
+function loadStickySessions() {
+  try {
+    return new Set(JSON.parse(localStorage.getItem('sticky-sessions')) || []);
+  } catch {
+    return new Set();
+  }
+}
+
 function savePinnedSessions() {
   localStorage.setItem('pinned-sessions', JSON.stringify([...pinnedSessionIds]));
+  localStorage.setItem('sticky-sessions', JSON.stringify([...stickySessionIds]));
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
 function toggleSessionPin(sessionId) {
-  if (pinnedSessionIds.has(sessionId)) pinnedSessionIds.delete(sessionId);
-  else pinnedSessionIds.add(sessionId);
+  if (pinnedSessionIds.has(sessionId)) {
+    pinnedSessionIds.delete(sessionId);
+    stickySessionIds.delete(sessionId);
+  } else {
+    pinnedSessionIds.add(sessionId);
+  }
   savePinnedSessions();
   renderSessions();
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+function toggleSessionSticky(sessionId) {
+  if (stickySessionIds.has(sessionId)) {
+    stickySessionIds.delete(sessionId);
+    pinnedSessionIds.delete(sessionId);
+  } else {
+    pinnedSessionIds.add(sessionId);
+    stickySessionIds.add(sessionId);
+  }
+  savePinnedSessions();
+  renderSessions();
+}
+
+function getSessionPinState(sessionId) {
+  if (stickySessionIds.has(sessionId)) return 'sticky';
+  if (pinnedSessionIds.has(sessionId)) return 'pinned';
+  return 'none';
+}
+
+function isAnyPinned(sessionId) {
+  return pinnedSessionIds.has(sessionId) || stickySessionIds.has(sessionId);
+}
+
+function _renderPinToDetail(pin) {
+  const body = document.getElementById('msg-detail-body');
+  const agentBtn = document.getElementById('msg-detail-agent-btn');
+  agentBtn.style.display = 'none';
+  if (pin.type === 'tool_use') {
+    document.getElementById('msg-detail-title').textContent = pin.tool || 'Tool';
+    const fullText = pin.fullDetail || pin.detail || '';
+    const pinParamsHtml = renderToolParamsHtml(pin.params);
+    const pinResultHtml = renderToolResultHtml(pin.toolResult, pin.toolResultTruncated, pin.toolResultFull);
+    const pinDetailEscaped = escapeHtml(fullText);
+    const pinDetailRendered = pin.tool === 'Bash' ? highlightBash(pinDetailEscaped) : pinDetailEscaped;
+    body.innerHTML =
+      (fullText ? `<pre class="msg-detail-pre">${pinDetailRendered}</pre>` : '<em>No details</em>') +
+      pinParamsHtml +
+      pinResultHtml;
+  } else if (pin.type === 'agent') {
+    document.getElementById('msg-detail-title').textContent = pin.agentType || 'Agent';
+    const lastMsg = stripAnsi(pin.lastMessage || '');
+    body.innerHTML = lastMsg ? renderMarkdown(lastMsg) : '<em>No agent message</em>';
+  } else {
+    const text = stripAnsi(pin.fullText || pin.text || '');
+    document.getElementById('msg-detail-title').textContent = pin.type === 'assistant' ? 'Claude' : 'User';
+    body.innerHTML = renderMarkdown(text);
+  }
+  document.getElementById('msg-detail-meta').textContent = formatDate(pin.timestamp);
 }
 
 const SESSION_PIN_SVG = PIN_SVG.replace('width="14" height="14"', 'width="12" height="12"');
@@ -1148,7 +1370,7 @@ function showMsgDetail(idx) {
       const detailRendered = m.tool === 'Bash' ? highlightBash(detailEscaped) : detailEscaped;
       mainHtml = `${descHtml}<pre class="msg-detail-pre">${detailRendered}</pre>`;
     } else {
-      mainHtml = '<em>No details</em>';
+      mainHtml = TASK_TOOLS.has(m.tool) ? '' : '<em>No details</em>';
     }
     body.innerHTML = mainHtml + toolParamsHtml + taskResultHtml + (hasAgentTabs ? '' : toolResultHtml) + agentExtraHtml;
   } else if (m.type === 'teammate') {
@@ -1163,14 +1385,25 @@ function showMsgDetail(idx) {
       body.innerHTML = renderMarkdown(text);
     }
   } else {
-    const text = stripAnsi(m.fullText || m.text);
+    const rawText = stripAnsi(m.fullText || m.text);
+    const cmd = m.type === 'user' ? parseCommandMessage(rawText) : null;
     document.getElementById('msg-detail-title').textContent =
       m.type === 'assistant' ? 'Claude' : m.systemLabel ? 'System' : 'User';
     document.getElementById('msg-detail-agent-btn').style.display = 'none';
     if (m.compactSummary) {
       body.innerHTML = renderMarkdown(m.compactSummary);
+    } else if (cmd) {
+      const argsMatch = rawText.match(/<command-args>([^<]*)<\/command-args>/);
+      const args = argsMatch?.[1].trim() ? argsMatch[1].trim() : null;
+      const cleanBody = rawText
+        .replace(/<command-[^>]+>[\s\S]*?<\/command-[^>]+>/g, '')
+        .replace(/<local-command-[^>]+>[\s\S]*?<\/local-command-[^>]+>/g, '')
+        .trim();
+      let cmdHtml = `<code>${escapeHtml(cmd)}${args ? ` ${escapeHtml(args)}` : ''}</code>`;
+      if (cleanBody) cmdHtml += `<div style="margin-top:10px">${renderMarkdown(cleanBody)}</div>`;
+      body.innerHTML = cmdHtml;
     } else {
-      body.innerHTML = renderMarkdown(text);
+      body.innerHTML = renderMarkdown(rawText);
     }
   }
   const modal = document.getElementById('msg-detail-modal').querySelector('.modal');
@@ -1282,6 +1515,32 @@ function renderProtocolDetail(data) {
 }
 
 const TASK_TOOLS = new Set(['TaskCreate', 'TaskUpdate', 'TaskGet', 'TaskList']);
+const TASK_STATUS_COLORS = {
+  pending: 'var(--text-muted)',
+  in_progress: 'var(--info)',
+  completed: 'var(--success)',
+  deleted: 'var(--danger)',
+};
+function formatTaskStatusBadge(status) {
+  const color = TASK_STATUS_COLORS[status] || 'var(--text-muted)';
+  return `<span style="color:${color};font-weight:600;text-transform:uppercase;font-size:0.85em">${escapeHtml(status)}</span>`;
+}
+function formatTaskToolDetail(params) {
+  if (!params) return '';
+  const parts = [];
+  if (params.taskId) {
+    const id = String(params.taskId).replace(/^#/, '');
+    parts.push(`<span style="color:var(--text-muted)">#${escapeHtml(id)}</span>`);
+  }
+  if (params.status) parts.push(formatTaskStatusBadge(params.status));
+  if (params.subject) parts.push(`<span style="color:var(--text-secondary)">${escapeHtml(params.subject)}</span>`);
+  return parts.length ? ` ${parts.join(' ')}` : '';
+}
+function getToolDetail(tool, params, detail) {
+  if (TASK_TOOLS.has(tool)) return formatTaskToolDetail(params);
+  if (detail) return ` <span style="color:var(--text-muted)">${escapeHtml(detail)}</span>`;
+  return '';
+}
 function renderTaskResult(toolResult) {
   if (!toolResult) return '';
   const lines = toolResult.trim().split('\n');
@@ -1294,17 +1553,9 @@ function renderTaskResult(toolResult) {
   const title = fields.find(([k]) => /^Task/.test(k));
   const status = fields.find(([k]) => k === 'Status');
   const rest = fields.filter(([k]) => !/^Task/.test(k) && k !== 'Status');
-  const statusColors = {
-    pending: 'var(--text-muted)',
-    in_progress: 'var(--info)',
-    completed: 'var(--success)',
-    deleted: 'var(--danger)',
-  };
-  const sc = status ? statusColors[status[1]] || 'var(--text-muted)' : '';
   let html = '<div class="protocol-detail">';
   if (title) html += `<span class="protocol-type-badge">${escapeHtml(title[1])}</span>`;
-  if (status)
-    html += `<span style="display:inline-block;font-size:10px;font-weight:600;color:${sc};text-transform:uppercase;margin-bottom:6px">${escapeHtml(status[1])}</span>`;
+  if (status) html += `<span style="display:inline-block;margin-bottom:6px">${formatTaskStatusBadge(status[1])}</span>`;
   if (rest.length) {
     html += '<div class="protocol-fields">';
     for (const [k, v] of rest) {
@@ -1411,6 +1662,13 @@ function makeExpandToggle(_truncatedHtml, fullHtml, opts = {}) {
 }
 
 function autoSizeModal(modal, body) {
+  modal.style.maxWidth = '';
+  modal.classList.remove('has-mermaid');
+  const hasMermaid = body.querySelector('pre.mermaid') !== null;
+  if (hasMermaid) {
+    modal.classList.add('has-mermaid');
+    return;
+  }
   const hasTable = body.querySelector('table') !== null;
   const hasPre = body.querySelector('pre') !== null;
   const desired = hasTable ? 1100 : body.textContent.length > 2000 || hasPre ? 960 : 860;
@@ -1503,8 +1761,9 @@ function renderAgentFooter() {
   // or started >30s after previous stopped (legitimate re-spawn). Filter the rest.
   const byType = {};
   for (const a of agents) {
-    if (!byType[a.type]) byType[a.type] = [];
-    byType[a.type].push(a);
+    const groupKey = a.agentName || a.type;
+    if (!byType[groupKey]) byType[groupKey] = [];
+    byType[groupKey].push(a);
   }
   const filtered = [];
   for (const group of Object.values(byType)) {
@@ -1578,10 +1837,15 @@ function renderAgentFooter() {
         const colonIdx = rawType.indexOf(':');
         const typeNs = colonIdx > 0 ? rawType.substring(0, colonIdx + 1) : '';
         const typeName = colonIdx > 0 ? rawType.substring(colonIdx + 1) : rawType;
+        const agentNameVal = a.agentName || null;
+        const nameColor = agentNameVal ? getOwnerColor(agentNameVal) : null;
+        const nameBadgeHtml = nameColor
+          ? `<span class="task-owner-badge task-owner-badge--compact" style="background:${nameColor.bg};color:${nameColor.color}">${escapeHtml(agentNameVal)}</span>`
+          : '';
         const agentColor = resolveNamedColor(a.color);
         const colorStyle = agentColor ? ` style="border-left:3px solid ${agentColor.color}"` : '';
         return `<div class="agent-card"${colorStyle} onclick="showAgentModal('${a.agentId}')">
-          <div class="agent-type-row">${typeNs ? `<span class="agent-type-ns">${escapeHtml(typeNs)}</span>` : ''}<span class="agent-type-name">${escapeHtml(typeName)}</span></div>
+          <div class="agent-type-row">${typeNs ? `<span class="agent-type-ns">${escapeHtml(typeNs)}</span>` : ''}<span class="agent-type-name">${escapeHtml(typeName)}</span>${nameBadgeHtml}</div>
           <div class="agent-status-row"><span class="agent-dot ${a.status}"></span><span class="agent-status">${statusText}</span></div>
           ${msgHtml}
         </div>`;
@@ -1681,13 +1945,21 @@ function showAgentModal(agentId) {
   const elapsed = stopped && started ? stopped.getTime() - started.getTime() : started ? now - started.getTime() : 0;
 
   const statusDot = `<span class="agent-dot ${agent.status}" style="display:inline-block;vertical-align:middle;margin-right:6px;"></span>`;
-  title.innerHTML = `${statusDot} ${escapeHtml(agent.type || 'unknown')}`;
+  const modalNameLabel = agent.agentName ? ` · ${escapeHtml(agent.agentName)}` : '';
+  title.innerHTML = `${statusDot} ${escapeHtml(agent.type || 'unknown')}${modalNameLabel}`;
 
   const rows = [
     ['Status', agent.status],
     ['Agent ID', `<code style="font-size:12px;color:var(--text-tertiary)">${escapeHtml(agent.agentId)}</code>`],
     ['Duration', formatDuration(elapsed)],
   ];
+  if (agent.agentName) {
+    const ownerColor = getOwnerColor(agent.agentName);
+    rows.push([
+      'Owner',
+      `<span class="task-owner-badge" style="background:${ownerColor.bg};color:${ownerColor.color}">${escapeHtml(agent.agentName)}</span>`,
+    ]);
+  }
   if (agent.model)
     rows.push(['Model', `<code style="font-size:12px;color:var(--text-tertiary)">${escapeHtml(agent.model)}</code>`]);
   if (started) rows.push(['Started', started.toLocaleTimeString()]);
@@ -1737,6 +2009,25 @@ function closeAgentModal() {
 //#endregion
 
 //#region RENDERING
+let revealedPlanSessionId = null;
+let revealedStorageSessionId = null;
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+async function revealPlanSession(planSessionId) {
+  if (revealedPlanSessionId === planSessionId) {
+    revealedPlanSessionId = null;
+    renderSessions();
+    return;
+  }
+  revealedPlanSessionId = planSessionId;
+  if (!sessions.some((s) => s.id === planSessionId)) {
+    lastSessionsHash = '';
+    await fetchSessions();
+  }
+  await fetchTasks(planSessionId);
+  const el = document.querySelector(`.session-item[data-session-id="${CSS.escape(planSessionId)}"]`);
+  if (el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
 async function showAllTasks() {
   try {
     viewMode = 'all';
@@ -1810,16 +2101,13 @@ function renderSessions() {
       if (isActive) activeSessionIds.add(s.id);
       return isActive;
     });
-    // Include plan sessions whose implementation is active
-    const planSessions = sessions.filter(
-      (s) =>
-        s.planImplementationSessionId &&
-        activeSessionIds.has(s.planImplementationSessionId) &&
-        !activeSessionIds.has(s.id),
-    );
-    if (planSessions.length) {
-      filteredSessions = filteredSessions.concat(planSessions);
-      filteredSessions.sort((a, b) => new Date(b.modifiedAt) - new Date(a.modifiedAt));
+    if (revealedPlanSessionId && !filteredSessions.some((s) => s.id === revealedPlanSessionId)) {
+      const planSession = sessions.find((s) => s.id === revealedPlanSessionId);
+      if (planSession) filteredSessions.push(planSession);
+    }
+    if (revealedStorageSessionId && !filteredSessions.some((s) => s.id === revealedStorageSessionId)) {
+      const storageSession = sessions.find((s) => s.id === revealedStorageSessionId);
+      if (storageSession) filteredSessions.push(storageSession);
     }
   }
   if (filterProject) {
@@ -1828,32 +2116,36 @@ function renderSessions() {
 
   // Apply search filter
   if (searchQuery) {
-    filteredSessions = filteredSessions.filter((session) => {
-      // Search in session name and ID
-      if (session.name && fuzzyMatch(session.name, searchQuery)) return true;
-      if (session.id && fuzzyMatch(session.id, searchQuery)) return true;
+    const taskMatchIds = new Set();
+    for (const t of allTasksCache) {
+      if (
+        (t.subject && fuzzyMatch(t.subject, searchQuery)) ||
+        (t.description && fuzzyMatch(t.description, searchQuery)) ||
+        (t.activeForm && fuzzyMatch(t.activeForm, searchQuery))
+      )
+        taskMatchIds.add(t.sessionId);
+    }
+    const matchesSearch = (s) =>
+      (s.name && fuzzyMatch(s.name, searchQuery)) ||
+      (s.id && fuzzyMatch(s.id, searchQuery)) ||
+      (s.project && fuzzyMatch(s.project, searchQuery)) ||
+      (s.description && fuzzyMatch(s.description, searchQuery)) ||
+      taskMatchIds.has(s.id);
 
-      // Search in project path
-      if (session.project && fuzzyMatch(session.project, searchQuery)) return true;
+    filteredSessions = filteredSessions.filter(matchesSearch);
 
-      // Search in description
-      if (session.description && fuzzyMatch(session.description, searchQuery)) return true;
-
-      // Search in tasks for this session
-      const sessionTasks = allTasksCache.filter((t) => t.sessionId === session.id);
-      return sessionTasks.some(
-        (task) =>
-          (task.subject && fuzzyMatch(task.subject, searchQuery)) ||
-          (task.description && fuzzyMatch(task.description, searchQuery)) ||
-          (task.activeForm && fuzzyMatch(task.activeForm, searchQuery)),
-      );
-    });
+    // Re-add pinned/sticky sessions that match the query but were excluded by active filter
+    if (pinnedSessionIds.size > 0 || stickySessionIds.size > 0) {
+      const filteredIds = new Set(filteredSessions.map((s) => s.id));
+      const missingPinned = sessions.filter((s) => isAnyPinned(s.id) && !filteredIds.has(s.id) && matchesSearch(s));
+      if (missingPinned.length) filteredSessions = [...missingPinned, ...filteredSessions];
+    }
   }
 
-  // Always include pinned sessions even if they don't match filters
-  if (pinnedSessionIds.size > 0 && !searchQuery) {
+  // Include pinned/sticky sessions even if they don't match active/recent filter
+  if (!searchQuery && (pinnedSessionIds.size > 0 || stickySessionIds.size > 0)) {
     const filteredIds = new Set(filteredSessions.map((s) => s.id));
-    const missingPinned = sessions.filter((s) => pinnedSessionIds.has(s.id) && !filteredIds.has(s.id));
+    const missingPinned = sessions.filter((s) => isAnyPinned(s.id) && !filteredIds.has(s.id));
     if (missingPinned.length) filteredSessions = [...missingPinned, ...filteredSessions];
   }
 
@@ -1907,11 +2199,13 @@ function renderSessions() {
     const isTeam = session.isTeam;
     const memberCount = session.memberCount || 0;
 
-    const isSessionPinned = pinnedSessionIds.has(session.id);
+    const pinState = getSessionPinState(session.id);
+    const pinClass = pinState === 'sticky' ? ' sticky' : pinState === 'pinned' ? ' pinned' : '';
+    const pinTitle = pinState === 'pinned' || pinState === 'sticky' ? 'Unpin' : 'Pin';
     const showCtx = !!session.contextStatus;
     return `
           <button onclick="fetchTasks('${session.id}')" data-session-id="${session.id}" class="session-item ${isActive ? 'active' : ''} ${session.hasWaitingForUser ? 'permission-pending' : ''} ${!session.hasRecentLog && !session.inProgress && !session.hasWaitingForUser ? 'stale' : ''} ${showCtx ? 'has-context' : ''}" title="${tooltip}">
-            <span class="session-pin-btn${isSessionPinned ? ' pinned' : ''}" onclick="event.stopPropagation();toggleSessionPin('${escapeHtml(session.id)}')" title="${isSessionPinned ? 'Unpin' : 'Pin'} session">${SESSION_PIN_SVG}</span>
+            <span class="session-pin-btn${pinClass}" onclick="event.stopPropagation();toggleSessionPin('${escapeHtml(session.id)}')" title="${pinTitle} session">${SESSION_PIN_SVG}</span>
             <div class="session-name">${escapeHtml(primaryName)}</div>
             ${secondaryName ? `<div class="session-secondary">${escapeHtml(secondaryName)}</div>` : ''}
             ${gitBranch ? `<div class="session-branch">${gitBranch}</div>` : ''}
@@ -1923,7 +2217,7 @@ function renderSessions() {
                 ${isTeam || session.project || showCtx ? `<span class="team-info-btn" onclick="event.stopPropagation(); showSessionInfoModal('${session.id}')" title="View session info">ℹ</span>` : ''}
                 ${session.hasPlan ? `<span class="plan-indicator" onclick="event.stopPropagation(); openPlanForSession('${session.id}')" title="View plan"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span>` : ''}
                 ${session.hasRunningAgents ? '<span class="agent-badge" title="Active agents">🤖</span>' : ''}
-                ${session.planSourceSessionId ? `<span class="plan-indicator" title="Implements plan — click to view plan session" onclick="event.stopPropagation(); fetchTasks('${escapeHtml(session.planSourceSessionId)}')">📋</span>` : ''}
+                ${session.planSourceSessionId ? `<span class="plan-indicator" title="Implements plan — click to reveal plan session" onclick="event.stopPropagation(); revealPlanSession('${escapeHtml(session.planSourceSessionId)}')">📋</span>` : ''}
                 ${session.hasWaitingForUser ? '<span class="agent-badge" title="Waiting for user">❓</span>' : ''}
                 ${isLive ? '<span class="pulse"></span>' : ''}
               </span>
@@ -1951,10 +2245,14 @@ function renderSessions() {
     const groupPinned = localStorage.getItem('groupPinnedSessions') !== 'false';
     const renderGroupSessions = (sessions, pinKey) => {
       if (!groupPinned || pinnedSessionIds.size === 0) return sessions.map(renderSessionCard).join('');
-      const gPinned = sessions.filter((s) => pinnedSessionIds.has(s.id));
+      const gPinned = sessions.filter((s) => pinnedSessionIds.has(s.id) && !stickySessionIds.has(s.id));
       if (gPinned.length === 0) return sessions.map(renderSessionCard).join('');
-      const gUnpinned = sessions.filter((s) => !pinnedSessionIds.has(s.id));
+      const gIdlePinned = gPinned.filter((s) => !isSessionActive(s));
+      const gUnpinned = sessions.filter(
+        (s) => !pinnedSessionIds.has(s.id) || isSessionActive(s) || stickySessionIds.has(s.id),
+      );
       const pinCollapsed = collapsedProjectGroups.has(pinKey);
+      if (gIdlePinned.length === 0 && !pinCollapsed) return gUnpinned.map(renderSessionCard).join('');
       return (
         '<div class="pinned-sub-section">' +
         '<div class="pinned-sub-header' +
@@ -1965,21 +2263,23 @@ function renderSessions() {
         '<svg class="group-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>' +
         '<span class="pinned-sub-label">Pinned</span>' +
         '<span class="group-count">' +
-        gPinned.length +
+        gIdlePinned.length +
         '</span>' +
         '<span class="pinned-ungroup-btn" title="Ungroup pinned sessions">&times;</span>' +
         '</div>' +
         '<div class="pinned-sub-items' +
         (pinCollapsed ? ' collapsed' : '') +
         '">' +
-        gPinned.map(renderSessionCard).join('') +
+        gIdlePinned.map(renderSessionCard).join('') +
         '</div>' +
         '</div>' +
         gUnpinned.map(renderSessionCard).join('')
       );
     };
-    if (!groupPinned && pinnedSessionIds.size > 0) {
-      const pinSort = (a, b) => (pinnedSessionIds.has(b.id) ? 1 : 0) - (pinnedSessionIds.has(a.id) ? 1 : 0);
+    if (!groupPinned && (pinnedSessionIds.size > 0 || stickySessionIds.size > 0)) {
+      const pinWeight = (s) =>
+        stickySessionIds.has(s.id) ? 2 : pinnedSessionIds.has(s.id) && !isSessionActive(s) ? 1 : 0;
+      const pinSort = (a, b) => pinWeight(b) - pinWeight(a);
       for (const [, arr] of groups) arr.sort(pinSort);
       ungrouped.sort(pinSort);
     }
@@ -2054,19 +2354,28 @@ function renderSessions() {
 
     sessionsList.innerHTML = html;
   } else {
-    const pinned = filteredSessions.filter((s) => pinnedSessionIds.has(s.id));
-    const rest = filteredSessions.filter((s) => !pinnedSessionIds.has(s.id));
+    const sticky = filteredSessions.filter((s) => stickySessionIds.has(s.id));
+    const idlePinned = filteredSessions.filter((s) => pinnedSessionIds.has(s.id) && !isSessionActive(s));
+    const rest = filteredSessions.filter(
+      (s) =>
+        (!pinnedSessionIds.has(s.id) && !stickySessionIds.has(s.id)) ||
+        (pinnedSessionIds.has(s.id) && isSessionActive(s)),
+    );
     let html = '';
-    if (pinned.length > 0) {
-      const isCollapsed = collapsedProjectGroups.has('__pinned__');
+    if (sticky.length > 0) {
+      html += sticky.map(renderSessionCard).join('');
+    }
+    const isCollapsed = collapsedProjectGroups.has('__pinned__');
+    const hasPinned = pinnedSessionIds.size > 0 && filteredSessions.some((s) => pinnedSessionIds.has(s.id));
+    if (idlePinned.length > 0 || (hasPinned && isCollapsed)) {
       html += `
             <div class="project-group-header${isCollapsed ? ' collapsed' : ''}" data-group-path="__pinned__">
               <svg class="group-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
               <span class="group-name">Pinned</span>
-              <span class="group-count">${pinned.length}</span>
+              <span class="group-count">${idlePinned.length}</span>
             </div>
             <div class="project-group-sessions${isCollapsed ? ' collapsed' : ''}">
-              ${pinned.map(renderSessionCard).join('')}
+              ${idlePinned.map(renderSessionCard).join('')}
             </div>
           `;
     }
@@ -3031,7 +3340,10 @@ const _scratchpadModal = document.getElementById('scratchpad-modal');
 const _scratchpadTextarea = document.getElementById('scratchpad-textarea');
 const _scratchpadCharcount = document.getElementById('scratchpad-charcount');
 
+let _scratchpadKeyOverride = null;
+
 function _scratchpadKey() {
+  if (_scratchpadKeyOverride) return _scratchpadKeyOverride;
   if (currentSessionId) return `scratchpad-${currentSessionId}`;
   if (currentProjectPath) return `scratchpad-project:${currentProjectPath}`;
   return null;
@@ -3045,7 +3357,8 @@ function toggleScratchpad() {
   }
 }
 
-function showScratchpad() {
+function showScratchpad(keyOverride) {
+  _scratchpadKeyOverride = keyOverride || null;
   const key = _scratchpadKey();
   if (!key) return;
   _scratchpadTextarea.value = localStorage.getItem(key) || '';
@@ -3060,13 +3373,19 @@ function closeScratchpad() {
     _scratchpadSaveTimer = null;
   }
   saveScratchpad();
+  _scratchpadKeyOverride = null;
   _scratchpadModal.classList.remove('visible');
 }
 
 function saveScratchpad() {
   const key = _scratchpadKey();
   if (!key) return;
-  localStorage.setItem(key, _scratchpadTextarea.value);
+  const val = _scratchpadTextarea.value;
+  if (val.trim()) {
+    localStorage.setItem(key, val);
+  } else {
+    localStorage.removeItem(key);
+  }
 }
 
 _scratchpadTextarea.addEventListener('input', () => {
@@ -3078,6 +3397,374 @@ _scratchpadTextarea.addEventListener('input', () => {
   }, 500);
 });
 
+//#endregion
+
+//#region STORAGE_MANAGER
+
+function _getStorageTotalSize() {
+  let bytes = 0;
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    bytes += k.length + localStorage.getItem(k).length;
+  }
+  return bytes * 2; // UTF-16
+}
+
+function _updateStorageTotal() {
+  const el = document.getElementById('storage-total');
+  if (el) el.textContent = `${(_getStorageTotalSize() / 1024).toFixed(1)} KB`;
+}
+
+function _getKnownSessionIds() {
+  return new Set(sessions.map((s) => s.id));
+}
+
+function _sessionLabel(session, id) {
+  return session ? escapeHtml(session.name || session.slug || id.slice(0, 12)) : escapeHtml(id.slice(0, 12));
+}
+
+function _groupByProject(sessionIds) {
+  const sessionMap = new Map(sessions.map((s) => [s.id, s]));
+  const groups = new Map();
+  const orphans = [];
+  for (const id of sessionIds) {
+    const session = sessionMap.get(id);
+    if (!session) {
+      orphans.push({ id, session: null });
+      continue;
+    }
+    const project = session.project || '(no project)';
+    if (!groups.has(project)) groups.set(project, []);
+    groups.get(project).push({ id, session });
+  }
+  return { groups, orphans };
+}
+
+function _projectLabel(project) {
+  if (project === '(no project)') return '(no project)';
+  return project.split(/[/\\]/).pop() || project;
+}
+
+function _escapeForJsAttr(str) {
+  const jsEscaped = str.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n').replace(/\r/g, '\\r');
+  return escapeHtml(jsEscaped);
+}
+
+function _renderProjectGroup(label, meta, innerHtml) {
+  return `<div class="storage-project-group">
+    <div class="storage-project-header">
+      <span>${label}</span>
+      <span class="storage-item-meta">${meta}</span>
+    </div>
+    <div class="storage-session-group">${innerHtml}</div>
+  </div>`;
+}
+
+function _renderOrphanGroup(count, innerHtml) {
+  return _renderProjectGroup('Orphaned', `<span class="storage-item-badge orphan">${count}</span>`, innerHtml);
+}
+
+function showStorageManager() {
+  _updateStorageTotal();
+  _updateOrphanedCount();
+  document.querySelectorAll('.storage-tab').forEach((t) => {
+    t.classList.toggle('active', t.dataset.tab === 'sessions');
+  });
+  _renderStorageTab();
+  document.getElementById('storage-modal').classList.add('visible');
+}
+
+function closeStorageManager() {
+  document.getElementById('storage-modal').classList.remove('visible');
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+function switchStorageTab(tab) {
+  document.querySelectorAll('.storage-tab').forEach((t) => {
+    t.classList.toggle('active', t.dataset.tab === tab);
+  });
+  _renderStorageTab();
+}
+
+function _renderStorageTab() {
+  const body = document.getElementById('storage-modal-body');
+  const tab = document.querySelector('.storage-tab.active')?.dataset.tab || 'sessions';
+  if (tab === 'sessions') body.innerHTML = _renderStorageSessions();
+  else if (tab === 'scratchpads') body.innerHTML = _renderStorageScratchpads();
+}
+
+function _renderStorageSessions() {
+  const pinnedIds = [...new Set([...pinnedSessionIds, ...stickySessionIds])];
+
+  const msgMap = new Map();
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (!key.startsWith('pinned-messages-')) continue;
+    const sid = key.slice('pinned-messages-'.length);
+    try {
+      const pins = JSON.parse(localStorage.getItem(key)) || [];
+      if (pins.length) msgMap.set(sid, { pins, key });
+    } catch {}
+  }
+
+  const allIds = [...new Set([...pinnedIds, ...msgMap.keys()])];
+  if (!allIds.length) return '<div class="storage-empty">No pinned sessions or messages</div>';
+  const { groups, orphans } = _groupByProject(allIds);
+
+  function renderMessageItems(id) {
+    const g = msgMap.get(id);
+    if (!g) return '';
+    const eid = escapeHtml(id);
+    const header = `<div class="storage-group-header" style="padding-left:12px;">
+      <span>${g.pins.length} pinned message${g.pins.length > 1 ? 's' : ''}</span>
+      <div class="storage-item-actions">
+        <button class="danger" onclick="_storageClearSessionPins('${eid}')">Clear All</button>
+      </div>
+    </div>`;
+    const items = g.pins
+      .map((p) => {
+        const type = escapeHtml(p.type || '?');
+        const text = escapeHtml((p.text || p.tool || p.agentType || '').slice(0, 60));
+        const pinId = _escapeForJsAttr(p.id || '');
+        const sid = _escapeForJsAttr(id);
+        return `<div class="storage-item storage-item-clickable" style="padding-left:24px;" onclick="_storagePreviewPin('${sid}','${pinId}')">
+        <span class="storage-item-badge">${type}</span>
+        <span class="storage-item-id">${text}</span>
+        <span class="storage-item-meta">${formatDate(p.timestamp)}</span>
+        <div class="storage-item-actions">
+          <button onclick="event.stopPropagation();_storagePreviewPin('${sid}','${pinId}')">View</button>
+          <button class="danger" onclick="event.stopPropagation();_storageUnpinMessage('${sid}','${pinId}')">Unpin</button>
+        </div>
+      </div>`;
+      })
+      .join('');
+    return header + items;
+  }
+
+  function renderSessionItem({ id, session }) {
+    const isPinned = isAnyPinned(id);
+    const eid = escapeHtml(id);
+    const actions = isPinned
+      ? `<button onclick="_storageViewSession('${eid}')">View</button>
+         <button class="danger" onclick="_storageUnpinSession('${eid}')">Unpin</button>`
+      : `<button onclick="_storageViewSession('${eid}')">View</button>`;
+    return `<div class="storage-group-header">
+      <span>${_sessionLabel(session, id)}</span>
+      <div class="storage-item-actions">${actions}</div>
+    </div>${renderMessageItems(id)}`;
+  }
+
+  let html = '';
+  for (const [project, items] of groups) {
+    const count = items.length;
+    html += _renderProjectGroup(
+      escapeHtml(_projectLabel(project)),
+      `${count} session${count > 1 ? 's' : ''}`,
+      items.map(renderSessionItem).join(''),
+    );
+  }
+  if (orphans.length) {
+    html += _renderOrphanGroup(orphans.length, orphans.map(renderSessionItem).join(''));
+  }
+  return html;
+}
+
+async function _storageViewSession(id) {
+  closeStorageManager();
+  revealedStorageSessionId = id;
+  if (!sessions.some((s) => s.id === id)) {
+    lastSessionsHash = '';
+    await fetchSessions();
+  }
+  await fetchTasks(id);
+  const el = document.querySelector(`.session-item[data-session-id="${CSS.escape(id)}"]`);
+  if (el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+function _storageUnpinSession(id) {
+  pinnedSessionIds.delete(id);
+  stickySessionIds.delete(id);
+  savePinnedSessions();
+  renderSessions();
+  _renderStorageTab();
+  _updateStorageTotal();
+}
+
+function _storageClearSessionPins(sessionId) {
+  localStorage.removeItem(`pinned-messages-${sessionId}`);
+  if (currentSessionId === sessionId) {
+    currentPins = [];
+    const el = document.getElementById('message-panel-pinned');
+    if (el) el.innerHTML = '';
+  }
+  _renderStorageTab();
+  _updateStorageTotal();
+}
+
+function _storageUnpinMessage(sessionId, pinId) {
+  const key = `pinned-messages-${sessionId}`;
+  try {
+    const pins = JSON.parse(localStorage.getItem(key)) || [];
+    const idx = pins.findIndex((p) => p.id === pinId);
+    if (idx < 0) return;
+    pins.splice(idx, 1);
+    if (pins.length) localStorage.setItem(key, JSON.stringify(pins));
+    else localStorage.removeItem(key);
+    if (currentSessionId === sessionId) {
+      currentPins = pins;
+      const el = document.getElementById('message-panel-pinned');
+      if (el) el.innerHTML = renderPinnedSection();
+    }
+  } catch {}
+  _renderStorageTab();
+  _updateStorageTotal();
+}
+
+function _renderStorageScratchpads() {
+  const allItems = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (!key.startsWith('scratchpad-')) continue;
+    const val = localStorage.getItem(key) || '';
+    const isProject = key.startsWith('scratchpad-project:');
+    const id = isProject ? key.slice('scratchpad-project:'.length) : key.slice('scratchpad-'.length);
+    allItems.push({ key, id, isProject, chars: val.length });
+  }
+  if (!allItems.length) return '<div class="storage-empty">No scratchpads</div>';
+
+  const projectItems = allItems.filter((i) => i.isProject);
+  const sessionItems = allItems.filter((i) => !i.isProject);
+  const sessionIds = sessionItems.map((i) => i.id);
+  const { groups: projectGroups, orphans } = _groupByProject(sessionIds);
+  const scratchBySession = new Map(sessionItems.map((i) => [i.id, i]));
+
+  function renderScratchItem(item) {
+    const session = !item.isProject ? sessions.find((s) => s.id === item.id) : null;
+    const typeBadge = item.isProject
+      ? '<span class="storage-item-badge">project</span>'
+      : '<span class="storage-item-badge">session</span>';
+    const jsKey = _escapeForJsAttr(item.key);
+    const label = item.isProject ? escapeHtml(_projectLabel(item.id)) : _sessionLabel(session, item.id);
+    return `<div class="storage-item">
+      <span class="storage-item-id" title="${escapeHtml(item.id)}">${label}</span>
+      ${typeBadge}
+      <span class="storage-item-meta">${item.chars} chars</span>
+      <div class="storage-item-actions">
+        <button onclick="_storagePreviewScratchpad('${jsKey}')">View</button>
+        <button class="danger" onclick="_storageDeleteScratchpad('${jsKey}')">Delete</button>
+      </div>
+    </div>`;
+  }
+
+  let html = '';
+
+  if (projectItems.length) {
+    html += _renderProjectGroup(
+      'Project Scratchpads',
+      `${projectItems.length}`,
+      projectItems.map(renderScratchItem).join(''),
+    );
+  }
+
+  for (const [project, items] of projectGroups) {
+    const matching = items.map((i) => scratchBySession.get(i.id)).filter(Boolean);
+    if (!matching.length) continue;
+    html += _renderProjectGroup(
+      escapeHtml(_projectLabel(project)),
+      `${matching.length} scratchpad${matching.length > 1 ? 's' : ''}`,
+      matching.map(renderScratchItem).join(''),
+    );
+  }
+
+  if (orphans.length) {
+    const orphanItems = orphans.map((i) => scratchBySession.get(i.id)).filter(Boolean);
+    if (orphanItems.length) {
+      html += _renderOrphanGroup(orphanItems.length, orphanItems.map(renderScratchItem).join(''));
+    }
+  }
+  return html;
+}
+
+function _storagePreviewScratchpad(key) {
+  closeStorageManager();
+  showScratchpad(key);
+}
+
+function _storagePreviewPin(sessionId, pinId) {
+  closeStorageManager();
+  const key = `pinned-messages-${sessionId}`;
+  try {
+    const pins = JSON.parse(localStorage.getItem(key)) || [];
+    const pin = pins.find((p) => p.id === pinId);
+    if (!pin) return;
+    document.getElementById('msg-detail-pin-btn').style.display = 'none';
+    currentMsgDetailIdx = null;
+    currentPinDetailId = null;
+    _renderPinToDetail(pin);
+    document.getElementById('msg-detail-modal').classList.add('visible');
+  } catch (e) {
+    console.error('_storagePreviewPin error:', e);
+  }
+}
+
+function _storageDeleteScratchpad(key) {
+  localStorage.removeItem(key);
+  _renderStorageTab();
+  _updateStorageTotal();
+}
+
+function _findOrphanedKeys() {
+  const known = _getKnownSessionIds();
+  if (!known.size) return [];
+  const orphaned = [];
+  for (const id of pinnedSessionIds) if (!known.has(id)) orphaned.push(`__pinned__${id}`);
+  for (const id of stickySessionIds) if (!known.has(id)) orphaned.push(`__sticky__${id}`);
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key.startsWith('pinned-messages-')) {
+      if (!known.has(key.slice('pinned-messages-'.length))) orphaned.push(key);
+    } else if (key.startsWith('scratchpad-') && !key.startsWith('scratchpad-project:')) {
+      if (!known.has(key.slice('scratchpad-'.length))) orphaned.push(key);
+    }
+  }
+  return orphaned;
+}
+
+function _updateOrphanedCount() {
+  const btn = document.getElementById('storage-cleanup-btn');
+  if (!btn) return;
+  const count = _findOrphanedKeys().length;
+  btn.textContent = count ? `Clean Orphaned (${count})` : 'Clean Orphaned';
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML onclick
+function cleanupOrphanedStorage() {
+  if (!sessions.length) {
+    showToast('Sessions not loaded yet — try again after they appear');
+    return;
+  }
+  const orphaned = _findOrphanedKeys();
+  let pinsChanged = false;
+  for (const key of orphaned) {
+    if (key.startsWith('__pinned__')) {
+      pinnedSessionIds.delete(key.slice('__pinned__'.length));
+      pinsChanged = true;
+    } else if (key.startsWith('__sticky__')) {
+      stickySessionIds.delete(key.slice('__sticky__'.length));
+      pinsChanged = true;
+    } else {
+      localStorage.removeItem(key);
+    }
+  }
+  if (pinsChanged) savePinnedSessions();
+  const removed = orphaned.length;
+
+  showToast(removed ? `Cleaned ${removed} orphaned item${removed > 1 ? 's' : ''}` : 'No orphaned items found');
+  renderSessions();
+  _renderStorageTab();
+  _updateStorageTotal();
+  _updateOrphanedCount();
+}
 //#endregion
 
 //#region KEYBOARD_SHORTCUTS
@@ -3149,6 +3836,11 @@ document.addEventListener('keydown', (e) => {
       msgDetailFollowLatest = true;
       showMsgDetail(currentMessages.length - 1);
     }
+    return;
+  }
+  if (e.code === 'KeyS' && e.shiftKey) {
+    e.preventDefault();
+    showStorageManager();
     return;
   }
 
@@ -3585,6 +4277,33 @@ function renderMarkdown(text) {
   return `<pre style="white-space:pre-wrap;margin:0;">${escapeHtml(text)}</pre>`;
 }
 
+function isLightTheme() {
+  const saved = localStorage.getItem('theme');
+  return (
+    document.body.classList.contains('light') || (!saved && window.matchMedia('(prefers-color-scheme: light)').matches)
+  );
+}
+
+function getMermaidTheme() {
+  return isLightTheme() ? 'default' : 'dark';
+}
+
+function initMermaidBlocks(container) {
+  if (typeof mermaid === 'undefined') return;
+  const blocks = (container || document).querySelectorAll('pre.mermaid:not([data-processed])');
+  if (blocks.length) mermaid.run({ nodes: [...blocks] });
+}
+
+function reinitMermaidTheme() {
+  if (typeof mermaid === 'undefined') return;
+  mermaid.initialize({ startOnLoad: false, theme: getMermaidTheme() });
+  document.querySelectorAll('pre.mermaid[data-processed]').forEach((el) => {
+    el.removeAttribute('data-processed');
+    el.innerHTML = escapeHtml(el.getAttribute('data-original') || '');
+  });
+  initMermaidBlocks();
+}
+
 const _agentTabTexts = {};
 
 function renderAgentTabs(promptHtml, responseHtml, promptText, responseText) {
@@ -3848,22 +4567,21 @@ function toggleTheme() {
   updateThemeIcon();
   updateThemeColor(!isCurrentlyLight);
   syncHljsTheme();
+  reinitMermaidTheme();
 }
 
 function syncHljsTheme() {
-  const isLight = document.body.classList.contains('light');
-  const dark = document.getElementById('hljs-theme-dark');
-  const light = document.getElementById('hljs-theme-light');
-  if (dark) dark.disabled = isLight;
-  if (light) light.disabled = !isLight;
+  const light = isLightTheme();
+  const dark$ = document.getElementById('hljs-theme-dark');
+  const light$ = document.getElementById('hljs-theme-light');
+  if (dark$) dark$.disabled = light;
+  if (light$) light$.disabled = !light;
 }
 
 function updateThemeIcon() {
-  const saved = localStorage.getItem('theme');
-  const isLight =
-    document.body.classList.contains('light') || (!saved && window.matchMedia('(prefers-color-scheme: light)').matches);
-  document.getElementById('theme-icon-dark').style.display = isLight ? 'none' : 'block';
-  document.getElementById('theme-icon-light').style.display = isLight ? 'block' : 'none';
+  const light = isLightTheme();
+  document.getElementById('theme-icon-dark').style.display = light ? 'none' : 'block';
+  document.getElementById('theme-icon-light').style.display = light ? 'block' : 'none';
 }
 
 function loadTheme() {
@@ -4037,7 +4755,19 @@ async function showSessionInfoModal(sessionId) {
   showInfoModal(session, teamConfig, tasks, planContent);
 }
 
+let _infoModalSessionId = null;
 let _pendingPlanContent = null;
+
+function updateStickyBtnState() {
+  const stickyBtn = document.getElementById('session-info-sticky-btn');
+  if (!stickyBtn || !_infoModalSessionId) return;
+  const isSticky = stickySessionIds.has(_infoModalSessionId);
+  stickyBtn.style.display = '';
+  stickyBtn.classList.toggle('active', isSticky);
+  stickyBtn.title = isSticky ? 'Remove sticky pin' : 'Sticky pin — always show at top';
+  const svg = stickyBtn.querySelector('svg');
+  if (svg) svg.setAttribute('fill', isSticky ? 'currentColor' : 'none');
+}
 
 function showInfoModal(session, teamConfig, tasks, planContent) {
   const modal = document.getElementById('team-modal');
@@ -4098,7 +4828,7 @@ function showInfoModal(session, teamConfig, tasks, planContent) {
     } else {
       html += `<span style="${plainStyle}" title="${copyVal}">${escapeHtml(value)}</span>`;
     }
-    const jsCopyVal = copyVal.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const jsCopyVal = _escapeForJsAttr(copyVal);
     html += `<button onclick="navigator.clipboard.writeText('${jsCopyVal}'); this.textContent='✓'; setTimeout(() => this.textContent='Copy', 1000)" style="padding: 2px 8px; font-size: 11px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 4px; color: var(--text-secondary); cursor: pointer; white-space: nowrap;">Copy</button>`;
   });
   html += `</div>`;
@@ -4176,6 +4906,8 @@ function showInfoModal(session, teamConfig, tasks, planContent) {
   }
 
   bodyEl.innerHTML = html;
+  _infoModalSessionId = session.id;
+  updateStickyBtnState();
   modal.classList.add('visible');
 
   const keyHandler = (e) => {
@@ -4338,6 +5070,9 @@ document.addEventListener('DOMContentLoaded', () => {
   if (typeof marked !== 'undefined' && typeof hljs !== 'undefined') {
     const renderer = new marked.Renderer();
     renderer.code = ({ text, lang }) => {
+      if (lang === 'mermaid') {
+        return `<pre class="mermaid" data-original="${escapeHtml(text)}">${escapeHtml(text)}</pre>`;
+      }
       let highlighted;
       if (lang && hljs.getLanguage(lang)) {
         highlighted = hljs.highlight(text, { language: lang }).value;
@@ -4347,6 +5082,20 @@ document.addEventListener('DOMContentLoaded', () => {
       return `<pre><code class="hljs language-${escapeHtml(lang || '')}">${highlighted}</code></pre>`;
     };
     marked.use({ renderer });
+  }
+
+  if (typeof mermaid !== 'undefined') {
+    mermaid.initialize({ startOnLoad: false, theme: getMermaidTheme() });
+    let mermaidPending = false;
+    const mo = new MutationObserver(() => {
+      if (mermaidPending) return;
+      mermaidPending = true;
+      queueMicrotask(() => {
+        mermaidPending = false;
+        initMermaidBlocks();
+      });
+    });
+    mo.observe(document.body, { childList: true, subtree: true });
   }
 });
 
@@ -4360,6 +5109,42 @@ initSidebarResize();
 loadPanelWidths();
 initPanelResize('detail-panel', 'detail-panel-resize', '--detail-panel-width', 'detail-panel-width');
 initPanelResize('message-panel', 'message-panel-resize', '--message-panel-width', 'message-panel-width');
+
+const msgContentEl = document.getElementById('message-panel-content');
+const jumpLatestBtn = document.createElement('button');
+jumpLatestBtn.id = 'msg-jump-latest';
+jumpLatestBtn.className = 'msg-jump-latest';
+jumpLatestBtn.style.display = 'none';
+jumpLatestBtn.textContent = '\u2193 Latest';
+jumpLatestBtn.onclick = function () {
+  msgContentEl.scrollTop = msgContentEl.scrollHeight;
+  msgUserScrolledUp = false;
+  this.style.display = 'none';
+};
+msgContentEl.parentElement.appendChild(jumpLatestBtn);
+
+let msgScrollThrottled = false;
+msgContentEl.addEventListener('scroll', () => {
+  if (msgScrollThrottled) return;
+  msgScrollThrottled = true;
+  requestAnimationFrame(() => {
+    msgScrollThrottled = false;
+    const el = msgContentEl;
+    if (el.scrollTop === 0 && msgHasMore && !msgLoadingMore) {
+      loadOlderMessages();
+    }
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
+    msgUserScrolledUp = !nearBottom;
+    jumpLatestBtn.style.display = msgUserScrolledUp ? '' : 'none';
+  });
+});
+// Load older messages on wheel-up when content doesn't overflow
+msgContentEl.addEventListener('wheel', function (e) {
+  if (e.deltaY < 0 && this.scrollTop === 0 && msgHasMore && !msgLoadingMore) {
+    loadOlderMessages();
+  }
+});
+
 fetch('/api/version')
   .then((r) => r.json())
   .then((d) => {
@@ -4376,6 +5161,7 @@ searchQuery = urlState.search || '';
 
 loadPreferences();
 pinnedSessionIds = loadPinnedSessions();
+stickySessionIds = loadStickySessions();
 setupEventSource();
 
 if (urlState.search) {
@@ -4397,6 +5183,10 @@ fetchSessions().then(async () => {
   }
   if (urlState.messages && currentSessionId) {
     toggleMessagePanel();
+    // Re-render after panel layout settles so scroll dimensions are correct
+    requestAnimationFrame(() => {
+      if (currentMessages.length) renderMessages(currentMessages);
+    });
   }
 });
 
