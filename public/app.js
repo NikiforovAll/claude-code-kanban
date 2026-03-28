@@ -36,6 +36,7 @@ let msgUserScrolledUp = false;
 const MSG_MAX_LOADED = 200;
 let currentProjectPath = null;
 let currentProjectSessionIds = [];
+const dismissedSessionIds = new Set();
 
 function resetMessageScrollState() {
   msgUserScrolledUp = false;
@@ -627,7 +628,10 @@ async function viewAgentLog(agentId) {
     await fetchAgents(currentSessionId);
     agent = findAgentById(agentId);
   }
-  if (!agent) return;
+  if (!agent) {
+    if (!currentSessionId) return;
+    agent = { agentId: agentId, type: 'Agent', _sourceSessionId: currentSessionId };
+  }
   const resolvedId = agent.agentId;
   const shortId = resolvedId.length > 8 ? resolvedId.slice(0, 8) : resolvedId;
   const agentSessionId = agent._sourceSessionId || currentSessionId;
@@ -652,6 +656,7 @@ async function viewAgentLog(agentId) {
       const data = JSON.parse(e.data);
       currentMessages = data.messages;
       if (messagePanelOpen) renderMessages(data.messages);
+      maybeFollowLatest();
     } catch (_) {}
   });
   agentLogSSE.onerror = () => {};
@@ -684,6 +689,7 @@ async function fetchAgentMessages() {
     if (!agentLogMode || agentLogMode.agentId !== agentId) return;
     currentMessages = data.messages;
     if (messagePanelOpen) renderMessages(data.messages);
+    maybeFollowLatest();
   } catch (e) {
     console.error('[fetchAgentMessages]', e);
   }
@@ -737,9 +743,7 @@ async function fetchMessages(sessionId) {
       }
     }
 
-    if (msgDetailFollowLatest && currentMessages.length) {
-      showMsgDetail(currentMessages.length - 1);
-    }
+    maybeFollowLatest();
   } catch (e) {
     console.error('[fetchMessages]', e);
   }
@@ -1538,8 +1542,15 @@ function formatTaskToolDetail(params) {
 }
 function getToolDetail(tool, params, detail) {
   if (TASK_TOOLS.has(tool)) return formatTaskToolDetail(params);
-  if (detail) return ` <span style="color:var(--text-muted)">${escapeHtml(detail)}</span>`;
-  return '';
+  if (!detail) return '';
+  let extra = '';
+  if (tool === 'Read' && params) {
+    const parts = [];
+    if (params.offset) parts.push(`L${params.offset}`);
+    if (params.limit) parts.push(`+${params.limit}`);
+    if (parts.length) extra = ` <span style="color:var(--text-muted);opacity:.7">${parts.join(' ')}</span>`;
+  }
+  return ` <span style="color:var(--text-muted)">${escapeHtml(detail)}</span>${extra}`;
 }
 function renderTaskResult(toolResult) {
   if (!toolResult) return '';
@@ -1828,10 +1839,12 @@ function renderAgentFooter() {
             : a.status === 'idle'
               ? `idle · ${formatDuration(elapsed)}`
               : `active · ${formatDuration(elapsed)}`;
+        const descText = a.description || '';
         const promptTrimmed = stripAnsi(stripTeammateWrapper((a.prompt || '').trim())).replace(/[\r\n]+/g, ' ');
-        const promptTrunc = promptTrimmed.length > 60 ? `${promptTrimmed.substring(0, 60)}…` : promptTrimmed;
-        const msgHtml = promptTrunc
-          ? `<div class="agent-message" title="${escapeHtml(promptTrimmed)}">${escapeHtml(promptTrunc)}</div>`
+        const displayText = descText || promptTrimmed;
+        const displayTrunc = displayText.length > 60 ? `${displayText.substring(0, 60)}…` : displayText;
+        const msgHtml = displayTrunc
+          ? `<div class="agent-message" title="${escapeHtml(displayText)}">${escapeHtml(displayTrunc)}</div>`
           : '';
         const rawType = a.type || 'unknown';
         const colonIdx = rawType.indexOf(':');
@@ -2091,6 +2104,7 @@ function renderSessions() {
     const now = Date.now();
     const activeSessionIds = new Set();
     filteredSessions = filteredSessions.filter((s) => {
+      if (dismissedSessionIds.has(s.id)) return false;
       const isActive =
         s.hasMessages &&
         ((!s.sharedTaskList && (s.pending > 0 || s.inProgress > 0)) ||
@@ -2770,7 +2784,7 @@ function navigateSession(direction, items) {
   }
   const currentEl = items[selectedSessionIdx];
   let newIdx = selectedSessionIdx + direction;
-  if (!currentEl || !currentEl.isConnected) {
+  if (!currentEl?.isConnected) {
     const restoredIdx = selectedSessionKbId ? items.findIndex((el) => getKbId(el) === selectedSessionKbId) : -1;
     newIdx = restoredIdx >= 0 ? restoredIdx : 0;
   }
@@ -4081,7 +4095,12 @@ function setupEventSource() {
       }
 
       if (data.type === 'team-update') {
-        debouncedRefresh(data.teamName, false);
+        const teamSession = sessions.find((s) => s.isTeam && s.teamName === data.teamName);
+        if (teamSession) {
+          debouncedRefresh(teamSession.id, false);
+        } else if (currentSessionId) {
+          debouncedRefresh(currentSessionId, false);
+        }
       }
     };
   }
@@ -4238,6 +4257,12 @@ function renderContextDetail(raw) {
 //#endregion
 
 //#region UTILS
+function maybeFollowLatest() {
+  if (msgDetailFollowLatest && currentMessages.length) {
+    showMsgDetail(currentMessages.length - 1);
+  }
+}
+
 function isSessionActive(s) {
   return s.hasRecentLog || s.inProgress > 0 || s.hasActiveAgents || s.hasWaitingForUser;
 }
@@ -4908,6 +4933,7 @@ function showInfoModal(session, teamConfig, tasks, planContent) {
   bodyEl.innerHTML = html;
   _infoModalSessionId = session.id;
   updateStickyBtnState();
+  updateDismissBtnState();
   modal.classList.add('visible');
 
   const keyHandler = (e) => {
@@ -4923,6 +4949,25 @@ function showInfoModal(session, teamConfig, tasks, planContent) {
 
 function closeTeamModal() {
   document.getElementById('team-modal').classList.remove('visible');
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+function toggleDismissSession(sessionId) {
+  if (dismissedSessionIds.has(sessionId)) {
+    dismissedSessionIds.delete(sessionId);
+  } else {
+    dismissedSessionIds.add(sessionId);
+  }
+  updateDismissBtnState();
+  renderSessions();
+}
+
+function updateDismissBtnState() {
+  const btn = document.getElementById('session-info-dismiss-btn');
+  if (!btn || !_infoModalSessionId) return;
+  const isDismissed = dismissedSessionIds.has(_infoModalSessionId);
+  btn.textContent = isDismissed ? 'Restore' : 'Dismiss';
+  btn.title = isDismissed ? 'Restore — show in active list again' : 'Dismiss — hide from active list';
 }
 
 let _planSessionId = null;
@@ -4999,7 +5044,7 @@ function updateOwnerFilter() {
   const select = document.getElementById('owner-filter');
 
   const session = sessions.find((s) => s.id === currentSessionId);
-  if (!session || !session.isTeam) {
+  if (!session?.isTeam) {
     bar.classList.remove('visible');
     return;
   }
