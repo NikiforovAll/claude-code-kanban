@@ -655,9 +655,7 @@ async function viewAgentLog(agentId) {
       const data = JSON.parse(e.data);
       currentMessages = data.messages;
       if (messagePanelOpen) renderMessages(data.messages);
-      if (msgDetailFollowLatest && currentMessages.length) {
-        showMsgDetail(currentMessages.length - 1);
-      }
+      maybeFollowLatest();
     } catch (_) {}
   });
   agentLogSSE.onerror = () => {};
@@ -690,9 +688,7 @@ async function fetchAgentMessages() {
     if (!agentLogMode || agentLogMode.agentId !== agentId) return;
     currentMessages = data.messages;
     if (messagePanelOpen) renderMessages(data.messages);
-    if (msgDetailFollowLatest && currentMessages.length) {
-      showMsgDetail(currentMessages.length - 1);
-    }
+    maybeFollowLatest();
   } catch (e) {
     console.error('[fetchAgentMessages]', e);
   }
@@ -746,9 +742,7 @@ async function fetchMessages(sessionId) {
       }
     }
 
-    if (msgDetailFollowLatest && currentMessages.length) {
-      showMsgDetail(currentMessages.length - 1);
-    }
+    maybeFollowLatest();
   } catch (e) {
     console.error('[fetchMessages]', e);
   }
@@ -900,8 +894,7 @@ function renderToolItem(m, i, compact) {
       ? `onclick="showAgentModal('${escapeHtml(m.agentId)}')" ${combinedStyle}`
       : `onclick="msgDetailFollowLatest=false;showMsgDetail(${i})" ${combinedStyle}`;
   const pinBtn = renderMsgPinBtn(m, i);
-  const agentDataAttr = m.tool === 'Agent' && m.agentId ? ` data-agent-id="${escapeHtml(m.agentId)}"` : '';
-  return `<div class="msg-item msg-tool${compactClass}"${agentDataAttr} ${itemClickAttr}>
+  return `<div class="msg-item msg-tool${compactClass}" ${itemClickAttr}>
       ${getToolIcon(m.tool)}
       <div class="msg-body"><div class="msg-text">${escapeHtml(m.tool)}${toolDetail}${agentLink}</div><div class="msg-time">${formatDate(m.timestamp)}</div></div>${agentLogBtn}${pinBtn}
     </div>`;
@@ -4255,6 +4248,12 @@ function renderContextDetail(raw) {
 //#endregion
 
 //#region UTILS
+function maybeFollowLatest() {
+  if (msgDetailFollowLatest && currentMessages.length) {
+    showMsgDetail(currentMessages.length - 1);
+  }
+}
+
 function isSessionActive(s) {
   return s.hasRecentLog || s.inProgress > 0 || s.hasActiveAgents || s.hasWaitingForUser;
 }

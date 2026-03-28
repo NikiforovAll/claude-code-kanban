@@ -3269,19 +3269,6 @@ pre.mermaid svg {
   animation: shimmer 2s linear infinite;
 }
 
-@keyframes msgHighlight {
-  0% {
-    background-color: var(--accent);
-  }
-  100% {
-    background-color: transparent;
-  }
-}
-
-.msg-highlight {
-  animation: msgHighlight 2s ease-out;
-}
-
 /* #endregion */
 
 /* #region PROJECT_GROUPS */
