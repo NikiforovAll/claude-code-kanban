@@ -1541,8 +1541,15 @@ function formatTaskToolDetail(params) {
 }
 function getToolDetail(tool, params, detail) {
   if (TASK_TOOLS.has(tool)) return formatTaskToolDetail(params);
-  if (detail) return ` <span style="color:var(--text-muted)">${escapeHtml(detail)}</span>`;
-  return '';
+  if (!detail) return '';
+  let extra = '';
+  if (tool === 'Read' && params) {
+    const parts = [];
+    if (params.offset) parts.push(`L${params.offset}`);
+    if (params.limit) parts.push(`+${params.limit}`);
+    if (parts.length) extra = ` <span style="color:var(--text-muted);opacity:.7">${parts.join(' ')}</span>`;
+  }
+  return ` <span style="color:var(--text-muted)">${escapeHtml(detail)}</span>${extra}`;
 }
 function renderTaskResult(toolResult) {
   if (!toolResult) return '';
