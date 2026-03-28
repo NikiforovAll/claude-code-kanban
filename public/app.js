@@ -36,6 +36,7 @@ let msgUserScrolledUp = false;
 const MSG_MAX_LOADED = 200;
 let currentProjectPath = null;
 let currentProjectSessionIds = [];
+const dismissedSessionIds = new Set();
 
 function resetMessageScrollState() {
   msgUserScrolledUp = false;
@@ -2103,6 +2104,7 @@ function renderSessions() {
     const now = Date.now();
     const activeSessionIds = new Set();
     filteredSessions = filteredSessions.filter((s) => {
+      if (dismissedSessionIds.has(s.id)) return false;
       const isActive =
         s.hasMessages &&
         ((!s.sharedTaskList && (s.pending > 0 || s.inProgress > 0)) ||
@@ -4931,6 +4933,7 @@ function showInfoModal(session, teamConfig, tasks, planContent) {
   bodyEl.innerHTML = html;
   _infoModalSessionId = session.id;
   updateStickyBtnState();
+  updateDismissBtnState();
   modal.classList.add('visible');
 
   const keyHandler = (e) => {
@@ -4946,6 +4949,25 @@ function showInfoModal(session, teamConfig, tasks, planContent) {
 
 function closeTeamModal() {
   document.getElementById('team-modal').classList.remove('visible');
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+function toggleDismissSession(sessionId) {
+  if (dismissedSessionIds.has(sessionId)) {
+    dismissedSessionIds.delete(sessionId);
+  } else {
+    dismissedSessionIds.add(sessionId);
+  }
+  updateDismissBtnState();
+  renderSessions();
+}
+
+function updateDismissBtnState() {
+  const btn = document.getElementById('session-info-dismiss-btn');
+  if (!btn || !_infoModalSessionId) return;
+  const isDismissed = dismissedSessionIds.has(_infoModalSessionId);
+  btn.textContent = isDismissed ? 'Restore' : 'Dismiss';
+  btn.title = isDismissed ? 'Restore — show in active list again' : 'Dismiss — hide from active list';
 }
 
 let _planSessionId = null;
