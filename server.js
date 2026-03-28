@@ -1452,9 +1452,16 @@ watcher.on('all', (event, filePath) => {
 function broadcastToMappedSessions(taskListName, event, filePath) {
   const { listToSessions } = loadAllTaskMaps();
   const map = listToSessions[taskListName];
-  if (!map) return;
-  for (const sid of Object.keys(map)) {
-    broadcast({ type: 'update', event, sessionId: sid, file: path.basename(filePath) });
+  if (map) {
+    for (const sid of Object.keys(map)) {
+      broadcast({ type: 'update', event, sessionId: sid, file: path.basename(filePath) });
+    }
+    return;
+  }
+  // Fallback: check if taskListName is a team name
+  const cfg = loadTeamConfig(taskListName);
+  if (cfg?.leadSessionId) {
+    broadcast({ type: 'update', event, sessionId: cfg.leadSessionId, file: path.basename(filePath) });
   }
 }
 
