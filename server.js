@@ -1016,14 +1016,17 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
 
     const agentsNeedingPrompt = agents.filter(a => !a.prompt);
     const agentsNeedingName = agents.filter(a => !a.agentName);
-    if ((agentsNeedingPrompt.length || agentsNeedingName.length) && meta.jsonlPath) {
+    const agentsNeedingDesc = agents.filter(a => !a.description);
+    if ((agentsNeedingPrompt.length || agentsNeedingName.length || agentsNeedingDesc.length) && meta.jsonlPath) {
       let byAgentId = {};
       let nameByAgentId = {};
+      let descByAgentId = {};
       try {
         const progressMap = getProgressMap(meta.jsonlPath);
         for (const entry of Object.values(progressMap)) {
           if (entry.prompt && !byAgentId[entry.agentId]) byAgentId[entry.agentId] = entry.prompt;
           if (entry.name && !nameByAgentId[entry.agentId]) nameByAgentId[entry.agentId] = entry.name;
+          if (entry.description && !descByAgentId[entry.agentId]) descByAgentId[entry.agentId] = entry.description;
         }
       } catch (_) {}
       for (const agent of agentsNeedingPrompt) {
@@ -1033,6 +1036,9 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
       }
       for (const agent of agentsNeedingName) {
         if (nameByAgentId[agent.agentId]) agent.agentName = nameByAgentId[agent.agentId];
+      }
+      for (const agent of agentsNeedingDesc) {
+        if (descByAgentId[agent.agentId]) agent.description = descByAgentId[agent.agentId];
       }
     }
 
@@ -1199,6 +1205,7 @@ app.get('/api/sessions/:sessionId/messages', (req, res) => {
       const entry = progressMap[msg.toolUseId];
       if (entry) {
         msg.agentId = entry.agentId;
+        if (entry.description) msg.agentDescription = entry.description;
         if (entry.prompt && !msg.agentPrompt) msg.agentPrompt = entry.prompt;
         try {
           const agentFile = path.join(agentDir, entry.agentId + '.json');

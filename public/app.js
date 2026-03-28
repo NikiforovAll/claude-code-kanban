@@ -627,7 +627,10 @@ async function viewAgentLog(agentId) {
     await fetchAgents(currentSessionId);
     agent = findAgentById(agentId);
   }
-  if (!agent) return;
+  if (!agent) {
+    if (!currentSessionId) return;
+    agent = { agentId: agentId, type: 'Agent', _sourceSessionId: currentSessionId };
+  }
   const resolvedId = agent.agentId;
   const shortId = resolvedId.length > 8 ? resolvedId.slice(0, 8) : resolvedId;
   const agentSessionId = agent._sourceSessionId || currentSessionId;
@@ -652,6 +655,9 @@ async function viewAgentLog(agentId) {
       const data = JSON.parse(e.data);
       currentMessages = data.messages;
       if (messagePanelOpen) renderMessages(data.messages);
+      if (msgDetailFollowLatest && currentMessages.length) {
+        showMsgDetail(currentMessages.length - 1);
+      }
     } catch (_) {}
   });
   agentLogSSE.onerror = () => {};
@@ -684,6 +690,9 @@ async function fetchAgentMessages() {
     if (!agentLogMode || agentLogMode.agentId !== agentId) return;
     currentMessages = data.messages;
     if (messagePanelOpen) renderMessages(data.messages);
+    if (msgDetailFollowLatest && currentMessages.length) {
+      showMsgDetail(currentMessages.length - 1);
+    }
   } catch (e) {
     console.error('[fetchAgentMessages]', e);
   }
@@ -891,7 +900,8 @@ function renderToolItem(m, i, compact) {
       ? `onclick="showAgentModal('${escapeHtml(m.agentId)}')" ${combinedStyle}`
       : `onclick="msgDetailFollowLatest=false;showMsgDetail(${i})" ${combinedStyle}`;
   const pinBtn = renderMsgPinBtn(m, i);
-  return `<div class="msg-item msg-tool${compactClass}" ${itemClickAttr}>
+  const agentDataAttr = m.tool === 'Agent' && m.agentId ? ` data-agent-id="${escapeHtml(m.agentId)}"` : '';
+  return `<div class="msg-item msg-tool${compactClass}"${agentDataAttr} ${itemClickAttr}>
       ${getToolIcon(m.tool)}
       <div class="msg-body"><div class="msg-text">${escapeHtml(m.tool)}${toolDetail}${agentLink}</div><div class="msg-time">${formatDate(m.timestamp)}</div></div>${agentLogBtn}${pinBtn}
     </div>`;
@@ -1828,10 +1838,12 @@ function renderAgentFooter() {
             : a.status === 'idle'
               ? `idle · ${formatDuration(elapsed)}`
               : `active · ${formatDuration(elapsed)}`;
+        const descText = a.description || '';
         const promptTrimmed = stripAnsi(stripTeammateWrapper((a.prompt || '').trim())).replace(/[\r\n]+/g, ' ');
-        const promptTrunc = promptTrimmed.length > 60 ? `${promptTrimmed.substring(0, 60)}…` : promptTrimmed;
-        const msgHtml = promptTrunc
-          ? `<div class="agent-message" title="${escapeHtml(promptTrimmed)}">${escapeHtml(promptTrunc)}</div>`
+        const displayText = descText || promptTrimmed;
+        const displayTrunc = displayText.length > 60 ? `${displayText.substring(0, 60)}…` : displayText;
+        const msgHtml = displayTrunc
+          ? `<div class="agent-message" title="${escapeHtml(displayText)}">${escapeHtml(displayTrunc)}</div>`
           : '';
         const rawType = a.type || 'unknown';
         const colonIdx = rawType.indexOf(':');
@@ -2770,7 +2782,7 @@ function navigateSession(direction, items) {
   }
   const currentEl = items[selectedSessionIdx];
   let newIdx = selectedSessionIdx + direction;
-  if (!currentEl || !currentEl.isConnected) {
+  if (!currentEl?.isConnected) {
     const restoredIdx = selectedSessionKbId ? items.findIndex((el) => getKbId(el) === selectedSessionKbId) : -1;
     newIdx = restoredIdx >= 0 ? restoredIdx : 0;
   }
@@ -4081,7 +4093,12 @@ function setupEventSource() {
       }
 
       if (data.type === 'team-update') {
-        debouncedRefresh(data.teamName, false);
+        const teamSession = sessions.find((s) => s.isTeam && s.teamName === data.teamName);
+        if (teamSession) {
+          debouncedRefresh(teamSession.id, false);
+        } else if (currentSessionId) {
+          debouncedRefresh(currentSessionId, false);
+        }
       }
     };
   }
@@ -4999,7 +5016,7 @@ function updateOwnerFilter() {
   const select = document.getElementById('owner-filter');
 
   const session = sessions.find((s) => s.id === currentSessionId);
-  if (!session || !session.isTeam) {
+  if (!session?.isTeam) {
     bar.classList.remove('visible');
     return;
   }
