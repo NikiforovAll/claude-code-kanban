@@ -2770,7 +2770,7 @@ function navigateSession(direction, items) {
   }
   const currentEl = items[selectedSessionIdx];
   let newIdx = selectedSessionIdx + direction;
-  if (!currentEl || !currentEl.isConnected) {
+  if (!currentEl?.isConnected) {
     const restoredIdx = selectedSessionKbId ? items.findIndex((el) => getKbId(el) === selectedSessionKbId) : -1;
     newIdx = restoredIdx >= 0 ? restoredIdx : 0;
   }
@@ -4999,7 +4999,7 @@ function updateOwnerFilter() {
   const select = document.getElementById('owner-filter');
 
   const session = sessions.find((s) => s.id === currentSessionId);
-  if (!session || !session.isTeam) {
+  if (!session?.isTeam) {
     bar.classList.remove('visible');
     return;
   }

@@ -112,3 +112,12 @@ When modifying a feature, open **both** the JS region and the matching CSS regio
 | MEDIA_QUERIES | `prefers-color-scheme` auto-detection |
 | ANIMATIONS | Card fade-in, connection breathing, progress shimmer |
 | PROJECT_GROUPS | Collapsible project headers in session list |
+
+## KanbanBot (Agentic Workflow)
+
+- KanbanBot is an automated repository assistant running as a GitHub Agentic Workflow
+- PRs from KanbanBot have `[KanbanBot]` title prefix and `automation`/`kanbanbot` labels
+- KanbanBot uses persistent repo memory on `memory/kanbanbot` branch
+- To trigger on-demand: comment `/kanbanbot <instructions>` on any issue or PR
+- Workflow spec: `.github/workflows/kanbanbot.md`
+- Domain knowledge: `.github/agents/kanban-expert.agent.md`
