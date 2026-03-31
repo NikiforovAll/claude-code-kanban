@@ -1,11 +1,18 @@
 {
-  "last_run": "2026-03-30T12:22:00Z",
-  "last_run_id": "23743811033",
+  "last_run": "2026-03-31T12:04:06Z",
+  "last_run_id": "23796254111",
   "monthly_summary_issue": {
     "month": "2026-03",
-    "title": "[KanbanBot] Monthly Activity 2026-03"
+    "title": "[KanbanBot] Monthly Activity 2026-03",
+    "number": 19
   },
   "kanbanbot_prs": [
+    {
+      "title": "[KanbanBot] test: add contract tests for untested parser exports",
+      "branch": "kanbanbot/test-missing-parsers-2026-03-31",
+      "created": "2026-03-31",
+      "status": "open"
+    },
     {
       "title": "[KanbanBot] chore: fix npm security vulnerabilities (audit fix)",
       "branch": "kanbanbot/eng-audit-fix-2026-03-30",
