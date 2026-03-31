@@ -1,7 +1,8 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const { readFileSync } = require('fs');
+const { readFileSync, writeFileSync, mkdirSync, unlinkSync, rmdirSync } = require('fs');
 const path = require('path');
+const os = require('os');
 const Ajv = require('ajv');
 const addFormats = require('ajv-formats');
 
@@ -12,9 +13,13 @@ const {
   parseTeamConfig,
   parseSessionsIndex,
   parseJsonlLine,
+  readSessionInfoFromJsonl,
   readRecentMessages,
+  readMessagesPage,
   buildAgentProgressMap,
-  findTerminatedTeammates
+  readCompactSummaries,
+  findTerminatedTeammates,
+  extractPromptFromTranscript
 } = require('../lib/parsers');
 
 const ajv = new Ajv({ allErrors: true, strict: false });
@@ -534,5 +539,189 @@ describe('Parser: buildAgentProgressMap', () => {
   it('returns empty map for non-existent file', () => {
     const map = buildAgentProgressMap('/nonexistent/path.jsonl');
     assert.deepEqual(map, {});
+  });
+});
+
+describe('Parser: readSessionInfoFromJsonl', () => {
+  const jsonlPath = path.join(FIXTURES_DIR, 'session.jsonl');
+
+  it('reads slug from fixture', () => {
+    const info = readSessionInfoFromJsonl(jsonlPath);
+    assert.equal(info.slug, 'test-session');
+  });
+
+  it('reads projectPath (cwd) from fixture', () => {
+    const info = readSessionInfoFromJsonl(jsonlPath);
+    assert.equal(info.projectPath, '/home/user/project');
+  });
+
+  it('reads gitBranch from fixture', () => {
+    const info = readSessionInfoFromJsonl(jsonlPath);
+    assert.equal(info.gitBranch, 'main');
+  });
+
+  it('returns null fields for non-existent file', () => {
+    const info = readSessionInfoFromJsonl('/nonexistent/path.jsonl');
+    assert.equal(info.slug, null);
+    assert.equal(info.projectPath, null);
+    assert.equal(info.gitBranch, null);
+    assert.equal(info.customTitle, null);
+  });
+});
+
+describe('Parser: readMessagesPage', () => {
+  const jsonlPath = path.join(FIXTURES_DIR, 'session.jsonl');
+
+  it('returns messages array and hasMore flag', () => {
+    const result = readMessagesPage(jsonlPath, 100);
+    assert.ok(Array.isArray(result.messages));
+    assert.equal(typeof result.hasMore, 'boolean');
+  });
+
+  it('respects limit — returns at most limit messages', () => {
+    const result = readMessagesPage(jsonlPath, 3);
+    assert.ok(result.messages.length <= 3);
+  });
+
+  it('returns hasMore: false when all messages fit', () => {
+    const result = readMessagesPage(jsonlPath, 1000);
+    assert.equal(result.hasMore, false);
+  });
+
+  it('filters by beforeTimestamp', () => {
+    const all = readMessagesPage(jsonlPath, 1000);
+    if (all.messages.length > 0) {
+      const cutoff = all.messages[0].timestamp;
+      const filtered = readMessagesPage(jsonlPath, 1000, cutoff);
+      for (const msg of filtered.messages) {
+        assert.ok(msg.timestamp < cutoff, `message timestamp ${msg.timestamp} should be < ${cutoff}`);
+      }
+    }
+  });
+
+  it('returns empty messages for non-existent file', () => {
+    const result = readMessagesPage('/nonexistent/path.jsonl', 10);
+    assert.deepEqual(result.messages, []);
+    assert.equal(result.hasMore, false);
+  });
+});
+
+describe('Parser: extractPromptFromTranscript', () => {
+  const tmpDir = os.tmpdir();
+
+  it('returns null when first line is not a user message', () => {
+    const result = extractPromptFromTranscript(path.join(FIXTURES_DIR, 'session.jsonl'));
+    assert.equal(result, null);
+  });
+
+  it('extracts content when first line is a user message with string content', () => {
+    const file = path.join(tmpDir, 'extract-prompt-string.jsonl');
+    writeFileSync(file, JSON.stringify({
+      type: 'user',
+      message: { role: 'user', content: 'Please fix the authentication bug' },
+      timestamp: '2026-03-05T10:00:00Z'
+    }) + '\n');
+    try {
+      const result = extractPromptFromTranscript(file);
+      assert.equal(result, 'Please fix the authentication bug');
+    } finally {
+      unlinkSync(file);
+    }
+  });
+
+  it('extracts text from array content blocks', () => {
+    const file = path.join(tmpDir, 'extract-prompt-array.jsonl');
+    writeFileSync(file, JSON.stringify({
+      type: 'user',
+      message: { role: 'user', content: [{ type: 'text', text: 'Refactor the login module' }] },
+      timestamp: '2026-03-05T10:00:00Z'
+    }) + '\n');
+    try {
+      const result = extractPromptFromTranscript(file);
+      assert.equal(result, 'Refactor the login module');
+    } finally {
+      unlinkSync(file);
+    }
+  });
+
+  it('truncates long content to 500 characters', () => {
+    const longText = 'x'.repeat(600);
+    const file = path.join(tmpDir, 'extract-prompt-long.jsonl');
+    writeFileSync(file, JSON.stringify({
+      type: 'user',
+      message: { role: 'user', content: longText },
+      timestamp: '2026-03-05T10:00:00Z'
+    }) + '\n');
+    try {
+      const result = extractPromptFromTranscript(file);
+      assert.equal(result.length, 500);
+    } finally {
+      unlinkSync(file);
+    }
+  });
+});
+
+describe('Parser: readCompactSummaries', () => {
+  const tmpDir = os.tmpdir();
+
+  it('returns empty array when subagents dir does not exist', () => {
+    const file = path.join(tmpDir, 'no-subagents.jsonl');
+    writeFileSync(file, '');
+    try {
+      const result = readCompactSummaries(file);
+      assert.deepEqual(result, []);
+    } finally {
+      unlinkSync(file);
+    }
+  });
+
+  it('returns summaries from compact subagent JSONL files', () => {
+    const sessionName = 'compact-test-session';
+    const sessionFile = path.join(tmpDir, `${sessionName}.jsonl`);
+    const subagentsDir = path.join(tmpDir, sessionName, 'subagents');
+    mkdirSync(subagentsDir, { recursive: true });
+
+    const compactFile = path.join(subagentsDir, 'agent-acompact-001.jsonl');
+    writeFileSync(compactFile, [
+      JSON.stringify({ type: 'user', message: { role: 'user', content: 'compact this' }, timestamp: '2026-03-05T10:00:00Z' }),
+      JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: '<summary>Session compacted successfully</summary>' }] }, timestamp: '2026-03-05T10:00:05Z' })
+    ].join('\n') + '\n');
+    writeFileSync(sessionFile, '');
+
+    try {
+      const result = readCompactSummaries(sessionFile);
+      assert.ok(Array.isArray(result));
+      assert.equal(result.length, 1);
+      assert.equal(result[0].summary, 'Session compacted successfully');
+      assert.equal(result[0].timestamp, '2026-03-05T10:00:05Z');
+    } finally {
+      unlinkSync(compactFile);
+      unlinkSync(sessionFile);
+      rmdirSync(subagentsDir);
+      rmdirSync(path.join(tmpDir, sessionName));
+    }
+  });
+
+  it('skips compact files without a summary tag', () => {
+    const sessionName = 'compact-no-summary';
+    const sessionFile = path.join(tmpDir, `${sessionName}.jsonl`);
+    const subagentsDir = path.join(tmpDir, sessionName, 'subagents');
+    mkdirSync(subagentsDir, { recursive: true });
+
+    const compactFile = path.join(subagentsDir, 'agent-acompact-002.jsonl');
+    writeFileSync(compactFile, [
+      JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'No summary here' }] }, timestamp: '2026-03-05T10:01:00Z' })
+    ].join('\n') + '\n');
+    writeFileSync(sessionFile, '');
+
+    try {
+      const result = readCompactSummaries(sessionFile);
+      assert.deepEqual(result, []);
+    } finally {
+      unlinkSync(compactFile);
+      unlinkSync(sessionFile);
+      rmdirSync(subagentsDir);
+      rmdirSync(path.join(tmpDir, sessionName));
+    }
   });
 });
