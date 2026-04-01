@@ -157,6 +157,28 @@ async function fetchSessions() {
   }
 }
 
+// Lightweight variant used for metadata/agent SSE events where tasks have not changed.
+// Skips the /api/tasks/all fetch to avoid a redundant round-trip.
+async function fetchSessionsOnly() {
+  try {
+    const allPinnedIds = new Set([...pinnedSessionIds, ...stickySessionIds]);
+    if (revealedPlanSessionId) allPinnedIds.add(revealedPlanSessionId);
+    if (revealedStorageSessionId) allPinnedIds.add(revealedStorageSessionId);
+    const pinnedParam = allPinnedIds.size > 0 ? `&pinned=${[...allPinnedIds].join(',')}` : '';
+    const newSessions = await fetch(`/api/sessions?limit=${sessionLimit}${pinnedParam}`).then((r) => r.json());
+
+    const sessionsHash = JSON.stringify(newSessions);
+    if (sessionsHash === lastSessionsHash) return;
+    lastSessionsHash = sessionsHash;
+
+    sessions = newSessions;
+    renderSessions();
+    renderLiveUpdatesFromCache();
+  } catch (error) {
+    console.error('Failed to fetch sessions:', error);
+  }
+}
+
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
 function handleSearch(query) {
   searchQuery = query.toLowerCase().trim();
@@ -4043,7 +4065,7 @@ function setupEventSource() {
       if (isMetadata) {
         clearTimeout(metadataRefreshTimer);
         metadataRefreshTimer = setTimeout(async () => {
-          fetchSessions().catch((err) => console.error('[SSE] fetchSessions failed:', err));
+          fetchSessionsOnly().catch((err) => console.error('[SSE] fetchSessionsOnly failed:', err));
           if (currentSessionId) {
             await fetchAgents(currentSessionId);
             if (!agentLogMode) fetchMessages(currentSessionId);
@@ -4084,7 +4106,7 @@ function setupEventSource() {
         pendingAgentSessionIds.add(data.sessionId);
         clearTimeout(agentRefreshTimer);
         agentRefreshTimer = setTimeout(() => {
-          fetchSessions().catch((err) => console.error('[SSE] fetchSessions failed:', err));
+          fetchSessionsOnly().catch((err) => console.error('[SSE] fetchSessionsOnly failed:', err));
           if (viewMode === 'project' && currentProjectSessionIds.some((id) => pendingAgentSessionIds.has(id))) {
             refreshProjectAgents();
           } else if (currentSessionId && pendingAgentSessionIds.has(currentSessionId)) {
