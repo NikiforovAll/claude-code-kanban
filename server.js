@@ -181,6 +181,10 @@ app.param('taskId', (req, res, next, val) => {
 // Parse JSON bodies
 app.use(express.json());
 
+app.get('/hub-config', (_req, res) => {
+  res.json({ enabled: !!process.env.CLAUDE_HUB, url: process.env.HUB_URL || null });
+});
+
 // Serve static files
 app.get('/sw.js', (req, res) => {
   res.setHeader('Cache-Control', 'no-cache');

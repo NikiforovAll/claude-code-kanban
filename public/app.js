@@ -5254,3 +5254,24 @@ window.addEventListener('popstate', () => {
   if (s.messages !== messagePanelOpen) toggleMessagePanel();
 });
 //#endregion
+
+// #region HUB_INTEGRATION
+(async function initHub() {
+  const cfg = await fetch('/hub-config')
+    .then((r) => r.json())
+    .catch(() => ({}));
+  if (!cfg.enabled) return;
+  window.__HUB__ = cfg;
+  document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+      e.preventDefault();
+      window.parent?.postMessage({ type: 'hub:keydown', key: e.key }, '*');
+    }
+  });
+})();
+
+window.hubNavigate = function hubNavigate(app, url) {
+  if (!window.__HUB__?.enabled) return;
+  window.parent?.postMessage({ type: 'hub:navigate', app, url }, '*');
+};
+// #endregion HUB_INTEGRATION
