@@ -3330,6 +3330,22 @@ pre.mermaid svg {
   color: var(--accent);
 }
 
+.marketplace-btn {
+  color: #888;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  transition:
+    color 0.15s,
+    filter 0.15s;
+  border-radius: 3px;
+}
+
+.marketplace-btn:hover {
+  color: var(--accent);
+  filter: drop-shadow(0 0 3px var(--accent));
+}
+
 .project-group-header .group-count {
   font-weight: 400;
   color: var(--text-muted);
