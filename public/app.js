@@ -25,6 +25,7 @@ let agentPollInterval = null;
 let selectedTaskId = null;
 let selectedSessionId = null;
 let focusZone = 'board'; // 'board' | 'sidebar'
+let appConfig = { marketplaceUrl: null };
 let selectedSessionIdx = -1;
 let selectedSessionKbId = null;
 let sessionJustSelected = false;
@@ -1321,6 +1322,8 @@ function _renderPinToDetail(pin) {
 }
 
 const SESSION_PIN_SVG = PIN_SVG.replace('width="14" height="14"', 'width="12" height="12"');
+const MARKETPLACE_SVG =
+  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg>';
 
 //#endregion
 
@@ -2233,6 +2236,7 @@ function renderSessions() {
                 ${session.hasRunningAgents ? '<span class="agent-badge" title="Active agents">🤖</span>' : ''}
                 ${session.planSourceSessionId ? `<span class="plan-indicator" title="Implements plan — click to reveal plan session" onclick="event.stopPropagation(); revealPlanSession('${escapeHtml(session.planSourceSessionId)}')">📋</span>` : ''}
                 ${session.hasWaitingForUser ? '<span class="agent-badge" title="Waiting for user">❓</span>' : ''}
+                ${(window.__HUB__?.enabled || appConfig.marketplaceUrl) && session.project ? `<span class="marketplace-btn" data-project-path="${escapeHtml(session.project)}" onclick="event.stopPropagation(); openMarketplace(this.dataset.projectPath)" title="Open in Marketplace">${MARKETPLACE_SVG}</span>` : ''}
                 ${isLive ? '<span class="pulse"></span>' : ''}
               </span>
               <div class="progress-bar"><div class="progress-fill" style="width: ${percent}%"></div></div>
@@ -5036,6 +5040,18 @@ function openFolderInEditor(folder, file) {
   postAndToast('/api/open-folder', body, 'folder');
 }
 
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+function openMarketplace(projectPath) {
+  const params = new URLSearchParams({ project: projectPath });
+  if (window.__HUB__?.enabled) {
+    hubNavigate('marketplace', `?${params}`);
+  } else if (appConfig.marketplaceUrl) {
+    const url = new URL(appConfig.marketplaceUrl);
+    url.search = params.toString();
+    window.open(url.toString(), '_blank');
+  }
+}
+
 //#endregion
 
 //#region OWNER_FILTER
@@ -5213,6 +5229,13 @@ if (urlState.search) {
   document.getElementById('search-input').value = urlState.search;
   document.getElementById('search-clear-btn').classList.add('visible');
 }
+
+fetch('/api/config')
+  .then((r) => r.json())
+  .then((c) => {
+    appConfig = c;
+  })
+  .catch(() => {});
 
 fetchSessions().then(async () => {
   if (urlState.projectView) {
