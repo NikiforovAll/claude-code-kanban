@@ -1,0 +1,13 @@
+{
+  "name": "claude-code-kanban",
+  "owner": {
+    "name": "NikiforovAll"
+  },
+  "plugins": [
+    {
+      "name": "claude-code-kanban",
+      "source": "./plugins/claude-code-kanban",
+      "description": "Agent activity tracking for claude-code-kanban dashboard"
+    }
+  ]
+}

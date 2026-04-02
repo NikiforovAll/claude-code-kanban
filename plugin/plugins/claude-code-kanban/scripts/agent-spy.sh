@@ -1,6 +1,6 @@
 #!/bin/bash
 # Tracks subagent lifecycle: one JSON file per agent, grouped by session
-# Layout: ~/.claude/agent-activity/{sessionId}/{agentId}.json
+# Layout: ~/.claude/.cck/agent-activity/{sessionId}/{agentId}.json
 
 INPUT=$(cat)
 
@@ -16,12 +16,14 @@ eval "$(echo "$INPUT" | jq -r '
 
 [ -z "$SESSION_ID" ] && exit 0
 
+CCK_ACTIVITY="$HOME/.claude/.cck/agent-activity"
+
 # Map session to custom task list on session start
 if [ "$EVENT" = "SessionStart" ]; then
   TASK_LIST_ID="${CLAUDE_CODE_TASK_LIST_ID:-}"
   if [ -n "$TASK_LIST_ID" ]; then
     CWD=$(echo "$INPUT" | jq -r '.cwd // ""')
-    MAPS_DIR="$HOME/.claude/agent-activity/_task-maps"
+    MAPS_DIR="$CCK_ACTIVITY/_task-maps"
     mkdir -p "$MAPS_DIR"
     MAP_FILE="$MAPS_DIR/$TASK_LIST_ID.json"
     TMP_FILE="$MAP_FILE.$$"
@@ -36,7 +38,7 @@ fi
 
 # PostToolUse / non-waiting PreToolUse: clear waiting state
 if [ "$EVENT" = "PostToolUse" ] || { [ "$EVENT" = "PreToolUse" ] && [ "$TOOL_NAME" != "AskUserQuestion" ]; }; then
-  WFILE="$HOME/.claude/agent-activity/$SESSION_ID/_waiting.json"
+  WFILE="$CCK_ACTIVITY/$SESSION_ID/_waiting.json"
   rm -f "$WFILE"
   [ "$EVENT" = "PostToolUse" ] && exit 0
 fi
@@ -46,7 +48,7 @@ fi
 
 # Waiting-for-user events → write _waiting.json marker
 if [ "$EVENT" = "PermissionRequest" ] || { [ "$EVENT" = "PreToolUse" ] && [ "$TOOL_NAME" = "AskUserQuestion" ]; }; then
-  DIR="$HOME/.claude/agent-activity/$SESSION_ID"
+  DIR="$CCK_ACTIVITY/$SESSION_ID"
   mkdir -p "$DIR"
   KIND="permission"
   [ "$EVENT" = "PreToolUse" ] && KIND="question"
@@ -63,7 +65,7 @@ fi
 
 # TeammateIdle has no agent_id — resolve via name→id mapping file
 if [ "$EVENT" = "TeammateIdle" ] && [ -z "$AGENT_ID" ] && [ -n "$TEAMMATE_NAME" ]; then
-  DIR="$HOME/.claude/agent-activity/$SESSION_ID"
+  DIR="$CCK_ACTIVITY/$SESSION_ID"
   MAP_FILE="$DIR/_name-${TEAMMATE_NAME}.id"
   [ ! -f "$MAP_FILE" ] && exit 0
   AGENT_ID=$(cat "$MAP_FILE")
@@ -83,7 +85,7 @@ fi
 
 [ -z "$AGENT_ID" ] && exit 0
 
-DIR="$HOME/.claude/agent-activity/$SESSION_ID"
+DIR="$CCK_ACTIVITY/$SESSION_ID"
 FILE="$DIR/$AGENT_ID.json"
 
 # On Start: skip if no type (internal agents like AskUserQuestion)
