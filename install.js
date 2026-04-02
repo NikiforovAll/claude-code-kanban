@@ -7,10 +7,12 @@ const readline = require('readline');
 const { execSync } = require('child_process');
 
 const CLAUDE_DIR = path.join(os.homedir(), '.claude');
+const CCK_DIR = path.join(CLAUDE_DIR, '.cck');
 const HOOKS_DIR = path.join(CLAUDE_DIR, 'hooks');
 const SETTINGS_PATH = path.join(CLAUDE_DIR, 'settings.json');
-const PLUGIN_DIR = path.join(__dirname, 'plugin');
-const CTX_SCRIPT_SRC = path.join(PLUGIN_DIR, 'plugins', 'claude-code-kanban', 'scripts', 'context-status.sh');
+const PLUGIN_SRC = path.join(__dirname, 'plugin');
+const PLUGIN_DEST = path.join(CCK_DIR, 'plugin');
+const CTX_SCRIPT_SRC = path.join(PLUGIN_SRC, 'plugins', 'claude-code-kanban', 'scripts', 'context-status.sh');
 const CTX_SCRIPT_DEST = path.join(HOOKS_DIR, 'context-status.sh');
 
 // ANSI helpers
@@ -47,6 +49,20 @@ function copyScript(src, dest) {
   try { fs.chmodSync(dest, 0o755); } catch {}
 }
 
+function copyDirSync(src, dest) {
+  fs.mkdirSync(dest, { recursive: true });
+  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+    const srcPath = path.join(src, entry.name);
+    const destPath = path.join(dest, entry.name);
+    if (entry.isDirectory()) {
+      copyDirSync(srcPath, destPath);
+    } else {
+      fs.copyFileSync(srcPath, destPath);
+      try { fs.chmodSync(destPath, 0o755); } catch {}
+    }
+  }
+}
+
 async function runInstall() {
   console.log(`\n  ${bold('claude-code-kanban')} — Plugin & StatusLine installer\n`);
 
@@ -69,11 +85,20 @@ async function runInstall() {
     console.log(yellow('⚠ not found — hook scripts require jq for JSON parsing'));
   }
 
-  // 2. Register marketplace & install plugin via Claude CLI
-  console.log(`\n  Plugin: ${dim(PLUGIN_DIR)}`);
+  // 2. Copy plugin to stable location & register marketplace
+  console.log(`\n  Plugin: ${dim(PLUGIN_DEST)}`);
   if (await prompt(`    Install claude-code-kanban plugin? [Y/n] `)) {
+    process.stdout.write('    Copying plugin to ~/.claude/.cck/plugin... ');
+    try {
+      if (fs.existsSync(PLUGIN_DEST)) fs.rmSync(PLUGIN_DEST, { recursive: true, force: true });
+      copyDirSync(PLUGIN_SRC, PLUGIN_DEST);
+      console.log(green('✓'));
+    } catch (e) {
+      console.log(red(`✗ ${e.message}`));
+    }
+
     process.stdout.write('    Registering marketplace... ');
-    const mkt = runCLI(`claude plugin marketplace add "${PLUGIN_DIR}"`, ['already', 'exists']);
+    const mkt = runCLI(`claude plugin marketplace add "${PLUGIN_DEST}"`, ['already', 'exists']);
     if (mkt.ok) {
       console.log(green(mkt.idempotent ? '✓ already registered' : '✓'));
     } else {
@@ -181,7 +206,15 @@ async function runUninstall() {
     console.log(yellow(`⚠ ${rmMkt.error}`));
   }
 
-  // 3. Remove context-status.sh copy
+  // 3. Remove plugin copy
+  if (fs.existsSync(PLUGIN_DEST)) {
+    fs.rmSync(PLUGIN_DEST, { recursive: true, force: true });
+    console.log(`  Plugin copy: ${green('✓')} Removed`);
+  } else {
+    console.log(`  Plugin copy: ${dim('Not found')}`);
+  }
+
+  // 4. Remove context-status.sh copy
   if (fs.existsSync(CTX_SCRIPT_DEST)) {
     fs.unlinkSync(CTX_SCRIPT_DEST);
     console.log(`  Context spy: ${green('✓')} Removed`);
@@ -189,7 +222,7 @@ async function runUninstall() {
     console.log(`  Context spy: ${dim('Not found')}`);
   }
 
-  // 4. Clean up settings.json (statusLine)
+  // 5. Clean up settings.json (statusLine)
   if (fs.existsSync(SETTINGS_PATH)) {
     try {
       const settings = JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf8'));
