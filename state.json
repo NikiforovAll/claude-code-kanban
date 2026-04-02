@@ -1,23 +1,31 @@
 {
-  "last_run": "2026-04-01T12:05:17Z",
-  "last_run_id": "23847596598",
+  "last_run": "2026-04-02T12:03:46Z",
+  "last_run_id": "23899375797",
   "monthly_summary_issue": {
     "month": "2026-04",
     "title": "[KanbanBot] Monthly Activity 2026-04",
-    "number": "pending"
+    "number": 23
   },
   "kanbanbot_prs": [
     {
-      "title": "[KanbanBot] ci: add npm caching and update Biome schema to 2.4.10",
-      "branch": "kanbanbot/eng-ci-npm-cache-2026-04-01",
-      "created": "2026-04-01",
+      "title": "[KanbanBot] perf: skip 30s fallback poll when browser tab is hidden",
+      "branch": "kanbanbot/perf-visibility-poll-2026-04-02",
+      "created": "2026-04-02",
       "status": "open"
     },
     {
       "title": "[KanbanBot] perf: skip task fetch on metadata and agent SSE events",
       "branch": "kanbanbot/perf-sse-fetch-reduction-2026-04-01",
       "created": "2026-04-01",
+      "pr_number": 22,
       "status": "open"
+    },
+    {
+      "title": "[KanbanBot] ci: add npm caching and update Biome schema to 2.4.10",
+      "branch": "kanbanbot/eng-ci-npm-cache-2026-04-01",
+      "created": "2026-04-01",
+      "pr_number": 21,
+      "status": "open_blocked_protected_files"
     },
     {
       "title": "[KanbanBot] test: add contract tests for untested parser exports",
@@ -31,10 +39,10 @@
       "branch": "kanbanbot/eng-audit-fix-2026-03-30",
       "created": "2026-03-30",
       "pr_number": 18,
-      "status": "open_as_issue"
+      "status": "open_blocked_protected_files"
     }
   ],
   "issues_commented": [],
   "backlog_cursor": null,
-  "notes": "npm audit still shows 3 vulns (package-lock.json is protected). Express v5 and chokidar v5 major updates pending discussion. CDN dep pinning is future work."
+  "notes": "npm audit still shows 3 vulns (package-lock.json is protected). Express v5 and chokidar v5 major updates pending discussion. CDN dep pinning is future work. Two perf PRs open: visibility-aware poll (#new) and SSE fetch reduction (#22)."
 }
