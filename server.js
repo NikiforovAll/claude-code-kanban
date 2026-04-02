@@ -64,8 +64,9 @@ const TASKS_DIR = path.join(CLAUDE_DIR, 'tasks');
 const PROJECTS_DIR = path.join(CLAUDE_DIR, 'projects');
 const TEAMS_DIR = path.join(CLAUDE_DIR, 'teams');
 const PLANS_DIR = path.join(CLAUDE_DIR, 'plans');
-const AGENT_ACTIVITY_DIR = path.join(CLAUDE_DIR, 'agent-activity');
-const CONTEXT_STATUS_DIR = path.join(CLAUDE_DIR, 'context-status');
+const CCK_DIR = path.join(CLAUDE_DIR, '.cck');
+const AGENT_ACTIVITY_DIR = path.join(CCK_DIR, 'agent-activity');
+const CONTEXT_STATUS_DIR = path.join(CCK_DIR, 'context-status');
 
 const PERMISSION_TTL_MS = 1800000;
 const AGENT_TTL_MS = 3600000;

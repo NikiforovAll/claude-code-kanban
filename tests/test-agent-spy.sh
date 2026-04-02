@@ -1,14 +1,14 @@
 #!/bin/bash
-# Tests for hooks/agent-spy.sh
+# Tests for plugin/scripts/agent-spy.sh
 # Run: bash tests/test-agent-spy.sh
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-HOOK="$SCRIPT_DIR/hooks/agent-spy.sh"
+HOOK="$SCRIPT_DIR/plugin/plugins/claude-code-kanban/scripts/agent-spy.sh"
 TMPDIR=$(mktemp -d)
 export HOME="$TMPDIR"
-ACTIVITY_DIR="$TMPDIR/.claude/agent-activity"
+ACTIVITY_DIR="$TMPDIR/.claude/.cck/agent-activity"
 
 PASS=0
 FAIL=0
@@ -153,7 +153,7 @@ UPDATED=$(jq -r '.updatedAt' "$ACTIVITY_DIR/s3/a1.json")
 # ─── Session Map (CLAUDE_CODE_TASK_LIST_ID) ──────────────────────
 echo "Session map (custom task list):"
 
-MAPS_DIR="$TMPDIR/.claude/agent-activity/_task-maps"
+MAPS_DIR="$TMPDIR/.claude/.cck/agent-activity/_task-maps"
 
 # SessionStart with CLAUDE_CODE_TASK_LIST_ID writes task map
 CLAUDE_CODE_TASK_LIST_ID=my-project run_hook '{"session_id":"s-map1","agent_id":"","hook_event_name":"SessionStart","tool_name":"","cwd":"/home/user/dev/app"}'

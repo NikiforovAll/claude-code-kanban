@@ -45,8 +45,7 @@
   "files": [
     "server.js",
     "install.js",
-    "hooks/agent-spy.sh",
-    "hooks/context-status.sh",
+    "plugin/**/*",
     "lib/**/*",
     "public/**/*"
   ],
