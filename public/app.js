@@ -4825,6 +4825,9 @@ function showInfoModal(session, teamConfig, tasks, planContent) {
     const projectName = session.project.split(/[/\\]/).pop();
     infoRows.push(['Project', projectName, { openPath: session.projectDir }]);
     infoRows.push(['Path', session.project, { openPath: session.project }]);
+    if (session.cwd && session.cwd !== session.project) {
+      infoRows.push(['CWD', session.cwd, { openPath: session.cwd }]);
+    }
     if (session.gitBranch) {
       infoRows.push(['Branch', session.gitBranch]);
     }

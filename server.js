@@ -359,6 +359,20 @@ function loadSessionMetadata() {
       const files = readdirSync(projectPath).filter(f => f.endsWith('.jsonl'));
       const sessionIds = [];
 
+      // Read sessions-index.json first for canonical projectPath
+      let indexProjectPath = null;
+      const indexPath = path.join(projectPath, 'sessions-index.json');
+      let indexEntries = [];
+      if (existsSync(indexPath)) {
+        try {
+          const indexData = JSON.parse(readFileSync(indexPath, 'utf8'));
+          indexEntries = indexData.entries || [];
+          for (const entry of indexEntries) {
+            if (entry.projectPath) { indexProjectPath = entry.projectPath; break; }
+          }
+        } catch (e) {}
+      }
+
       // First pass: read all JSONL files
       let resolvedProjectPath = null;
       for (const file of files) {
@@ -372,7 +386,8 @@ function loadSessionMetadata() {
 
         metadata[sessionId] = {
           slug: sessionInfo.slug,
-          project: sessionInfo.projectPath || null,
+          project: indexProjectPath || sessionInfo.projectPath || null,
+          cwd: sessionInfo.cwd || null,
           gitBranch: sessionInfo.gitBranch || null,
           customTitle: sessionInfo.customTitle || null,
           jsonlPath: jsonlPath
@@ -381,38 +396,30 @@ function loadSessionMetadata() {
       }
 
       // Second pass: fill in missing project paths from siblings
-      if (resolvedProjectPath) {
+      const canonicalProject = indexProjectPath || resolvedProjectPath;
+      if (canonicalProject) {
         for (const sid of sessionIds) {
           if (!metadata[sid].project) {
-            metadata[sid].project = resolvedProjectPath;
+            metadata[sid].project = canonicalProject;
           }
         }
       }
 
-      // Also check sessions-index.json for custom names (if /rename was used)
-      const indexPath = path.join(projectPath, 'sessions-index.json');
-      if (existsSync(indexPath)) {
-        try {
-          const indexData = JSON.parse(readFileSync(indexPath, 'utf8'));
-          const entries = indexData.entries || [];
-
-          for (const entry of entries) {
-            if (entry.sessionId) {
-              if (!metadata[entry.sessionId]) {
-                metadata[entry.sessionId] = {
-                  slug: null,
-                  project: entry.projectPath || null,
-                  jsonlPath: null
-                };
-              }
-              metadata[entry.sessionId].description = entry.description || null;
-              if (entry.gitBranch) metadata[entry.sessionId].gitBranch = entry.gitBranch;
-              if (entry.customTitle) metadata[entry.sessionId].customTitle = entry.customTitle;
-              metadata[entry.sessionId].created = entry.created || null;
-            }
+      // Apply index metadata (descriptions, custom titles, etc.)
+      for (const entry of indexEntries) {
+        if (entry.sessionId) {
+          if (!metadata[entry.sessionId]) {
+            metadata[entry.sessionId] = {
+              slug: null,
+              project: indexProjectPath || entry.projectPath || null,
+              cwd: null,
+              jsonlPath: null
+            };
           }
-        } catch (e) {
-          // Skip invalid index files
+          metadata[entry.sessionId].description = entry.description || null;
+          if (entry.gitBranch) metadata[entry.sessionId].gitBranch = entry.gitBranch;
+          if (entry.customTitle) metadata[entry.sessionId].customTitle = entry.customTitle;
+          metadata[entry.sessionId].created = entry.created || null;
         }
       }
     }
@@ -480,6 +487,7 @@ function buildSessionObject(id, meta, overrides = {}) {
     name: getSessionDisplayName(id, meta),
     slug: meta.slug || null,
     project: meta.project || null,
+    cwd: meta.cwd || null,
     description: meta.description || null,
     gitBranch: meta.gitBranch || null,
     customTitle: meta.customTitle || null,
