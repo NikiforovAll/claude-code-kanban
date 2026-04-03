@@ -129,27 +129,33 @@ let lastTasksHash = '';
 //#endregion
 
 //#region DATA_FETCHING
-async function fetchSessions() {
+async function fetchSessions(includeTasks = true) {
   try {
     const allPinnedIds = new Set([...pinnedSessionIds, ...stickySessionIds]);
     if (revealedPlanSessionId) allPinnedIds.add(revealedPlanSessionId);
     if (revealedStorageSessionId) allPinnedIds.add(revealedStorageSessionId);
     const pinnedParam = allPinnedIds.size > 0 ? `&pinned=${[...allPinnedIds].join(',')}` : '';
-    const [newSessions, newTasks] = await Promise.all([
-      fetch(`/api/sessions?limit=${sessionLimit}${pinnedParam}`).then((r) => r.json()),
-      fetch('/api/tasks/all').then((r) => r.json()),
-    ]);
+    const sessionsPromise = fetch(`/api/sessions?limit=${sessionLimit}${pinnedParam}`).then((r) => r.json());
+
+    let newSessions, newTasks;
+    if (includeTasks) {
+      [newSessions, newTasks] = await Promise.all([sessionsPromise, fetch('/api/tasks/all').then((r) => r.json())]);
+    } else {
+      newSessions = await sessionsPromise;
+    }
 
     const sessionsHash = JSON.stringify(newSessions);
-    const tasksHash = JSON.stringify(newTasks);
-    if (sessionsHash === lastSessionsHash && tasksHash === lastTasksHash) {
-      return;
+    if (includeTasks) {
+      const tasksHash = JSON.stringify(newTasks);
+      if (sessionsHash === lastSessionsHash && tasksHash === lastTasksHash) return;
+      lastTasksHash = tasksHash;
+      allTasksCache = newTasks;
+    } else {
+      if (sessionsHash === lastSessionsHash) return;
     }
     lastSessionsHash = sessionsHash;
-    lastTasksHash = tasksHash;
 
     sessions = newSessions;
-    allTasksCache = newTasks;
     renderSessions();
     renderLiveUpdatesFromCache();
   } catch (error) {
@@ -4043,7 +4049,7 @@ function setupEventSource() {
       if (isMetadata) {
         clearTimeout(metadataRefreshTimer);
         metadataRefreshTimer = setTimeout(async () => {
-          fetchSessions().catch((err) => console.error('[SSE] fetchSessions failed:', err));
+          fetchSessions(false).catch((err) => console.error('[SSE] fetchSessions failed:', err));
           if (currentSessionId) {
             await fetchAgents(currentSessionId);
             if (!agentLogMode) fetchMessages(currentSessionId);
@@ -4084,7 +4090,7 @@ function setupEventSource() {
         pendingAgentSessionIds.add(data.sessionId);
         clearTimeout(agentRefreshTimer);
         agentRefreshTimer = setTimeout(() => {
-          fetchSessions().catch((err) => console.error('[SSE] fetchSessions failed:', err));
+          fetchSessions(false).catch((err) => console.error('[SSE] fetchSessions failed:', err));
           if (viewMode === 'project' && currentProjectSessionIds.some((id) => pendingAgentSessionIds.has(id))) {
             refreshProjectAgents();
           } else if (currentSessionId && pendingAgentSessionIds.has(currentSessionId)) {
