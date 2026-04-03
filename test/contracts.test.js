@@ -1,6 +1,6 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const { readFileSync, writeFileSync, mkdirSync, unlinkSync, rmdirSync } = require('fs');
+const { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync } = require('fs');
 const path = require('path');
 const os = require('os');
 const Ajv = require('ajv');
@@ -576,6 +576,10 @@ describe('Parser: readMessagesPage', () => {
     const result = readMessagesPage(jsonlPath, 100);
     assert.ok(Array.isArray(result.messages));
     assert.equal(typeof result.hasMore, 'boolean');
+    assert.ok(result.messages.length > 0, 'fixture should produce messages');
+    const msg = result.messages[0];
+    assert.ok('type' in msg, 'message should have type');
+    assert.ok('timestamp' in msg, 'message should have timestamp');
   });
 
   it('respects limit — returns at most limit messages', () => {
@@ -590,12 +594,12 @@ describe('Parser: readMessagesPage', () => {
 
   it('filters by beforeTimestamp', () => {
     const all = readMessagesPage(jsonlPath, 1000);
-    if (all.messages.length > 0) {
-      const cutoff = all.messages[0].timestamp;
-      const filtered = readMessagesPage(jsonlPath, 1000, cutoff);
-      for (const msg of filtered.messages) {
-        assert.ok(msg.timestamp < cutoff, `message timestamp ${msg.timestamp} should be < ${cutoff}`);
-      }
+    assert.ok(all.messages.length >= 2, 'fixture must have at least 2 messages');
+    const cutoff = all.messages[all.messages.length - 1].timestamp;
+    const filtered = readMessagesPage(jsonlPath, 1000, cutoff);
+    assert.ok(filtered.messages.length < all.messages.length, 'filtering should reduce result count');
+    for (const msg of filtered.messages) {
+      assert.ok(msg.timestamp < cutoff, `message timestamp ${msg.timestamp} should be < ${cutoff}`);
     }
   });
 
@@ -607,15 +611,20 @@ describe('Parser: readMessagesPage', () => {
 });
 
 describe('Parser: extractPromptFromTranscript', () => {
-  const tmpDir = os.tmpdir();
+  let tmpDir;
 
   it('returns null when first line is not a user message', () => {
     const result = extractPromptFromTranscript(path.join(FIXTURES_DIR, 'session.jsonl'));
     assert.equal(result, null);
   });
 
+  it('throws for non-existent file', () => {
+    assert.throws(() => extractPromptFromTranscript('/nonexistent/path.jsonl'));
+  });
+
   it('extracts content when first line is a user message with string content', () => {
-    const file = path.join(tmpDir, 'extract-prompt-string.jsonl');
+    tmpDir = mkdtempSync(path.join(os.tmpdir(), 'parser-test-'));
+    const file = path.join(tmpDir, 'prompt.jsonl');
     writeFileSync(file, JSON.stringify({
       type: 'user',
       message: { role: 'user', content: 'Please fix the authentication bug' },
@@ -625,12 +634,13 @@ describe('Parser: extractPromptFromTranscript', () => {
       const result = extractPromptFromTranscript(file);
       assert.equal(result, 'Please fix the authentication bug');
     } finally {
-      unlinkSync(file);
+      rmSync(tmpDir, { recursive: true, force: true });
     }
   });
 
   it('extracts text from array content blocks', () => {
-    const file = path.join(tmpDir, 'extract-prompt-array.jsonl');
+    tmpDir = mkdtempSync(path.join(os.tmpdir(), 'parser-test-'));
+    const file = path.join(tmpDir, 'prompt.jsonl');
     writeFileSync(file, JSON.stringify({
       type: 'user',
       message: { role: 'user', content: [{ type: 'text', text: 'Refactor the login module' }] },
@@ -640,13 +650,14 @@ describe('Parser: extractPromptFromTranscript', () => {
       const result = extractPromptFromTranscript(file);
       assert.equal(result, 'Refactor the login module');
     } finally {
-      unlinkSync(file);
+      rmSync(tmpDir, { recursive: true, force: true });
     }
   });
 
   it('truncates long content to 500 characters', () => {
+    tmpDir = mkdtempSync(path.join(os.tmpdir(), 'parser-test-'));
     const longText = 'x'.repeat(600);
-    const file = path.join(tmpDir, 'extract-prompt-long.jsonl');
+    const file = path.join(tmpDir, 'prompt.jsonl');
     writeFileSync(file, JSON.stringify({
       type: 'user',
       message: { role: 'user', content: longText },
@@ -656,26 +667,26 @@ describe('Parser: extractPromptFromTranscript', () => {
       const result = extractPromptFromTranscript(file);
       assert.equal(result.length, 500);
     } finally {
-      unlinkSync(file);
+      rmSync(tmpDir, { recursive: true, force: true });
     }
   });
 });
 
 describe('Parser: readCompactSummaries', () => {
-  const tmpDir = os.tmpdir();
-
   it('returns empty array when subagents dir does not exist', () => {
+    const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'parser-test-'));
     const file = path.join(tmpDir, 'no-subagents.jsonl');
     writeFileSync(file, '');
     try {
       const result = readCompactSummaries(file);
       assert.deepEqual(result, []);
     } finally {
-      unlinkSync(file);
+      rmSync(tmpDir, { recursive: true, force: true });
     }
   });
 
   it('returns summaries from compact subagent JSONL files', () => {
+    const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'parser-test-'));
     const sessionName = 'compact-test-session';
     const sessionFile = path.join(tmpDir, `${sessionName}.jsonl`);
     const subagentsDir = path.join(tmpDir, sessionName, 'subagents');
@@ -695,14 +706,12 @@ describe('Parser: readCompactSummaries', () => {
       assert.equal(result[0].summary, 'Session compacted successfully');
       assert.equal(result[0].timestamp, '2026-03-05T10:00:05Z');
     } finally {
-      unlinkSync(compactFile);
-      unlinkSync(sessionFile);
-      rmdirSync(subagentsDir);
-      rmdirSync(path.join(tmpDir, sessionName));
+      rmSync(tmpDir, { recursive: true, force: true });
     }
   });
 
   it('skips compact files without a summary tag', () => {
+    const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'parser-test-'));
     const sessionName = 'compact-no-summary';
     const sessionFile = path.join(tmpDir, `${sessionName}.jsonl`);
     const subagentsDir = path.join(tmpDir, sessionName, 'subagents');
@@ -718,10 +727,7 @@ describe('Parser: readCompactSummaries', () => {
       const result = readCompactSummaries(sessionFile);
       assert.deepEqual(result, []);
     } finally {
-      unlinkSync(compactFile);
-      unlinkSync(sessionFile);
-      rmdirSync(subagentsDir);
-      rmdirSync(path.join(tmpDir, sessionName));
+      rmSync(tmpDir, { recursive: true, force: true });
     }
   });
 });
