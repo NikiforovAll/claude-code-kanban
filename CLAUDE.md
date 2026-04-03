@@ -13,6 +13,10 @@ npm run dev          # start + open browser
 
 No build/lint/test commands.
 
+You have an access to gh cli to work on this project: https://github.com/NikiforovAll/claude-code-kanban
+
+To work on pr use `gh pr checkout <pr-number>` and `gh pr view <pr-number>` to see description and files changed.
+
 ## Architecture
 
 ```
