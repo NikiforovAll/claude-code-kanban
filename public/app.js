@@ -4109,8 +4109,22 @@ function setupEventSource() {
     };
   }
 
-  // Fallback poll every 30s in case SSE silently drops
+  // When the tab becomes visible after being hidden, catch up immediately
+  let _pollMissed = false;
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && _pollMissed) {
+      _pollMissed = false;
+      fetchSessions().catch(() => {});
+      if (currentSessionId) fetchTasks(currentSessionId).catch(() => {});
+    }
+  });
+
+  // Fallback poll every 30s in case SSE silently drops; skip when tab is hidden
   setInterval(() => {
+    if (document.hidden) {
+      _pollMissed = true;
+      return;
+    }
     fetchSessions().catch(() => {});
   }, 30000);
 
