@@ -16,7 +16,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/NikiforovAll/claude-task-viewer.git"
+    "url": "git+https://github.com/NikiforovAll/claude-code-kanban.git"
   },
   "keywords": [
     "claude",
@@ -31,16 +31,16 @@
   "author": "NikiforovAll",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/NikiforovAll/claude-task-viewer/issues"
+    "url": "https://github.com/NikiforovAll/claude-code-kanban/issues"
   },
-  "homepage": "https://github.com/NikiforovAll/claude-task-viewer#readme",
+  "homepage": "https://github.com/NikiforovAll/claude-code-kanban#readme",
   "dependencies": {
     "chokidar": "^3.5.3",
     "express": "^4.18.2",
-    "open": "^10.0.0"
+    "open": "^11.0.0"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.0.0"
   },
   "files": [
     "server.js",
