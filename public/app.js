@@ -2798,9 +2798,9 @@ function navigateSession(direction, items) {
     const restoredIdx = selectedSessionKbId ? items.findIndex((el) => getKbId(el) === selectedSessionKbId) : -1;
     newIdx = restoredIdx >= 0 ? restoredIdx : 0;
   }
-  if (newIdx >= 0 && newIdx < items.length) {
-    selectSessionByIndex(newIdx, items);
-  }
+  if (newIdx < 0) newIdx = items.length - 1;
+  else if (newIdx >= items.length) newIdx = 0;
+  selectSessionByIndex(newIdx, items);
 }
 
 function setGroupCollapsed(header, collapsed) {
@@ -3981,6 +3981,22 @@ document.addEventListener('keydown', (e) => {
     toggleScratchpad();
     return;
   }
+  if (e.key === '$' && !e.ctrlKey && !e.altKey && !e.metaKey) {
+    e.preventDefault();
+    hubNavigate('cost', contextSid ? `?view=detail&session=${encodeURIComponent(contextSid)}` : undefined);
+    return;
+  }
+  if (matchKey(e, 'KeyM')) {
+    e.preventDefault();
+    const mSession = contextSid ? sessions.find((s) => s.id === contextSid) : null;
+    hubNavigate('marketplace', mSession?.project ? `?project=${encodeURIComponent(mSession.project)}` : undefined);
+    return;
+  }
+  if (matchKey(e, 'KeyT')) {
+    e.preventDefault();
+    toggleTheme();
+    return;
+  }
   if (e.key === '?' || (e.key === '/' && e.shiftKey)) {
     e.preventDefault();
     showHelpModal();
@@ -4601,7 +4617,6 @@ function updateThemeColor(isLight) {
 //#endregion
 
 //#region THEME
-// biome-ignore lint/correctness/noUnusedVariables: used in HTML
 function toggleTheme() {
   const isCurrentlyLight = document.body.classList.contains('light');
   if (isCurrentlyLight) {
