@@ -48,17 +48,18 @@ function getClaudeDir() {
   return process.env.CLAUDE_DIR || path.join(os.homedir(), '.claude');
 }
 
-function getMarketplaceUrl() {
-  const idx = process.argv.findIndex(arg => arg.startsWith('--marketplace-url'));
+function getArgUrl(argName, envName) {
+  const idx = process.argv.findIndex(arg => arg.startsWith(`--${argName}`));
   if (idx !== -1) {
     const arg = process.argv[idx];
     if (arg.includes('=')) return arg.split('=').slice(1).join('=');
     if (process.argv[idx + 1]) return process.argv[idx + 1];
   }
-  return process.env.MARKETPLACE_URL || null;
+  return process.env[envName] || null;
 }
 
-const MARKETPLACE_URL = getMarketplaceUrl();
+const MARKETPLACE_URL = getArgUrl('marketplace-url', 'MARKETPLACE_URL');
+const COST_URL = getArgUrl('cost-url', 'COST_URL');
 const CLAUDE_DIR = getClaudeDir();
 const TASKS_DIR = path.join(CLAUDE_DIR, 'tasks');
 const PROJECTS_DIR = path.join(CLAUDE_DIR, 'projects');
@@ -1276,7 +1277,7 @@ app.get('/api/version', (req, res) => {
 });
 
 app.get('/api/config', (req, res) => {
-  res.json({ marketplaceUrl: MARKETPLACE_URL });
+  res.json({ marketplaceUrl: MARKETPLACE_URL, costUrl: COST_URL });
 });
 
 // API: Get all tasks across all sessions

@@ -25,7 +25,7 @@ let agentPollInterval = null;
 let selectedTaskId = null;
 let selectedSessionId = null;
 let focusZone = 'board'; // 'board' | 'sidebar'
-let appConfig = { marketplaceUrl: null };
+let appConfig = { marketplaceUrl: null, costUrl: null };
 let selectedSessionIdx = -1;
 let selectedSessionKbId = null;
 let sessionJustSelected = false;
@@ -4961,6 +4961,8 @@ function showInfoModal(session, teamConfig, tasks, planContent) {
   _infoModalSessionId = session.id;
   updateStickyBtnState();
   updateDismissBtnState();
+  const costBtn = document.getElementById('session-info-cost-btn');
+  if (costBtn) costBtn.style.display = window.__HUB__?.enabled || appConfig.costUrl ? '' : 'none';
   modal.classList.add('visible');
 
   const keyHandler = (e) => {
@@ -5061,6 +5063,15 @@ function openFolderInEditor(folder, file) {
   if (folder) body.folder = folder;
   if (file) body.file = file;
   postAndToast('/api/open-folder', body, 'folder');
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+function openCost(sessionId) {
+  if (window.__HUB__?.enabled) {
+    hubNavigate('cost', `?view=detail&session=${encodeURIComponent(sessionId)}`);
+  } else if (appConfig.costUrl) {
+    window.open(`${appConfig.costUrl}?view=detail&session=${encodeURIComponent(sessionId)}`, '_blank');
+  }
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
