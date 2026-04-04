@@ -5264,33 +5264,42 @@ if (urlState.search) {
   document.getElementById('search-clear-btn').classList.add('visible');
 }
 
-fetch('/api/config')
-  .then((r) => r.json())
-  .then((c) => {
-    appConfig = c;
-  })
-  .catch(() => {});
-
-fetchSessions().then(async () => {
-  if (urlState.projectView) {
-    try {
-      await fetchProjectView(atob(urlState.projectView));
-    } catch (_) {
+Promise.all([
+  fetch('/hub-config')
+    .then((r) => r.json())
+    .then((cfg) => {
+      if (!cfg.enabled) return;
+      window.__HUB__ = cfg;
+    })
+    .catch(() => {}),
+  fetch('/api/config')
+    .then((r) => r.json())
+    .then((c) => {
+      appConfig = c;
+    })
+    .catch(() => {}),
+])
+  .then(() => fetchSessions())
+  .then(async () => {
+    if (urlState.projectView) {
+      try {
+        await fetchProjectView(atob(urlState.projectView));
+      } catch (_) {
+        showAllTasks();
+      }
+    } else if (urlState.session) {
+      await fetchTasks(urlState.session);
+    } else {
       showAllTasks();
     }
-  } else if (urlState.session) {
-    await fetchTasks(urlState.session);
-  } else {
-    showAllTasks();
-  }
-  if (urlState.messages && currentSessionId) {
-    toggleMessagePanel();
-    // Re-render after panel layout settles so scroll dimensions are correct
-    requestAnimationFrame(() => {
-      if (currentMessages.length) renderMessages(currentMessages);
-    });
-  }
-});
+    if (urlState.messages && currentSessionId) {
+      toggleMessagePanel();
+      // Re-render after panel layout settles so scroll dimensions are correct
+      requestAnimationFrame(() => {
+        if (currentMessages.length) renderMessages(currentMessages);
+      });
+    }
+  });
 
 window.addEventListener('popstate', () => {
   const s = getUrlState();
@@ -5313,23 +5322,17 @@ window.addEventListener('popstate', () => {
 //#endregion
 
 // #region HUB_INTEGRATION
-(async function initHub() {
-  const cfg = await fetch('/hub-config')
-    .then((r) => r.json())
-    .catch(() => ({}));
-  if (!cfg.enabled) return;
-  window.__HUB__ = cfg;
-  document.addEventListener('keydown', (e) => {
-    if (e.ctrlKey && e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
-      e.preventDefault();
-      window.parent?.postMessage({ type: 'hub:keydown', key: e.key }, '*');
-    }
-    if (e.altKey && !e.ctrlKey && !e.shiftKey && !e.metaKey && /^[1-9]$/.test(e.key)) {
-      e.preventDefault();
-      window.parent?.postMessage({ type: 'hub:keydown', key: e.key }, '*');
-    }
-  });
-})();
+document.addEventListener('keydown', (e) => {
+  if (!window.__HUB__?.enabled) return;
+  if (e.ctrlKey && e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+    e.preventDefault();
+    window.parent?.postMessage({ type: 'hub:keydown', key: e.key }, '*');
+  }
+  if (e.altKey && !e.ctrlKey && !e.shiftKey && !e.metaKey && /^[1-9]$/.test(e.key)) {
+    e.preventDefault();
+    window.parent?.postMessage({ type: 'hub:keydown', key: e.key }, '*');
+  }
+});
 
 window.hubNavigate = function hubNavigate(app, url) {
   if (!window.__HUB__?.enabled) return;
