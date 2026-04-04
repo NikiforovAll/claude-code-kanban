@@ -123,7 +123,10 @@ body::before {
   border-radius: 6px;
   color: var(--text-muted);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease,
+    border-color 0.15s ease;
   padding: 0;
 }
 
@@ -350,7 +353,9 @@ body::before {
   background-position: right 8px center;
   text-overflow: ellipsis;
   min-width: 0;
-  transition: all 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
 }
 
 .filter-dropdown:hover {
@@ -435,7 +440,7 @@ body::before {
   border-radius: 6px;
   margin-bottom: 3px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background 0.15s ease;
 }
 
 .live-item:hover {
@@ -494,7 +499,9 @@ body::before {
   border-radius: 8px;
   text-align: left;
   cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition:
+    background 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+    border-color 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   box-shadow:
     0 1px 3px rgba(0, 0, 0, 0.12),
     0 1px 2px rgba(0, 0, 0, 0.08);
@@ -887,7 +894,10 @@ body::before {
   border-radius: 6px;
   color: var(--text-tertiary);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease;
 }
 
 .icon-btn:hover {
@@ -1037,7 +1047,9 @@ body::before {
   border-left: 2px solid var(--text-muted);
   border-radius: 8px;
   cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition:
+    background 0.2s cubic-bezier(0.4, 0, 0.2, 1),
+    border-color 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .task-card:hover {
@@ -1221,7 +1233,9 @@ body::before {
   color: var(--text-muted);
   cursor: pointer;
   border-radius: 4px;
-  transition: all 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
 }
 
 .detail-close:hover {
@@ -1418,7 +1432,9 @@ body::before {
   font-size: 11px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition:
+    filter 0.15s ease,
+    color 0.15s ease;
 }
 
 .edit-save {
@@ -1555,7 +1571,7 @@ body::before {
   font-size: 11px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: filter 0.15s ease;
 }
 
 .note-submit:hover {
@@ -1606,7 +1622,9 @@ body::before {
   color: var(--team);
   cursor: pointer;
   flex-shrink: 0;
-  transition: all 0.15s ease;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
 }
 
 .team-info-btn:hover {
@@ -1626,7 +1644,7 @@ body::before {
   color: var(--plan);
   cursor: pointer;
   flex-shrink: 0;
-  transition: all 0.15s ease;
+  transition: border-color 0.15s ease;
 }
 
 .plan-indicator:hover {
@@ -2581,7 +2599,9 @@ body.light .msg-assistant .msg-text {
   color: var(--text-primary);
   font-family: var(--mono);
   font-size: 13px;
-  transition: all 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
 }
 
 .search-input:hover {
@@ -2732,7 +2752,9 @@ body.light .msg-assistant .msg-text {
   align-items: center;
   justify-content: center;
   border-radius: 6px;
-  transition: all 0.15s ease;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
 }
 
 .modal-close:hover {
@@ -2773,7 +2795,9 @@ body.light .msg-assistant .msg-text {
   color: var(--text-primary);
   font-family: var(--mono);
   font-size: 14px;
-  transition: all 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
 }
 
 .form-input:focus {
@@ -2844,7 +2868,11 @@ select.form-input option:checked {
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    transform 0.15s ease,
+    box-shadow 0.15s ease;
 }
 
 .offline-card .btn {
@@ -3077,7 +3105,9 @@ select.form-input option:checked {
   font-size: 11px;
   cursor: pointer;
   font-family: var(--mono);
-  transition: all 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
 }
 
 .storage-item-actions button:hover {
