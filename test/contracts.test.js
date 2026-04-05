@@ -257,6 +257,57 @@ describe('Parser: parseJsonlLine', () => {
     const parsed = parseJsonlLine(lines[6]);
     assert.equal(parsed.type, 'file-history-snapshot');
   });
+
+  it('parses assistant message with thinking block', () => {
+    const raw = JSON.stringify({
+      type: 'assistant',
+      message: {
+        role: 'assistant',
+        model: 'claude-opus-4-6',
+        content: [
+          { type: 'thinking', thinking: 'Let me reason about this...' },
+          { type: 'text', text: 'Here is my answer.' }
+        ]
+      },
+      timestamp: '2026-03-05T10:00:30Z',
+      uuid: 'uuid-thinking',
+      sessionId: 'test-session-id'
+    });
+    const parsed = parseJsonlLine(raw);
+    assert.equal(parsed.role, 'assistant');
+    assert.equal(parsed.blocks.length, 2);
+    assert.equal(parsed.blocks[0].type, 'thinking');
+    assert.equal(parsed.blocks[1].type, 'text');
+  });
+
+  it('returns null content for user message with non-string content', () => {
+    const raw = JSON.stringify({
+      type: 'user',
+      message: {
+        role: 'user',
+        content: [{ type: 'tool_result', tool_use_id: 'tu_x', content: 'ok' }]
+      },
+      timestamp: '2026-03-05T10:00:31Z',
+      uuid: 'uuid-tool-result',
+      sessionId: 'test-session-id'
+    });
+    const parsed = parseJsonlLine(raw);
+    assert.equal(parsed.role, 'user');
+    assert.equal(parsed.content, null);
+  });
+
+  it('returns base object for unknown line type', () => {
+    const raw = JSON.stringify({
+      type: 'custom-title',
+      customTitle: 'My Session Title',
+      timestamp: '2026-03-05T10:00:32Z',
+      uuid: 'uuid-ct',
+      sessionId: 'test-session-id'
+    });
+    const parsed = parseJsonlLine(raw);
+    assert.equal(parsed.type, 'custom-title');
+    assert.equal(parsed.timestamp, '2026-03-05T10:00:32Z');
+  });
 });
 
 describe('Parser: readRecentMessages', () => {
@@ -566,6 +617,43 @@ describe('Parser: readSessionInfoFromJsonl', () => {
     assert.equal(info.projectPath, null);
     assert.equal(info.gitBranch, null);
     assert.equal(info.customTitle, null);
+  });
+
+  it('reads cwd field from fixture', () => {
+    const info = readSessionInfoFromJsonl(jsonlPath);
+    assert.equal(info.cwd, '/home/user/project');
+  });
+
+  it('extracts customTitle from a JSONL file containing a custom-title line', () => {
+    const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'cck-test-ct-'));
+    const file = path.join(tmpDir, 'custom-title-session.jsonl');
+    writeFileSync(file, [
+      JSON.stringify({ type: 'progress', cwd: '/home/user/project', gitBranch: 'main', slug: 'my-session', timestamp: '2026-03-05T10:00:00Z' }),
+      JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Working on it.' }] }, timestamp: '2026-03-05T10:00:01Z' }),
+      JSON.stringify({ type: 'custom-title', customTitle: 'Fix Authentication Bug', timestamp: '2026-03-05T10:00:02Z' })
+    ].join('\n') + '\n');
+    try {
+      const info = readSessionInfoFromJsonl(file);
+      assert.equal(info.customTitle, 'Fix Authentication Bug');
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not extract customTitle starting with < (HTML-like title)', () => {
+    const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'cck-test-ct2-'));
+    const file = path.join(tmpDir, 'html-title-session.jsonl');
+    const htmlTitle = '<ignored-title>bad title</ignored-title>';
+    writeFileSync(file, [
+      JSON.stringify({ type: 'progress', cwd: '/home/user/project', gitBranch: 'main', slug: 'html-session', timestamp: '2026-03-05T10:00:00Z' }),
+      JSON.stringify({ type: 'custom-title', customTitle: htmlTitle, timestamp: '2026-03-05T10:00:01Z' })
+    ].join('\n') + '\n');
+    try {
+      const info = readSessionInfoFromJsonl(file);
+      assert.equal(info.customTitle, null);
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 });
 
