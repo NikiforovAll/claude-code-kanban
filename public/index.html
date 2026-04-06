@@ -322,55 +322,61 @@
         </button>
       </div>
       <div class="modal-body">
-        <div style="display: grid; gap: 16px;">
-          <div>
-            <h4 style="margin: 0 0 8px 0; color: var(--text-primary); font-size: 14px; font-weight: 600;">Global</h4>
-            <table style="width: 100%; font-size: 13px;">
-              <tr>
-                <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">?</kbd></td>
-                <td style="padding: 4px 0; color: var(--text-primary);">Show keyboard shortcuts</td>
-              </tr>
-              <tr>
-                <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">Esc</kbd></td>
-                <td style="padding: 4px 0; color: var(--text-primary);">Close panels or cancel</td>
-              </tr>
-              <tr>
-                <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">Tab</kbd></td>
-                <td style="padding: 4px 0; color: var(--text-primary);">Toggle sidebar / board focus</td>
-              </tr>
-              <tr>
-                <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">[</kbd></td>
-                <td style="padding: 4px 0; color: var(--text-primary);">Toggle sidebar collapse</td>
-              </tr>
-            </table>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 24px;">
+          <div style="display: grid; gap: 16px; align-content: start;">
+            <div>
+              <h4 style="margin: 0 0 8px 0; color: var(--text-primary); font-size: 14px; font-weight: 600;">Global</h4>
+              <table style="width: 100%; font-size: 13px;">
+                <tr>
+                  <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">?</kbd></td>
+                  <td style="padding: 4px 0; color: var(--text-primary);">Show keyboard shortcuts</td>
+                </tr>
+                <tr>
+                  <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">Esc</kbd></td>
+                  <td style="padding: 4px 0; color: var(--text-primary);">Close panels or cancel</td>
+                </tr>
+                <tr>
+                  <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">Tab</kbd></td>
+                  <td style="padding: 4px 0; color: var(--text-primary);">Toggle sidebar / board focus</td>
+                </tr>
+                <tr>
+                  <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">[</kbd></td>
+                  <td style="padding: 4px 0; color: var(--text-primary);">Toggle sidebar collapse</td>
+                </tr>
+                <tr>
+                  <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">R</kbd></td>
+                  <td style="padding: 4px 0; color: var(--text-primary);">Reload page</td>
+                </tr>
+              </table>
+            </div>
+            <div>
+              <h4 style="margin: 0 0 8px 0; color: var(--text-primary); font-size: 14px; font-weight: 600;">Navigation</h4>
+              <table style="width: 100%; font-size: 13px;">
+                <tr>
+                  <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">J</kbd> / <kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">&darr;</kbd></td>
+                  <td style="padding: 4px 0; color: var(--text-primary);">Next task in column</td>
+                </tr>
+                <tr>
+                  <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">K</kbd> / <kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">&uarr;</kbd></td>
+                  <td style="padding: 4px 0; color: var(--text-primary);">Previous task in column</td>
+                </tr>
+                <tr>
+                  <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">H</kbd> / <kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">&larr;</kbd></td>
+                  <td style="padding: 4px 0; color: var(--text-primary);">Move to left column</td>
+                </tr>
+                <tr>
+                  <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">L</kbd> / <kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">&rarr;</kbd></td>
+                  <td style="padding: 4px 0; color: var(--text-primary);">Move to right column</td>
+                </tr>
+                <tr>
+                  <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">Enter</kbd></td>
+                  <td style="padding: 4px 0; color: var(--text-primary);">Toggle task detail panel</td>
+                </tr>
+              </table>
+            </div>
           </div>
-          <div>
-            <h4 style="margin: 0 0 8px 0; color: var(--text-primary); font-size: 14px; font-weight: 600;">Navigation</h4>
-            <table style="width: 100%; font-size: 13px;">
-              <tr>
-                <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">J</kbd> / <kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">&darr;</kbd></td>
-                <td style="padding: 4px 0; color: var(--text-primary);">Next task in column</td>
-              </tr>
-              <tr>
-                <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">K</kbd> / <kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">&uarr;</kbd></td>
-                <td style="padding: 4px 0; color: var(--text-primary);">Previous task in column</td>
-              </tr>
-              <tr>
-                <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">H</kbd> / <kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">&larr;</kbd></td>
-                <td style="padding: 4px 0; color: var(--text-primary);">Move to left column</td>
-              </tr>
-              <tr>
-                <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">L</kbd> / <kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">&rarr;</kbd></td>
-                <td style="padding: 4px 0; color: var(--text-primary);">Move to right column</td>
-              </tr>
-              <tr>
-                <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">Enter</kbd></td>
-                <td style="padding: 4px 0; color: var(--text-primary);">Toggle task detail panel</td>
-              </tr>
-            </table>
-          </div>
-          <div>
-            <h4 style="margin: 0 0 8px 0; color: var(--text-primary); font-size: 14px; font-weight: 600;">Task Actions</h4>
+          <div style="align-content: start;">
+            <h4 style="margin: 0 0 8px 0; color: var(--text-primary); font-size: 14px; font-weight: 600;">Actions</h4>
             <table style="width: 100%; font-size: 13px;">
               <tr>
                 <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">P</kbd></td>
@@ -385,14 +391,6 @@
                 <td style="padding: 4px 0; color: var(--text-primary);">Delete selected task</td>
               </tr>
               <tr>
-                <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">Shift+L</kbd></td>
-                <td style="padding: 4px 0; color: var(--text-primary);">Toggle session log</td>
-              </tr>
-              <tr>
-                <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">Shift+M</kbd></td>
-                <td style="padding: 4px 0; color: var(--text-primary);">Open last message detail</td>
-              </tr>
-              <tr>
                 <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">N</kbd></td>
                 <td style="padding: 4px 0; color: var(--text-primary);">Toggle scratchpad</td>
               </tr>
@@ -401,12 +399,20 @@
                 <td style="padding: 4px 0; color: var(--text-primary);">Toggle theme</td>
               </tr>
               <tr>
+                <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">M</kbd></td>
+                <td style="padding: 4px 0; color: var(--text-primary);">Jump to marketplace</td>
+              </tr>
+              <tr>
                 <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">$</kbd></td>
                 <td style="padding: 4px 0; color: var(--text-primary);">Jump to cost</td>
               </tr>
               <tr>
-                <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">M</kbd></td>
-                <td style="padding: 4px 0; color: var(--text-primary);">Jump to marketplace</td>
+                <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">Shift+L</kbd></td>
+                <td style="padding: 4px 0; color: var(--text-primary);">Toggle session log</td>
+              </tr>
+              <tr>
+                <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">Shift+M</kbd></td>
+                <td style="padding: 4px 0; color: var(--text-primary);">Open last message detail</td>
               </tr>
               <tr>
                 <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">Shift+S</kbd></td>

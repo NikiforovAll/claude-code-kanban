@@ -2124,13 +2124,12 @@ function renderSessions() {
       if (isActive) activeSessionIds.add(s.id);
       return isActive;
     });
-    if (revealedPlanSessionId && !filteredSessions.some((s) => s.id === revealedPlanSessionId)) {
-      const planSession = sessions.find((s) => s.id === revealedPlanSessionId);
-      if (planSession) filteredSessions.push(planSession);
-    }
-    if (revealedStorageSessionId && !filteredSessions.some((s) => s.id === revealedStorageSessionId)) {
-      const storageSession = sessions.find((s) => s.id === revealedStorageSessionId);
-      if (storageSession) filteredSessions.push(storageSession);
+    const filteredIds = new Set(filteredSessions.map((s) => s.id));
+    for (const id of [revealedPlanSessionId, revealedStorageSessionId, currentSessionId]) {
+      if (id && !filteredIds.has(id)) {
+        const session = sessions.find((s) => s.id === id);
+        if (session) filteredSessions.push(session);
+      }
     }
   }
   if (filterProject) {
@@ -3990,6 +3989,11 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
     const mSession = contextSid ? sessions.find((s) => s.id === contextSid) : null;
     hubNavigate('marketplace', mSession?.project ? `?project=${encodeURIComponent(mSession.project)}` : undefined);
+    return;
+  }
+  if (matchKey(e, 'KeyR')) {
+    e.preventDefault();
+    location.reload();
     return;
   }
   if (matchKey(e, 'KeyT')) {
