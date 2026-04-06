@@ -1463,17 +1463,19 @@ function updateFullscreenBtnIcon(btnId, isFullscreen) {
 }
 
 let _toastTimer = null;
+let _manualRefreshing = false;
 //#endregion
 
 //#region TOAST
-function showToast(msg) {
+function showToast(msg, type) {
   const el = document.getElementById('toast');
   clearTimeout(_toastTimer);
   el.style.transition = 'none';
-  el.classList.remove('visible');
+  el.classList.remove('visible', 'toast-success', 'toast-error', 'toast-info');
   void el.offsetHeight;
   el.style.transition = '';
   el.textContent = msg;
+  if (type) el.classList.add(`toast-${type}`);
   el.classList.add('visible');
   _toastTimer = setTimeout(() => el.classList.remove('visible'), 2000);
 }
@@ -3993,7 +3995,15 @@ document.addEventListener('keydown', (e) => {
   }
   if (matchKey(e, 'KeyR')) {
     e.preventDefault();
-    location.reload();
+    if (_manualRefreshing) return;
+    _manualRefreshing = true;
+    const refreshes = [fetchSessions()];
+    if (currentSessionId) refreshes.push(fetchTasks(currentSessionId));
+    Promise.all(refreshes)
+      .then(() => showToast('Data refreshed', 'success'))
+      .finally(() => {
+        _manualRefreshing = false;
+      });
     return;
   }
   if (matchKey(e, 'KeyT')) {
