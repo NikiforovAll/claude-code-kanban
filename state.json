@@ -1,6 +1,6 @@
 {
-  "last_run": "2026-04-05T11:56:53Z",
-  "last_run_id": "24000990291",
+  "last_run": "2026-04-07T12:05:56Z",
+  "last_run_id": "24080332924",
   "monthly_summary_issue": {
     "month": "2026-04",
     "title": "[KanbanBot] Monthly Activity 2026-04",
@@ -23,12 +23,25 @@
     },
     {
       "title": "[KanbanBot] test: add missing coverage for customTitle, cwd, thinking block, and parseJsonlLine edge cases",
-      "branch": "kanbanbot/test-missing-coverage-20260405",
+      "branch": "kanbanbot/test-missing-coverage-20260405-e66345c031fe9f54",
+      "number": 33,
       "created": "2026-04-05",
+      "status": "open"
+    },
+    {
+      "title": "[KanbanBot] eng: pin @biomejs/biome as a devDependency",
+      "branch": "kanbanbot/eng-pin-biome-devdep-20260407",
+      "created": "2026-04-07",
+      "status": "open"
+    },
+    {
+      "title": "[KanbanBot] refactor: move context-window constants into CONTEXT_WINDOW region",
+      "branch": "kanbanbot/improve-ctx-constants-region-20260407",
+      "created": "2026-04-07",
       "status": "open"
     }
   ],
   "issues_commented": [],
   "backlog_cursor": null,
-  "notes": "npm audit shows 0 vulnerabilities. Tests: 85/85 (was 79). CSS perf: 16 transition:all replaced with specific properties. Coding: renderOwnerBadge helper extracted. Express v5 and chokidar v5 major updates still need issue discussion. CDN dep pinning is future work. PRs #31 and #32 merge cleanly with main."
+  "notes": "npm audit shows 0 vulnerabilities. Tests: 85/85 planned (PR #33 pending merge, currently 79). CSS perf: 16 transition:all replaced with specific properties (PR #31). Coding: renderOwnerBadge helper extracted (PR #32). Eng: biome pinned as devDep (new PR). Refactor: context-window constants moved to correct region (new PR). Express v5 and chokidar v5 major updates still need issue discussion. CDN dep pinning is future work."
 }
