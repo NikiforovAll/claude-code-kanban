@@ -4167,6 +4167,9 @@ function setupEventSource() {
   connect();
 }
 
+//#endregion
+
+//#region CONTEXT_WINDOW
 const CONTEXT_COLORS = { green: '#5b9a6b', yellow: '#b8a63e', orange: '#c07840', red: '#b85555' };
 const COST_THRESHOLDS = { green: 0.5, yellow: 2, orange: 5 };
 const MODEL_THRESHOLDS = [
@@ -4175,9 +4178,6 @@ const MODEL_THRESHOLDS = [
 ];
 const DEFAULT_THRESHOLDS = { yellow: 100000, orange: 130000, red: 150000 };
 
-//#endregion
-
-//#region CONTEXT_WINDOW
 function getModelThresholds(modelName) {
   if (!modelName) return DEFAULT_THRESHOLDS;
   for (const t of MODEL_THRESHOLDS) {
