@@ -159,7 +159,7 @@ async function runInstall() {
     } else if (!settings.statusLine) {
       console.log(`\n  StatusLine: ${dim('not configured')}`);
       if (await prompt(`    Set up context tracking statusline? [Y/n] `)) {
-        settings.statusLine = { command: CTX_COMMAND };
+        settings.statusLine = { type: 'command', command: CTX_COMMAND };
         fs.writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2) + '\n');
         console.log(`    ${green('✓')} StatusLine configured`);
       } else {
@@ -169,6 +169,7 @@ async function runInstall() {
       const existing = settings.statusLine.command;
       console.log(`\n  StatusLine: ${dim(`current: ${existing}`)}`);
       if (await prompt(`    Prepend context spy to existing statusline? [Y/n] `)) {
+        settings.statusLine.type = 'command';
         settings.statusLine.command = `${CTX_COMMAND} | ${existing}`;
         fs.writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2) + '\n');
         console.log(`    ${green('✓')} StatusLine updated`);
