@@ -60,6 +60,7 @@ function getArgUrl(argName, envName) {
 
 const MARKETPLACE_URL = getArgUrl('marketplace-url', 'MARKETPLACE_URL');
 const COST_URL = getArgUrl('cost-url', 'COST_URL');
+const MEMORY_URL = getArgUrl('memory-url', 'MEMORY_URL');
 const CLAUDE_DIR = getClaudeDir();
 const TASKS_DIR = path.join(CLAUDE_DIR, 'tasks');
 const PROJECTS_DIR = path.join(CLAUDE_DIR, 'projects');
@@ -1277,7 +1278,7 @@ app.get('/api/version', (req, res) => {
 });
 
 app.get('/api/config', (req, res) => {
-  res.json({ marketplaceUrl: MARKETPLACE_URL, costUrl: COST_URL });
+  res.json({ marketplaceUrl: MARKETPLACE_URL, costUrl: COST_URL, memoryUrl: MEMORY_URL });
 });
 
 // API: Get all tasks across all sessions
