@@ -1,6 +1,6 @@
 {
-  "last_run": "2026-04-07T12:05:56Z",
-  "last_run_id": "24080332924",
+  "last_run": "2026-04-08T12:05:28Z",
+  "last_run_id": "24134334844",
   "monthly_summary_issue": {
     "month": "2026-04",
     "title": "[KanbanBot] Monthly Activity 2026-04",
@@ -29,19 +29,20 @@
       "status": "open"
     },
     {
-      "title": "[KanbanBot] eng: pin @biomejs/biome as a devDependency",
-      "branch": "kanbanbot/eng-pin-biome-devdep-20260407",
+      "title": "[KanbanBot] refactor: move context-window constants into CONTEXT_WINDOW region",
+      "branch": "kanbanbot/improve-ctx-constants-region-20260407-96ad55cf3c37bc56",
+      "number": 35,
       "created": "2026-04-07",
       "status": "open"
     },
     {
-      "title": "[KanbanBot] refactor: move context-window constants into CONTEXT_WINDOW region",
-      "branch": "kanbanbot/improve-ctx-constants-region-20260407",
-      "created": "2026-04-07",
+      "title": "[KanbanBot] a11y: set aria-selected on keyboard-selected task cards",
+      "branch": "kanbanbot/a11y-aria-selected-task-cards-20260408",
+      "created": "2026-04-08",
       "status": "open"
     }
   ],
   "issues_commented": [],
   "backlog_cursor": null,
-  "notes": "npm audit shows 0 vulnerabilities. Tests: 85/85 planned (PR #33 pending merge, currently 79). CSS perf: 16 transition:all replaced with specific properties (PR #31). Coding: renderOwnerBadge helper extracted (PR #32). Eng: biome pinned as devDep (new PR). Refactor: context-window constants moved to correct region (new PR). Express v5 and chokidar v5 major updates still need issue discussion. CDN dep pinning is future work."
+  "notes": "npm audit shows 0 vulnerabilities. Tests: 85/85 planned (PR #33 pending merge, currently 79). CSS perf: 16 transition:all replaced (PR #31). Coding: renderOwnerBadge helper extracted (PR #32). Context-window constants moved to correct region (PR #35). Eng: biome pinned as devDep blocked by protected files (Issue #34). A11y: aria-selected added to task cards for keyboard nav (new PR). Express v5 and chokidar v5 major updates still need issue discussion. CDN dep pinning is future work. Smoke test for /api/version as npm test is future work."
 }
