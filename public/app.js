@@ -2444,6 +2444,15 @@ function renderSessions() {
   }
 }
 
+function updateProgressBar(tasks) {
+  const completed = tasks.filter((t) => t.status === 'completed').length;
+  const percent = tasks.length > 0 ? Math.round((completed / tasks.length) * 100) : 0;
+  progressPercent.textContent = `${percent}%`;
+  progressBar.style.width = `${percent}%`;
+  const hasInProgress = tasks.some((t) => t.status === 'in_progress');
+  progressBar.classList.toggle('shimmer', hasInProgress && percent < 100);
+}
+
 function renderSession() {
   noSession.style.display = 'none';
   sessionView.classList.add('visible');
@@ -2468,13 +2477,7 @@ function renderSession() {
   metaParts.push(formatDate(session.modifiedAt));
   sessionMeta.textContent = metaParts.join(' · ');
 
-  const completed = currentTasks.filter((t) => t.status === 'completed').length;
-  const percent = currentTasks.length > 0 ? Math.round((completed / currentTasks.length) * 100) : 0;
-
-  progressPercent.textContent = `${percent}%`;
-  progressBar.style.width = `${percent}%`;
-  const hasInProgress = currentTasks.some((t) => t.status === 'in_progress');
-  progressBar.classList.toggle('shimmer', hasInProgress && percent < 100);
+  updateProgressBar(currentTasks);
 
   updateOwnerFilter();
   renderKanban();
@@ -2492,13 +2495,7 @@ function renderProjectView() {
   if (currentProjectPath) metaParts.push(currentProjectPath);
   sessionMeta.textContent = metaParts.join(' · ');
 
-  const completed = currentTasks.filter((t) => t.status === 'completed').length;
-  const percent = currentTasks.length > 0 ? Math.round((completed / currentTasks.length) * 100) : 0;
-
-  progressPercent.textContent = `${percent}%`;
-  progressBar.style.width = `${percent}%`;
-  const hasInProgress = currentTasks.some((t) => t.status === 'in_progress');
-  progressBar.classList.toggle('shimmer', hasInProgress && percent < 100);
+  updateProgressBar(currentTasks);
 
   updateOwnerFilter();
   renderKanban();
