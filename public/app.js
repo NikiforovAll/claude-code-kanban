@@ -2524,6 +2524,7 @@ function renderTaskCard(task) {
           ondragstart="onCardDragStart(event)"
           ondragend="onCardDragEnd(event)"
           class="task-card ${statusClass} ${isBlocked ? 'blocked' : ''}"
+          aria-selected="false"
           aria-label="${escapeHtml(task.subject)} — ${task.status.replace('_', ' ')}">
           <div class="task-id">
             <span>#${taskId}</span>
@@ -2586,7 +2587,10 @@ function renderKanban() {
       document.querySelector(`.task-card[data-task-id="${selectedTaskId}"][data-session-id="${selectedSessionId}"]`) ||
       document.querySelector(`.task-card[data-task-id="${selectedTaskId}"]`);
     if (card) {
-      if (focusZone === 'board') card.classList.add('selected');
+      if (focusZone === 'board') {
+        card.classList.add('selected');
+        card.setAttribute('aria-selected', 'true');
+      }
     } else {
       selectedTaskId = null;
       selectedSessionId = null;
@@ -2671,7 +2675,10 @@ async function onColumnDrop(e) {
 //#region KEYBOARD_NAV
 function selectTask(taskId, sessionId) {
   const prev = document.querySelector('.task-card.selected');
-  if (prev) prev.classList.remove('selected');
+  if (prev) {
+    prev.classList.remove('selected');
+    prev.setAttribute('aria-selected', 'false');
+  }
   selectedTaskId = taskId;
   selectedSessionId = sessionId;
   if (!taskId) return;
@@ -2680,6 +2687,7 @@ function selectTask(taskId, sessionId) {
     document.querySelector(`.task-card[data-task-id="${taskId}"]`);
   if (card) {
     card.classList.add('selected');
+    card.setAttribute('aria-selected', 'true');
     card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }
 }
@@ -2906,7 +2914,10 @@ function setFocusZone(zone) {
       const card = document.querySelector(
         `.task-card[data-task-id="${selectedTaskId}"][data-session-id="${selectedSessionId}"]`,
       );
-      if (card) card.classList.add('selected');
+      if (card) {
+        card.classList.add('selected');
+        card.setAttribute('aria-selected', 'true');
+      }
     } else {
       navigateVertical(1);
     }
