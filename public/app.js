@@ -2505,6 +2505,11 @@ function renderProjectView() {
   renderSessions();
 }
 
+function renderOwnerBadge(owner) {
+  const c = getOwnerColor(owner);
+  return `<span class="task-owner-badge" style="background:${c.bg};color:${c.color}">${escapeHtml(owner)}</span>`;
+}
+
 function renderTaskCard(task) {
   const isBlocked = task.blockedBy && task.blockedBy.length > 0;
   const useSlug = viewMode === 'all' || viewMode === 'project';
@@ -2528,16 +2533,7 @@ function renderTaskCard(task) {
           <div class="task-id">
             <span>#${taskId}</span>
             ${isBlocked ? '<span class="task-badge blocked">Blocked</span>' : ''}
-            ${
-              task.owner
-                ? (
-                    () => {
-                      const c = getOwnerColor(task.owner);
-                      return `<span class="task-owner-badge" style="background:${c.bg};color:${c.color}">${escapeHtml(task.owner)}</span>`;
-                    }
-                  )()
-                : ''
-            }
+            ${task.owner ? renderOwnerBadge(task.owner) : ''}
           </div>
           <div class="task-title">${escapeHtml(task.subject)}</div>
           ${sessionLabel ? `<div class="task-session">${escapeHtml(sessionLabel)}</div>` : ''}
