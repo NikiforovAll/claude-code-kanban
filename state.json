@@ -1,6 +1,6 @@
 {
-  "last_run": "2026-04-09T12:05:53Z",
-  "last_run_id": "24189175706",
+  "last_run": "2026-04-10T12:11:00Z",
+  "last_run_id": "24241930188",
   "monthly_summary_issue": {
     "month": "2026-04",
     "title": "[KanbanBot] Monthly Activity 2026-04",
@@ -52,5 +52,5 @@
   ],
   "issues_commented": [],
   "backlog_cursor": null,
-  "notes": "npm audit shows 0 vulnerabilities. Tests: 85/85 planned (PR #33 pending merge, currently 79 on main). CSS perf: 16 transition:all replaced (PR #31). Coding: renderOwnerBadge helper extracted (PR #32). Context-window constants moved to correct region (PR #35). Eng: biome pinned as devDep blocked by protected files (Issue #34). A11y: aria-selected added to task cards for keyboard nav (PR #36). Refactor: updateProgressBar helper extracted to remove duplication between renderSession/renderProjectView (PR #37). Express v5 and chokidar v5 major updates still need issue discussion. CDN dep pinning is future work. Smoke test for /api/version as npm test is future work. All 5 existing PRs merge cleanly into main (verified 2026-04-09)."
+  "notes": "npm audit shows 0 vulnerabilities. Tests: 92 on new branch (79 on main; PR #33 adds 6 to 85, new testing branch adds 13 to 92). CSS perf: 16 transition:all replaced (PR #31). Coding: renderOwnerBadge helper extracted (PR #32). Context-window constants moved to correct region (PR #35). Eng: biome pinned as devDep blocked by protected files (Issue #34). A11y: aria-selected added to task cards for keyboard nav (PR #36). Refactor: updateProgressBar helper extracted to remove duplication between renderSession/renderProjectView (PR #37). 2026-04-10: Branch kanbanbot/test-protocol-tool-coverage-20260410 prepared with 13 new tests but PR creation failed because safe-output MCP tools were unavailable this run. No open non-KanbanBot issues to comment on. Express v5 and chokidar v5 major updates still need issue discussion. CDN dep pinning is future work. Smoke test for /api/version as npm test is future work."
 }
