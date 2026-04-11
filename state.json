@@ -1,6 +1,6 @@
 {
-  "last_run": "2026-04-10T12:11:00Z",
-  "last_run_id": "24241930188",
+  "last_run": "2026-04-11T11:57:18Z",
+  "last_run_id": "24281942764",
   "monthly_summary_issue": {
     "month": "2026-04",
     "title": "[KanbanBot] Monthly Activity 2026-04",
@@ -44,13 +44,21 @@
     },
     {
       "title": "[KanbanBot] refactor: extract updateProgressBar helper to remove duplication",
-      "branch": "kanbanbot/improve-progress-bar-helper-20260409",
+      "branch": "kanbanbot/improve-progress-bar-helper-20260409-f2d77411a3014960",
       "number": 37,
       "created": "2026-04-09",
       "status": "open"
     }
   ],
+  "pending_branches": [
+    {
+      "branch": "kanbanbot/test-system-messages-and-tools-20260411",
+      "description": "test: add coverage for system messages, tool details, and teammate protocols (25 new tests, 79→104)",
+      "created": "2026-04-11",
+      "status": "local-only"
+    }
+  ],
   "issues_commented": [],
   "backlog_cursor": null,
-  "notes": "npm audit shows 0 vulnerabilities. Tests: 92 on new branch (79 on main; PR #33 adds 6 to 85, new testing branch adds 13 to 92). CSS perf: 16 transition:all replaced (PR #31). Coding: renderOwnerBadge helper extracted (PR #32). Context-window constants moved to correct region (PR #35). Eng: biome pinned as devDep blocked by protected files (Issue #34). A11y: aria-selected added to task cards for keyboard nav (PR #36). Refactor: updateProgressBar helper extracted to remove duplication between renderSession/renderProjectView (PR #37). 2026-04-10: Branch kanbanbot/test-protocol-tool-coverage-20260410 prepared with 13 new tests but PR creation failed because safe-output MCP tools were unavailable this run. No open non-KanbanBot issues to comment on. Express v5 and chokidar v5 major updates still need issue discussion. CDN dep pinning is future work. Smoke test for /api/version as npm test is future work."
+  "notes": "npm audit shows 0 vulnerabilities. Tests: 79 on main; PR #33 adds 6 to 85. Branch kanbanbot/test-system-messages-and-tools-20260411 has 25 new tests covering system messages (skip/compact/summary/task-notification), tool detail extraction (pattern/query/url/plan/SendMessage protocols), and teammate protocol types (idle/task_assignment/shutdown/plan_approval). Tests 79→104. Safe-output MCP tools were unavailable this run (second consecutive). All 6 open KanbanBot PRs (#31, #32, #33, #35, #36, #37) merge cleanly into main with no conflicts. Express v5 and chokidar v5 major updates still need issue discussion. CDN dep pinning is future work. Smoke test for /api/version as npm test is future work."
 }
