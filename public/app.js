@@ -2110,6 +2110,8 @@ function renderSessions() {
   // Update project dropdown
   updateProjectDropdown();
 
+  // Filter pipeline: active filter → force-include revealed/current (non-pinned) sessions →
+  // project filter → search filter → ensure pinned/sticky sessions are always included
   const LIVE_INDICATOR_MS = 10 * 1000;
   let filteredSessions = sessions;
   if (sessionFilter === 'active') {
@@ -2128,11 +2130,17 @@ function renderSessions() {
       if (isActive) activeSessionIds.add(s.id);
       return isActive;
     });
+    // Force-include revealed/current sessions that didn't pass the active filter.
+    // Skip pinned sessions — they are prepended separately below (lines ~2180) to preserve stable position.
     const filteredIds = new Set(filteredSessions.map((s) => s.id));
     for (const id of [revealedPlanSessionId, revealedStorageSessionId, currentSessionId]) {
-      if (id && !filteredIds.has(id)) {
+      if (id && !filteredIds.has(id) && !isAnyPinned(id)) {
         const session = sessions.find((s) => s.id === id);
-        if (session) filteredSessions.push(session);
+        if (session) {
+          const insertAt = filteredSessions.findIndex((s) => s.modifiedAt < session.modifiedAt);
+          if (insertAt === -1) filteredSessions.push(session);
+          else filteredSessions.splice(insertAt, 0, session);
+        }
       }
     }
   }
