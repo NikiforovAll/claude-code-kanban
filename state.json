@@ -1,6 +1,6 @@
 {
-  "last_run": "2026-04-13T12:19:44Z",
-  "last_run_id": "24342524657",
+  "last_run": "2026-04-14T12:08:26Z",
+  "last_run_id": "24397995416",
   "monthly_summary_issue": {
     "month": "2026-04",
     "title": "[KanbanBot] Monthly Activity 2026-04",
@@ -53,16 +53,16 @@
   "pending_work": [
     {
       "id": "perf-abort-fetchsessions",
-      "description": "perf: abort in-flight fetchSessions (AbortController). In DATA_FETCHING region: add let _fetchSessionsCtrl=null before fetchSessions, replace try-block with abort/new-ctrl pattern, pass {signal} to both fetch calls, swallow AbortError. ~15 line change to public/app.js.",
-      "attempt": 2
+      "description": "perf: abort in-flight fetchSessions (AbortController). STATE region: add let _fetchSessionsCtrl=null. DATA_FETCHING: abort/new-ctrl at start, pass {signal} to both fetches, swallow AbortError. ~12 lines in app.js. IMPLEMENTED in run 24397995416 but could not push (safeoutputs filtered).",
+      "attempt": 3
     },
     {
       "id": "test-parsers-labels",
-      "description": "test: export extractCustomTitleFromText and getSystemMessageLabel from lib/parsers.js module.exports. Add 18 tests to test/contracts.test.js: 6 for extractCustomTitleFromText (no-marker, valid, HTML-like rejected, last-wins, malformed JSON, missing field) and 12 for getSystemMessageLabel (summary tag, trim, task-notification, local-command-stdout Compacted vs other, local-command-caveat, bg-task-completed, continuation __skip__, /clear __skip__, /compact Compacted, null for unknown). 97 total tests.",
+      "description": "test: export extractCustomTitleFromText and getSystemMessageLabel from lib/parsers.js. Add 18 tests to test/contracts.test.js.",
       "attempt": 2
     }
   ],
   "issues_commented": [],
   "backlog_cursor": null,
-  "infrastructure_notes": "safeoutputs MCP server filtered for 4+ consecutive runs. Error: Could not verify server against any configured registry. Branches are created locally each run but lost at runner shutdown. 6 open KanbanBot PRs (#31-#37) are 4+ weeks old with no maintainer review. Express v5 and chokidar v5 major updates need issue discussion."
+  "infrastructure_notes": "safeoutputs MCP server filtered for 5+ consecutive runs. Error: Could not verify server against any configured registry. GitHub MCP server also disabled. Branches are created locally each run but lost at runner shutdown. 6 open KanbanBot PRs (#31-#37) weeks old with no maintainer review."
 }
