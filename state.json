@@ -1,6 +1,6 @@
 {
-  "last_run": "2026-04-17T12:05:47Z",
-  "last_run_id": "24564121021",
+  "last_run": "2026-04-18T11:58:30Z",
+  "last_run_id": "24604158861",
   "monthly_summary_issue": {
     "month": "2026-04",
     "title": "[KanbanBot] Monthly Activity 2026-04",
@@ -48,21 +48,28 @@
       "number": 37,
       "created": "2026-04-09",
       "status": "open"
+    },
+    {
+      "title": "[KanbanBot] refactor: extract renderKanbanColumn helper and KANBAN_EMPTY_ICON constant",
+      "branch": "kanbanbot/improve-kanban-column-helper-20260418",
+      "number": null,
+      "created": "2026-04-18",
+      "status": "local-only"
     }
   ],
   "pending_work": [
     {
-      "id": "test-parsers-labels",
-      "description": "test: export extractCustomTitleFromText and getSystemMessageLabel from lib/parsers.js. Add 20 tests to test/contracts.test.js. IMPLEMENTED in runs 24453493349, 24509303048, 24564121021 on branches kanbanbot/test-export-parser-helpers-20260415, kanbanbot/test-export-parser-helpers-20260416, kanbanbot/test-export-parser-helpers-20260417 but branches lost (safeoutputs blocked). lib/parsers.js: add 2 items to module.exports (extractCustomTitleFromText, getSystemMessageLabel). test/contracts.test.js: import both; add 2 describe blocks at end (8 tests for extractCustomTitleFromText, 12 for getSystemMessageLabel). 99 tests total.",
-      "attempt": 5
+      "id": "pr-kanban-column-helper",
+      "description": "refactor: extract renderKanbanColumn helper and KANBAN_EMPTY_ICON constant. Branch kanbanbot/improve-kanban-column-helper-20260418 created locally with commit 1f8ab3c. Changes: extract KANBAN_EMPTY_ICON module-level constant, extract renderKanbanColumn(tasks, emptyLabel) helper (removes 3 near-identical ternary blocks in renderKanban), fix HUB_INTEGRATION region marker from '// #region' to '//#region'. All lint/tests pass.",
+      "attempt": 1
     },
     {
       "id": "eng-pin-biome-devdep",
-      "description": "eng: pin @biomejs/biome@^2.4.12 as devDependency in package.json. Add npm run lint script. IMPLEMENTED in runs 24453493349 and 24509303048. Issue #34 already created as protected-files workaround.",
+      "description": "eng: pin @biomejs/biome@^2.4.12 as devDependency in package.json. Add npm run lint script. IMPLEMENTED in multiple runs. Issue #34 already created as protected-files workaround.",
       "attempt": 2
     }
   ],
   "issues_commented": [],
   "backlog_cursor": null,
-  "infrastructure_notes": "safeoutputs MCP server filtered for 8+ consecutive runs. Error: Tool 'create_pull_request' does not exist. GitHub MCP server also unavailable. Branches are created locally each run but lost at runner shutdown. 6 open KanbanBot PRs (#31-#37) 1-2 weeks old with no maintainer review. Root cause: safeoutputs tools not present in function schema. All work is prepared locally but cannot be pushed/submitted."
+  "infrastructure_notes": "safeoutputs MCP server unavailable for 9+ consecutive runs. Tool 'create_pull_request', 'noop', 'add_comment', 'missing_tool' all return 'Tool does not exist'. Branch kanbanbot/improve-kanban-column-helper-20260418 created locally but cannot be pushed as PR. 6 open KanbanBot PRs (#31-#37) await maintainer review."
 }
