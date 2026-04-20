@@ -1,6 +1,6 @@
 {
-  "last_run": "2026-04-19T11:58:55Z",
-  "last_run_id": "24628531077",
+  "last_run": "2026-04-20T12:28:07Z",
+  "last_run_id": "24665720800",
   "monthly_summary_issue": {
     "month": "2026-04",
     "title": "[KanbanBot] Monthly Activity 2026-04",
@@ -50,17 +50,17 @@
       "status": "open"
     },
     {
-      "title": "[KanbanBot] test: add coverage for thinking blocks, isMeta skipping, agent name enrichment, and hasMore pagination",
-      "branch": "kanbanbot/test-additional-coverage-20260419",
+      "title": "[KanbanBot] perf: CSS containment on task cards + ResizeObserver entry sizes",
+      "branch": "kanbanbot/perf-css-contain-20260420",
       "number": null,
-      "created": "2026-04-19",
+      "created": "2026-04-20",
       "status": "local-only"
     },
     {
-      "title": "[KanbanBot] refactor(kanban): fix HUB_INTEGRATION region markers and extract renderKanbanColumn helper",
-      "branch": "kanbanbot/fix-hub-region-marker-20260419",
+      "title": "[KanbanBot] test: missing coverage for buildAgentProgressMap name/description enrichment",
+      "branch": "kanbanbot/test-agent-progress-enrichment-20260420",
       "number": null,
-      "created": "2026-04-19",
+      "created": "2026-04-20",
       "status": "local-only"
     }
   ],
@@ -71,17 +71,17 @@
       "attempt": 2
     },
     {
-      "id": "pr-test-additional-coverage",
-      "description": "test: add coverage for thinking blocks, isMeta skipping, agent name enrichment, and hasMore pagination. Branch kanbanbot/test-additional-coverage-20260419. 4 new tests in test/contracts.test.js. 83 tests pass.",
+      "id": "pr-perf-css-contain",
+      "description": "perf: add contain: layout style to .task-card; use ResizeObserver borderBoxSize to avoid forced reflow. Branch kanbanbot/perf-css-contain-20260420. 79 tests pass, lint clean.",
       "attempt": 1
     },
     {
-      "id": "pr-fix-hub-region-marker",
-      "description": "refactor(kanban): fix HUB_INTEGRATION region markers (// #region -> //#region) and extract KANBAN_EMPTY_ICON + renderKanbanColumn helper. Branch kanbanbot/fix-hub-region-marker-20260419. Lint/tests pass.",
+      "id": "pr-test-agent-enrichment",
+      "description": "test: 2 new tests for buildAgentProgressMap name+description enrichment. Branch kanbanbot/test-agent-progress-enrichment-20260420. 81 tests pass, lint clean.",
       "attempt": 1
     }
   ],
   "issues_commented": [],
   "backlog_cursor": null,
-  "infrastructure_notes": "safeoutputs MCP server unavailable for 10+ consecutive runs. Branches created locally cannot be pushed as PRs. 6 open KanbanBot PRs (#31-#37) await maintainer review. 2 new local branches created this run: kanbanbot/test-additional-coverage-20260419 and kanbanbot/fix-hub-region-marker-20260419."
+  "infrastructure_notes": "ROOT CAUSE IDENTIFIED (run 2026-04-20): MCP registry policy check fails with 401 at api.github.com/copilot/mcp_registry. Log: 'MCP server safeoutputs filtered: Could not verify server against any configured registry'. This blocks ALL safeoutputs tools every run. gh CLI also unauthenticated so no git push or PR creation possible. Maintainer action needed: ensure GITHUB_TOKEN in kanbanbot workflow has copilot:read scope or add safeoutputs to allowed MCP servers list. Seen in agent process log: /tmp/gh-aw/sandbox/agent/logs/process-*.log"
 }
