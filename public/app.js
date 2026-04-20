@@ -4810,44 +4810,38 @@ async function showSessionInfoModal(sessionId) {
   const session = sessions.find((s) => s.id === sessionId);
   if (!session) return;
 
-  const promises = [];
+  // Open modal immediately with session metadata (cwd / path / branch are
+  // already in-memory). Plan / team / tasks are fetched in the background
+  // and re-rendered when they arrive, so the modal doesn't block on network.
+  _planSessionId = sessionId;
+  const cachedTasks = currentSessionId === sessionId ? currentTasks : [];
+  showInfoModal(session, null, cachedTasks, null);
 
-  // Fetch team config
-  let teamConfig = null;
-  if (session.isTeam) {
-    const teamId = session.teamName || sessionId;
-    promises.push(
-      fetch(`/api/teams/${teamId}`)
+  const rerender = (teamConfig, tasks, planContent) => {
+    if (_planSessionId !== sessionId) return; // user opened a different modal
+    showInfoModal(session, teamConfig, tasks, planContent);
+  };
+
+  const teamPromise = session.isTeam
+    ? fetch(`/api/teams/${session.teamName || sessionId}`)
         .then((r) => (r.ok ? r.json() : null))
         .catch(() => null)
-        .then((data) => {
-          teamConfig = data;
-        }),
-    );
-  }
+    : Promise.resolve(null);
 
-  // Fetch plan
-  let planContent = null;
-  promises.push(
-    fetch(`/api/sessions/${sessionId}/plan`)
-      .then((r) => (r.ok ? r.json() : null))
-      .catch(() => null)
-      .then((data) => {
-        planContent = data?.content || null;
-      }),
-  );
+  const planPromise = fetch(`/api/sessions/${sessionId}/plan`)
+    .then((r) => (r.ok ? r.json() : null))
+    .catch(() => null)
+    .then((data) => data?.content || null);
 
-  await Promise.all(promises);
+  const tasksPromise =
+    cachedTasks.length > 0
+      ? Promise.resolve(cachedTasks)
+      : fetch(`/api/sessions/${sessionId}`)
+          .then((r) => (r.ok ? r.json() : []))
+          .catch(() => []);
 
-  let tasks = currentSessionId === sessionId ? currentTasks : [];
-  if (tasks.length === 0) {
-    try {
-      const r = await fetch(`/api/sessions/${sessionId}`);
-      if (r.ok) tasks = await r.json();
-    } catch {}
-  }
-  _planSessionId = sessionId;
-  showInfoModal(session, teamConfig, tasks, planContent);
+  const [teamConfig, planContent, tasks] = await Promise.all([teamPromise, planPromise, tasksPromise]);
+  rerender(teamConfig, tasks, planContent);
 }
 
 let _infoModalSessionId = null;
@@ -5004,12 +4998,15 @@ function showInfoModal(session, teamConfig, tasks, planContent) {
   }
 
   bodyEl.innerHTML = html;
+  const alreadyVisible = modal.classList.contains('visible');
   _infoModalSessionId = session.id;
   updateStickyBtnState();
   updateDismissBtnState();
   const costBtn = document.getElementById('session-info-cost-btn');
   if (costBtn) costBtn.style.display = window.__HUB__?.enabled || appConfig.costUrl ? '' : 'none';
   modal.classList.add('visible');
+
+  if (alreadyVisible) return; // re-render during deferred hydration — key handler already attached
 
   const keyHandler = (e) => {
     if (e.key === 'Escape') {
