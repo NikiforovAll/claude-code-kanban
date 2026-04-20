@@ -4819,6 +4819,8 @@ async function showSessionInfoModal(sessionId) {
 
   const rerender = (teamConfig, tasks, planContent) => {
     if (_planSessionId !== sessionId) return; // user opened a different modal
+    const modal = document.getElementById('team-modal');
+    if (!modal?.classList.contains('visible')) return; // user closed modal — don't reopen
     showInfoModal(session, teamConfig, tasks, planContent);
   };
 
@@ -5021,6 +5023,7 @@ function showInfoModal(session, teamConfig, tasks, planContent) {
 
 function closeTeamModal() {
   document.getElementById('team-modal').classList.remove('visible');
+  _planSessionId = null;
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
