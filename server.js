@@ -387,9 +387,23 @@ function loadSessionMetadata() {
           resolvedProjectPath = sessionInfo.projectPath;
         }
 
+        const candidateProject = indexProjectPath || sessionInfo.projectPath || null;
+        const existing = metadata[sessionId];
+        // Same sessionId can appear in multiple project dirs (e.g. "shadow"
+        // JSONLs that only hold custom-title/agent-name records when a session
+        // is continued from a worktree). Don't let a weaker entry (no cwd, no
+        // project) overwrite a previously resolved one — just merge scalars.
+        if (existing && existing.project && !candidateProject) {
+          if (!existing.slug && sessionInfo.slug) existing.slug = sessionInfo.slug;
+          if (!existing.customTitle && sessionInfo.customTitle) existing.customTitle = sessionInfo.customTitle;
+          if (!existing.gitBranch && sessionInfo.gitBranch) existing.gitBranch = sessionInfo.gitBranch;
+          sessionIds.push(sessionId);
+          continue;
+        }
+
         metadata[sessionId] = {
           slug: sessionInfo.slug,
-          project: indexProjectPath || sessionInfo.projectPath || null,
+          project: candidateProject,
           cwd: sessionInfo.cwd || null,
           gitBranch: sessionInfo.gitBranch || null,
           customTitle: sessionInfo.customTitle || null,
