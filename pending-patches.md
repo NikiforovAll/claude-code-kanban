@@ -3,10 +3,10 @@
 These patches were prepared but could not be pushed as PRs due to safeoutputs MCP server failure.
 To apply: git apply <patch-file-content>
 
-## Patch 1: perf-css-contain-20260421
+## Patch 1: perf-css-contain-20260422
 
 Title: perf: CSS containment on task cards + ResizeObserver entry sizes
-Tests: 79/79 pass, lint clean
+Tests: 81/81 pass, lint clean
 
 ```diff
 diff --git a/public/app.js b/public/app.js
@@ -38,17 +38,17 @@ index ea9861b..ff8ba17 100644
  }
 ```
 
-## Patch 2: test-agent-progress-enrichment-20260421
+## Patch 2: test-agent-progress-enrichment-20260422
 
 Title: test: add missing coverage for buildAgentProgressMap name/description enrichment
 Tests: 81/81 pass (2 new), lint clean
 
 ```diff
 diff --git a/test/contracts.test.js b/test/contracts.test.js
-index bb8ec95..4d8c4cc 100644
+index bb8ec95..8998e2e 100644
 --- a/test/contracts.test.js
 +++ b/test/contracts.test.js
-@@ -540,6 +540,47 @@ describe('Parser: buildAgentProgressMap', () => {
+@@ -540,6 +540,46 @@ describe('Parser: buildAgentProgressMap', () => {
      const map = buildAgentProgressMap('/nonexistent/path.jsonl');
      assert.deepEqual(map, {});
    });
@@ -62,7 +62,6 @@ index bb8ec95..4d8c4cc 100644
 +  it('enriches map entry with description from Agent tool_use input', () => {
 +    const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'parser-test-'));
 +    const file = path.join(tmpDir, 'test.jsonl');
-+    const { writeFileSync } = require('fs');
 +    writeFileSync(file, [
 +      JSON.stringify({
 +        type: 'assistant',
@@ -97,3 +96,4 @@ index bb8ec95..4d8c4cc 100644
  
  describe('Parser: readSessionInfoFromJsonl', () => {
 ```
+
