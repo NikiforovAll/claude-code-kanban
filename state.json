@@ -1,94 +1,26 @@
 {
-  "last_run": "2026-04-23T12:08:17Z",
-  "last_run_id": "24834275853",
+  "last_run": "2026-04-24T12:08:45Z",
+  "last_run_id": "24888579506",
   "monthly_summary_issue": {
     "month": "2026-04",
     "title": "[KanbanBot] Monthly Activity 2026-04",
     "number": 23
   },
   "kanbanbot_prs": [
-    {
-      "title": "[KanbanBot] perf: replace transition: all with specific property transitions",
-      "branch": "kanbanbot/perf-specific-transitions-9f589da92459d7ef",
-      "number": 31,
-      "created": "2026-04-04",
-      "status": "open"
-    },
-    {
-      "title": "[KanbanBot] refactor: extract renderOwnerBadge helper",
-      "branch": "kanbanbot/improve-task-card-owner-badge-715fa0dce541b035",
-      "number": 32,
-      "created": "2026-04-04",
-      "status": "open"
-    },
-    {
-      "title": "[KanbanBot] test: add missing coverage for customTitle, cwd",
-      "branch": "kanbanbot/test-missing-coverage-20260405-e66345c031fe9f54",
-      "number": 33,
-      "created": "2026-04-05",
-      "status": "open"
-    },
-    {
-      "title": "[KanbanBot] refactor: move context-window constants",
-      "branch": "kanbanbot/improve-ctx-constants-region-20260407-96ad55cf3c37bc56",
-      "number": 35,
-      "created": "2026-04-07",
-      "status": "open"
-    },
-    {
-      "title": "[KanbanBot] a11y: set aria-selected on keyboard-selected task cards",
-      "branch": "kanbanbot/a11y-aria-selected-task-cards-20260408-d1ff40bf1d087b16",
-      "number": 36,
-      "created": "2026-04-08",
-      "status": "open"
-    },
-    {
-      "title": "[KanbanBot] refactor: extract updateProgressBar helper",
-      "branch": "kanbanbot/improve-progress-bar-helper-20260409-f2d77411a3014960",
-      "number": 37,
-      "created": "2026-04-09",
-      "status": "open"
-    },
-    {
-      "title": "[KanbanBot] eng: pin @biomejs/biome@^2.4.12 as devDependency, add npm run lint script",
-      "branch": "kanbanbot/eng-pin-biome-devdep-20260423",
-      "number": null,
-      "created": "2026-04-23",
-      "status": "local-only"
-    },
-    {
-      "title": "[KanbanBot] perf: CSS containment on task cards + ResizeObserver entry sizes",
-      "branch": "kanbanbot/perf-css-contain-20260423",
-      "number": null,
-      "created": "2026-04-23",
-      "status": "local-only"
-    },
-    {
-      "title": "[KanbanBot] test: add missing coverage for buildAgentProgressMap name/description enrichment",
-      "branch": "kanbanbot/test-agent-progress-enrichment-20260423",
-      "number": null,
-      "created": "2026-04-23",
-      "status": "local-only"
-    }
+    {"title": "[KanbanBot] perf: replace transition: all with specific property transitions", "branch": "kanbanbot/perf-specific-transitions-9f589da92459d7ef", "number": 31, "created": "2026-04-04", "status": "open"},
+    {"title": "[KanbanBot] refactor: extract renderOwnerBadge helper", "branch": "kanbanbot/improve-task-card-owner-badge-715fa0dce541b035", "number": 32, "created": "2026-04-04", "status": "open"},
+    {"title": "[KanbanBot] test: add missing coverage for customTitle, cwd", "branch": "kanbanbot/test-missing-coverage-20260405-e66345c031fe9f54", "number": 33, "created": "2026-04-05", "status": "open"},
+    {"title": "[KanbanBot] refactor: move context-window constants", "branch": "kanbanbot/improve-ctx-constants-region-20260407-96ad55cf3c37bc56", "number": 35, "created": "2026-04-07", "status": "open"},
+    {"title": "[KanbanBot] a11y: set aria-selected on keyboard-selected task cards", "branch": "kanbanbot/a11y-aria-selected-task-cards-20260408-d1ff40bf1d087b16", "number": 36, "created": "2026-04-08", "status": "open"},
+    {"title": "[KanbanBot] refactor: extract updateProgressBar helper", "branch": "kanbanbot/improve-progress-bar-helper-20260409-f2d77411a3014960", "number": 37, "created": "2026-04-09", "status": "open"},
+    {"title": "[KanbanBot] perf: CSS containment on task cards + ResizeObserver entry sizes", "branch": "kanbanbot/perf-css-contain-20260424", "number": null, "created": "2026-04-24", "status": "local-only"},
+    {"title": "[KanbanBot] eng: pin @biomejs/biome@^2.0.0 as devDependency, add npm run lint script", "branch": "kanbanbot/fix-issue-34-biome-devdep-20260424", "number": null, "created": "2026-04-24", "status": "local-only"}
   ],
   "pending_work": [
-    {
-      "id": "pr-eng-biome-devdep-4",
-      "description": "eng: pin @biomejs/biome@^2.4.12 as devDependency + npm run lint script. Closes #34. Branch kanbanbot/eng-pin-biome-devdep-20260423. 79 tests pass, lint clean. Attempt 4.",
-      "attempt": 4
-    },
-    {
-      "id": "pr-perf-css-contain-4",
-      "description": "perf: CSS containment on task cards + ResizeObserver entry sizes. Branch kanbanbot/perf-css-contain-20260423. 79 tests pass, lint clean. Attempt 4.",
-      "attempt": 4
-    },
-    {
-      "id": "pr-test-agent-enrichment-4",
-      "description": "test: 2 new tests for buildAgentProgressMap name+description enrichment (81/81 pass, lint clean). Branch kanbanbot/test-agent-progress-enrichment-20260423. Attempt 4.",
-      "attempt": 4
-    }
+    {"id": "pr-perf-css-contain-5", "description": "perf: CSS containment on task cards + ResizeObserver entry sizes. Branch kanbanbot/perf-css-contain-20260424. 79 tests pass, lint clean. Attempt 5.", "attempt": 5},
+    {"id": "pr-fix-34-biome-devdep-5", "description": "eng: pin @biomejs/biome@^2.0.0 as devDependency, add npm run lint script. Closes #34. Branch kanbanbot/fix-issue-34-biome-devdep-20260424. 79 tests pass, lint clean. Attempt 5.", "attempt": 5}
   ],
   "issues_commented": [],
   "backlog_cursor": null,
-  "infrastructure_notes": "PERSISTENT ISSUE (confirmed 2026-04-23 run 24834275853): safeoutputs MCP server unavailable. create_pull_request/add_comment/noop all fail with tool-does-not-exist. gh CLI also unauthenticated. No GitHub writes possible. Branches exist only locally. Maintainer action needed: ensure safeoutputs MCP server is enabled in kanbanbot workflow."
+  "infrastructure_notes": "PERSISTENT ISSUE (confirmed 2026-04-24 run 24888579506): safeoutputs MCP server unavailable. create_pull_request/add_comment/noop all fail with tool-does-not-exist. gh CLI also unauthenticated. No GitHub writes possible. Branches exist only locally. Maintainer action needed: ensure safeoutputs MCP server is enabled in kanbanbot workflow."
 }
