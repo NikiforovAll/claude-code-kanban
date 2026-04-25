@@ -791,6 +791,12 @@ app.get('/api/sessions', async (req, res) => {
     let sessions = Array.from(sessionsMap.values());
     sessions.sort((a, b) => new Date(b.modifiedAt) - new Date(a.modifiedAt));
 
+    // Apply project filter before limit so the limit is per-project
+    const projectFilter = req.query.project;
+    if (projectFilter) {
+      sessions = sessions.filter(s => s.project === projectFilter);
+    }
+
     // Apply limit if specified, but always include pinned sessions
     if (limit !== null && limit > 0) {
       const top = sessions.slice(0, limit);
@@ -1303,6 +1309,7 @@ app.get('/api/tasks/all', async (req, res) => {
     }
 
     const metadata = loadSessionMetadata();
+    const { listToSessions } = loadAllTaskMaps();
     const sessionDirs = readdirSync(TASKS_DIR, { withFileTypes: true })
       .filter(d => d.isDirectory());
 
@@ -1313,6 +1320,19 @@ app.get('/api/tasks/all', async (req, res) => {
       const taskFiles = readdirSync(sessionPath).filter(f => f.endsWith('.json'));
       const meta = metadata[sessionDir.name] || {};
 
+      // For custom task list directories (non-UUID dirs), resolve project from the
+      // mapped sessions since those dirs don't have their own metadata entry.
+      let project = meta.project || null;
+      if (!project) {
+        const mappedSessions = listToSessions[sessionDir.name];
+        if (mappedSessions) {
+          for (const [sid, info] of Object.entries(mappedSessions)) {
+            project = metadata[sid]?.project || info.project || null;
+            if (project) break;
+          }
+        }
+      }
+
       for (const file of taskFiles) {
         try {
           const task = JSON.parse(readFileSync(path.join(sessionPath, file), 'utf8'));
@@ -1320,7 +1340,7 @@ app.get('/api/tasks/all', async (req, res) => {
             ...task,
             sessionId: sessionDir.name,
             sessionName: getSessionDisplayName(sessionDir.name, meta),
-            project: meta.project || null
+            project
           });
         } catch (e) {
           // Skip invalid files

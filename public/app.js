@@ -135,7 +135,11 @@ async function fetchSessions(includeTasks = true) {
     if (revealedPlanSessionId) allPinnedIds.add(revealedPlanSessionId);
     if (revealedStorageSessionId) allPinnedIds.add(revealedStorageSessionId);
     const pinnedParam = allPinnedIds.size > 0 ? `&pinned=${[...allPinnedIds].join(',')}` : '';
-    const sessionsPromise = fetch(`/api/sessions?limit=${sessionLimit}${pinnedParam}`).then((r) => r.json());
+    const projectParam =
+      filterProject && filterProject !== '__recent__' ? `&project=${encodeURIComponent(filterProject)}` : '';
+    const sessionsPromise = fetch(`/api/sessions?limit=${sessionLimit}${pinnedParam}${projectParam}`).then((r) =>
+      r.json(),
+    );
 
     let newSessions, newTasks;
     if (includeTasks) {
@@ -4590,7 +4594,7 @@ document.addEventListener('click', (e) => {
 function filterByProject(project) {
   filterProject = project || null;
   updateUrl();
-  renderSessions();
+  fetchSessions(false);
   showAllTasks();
 }
 
