@@ -1,26 +1,83 @@
 {
-  "last_run": "2026-04-25T12:00:00Z",
-  "last_run_id": "24930378997",
+  "last_run": "2026-04-26T12:00:00Z",
+  "last_run_id": "24956075062",
   "monthly_summary_issue": {
     "month": "2026-04",
     "title": "[KanbanBot] Monthly Activity 2026-04",
     "number": 23
   },
   "kanbanbot_prs": [
-    {"title": "[KanbanBot] perf: replace transition: all with specific property transitions", "branch": "kanbanbot/perf-specific-transitions-9f589da92459d7ef", "number": 31, "created": "2026-04-04", "status": "open"},
-    {"title": "[KanbanBot] refactor: extract renderOwnerBadge helper", "branch": "kanbanbot/improve-task-card-owner-badge-715fa0dce541b035", "number": 32, "created": "2026-04-04", "status": "open"},
-    {"title": "[KanbanBot] test: add missing coverage for customTitle, cwd", "branch": "kanbanbot/test-missing-coverage-20260405-e66345c031fe9f54", "number": 33, "created": "2026-04-05", "status": "open"},
-    {"title": "[KanbanBot] refactor: move context-window constants", "branch": "kanbanbot/improve-ctx-constants-region-20260407-96ad55cf3c37bc56", "number": 35, "created": "2026-04-07", "status": "open"},
-    {"title": "[KanbanBot] a11y: set aria-selected on keyboard-selected task cards", "branch": "kanbanbot/a11y-aria-selected-task-cards-20260408-d1ff40bf1d087b16", "number": 36, "created": "2026-04-08", "status": "open"},
-    {"title": "[KanbanBot] refactor: extract updateProgressBar helper", "branch": "kanbanbot/improve-progress-bar-helper-20260409-f2d77411a3014960", "number": 37, "created": "2026-04-09", "status": "open"},
-    {"title": "[KanbanBot] eng: pin @biomejs/biome as devDependency, add npm run lint script", "branch": "kanbanbot/fix-issue-34-biome-devdep-20260425", "number": null, "created": "2026-04-25", "status": "local-only"},
-    {"title": "[KanbanBot] fix: define missing --info and --danger CSS custom properties", "branch": "kanbanbot/improve-missing-css-vars-20260425", "number": null, "created": "2026-04-25", "status": "local-only"}
+    {
+      "title": "[KanbanBot] perf: replace transition: all with specific property transitions",
+      "branch": "kanbanbot/perf-specific-transitions-9f589da92459d7ef",
+      "number": 31,
+      "created": "2026-04-04",
+      "status": "open"
+    },
+    {
+      "title": "[KanbanBot] refactor: extract renderOwnerBadge helper",
+      "branch": "kanbanbot/improve-task-card-owner-badge-715fa0dce541b035",
+      "number": 32,
+      "created": "2026-04-04",
+      "status": "open"
+    },
+    {
+      "title": "[KanbanBot] test: add missing coverage for customTitle, cwd",
+      "branch": "kanbanbot/test-missing-coverage-20260405-e66345c031fe9f54",
+      "number": 33,
+      "created": "2026-04-05",
+      "status": "open"
+    },
+    {
+      "title": "[KanbanBot] refactor: move context-window constants",
+      "branch": "kanbanbot/improve-ctx-constants-region-20260407-96ad55cf3c37bc56",
+      "number": 35,
+      "created": "2026-04-07",
+      "status": "open"
+    },
+    {
+      "title": "[KanbanBot] a11y: set aria-selected on keyboard-selected task cards",
+      "branch": "kanbanbot/a11y-aria-selected-task-cards-20260408-d1ff40bf1d087b16",
+      "number": 36,
+      "created": "2026-04-08",
+      "status": "open"
+    },
+    {
+      "title": "[KanbanBot] refactor: extract updateProgressBar helper",
+      "branch": "kanbanbot/improve-progress-bar-helper-20260409-f2d77411a3014960",
+      "number": 37,
+      "created": "2026-04-09",
+      "status": "open"
+    },
+    {
+      "title": "[KanbanBot] fix: define missing --info and --danger CSS custom properties",
+      "branch": "kanbanbot/improve-missing-css-vars-20260425",
+      "number": null,
+      "created": "2026-04-25",
+      "status": "local-only"
+    },
+    {
+      "title": "[KanbanBot] eng: pin @biomejs/biome as devDependency, add npm run lint script",
+      "branch": "kanbanbot/eng-pin-biome-devdep-20260426",
+      "number": null,
+      "created": "2026-04-26",
+      "status": "local-only"
+    }
   ],
   "pending_work": [
-    {"id": "pr-fix-34-biome-devdep-6", "description": "eng: pin @biomejs/biome as devDependency, add npm run lint script. Closes #34. Branch kanbanbot/fix-issue-34-biome-devdep-20260425. 79 tests pass, lint clean.", "attempt": 6},
-    {"id": "pr-fix-css-vars-1", "description": "fix: define missing --info and --danger CSS custom properties. Branch kanbanbot/improve-missing-css-vars-20260425. 79 tests pass, lint clean. Dark/light theme vars added.", "attempt": 1}
+    {
+      "id": "pr-fix-css-vars-1",
+      "description": "fix: define missing --info and --danger CSS custom properties. Branch kanbanbot/improve-missing-css-vars-20260425. 79 tests pass, lint clean. Dark/light theme vars added.",
+      "attempt": 1
+    },
+    {
+      "id": "pr-fix-34-biome-devdep-7",
+      "description": "eng: pin @biomejs/biome as devDependency, add npm run lint script. Closes #34. Branch kanbanbot/eng-pin-biome-devdep-20260426. 79 tests pass, lint clean.",
+      "attempt": 7
+    }
   ],
   "issues_commented": [],
   "backlog_cursor": null,
-  "infrastructure_notes": "PERSISTENT ISSUE (confirmed runs: 2026-04-24 #24888579506, 2026-04-25 #24930378997): safeoutputs MCP server unavailable. create_pull_request/add_comment/noop/missing_tool all fail with tool-does-not-exist. gh CLI also unauthenticated. No GitHub writes possible. Branches exist only locally. Maintainer action needed: ensure safeoutputs MCP server is enabled in kanbanbot workflow."
+  "infrastructure_notes": "PERSISTENT ISSUE (confirmed runs: 2026-04-24 #24888579506, 2026-04-25 #24930378997, 2026-04-26 #24956075062): safeoutputs MCP server unavailable. create_pull_request/add_comment/noop/missing_tool all fail with tool-does-not-exist. gh CLI also unauthenticated. No GitHub writes possible. Branches exist only locally. Maintainer action needed: ensure safeoutputs MCP server is enabled in kanbanbot workflow.",
+  "pr_health_check_20260426": "All 6 open KanbanBot PRs (#31, #32, #33, #35, #36, #37) verified: 0 merge conflicts with main (each 1 commit ahead). No action needed."
 }
