@@ -310,6 +310,33 @@
     </div>
   </div>
 
+  <!-- Markdown Preview Modal -->
+  <div id="preview-modal" class="modal-overlay" style="z-index:10002;" onclick="closePreviewModal()">
+    <div class="modal preview-modal-dialog" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <h3 class="modal-title" id="preview-modal-title">Preview</h3>
+        <div style="display:flex;gap:4px;align-items:center;">
+          <button id="preview-link-btn" class="icon-btn" aria-label="Link to current session" title="Link to current session" onclick="togglePreviewSessionLink()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+          </button>
+          <button class="icon-btn" aria-label="Open in editor" title="Open in editor" onclick="openPreviewInEditor()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+          <button id="preview-modal-fullscreen-btn" class="icon-btn" aria-label="Toggle fullscreen" title="Toggle fullscreen" onclick="toggleModalFullscreen('preview-modal')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+          </button>
+          <button class="modal-close" aria-label="Close" onclick="closePreviewModal()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="modal-body" style="flex: 0 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden;">
+        <div id="preview-modal-body" class="rendered-md" style="word-break: break-word; font-size: 13px; line-height: 1.6; overflow-y: auto; flex: 0 1 auto; min-height: 0; padding-right: 8px;"></div>
+        <div id="preview-modal-meta" style="margin-top: 12px; font-size: 11px; color: var(--text-muted); flex-shrink: 0;"></div>
+      </div>
+    </div>
+  </div>
+
   <!-- Help Modal -->
   <div id="help-modal" class="modal-overlay" onclick="closeHelpModal()">
     <div class="modal" onclick="event.stopPropagation()">

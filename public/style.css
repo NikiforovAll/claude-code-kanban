@@ -2689,6 +2689,21 @@ body.light .msg-assistant .msg-text {
   max-height: 92vh;
 }
 
+.modal.preview-modal-dialog {
+  width: 90vw;
+  max-width: 1200px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.modal.preview-modal-dialog.fullscreen {
+  width: 90vw;
+  max-width: 90vw;
+  height: 90vh;
+  max-height: 90vh;
+}
+
 .modal-sm {
   max-width: 440px;
 }

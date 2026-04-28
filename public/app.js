@@ -4040,6 +4040,176 @@ document.addEventListener('keydown', (e) => {
 
 //#endregion
 
+//#region MARKDOWN_PREVIEW
+const PREVIEW_STORAGE_PREFIX = 'preview-paths-';
+let currentPreviewPath = null;
+
+function getSessionPreviewPaths(sessionId) {
+  if (!sessionId) return [];
+  try {
+    const raw = localStorage.getItem(PREVIEW_STORAGE_PREFIX + sessionId);
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
+}
+
+function addSessionPreviewPath(sessionId, filePath) {
+  if (!sessionId || !filePath) return;
+  const paths = getSessionPreviewPaths(sessionId).filter((p) => p !== filePath);
+  paths.unshift(filePath);
+  localStorage.setItem(PREVIEW_STORAGE_PREFIX + sessionId, JSON.stringify(paths.slice(0, 20)));
+}
+
+function removeSessionPreviewPath(sessionId, filePath) {
+  if (!sessionId) return;
+  const paths = getSessionPreviewPaths(sessionId).filter((p) => p !== filePath);
+  if (paths.length) localStorage.setItem(PREVIEW_STORAGE_PREFIX + sessionId, JSON.stringify(paths));
+  else localStorage.removeItem(PREVIEW_STORAGE_PREFIX + sessionId);
+}
+
+function openPreviewModal(filePath, content) {
+  currentPreviewPath = filePath;
+  document.getElementById('preview-modal-title').textContent = filePath.split(/[\\/]/).pop();
+  document.getElementById('preview-modal-body').innerHTML = renderMarkdown(content);
+  document.getElementById('preview-modal-meta').textContent = filePath;
+  document.getElementById('preview-modal').classList.add('visible');
+  updatePreviewLinkBtn();
+}
+
+function isPreviewLinkedToCurrentSession() {
+  if (!currentPreviewPath || !currentSessionId) return false;
+  return getSessionPreviewPaths(currentSessionId).includes(currentPreviewPath);
+}
+
+function updatePreviewLinkBtn() {
+  const btn = document.getElementById('preview-link-btn');
+  if (!btn) return;
+  if (!currentSessionId) {
+    btn.style.display = 'none';
+    return;
+  }
+  btn.style.display = '';
+  const linked = isPreviewLinkedToCurrentSession();
+  btn.title = linked ? 'Unlink from current session' : 'Link to current session';
+  btn.style.color = linked ? 'var(--accent, #5b9a6b)' : '';
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+function togglePreviewSessionLink() {
+  if (!currentPreviewPath || !currentSessionId) {
+    showToast('Select a session first');
+    return;
+  }
+  if (isPreviewLinkedToCurrentSession()) {
+    removeSessionPreviewPath(currentSessionId, currentPreviewPath);
+    showToast('Unlinked from session');
+  } else {
+    addSessionPreviewPath(currentSessionId, currentPreviewPath);
+    showToast('Linked to session');
+  }
+  updatePreviewLinkBtn();
+  if (_infoModalSessionId === currentSessionId) {
+    refreshInfoModalLinkedDocs();
+  }
+}
+
+function refreshInfoModalLinkedDocs() {
+  const bodyEl = document.getElementById('team-modal-body');
+  if (!bodyEl) return;
+  const existing = bodyEl.querySelector('.linked-docs-section');
+  const html = renderLinkedDocsHtml(_infoModalSessionId);
+  if (!existing) {
+    if (!html) return;
+    const planCard = bodyEl.querySelector('[data-plan-card]');
+    const wrap = document.createElement('div');
+    wrap.innerHTML = html;
+    const node = wrap.firstElementChild;
+    if (planCard?.nextSibling) planCard.parentNode.insertBefore(node, planCard.nextSibling);
+    else bodyEl.appendChild(node);
+    bindLinkedDocsHandlers(node, _infoModalSessionId);
+    return;
+  }
+  if (!html) {
+    existing.remove();
+    return;
+  }
+  const wrap = document.createElement('div');
+  wrap.innerHTML = html;
+  const node = wrap.firstElementChild;
+  existing.replaceWith(node);
+  bindLinkedDocsHandlers(node, _infoModalSessionId);
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+function closePreviewModal() {
+  resetModalFullscreen('preview-modal');
+  currentPreviewPath = null;
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+function openPreviewInEditor() {
+  if (!currentPreviewPath) return;
+  postAndToast('/api/open-in-editor', { file: currentPreviewPath }, 'in editor');
+}
+
+async function openPreviewByPath(filePath) {
+  if (!filePath) return;
+  try {
+    const r = await fetch(`/api/preview?path=${encodeURIComponent(filePath)}`);
+    if (!r.ok) {
+      showToast('Preview file unavailable');
+      return;
+    }
+    const data = await r.json();
+    openPreviewModal(data.path, data.content);
+  } catch {
+    showToast('Failed to load preview');
+  }
+}
+
+function handlePreviewOpenEvent(data) {
+  const { path: filePath, content, sessionId } = data;
+  if (sessionId && sessionId !== currentSessionId) {
+    if (sessions.find((s) => s.id === sessionId)) {
+      fetchTasks(sessionId);
+    } else {
+      showToast(`Preview received for unknown session ${sessionId.slice(0, 8)}`);
+    }
+  }
+  openPreviewModal(filePath, content);
+}
+
+function renderLinkedDocsHtml(sessionId) {
+  const paths = getSessionPreviewPaths(sessionId);
+  if (!paths.length) return '';
+  const items = paths
+    .map((p, i) => {
+      const name = p.split(/[\\/]/).pop();
+      return `<a href="#" class="linked-doc-link" data-idx="${i}" title="${escapeHtml(p)}" style="color:var(--accent-text);text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px;">${escapeHtml(name)}</a>`;
+    })
+    .join(', ');
+  return `<div class="linked-docs-section" style="margin-bottom:16px;font-size:12px;">
+    <div style="font-size:11px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">Linked documents</div>
+    <div>${items}</div>
+  </div>`;
+}
+
+function bindLinkedDocsHandlers(container, sessionId) {
+  if (!container) return;
+  const links = container.querySelectorAll('.linked-doc-link');
+  if (!links.length) return;
+  const paths = getSessionPreviewPaths(sessionId);
+  for (const link of links) {
+    link.addEventListener('click', (e) => {
+      e.preventDefault();
+      openPreviewByPath(paths[+link.dataset.idx]);
+    });
+  }
+}
+//#endregion
+
 //#region SSE
 function setupEventSource() {
   let retryDelay = 1000;
@@ -4153,6 +4323,10 @@ function setupEventSource() {
 
       if (data.type === 'context-update') {
         debouncedRefresh(data.sessionId, true);
+      }
+
+      if (data.type === 'preview:open') {
+        handlePreviewOpenEvent(data);
       }
 
       if (data.type === 'team-update') {
@@ -4940,7 +5114,7 @@ function showInfoModal(session, teamConfig, tasks, planContent) {
     _pendingPlanContent = planContent;
     const titleMatch = planContent.match(/^#\s+(.+)$/m);
     const planTitle = titleMatch ? titleMatch[1].trim() : null;
-    html += `<div onclick="openPlanModal()" style="margin-bottom: 16px; padding: 10px 14px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; display: flex; align-items: center; gap: 10px; transition: all 0.15s ease;" onmouseover="this.style.borderColor='var(--accent)';this.style.background='var(--bg-hover)'" onmouseout="this.style.borderColor='var(--border)';this.style.background='var(--bg-elevated)'">
+    html += `<div data-plan-card="1" onclick="openPlanModal()" style="margin-bottom: 16px; padding: 10px 14px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; display: flex; align-items: center; gap: 10px; transition: all 0.15s ease;" onmouseover="this.style.borderColor='var(--accent)';this.style.background='var(--bg-hover)'" onmouseout="this.style.borderColor='var(--border)';this.style.background='var(--bg-elevated)'">
           <span style="font-size: 14px;">📋</span>
           <div style="flex: 1; min-width: 0;">
             <div style="font-size: 11px; font-weight: 500; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Plan</div>
@@ -4949,6 +5123,8 @@ function showInfoModal(session, teamConfig, tasks, planContent) {
           <svg viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2" style="width: 16px; height: 16px; flex-shrink: 0;"><path d="M9 18l6-6-6-6"/></svg>
         </div>`;
   }
+
+  html += renderLinkedDocsHtml(session.id);
 
   // Team info section
   if (teamConfig) {
@@ -5004,6 +5180,7 @@ function showInfoModal(session, teamConfig, tasks, planContent) {
   }
 
   bodyEl.innerHTML = html;
+  bindLinkedDocsHandlers(bodyEl, session.id);
   const alreadyVisible = modal.classList.contains('visible');
   _infoModalSessionId = session.id;
   updateStickyBtnState();

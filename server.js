@@ -21,12 +21,46 @@ const {
 } = require('./lib/parsers');
 
 const isSetupCommand = process.argv.includes('--install') || process.argv.includes('--uninstall');
+const isPreviewCli = process.argv[2] === 'preview';
+const isCliCommand = isSetupCommand || isPreviewCli;
 
 if (isSetupCommand) {
   const { runInstall, runUninstall } = require('./install');
   (process.argv.includes('--install') ? runInstall() : runUninstall())
     .then(() => process.exit(0))
     .catch(e => { console.error(e.message); process.exit(1); });
+}
+
+if (isPreviewCli) {
+  runPreviewCli().then(code => process.exit(code)).catch(e => { console.error(e.message); process.exit(1); });
+  return;
+}
+
+async function runPreviewCli() {
+  const filePathArg = process.argv.slice(3).find(a => !a.startsWith('--'));
+  if (!filePathArg) {
+    console.error('Usage: claude-code-kanban preview <file.md> [--session <id>]');
+    return 1;
+  }
+  const sessionId = getArgUrl('session', 'PREVIEW_SESSION');
+  const abs = path.resolve(filePathArg);
+  const port = process.env.PORT || 3456;
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/api/preview`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: abs, sessionId: sessionId || null })
+    });
+    if (!res.ok) {
+      console.error(`Preview failed (${res.status}): ${await res.text()}`);
+      return 1;
+    }
+    console.log(`Preview opened: ${abs}${sessionId ? ` (session ${sessionId})` : ''}`);
+    return 0;
+  } catch {
+    console.error(`Cannot reach cck server on port ${port}. Start it first with "claude-code-kanban".`);
+    return 1;
+  }
 }
 
 const app = express();
@@ -1451,6 +1485,54 @@ app.delete('/api/tasks/:sessionId/:taskId', async (req, res) => {
   }
 });
 
+// API: Markdown preview — read file and broadcast to clients
+async function readMarkdownFile(absPath) {
+  const ext = path.extname(absPath).toLowerCase();
+  if (ext !== '.md' && ext !== '.markdown') {
+    const err = new Error('Only .md/.markdown files are allowed');
+    err.status = 400;
+    throw err;
+  }
+  try {
+    return await fs.readFile(absPath, 'utf8');
+  } catch (e) {
+    if (e.code === 'ENOENT') { const err = new Error('File not found'); err.status = 404; throw err; }
+    if (e.code === 'EISDIR') { const err = new Error('Not a file'); err.status = 400; throw err; }
+    throw e;
+  }
+}
+
+function resolvePreviewPath(filePath) {
+  if (!filePath || typeof filePath !== 'string') return null;
+  return path.isAbsolute(filePath) ? filePath : path.resolve(filePath);
+}
+
+app.post('/api/preview', async (req, res) => {
+  try {
+    const { path: filePath, sessionId } = req.body || {};
+    const abs = resolvePreviewPath(filePath);
+    if (!abs) return res.status(400).json({ error: 'path is required' });
+    const content = await readMarkdownFile(abs);
+    broadcast({ type: 'preview:open', path: abs, content, sessionId: sessionId || null });
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error in /api/preview:', error);
+    res.status(error.status || 500).json({ error: error.message || 'Preview failed' });
+  }
+});
+
+app.get('/api/preview', async (req, res) => {
+  try {
+    const abs = resolvePreviewPath(req.query.path);
+    if (!abs) return res.status(400).json({ error: 'path is required' });
+    const content = await readMarkdownFile(abs);
+    res.json({ path: abs, content });
+  } catch (error) {
+    console.error('Error in GET /api/preview:', error);
+    res.status(error.status || 500).json({ error: error.message || 'Preview failed' });
+  }
+});
+
 // SSE endpoint for live updates
 app.get('/api/events', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
@@ -1488,8 +1570,8 @@ app.use('/api', (req, res) => {
   res.status(404).json({ error: 'Not found' });
 });
 
-// File watchers and server startup (skip for --install/--uninstall)
-if (!isSetupCommand) {
+// File watchers and server startup (skip for --install/--uninstall/preview)
+if (!isCliCommand) {
 
 // Watch for file changes (chokidar handles non-existent paths)
 const watcher = chokidar.watch(TASKS_DIR, {
