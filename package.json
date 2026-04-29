@@ -44,6 +44,7 @@
   },
   "files": [
     "server.js",
+    "cli.js",
     "install.js",
     "plugin/**/*",
     "lib/**/*",

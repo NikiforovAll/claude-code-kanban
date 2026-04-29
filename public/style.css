@@ -739,12 +739,21 @@ body::before {
   background-position: top;
   font-size: 10px;
   color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .sidebar-footer a {
   color: var(--text-tertiary);
   text-decoration: none;
   transition: color 0.15s;
+}
+
+.sidebar-footer .footer-limits strong {
+  color: var(--text-secondary);
+  font-weight: 600;
 }
 
 .sidebar-footer a:hover {

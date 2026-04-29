@@ -4169,6 +4169,26 @@ async function openPreviewByPath(filePath) {
   }
 }
 
+function handleSessionOpenEvent(data) {
+  const { id } = data;
+  if (!id) return;
+  const target = sessions.find((s) => s.id === id);
+  if (!target) {
+    showToast(`Session not found: ${id.slice(0, 8)}`);
+    return;
+  }
+  if (sessionFilter !== 'active') {
+    sessionFilter = 'active';
+    const sel = document.getElementById('session-filter');
+    if (sel) sel.value = 'active';
+    updateUrl();
+  }
+  if (!isSessionActive(target)) {
+    stickySessionIds.add(id);
+  }
+  fetchTasks(id);
+}
+
 function handlePreviewOpenEvent(data) {
   const { path: filePath, content, sessionId } = data;
   if (sessionId && sessionId !== currentSessionId) {
@@ -4323,10 +4343,15 @@ function setupEventSource() {
 
       if (data.type === 'context-update') {
         debouncedRefresh(data.sessionId, true);
+        refreshRateLimits();
       }
 
       if (data.type === 'preview:open') {
         handlePreviewOpenEvent(data);
+      }
+
+      if (data.type === 'session:open') {
+        handleSessionOpenEvent(data);
       }
 
       if (data.type === 'team-update') {
@@ -5479,10 +5504,76 @@ msgContentEl.addEventListener('wheel', function (e) {
   }
 });
 
+const footerState = { version: null, limitsKey: null, timer: null };
+function formatResetIn(epochSec) {
+  if (!epochSec) return null;
+  const ms = epochSec * 1000 - Date.now();
+  if (ms <= 0) return 'now';
+  const m = Math.round(ms / 60000);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  const rm = m % 60;
+  if (h < 24) return rm ? `${h}h ${rm}m` : `${h}h`;
+  const d = Math.floor(h / 24);
+  const rh = h % 24;
+  return rh ? `${d}d ${rh}h` : `${d}d`;
+}
+function makeLimitCell(label, bucket) {
+  const pct = bucket?.used_percentage;
+  const cell = document.createElement('span');
+  cell.className = 'footer-limit-cell';
+  const reset = formatResetIn(bucket?.resets_at);
+  if (reset) cell.title = `${label}: resets in ${reset}`;
+  cell.append(document.createTextNode(`${label} `));
+  const strong = document.createElement('strong');
+  strong.textContent = pct == null ? '-%' : `${Math.ceil(pct)}%`;
+  cell.appendChild(strong);
+  return cell;
+}
+function makeLimitSpan(rl) {
+  const span = document.createElement('span');
+  span.className = 'footer-limits';
+  span.append(makeLimitCell('5h', rl?.five_hour), document.createTextNode(' · '), makeLimitCell('7d', rl?.seven_day));
+  return span;
+}
+function renderSidebarFooter(rateLimits) {
+  const el = document.getElementById('sidebar-footer');
+  if (!el) return;
+  const fh = rateLimits?.five_hour?.used_percentage ?? null;
+  const sd = rateLimits?.seven_day?.used_percentage ?? null;
+  const children = [];
+  if (footerState.version) {
+    const v = document.createElement('span');
+    v.textContent = `v${footerState.version}`;
+    children.push(v);
+  }
+  if (fh != null || sd != null) children.push(makeLimitSpan(rateLimits));
+  el.replaceChildren(...children);
+}
+function refreshRateLimits() {
+  if (footerState.timer) return;
+  footerState.timer = setTimeout(() => {
+    footerState.timer = null;
+    fetch('/api/context-status')
+      .then((r) => r.json())
+      .then((all) => {
+        const rl = Object.values(all || {}).find((e) => e?.rate_limits)?.rate_limits || null;
+        const fh = rl?.five_hour?.used_percentage ?? null;
+        const sd = rl?.seven_day?.used_percentage ?? null;
+        const key = `${fh}|${sd}`;
+        if (key === footerState.limitsKey) return;
+        footerState.limitsKey = key;
+        renderSidebarFooter(rl);
+      })
+      .catch(() => {});
+  }, 1500);
+}
 fetch('/api/version')
   .then((r) => r.json())
   .then((d) => {
-    document.getElementById('sidebar-footer').textContent = `v${d.version}`;
+    footerState.version = d.version;
+    renderSidebarFooter(null);
+    refreshRateLimits();
   })
   .catch(() => {});
 

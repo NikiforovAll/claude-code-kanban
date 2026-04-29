@@ -117,6 +117,21 @@ When modifying a feature, open **both** the JS region and the matching CSS regio
 | ANIMATIONS | Card fade-in, connection breathing, progress shimmer |
 | PROJECT_GROUPS | Collapsible project headers in session list |
 
+## CLI
+
+Subcommands live in a dispatch table in `cli.js` (`COMMANDS`). `server.js` delegates to `runCli(process.argv)` from `cli.js`. Help (`--help`, `-h`, `help <cmd>`) is generated from the table — there is no manual help text to maintain.
+
+**Every new command MUST be documented in the dispatch table** with `summary`, `usage`, and (if applicable) `flags`. The design contract for the CLI lives in `_plans/cli-scope.md`.
+
+Adding a command:
+
+1. Add an entry to `COMMANDS` in `cli.js` with `summary`, `usage`, optional `flags`, and `run(args)`.
+2. The `run` function receives `process.argv.slice(3)` (or `slice(4)` for nested verbs) and returns an exit code.
+3. Add a server endpoint in `server.js` that broadcasts an SSE event (`{ type: '<noun>:<verb>', ... }`).
+4. Handle the event in `public/app.js` SSE dispatcher.
+
+Test locally: start the server (`npm start`), then run `node server.js <command>` from another terminal.
+
 ## KanbanBot (Agentic Workflow)
 
 - KanbanBot is an automated repository assistant running as a GitHub Agentic Workflow
