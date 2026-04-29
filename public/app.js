@@ -4069,10 +4069,33 @@ function removeSessionPreviewPath(sessionId, filePath) {
   else localStorage.removeItem(PREVIEW_STORAGE_PREFIX + sessionId);
 }
 
+function splitFrontmatter(text) {
+  const m = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
+  if (!m) return { fm: null, body: text };
+  const fm = {};
+  for (const line of m[1].split(/\r?\n/)) {
+    const kv = line.match(/^([A-Za-z0-9_.-]+)\s*:\s*(.*)$/);
+    if (kv) fm[kv[1]] = kv[2].replace(/^['"]|['"]$/g, '');
+  }
+  return { fm, body: m[2] };
+}
+
+function renderFrontmatterBlock(fm) {
+  const rows = Object.entries(fm)
+    .map(
+      ([k, v]) =>
+        `<div class="fm-row"><span class="fm-k">${escapeHtml(k)}</span><span class="fm-v">${escapeHtml(String(v))}</span></div>`,
+    )
+    .join('');
+  return `<details class="preview-fm" open><summary>frontmatter</summary><div class="fm-grid">${rows}</div></details>`;
+}
+
 function openPreviewModal(filePath, content) {
   currentPreviewPath = filePath;
   document.getElementById('preview-modal-title').textContent = filePath.split(/[\\/]/).pop();
-  document.getElementById('preview-modal-body').innerHTML = renderMarkdown(content);
+  const { fm, body } = /\.(md|markdown)$/i.test(filePath) ? splitFrontmatter(content) : { fm: null, body: content };
+  document.getElementById('preview-modal-body').innerHTML =
+    (fm ? renderFrontmatterBlock(fm) : '') + renderMarkdown(body);
   document.getElementById('preview-modal-meta').textContent = filePath;
   document.getElementById('preview-modal').classList.add('visible');
   updatePreviewLinkBtn();

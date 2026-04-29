@@ -2713,6 +2713,53 @@ body.light .msg-assistant .msg-text {
   max-height: 90vh;
 }
 
+.preview-fm {
+  margin: 0 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-elevated, rgba(127, 127, 127, 0.06));
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: 11px;
+}
+
+.preview-fm > summary {
+  cursor: pointer;
+  padding: 6px 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 10px;
+  user-select: none;
+}
+
+.preview-fm[open] > summary {
+  border-bottom: 1px solid var(--border);
+}
+
+.preview-fm .fm-grid {
+  padding: 8px 10px;
+  display: grid;
+  gap: 4px 12px;
+}
+
+.preview-fm .fm-row {
+  display: grid;
+  grid-template-columns: minmax(80px, 140px) 1fr;
+  gap: 12px;
+  align-items: baseline;
+}
+
+.preview-fm .fm-k {
+  color: var(--accent, #7aa2f7);
+  font-weight: 600;
+}
+
+.preview-fm .fm-v {
+  color: var(--text, inherit);
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
 .modal-sm {
   max-width: 440px;
 }

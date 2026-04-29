@@ -57,6 +57,10 @@ const COMMANDS = {
 };
 
 function runCli(argv) {
+  if (argv.includes('--version') || argv.includes('-v')) {
+    console.log(require('./package.json').version);
+    process.exit(0);
+  }
   const cli = resolveCliCommand(argv);
   if (cli.kind === 'server') return false;
   if (cli.kind === 'help') {
@@ -119,6 +123,7 @@ function printTopHelp() {
   console.log(`  ${'help'.padEnd(20)}Show help for a command (claude-code-kanban help <command>)`);
   console.log('\nFlags:');
   console.log('  --help, -h            Show help (top-level, noun-level, or leaf-level)');
+  console.log('  --version, -v         Print version and exit');
   console.log('\nServer mode (no subcommand):');
   console.log('  --port <n>            Port to listen on (default 3456)');
   console.log('  --dir <path>          Override Claude config dir (default ~/.claude)');
