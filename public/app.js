@@ -504,6 +504,7 @@ async function fetchTasks(sessionId) {
     resetAgentState();
     updateUrl();
     renderSession();
+    renderSessions();
     fetchAgents(sessionId);
     if (!agentLogMode) fetchMessages(sessionId);
   } catch (error) {
@@ -4148,6 +4149,8 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
     if (_manualRefreshing) return;
     _manualRefreshing = true;
+    lastSessionsHash = '';
+    lastTasksHash = '';
     const refreshes = [fetchSessions()];
     if (currentSessionId) refreshes.push(fetchTasks(currentSessionId));
     Promise.all(refreshes)
@@ -4979,11 +4982,18 @@ async function updateProjectDropdown() {
   projectsCacheDirty = false;
 
   const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  const prevRecent = recentProjects;
   recentProjects = new Set(
     projects.filter((p) => p.modifiedAt && new Date(p.modifiedAt).getTime() > cutoff).map((p) => p.path),
   );
 
   renderProjectDropdown(dropdown, projects);
+
+  // recentProjects was empty before — sidebar rendered with __recent__ filter
+  // dropping every session. Re-render now that we know which projects qualify.
+  if (filterProject === '__recent__' && prevRecent.size === 0 && recentProjects.size > 0) {
+    renderSessions();
+  }
 }
 
 function renderProjectDropdown(dropdown, projects) {
