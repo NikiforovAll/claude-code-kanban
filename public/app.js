@@ -4212,11 +4212,11 @@ function handleSessionOpenEvent(data) {
   fetchTasks(id);
 }
 
-function handlePreviewOpenEvent(data) {
+async function handlePreviewOpenEvent(data) {
   const { path: filePath, content, sessionId } = data;
   if (sessionId && sessionId !== currentSessionId) {
     if (sessions.find((s) => s.id === sessionId)) {
-      fetchTasks(sessionId);
+      await fetchTasks(sessionId);
     } else {
       showToast(`Preview received for unknown session ${sessionId.slice(0, 8)}`);
     }

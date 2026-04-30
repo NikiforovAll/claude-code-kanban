@@ -965,10 +965,14 @@ app.post('/api/open-folder', (req, res) => {
   }
 });
 
-// API: Open content in editor as temp file
+// API: Open file in editor — either an existing path ({ file }) or content as a temp file ({ content, title })
 app.post('/api/open-in-editor', (req, res) => {
   try {
-    const { content, title } = req.body;
+    const { content, title, file } = req.body;
+    if (file) {
+      openInEditor(file);
+      return res.json({ success: true, path: file });
+    }
     if (!content) return res.status(400).json({ error: 'No content provided' });
 
     const safeName = (title || 'message').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 50);
