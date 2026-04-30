@@ -638,6 +638,17 @@ function toggleMessagePanel() {
   updateUrl();
 }
 
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML onclick
+async function openSessionWithBookmarks(sessionId) {
+  if (!messagePanelOpen) {
+    const panel = document.getElementById('message-panel');
+    messagePanelOpen = true;
+    panel.classList.add('visible');
+    document.getElementById('message-toggle')?.classList.add('active');
+  }
+  await fetchTasks(sessionId);
+}
+
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
 async function viewAgentLog(agentId) {
   let agent = findAgentById(agentId);
@@ -1342,6 +1353,10 @@ const MARKETPLACE_SVG =
   '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg>';
 const MEMORY_SVG =
   '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>';
+const LINK_SVG_PATHS =
+  '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>';
+const linkSvg = (size) =>
+  `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${LINK_SVG_PATHS}</svg>`;
 
 //#endregion
 
@@ -2244,6 +2259,8 @@ function renderSessions() {
     const pinClass = pinState === 'sticky' ? ' sticky' : pinState === 'pinned' ? ' pinned' : '';
     const pinTitle = pinState === 'pinned' || pinState === 'sticky' ? 'Unpin' : 'Pin';
     const showCtx = !!session.contextStatus;
+    const linkedDocsCount = getSessionPreviewPaths(session.id).length;
+    const bookmarksCount = loadPins(session.id).length;
     return `
           <button onclick="fetchTasks('${session.id}')" data-session-id="${session.id}" class="session-item ${isActive ? 'active' : ''} ${session.hasWaitingForUser ? 'permission-pending' : ''} ${!session.hasRecentLog && !session.inProgress && !session.hasWaitingForUser ? 'stale' : ''} ${showCtx ? 'has-context' : ''}" title="${tooltip}">
             <span class="session-pin-btn${pinClass}" onclick="event.stopPropagation();toggleSessionPin('${escapeHtml(session.id)}')" title="${pinTitle} session">${SESSION_PIN_SVG}</span>
@@ -2254,9 +2271,11 @@ function renderSessions() {
             <div class="session-progress">
               <span class="session-indicators">
                 ${isTeam ? `<span class="team-badge" title="${memberCount} team members"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>${memberCount}</span>` : ''}
-                ${session.sharedTaskList ? `<span class="shared-tasklist-badge" title="Shared task list: ${escapeHtml(session.sharedTaskList)}"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></span>` : ''}
+                ${session.sharedTaskList ? `<span class="shared-tasklist-badge" title="Shared task list: ${escapeHtml(session.sharedTaskList)}">${linkSvg(12)}</span>` : ''}
                 ${isTeam || session.project || showCtx ? `<span class="team-info-btn" onclick="event.stopPropagation(); showSessionInfoModal('${session.id}')" title="View session info">ℹ</span>` : ''}
                 ${session.hasPlan ? `<span class="plan-indicator" onclick="event.stopPropagation(); openPlanForSession('${session.id}')" title="View plan"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span>` : ''}
+                ${linkedDocsCount > 0 ? `<span class="linked-docs-badge" onclick="event.stopPropagation(); showSessionInfoModal('${session.id}')" title="${linkedDocsCount} linked document${linkedDocsCount > 1 ? 's' : ''}">${linkSvg(10)}${linkedDocsCount}</span>` : ''}
+                ${bookmarksCount > 0 ? `<span class="bookmarks-badge" onclick="event.stopPropagation(); openSessionWithBookmarks('${session.id}')" title="${bookmarksCount} bookmarked message${bookmarksCount > 1 ? 's' : ''}"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>${bookmarksCount}</span>` : ''}
                 ${session.hasRunningAgents ? '<span class="agent-badge" title="Active agents">🤖</span>' : ''}
                 ${session.planSourceSessionId ? `<span class="plan-indicator" title="Implements plan — click to reveal plan session" onclick="event.stopPropagation(); revealPlanSession('${escapeHtml(session.planSourceSessionId)}')">📋</span>` : ''}
                 ${session.hasWaitingForUser ? '<span class="agent-badge" title="Waiting for user">❓</span>' : ''}
@@ -3534,6 +3553,7 @@ function _renderStorageTab() {
   const tab = document.querySelector('.storage-tab.active')?.dataset.tab || 'sessions';
   if (tab === 'sessions') body.innerHTML = _renderStorageSessions();
   else if (tab === 'scratchpads') body.innerHTML = _renderStorageScratchpads();
+  else if (tab === 'linked-docs') body.innerHTML = _renderStorageLinkedDocs();
 }
 
 function _renderStorageSessions() {
@@ -3756,6 +3776,87 @@ function _storageDeleteScratchpad(key) {
   _updateStorageTotal();
 }
 
+function _renderStorageLinkedDocs() {
+  const entries = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (!key.startsWith(PREVIEW_STORAGE_PREFIX)) continue;
+    try {
+      const arr = JSON.parse(localStorage.getItem(key)) || [];
+      if (Array.isArray(arr) && arr.length) {
+        entries.push({ sessionId: key.slice(PREVIEW_STORAGE_PREFIX.length), paths: arr });
+      }
+    } catch {}
+  }
+  if (!entries.length) return '<div class="storage-empty">No linked documents</div>';
+
+  const byId = new Map(entries.map((e) => [e.sessionId, e]));
+  const { groups, orphans } = _groupByProject(entries.map((e) => e.sessionId));
+
+  function renderDocRow(sessionId, p) {
+    const name = p.split(/[\\/]/).pop();
+    const sid = _escapeForJsAttr(sessionId);
+    const jsPath = _escapeForJsAttr(p);
+    return `<div class="storage-item" style="padding-left:24px;">
+      <span class="storage-item-id" title="${escapeHtml(p)}">${escapeHtml(name)}</span>
+      <div class="storage-item-actions">
+        <button onclick="_storagePreviewLinkedDoc('${jsPath}')">View</button>
+        <button class="danger" onclick="_storageUnlinkDoc('${sid}','${jsPath}')">Unlink</button>
+      </div>
+    </div>`;
+  }
+
+  function renderSessionItem({ id, session }) {
+    const entry = byId.get(id);
+    if (!entry) return '';
+    const eid = escapeHtml(id);
+    const count = entry.paths.length;
+    const header = `<div class="storage-group-header">
+      <span>${_sessionLabel(session, id)} <span class="storage-item-badge">${count} doc${count > 1 ? 's' : ''}</span></span>
+      <div class="storage-item-actions">
+        <button class="danger" onclick="_storageClearLinkedDocs('${eid}')">Clear All</button>
+      </div>
+    </div>`;
+    const rows = entry.paths.map((p) => renderDocRow(id, p)).join('');
+    return header + rows;
+  }
+
+  let html = '';
+  for (const [project, items] of groups) {
+    const count = items.length;
+    html += _renderProjectGroup(
+      escapeHtml(_projectLabel(project)),
+      `${count} session${count > 1 ? 's' : ''}`,
+      items.map(renderSessionItem).join(''),
+    );
+  }
+  if (orphans.length) {
+    html += _renderOrphanGroup(orphans.length, orphans.map(renderSessionItem).join(''));
+  }
+  return html;
+}
+
+function _storagePreviewLinkedDoc(path) {
+  closeStorageManager();
+  openPreviewByPath(path);
+}
+
+function _storageUnlinkDoc(sessionId, path) {
+  removeSessionPreviewPath(sessionId, path);
+  if (sessionId === _infoModalSessionId) refreshInfoModalLinkedDocs();
+  renderSessions();
+  _renderStorageTab();
+  _updateStorageTotal();
+}
+
+function _storageClearLinkedDocs(sessionId) {
+  localStorage.removeItem(PREVIEW_STORAGE_PREFIX + sessionId);
+  if (sessionId === _infoModalSessionId) refreshInfoModalLinkedDocs();
+  renderSessions();
+  _renderStorageTab();
+  _updateStorageTotal();
+}
+
 function _findOrphanedKeys() {
   const known = _getKnownSessionIds();
   if (!known.size) return [];
@@ -3768,6 +3869,8 @@ function _findOrphanedKeys() {
       if (!known.has(key.slice('pinned-messages-'.length))) orphaned.push(key);
     } else if (key.startsWith('scratchpad-') && !key.startsWith('scratchpad-project:')) {
       if (!known.has(key.slice('scratchpad-'.length))) orphaned.push(key);
+    } else if (key.startsWith(PREVIEW_STORAGE_PREFIX)) {
+      if (!known.has(key.slice(PREVIEW_STORAGE_PREFIX.length))) orphaned.push(key);
     }
   }
   return orphaned;
@@ -4139,6 +4242,7 @@ function togglePreviewSessionLink() {
   if (_infoModalSessionId === currentSessionId) {
     refreshInfoModalLinkedDocs();
   }
+  renderSessions();
 }
 
 function refreshInfoModalLinkedDocs() {
@@ -4237,7 +4341,11 @@ function renderLinkedDocsHtml(sessionId) {
     })
     .join(', ');
   return `<div class="linked-docs-section" style="margin-bottom:16px;font-size:12px;">
-    <div style="font-size:11px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">Linked documents</div>
+    <div style="font-size:11px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;display:flex;align-items:center;gap:6px;">
+      ${linkSvg(12)}
+      <span>Linked documents</span>
+      <span style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:10px;padding:0 6px;font-size:10px;color:var(--text-secondary);">${paths.length}</span>
+    </div>
     <div>${items}</div>
   </div>`;
 }
