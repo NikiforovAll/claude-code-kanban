@@ -78,11 +78,34 @@ function updateUrl() {
   const qs = params.toString();
   const url = qs ? `?${qs}` : window.location.pathname;
   history.replaceState(null, '', url);
+  persistLastView();
+}
+
+const LAST_VIEW_KEY = 'lastView';
+function persistLastView() {
+  try {
+    const data = {
+      view: viewMode,
+      session: currentSessionId,
+      projectPath: viewMode === 'project' ? currentProjectPath : null,
+    };
+    localStorage.setItem(LAST_VIEW_KEY, JSON.stringify(data));
+  } catch (_) {}
+}
+function loadLastView() {
+  try {
+    return JSON.parse(localStorage.getItem(LAST_VIEW_KEY)) || null;
+  } catch (_) {
+    return null;
+  }
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
 function resetState() {
   history.replaceState(null, '', window.location.pathname);
+  try {
+    localStorage.removeItem(LAST_VIEW_KEY);
+  } catch (_) {}
   sessionFilter = 'active';
   sessionLimit = '20';
   filterProject = '__recent__';
@@ -1999,34 +2022,35 @@ function showAgentModal(agentId) {
   const modalNameLabel = agent.agentName ? ` · ${escapeHtml(agent.agentName)}` : '';
   title.innerHTML = `${statusDot} ${escapeHtml(agent.type || 'unknown')}${modalNameLabel}`;
 
-  const rows = [
-    ['Status', agent.status],
-    ['Agent ID', `<code style="font-size:12px;color:var(--text-tertiary)">${escapeHtml(agent.agentId)}</code>`],
-    ['Duration', formatDuration(elapsed)],
-  ];
+  const shortModel = agent.model ? agent.model.replace(/^claude-/, '').replace(/-\d{8}$/, '') : null;
+  const shortId = agent.agentId ? agent.agentId.slice(0, 8) : '';
+  const chip = (label, value, opts = {}) => {
+    const cls = opts.cls ? ` ${opts.cls}` : '';
+    const style = opts.style ? ` style="${opts.style}"` : '';
+    const title = opts.title ? ` title="${escapeHtml(opts.title)}"` : '';
+    const labelHtml = label ? `<span class="agent-chip-label">${label}</span>` : '';
+    return `<span class="agent-chip${cls}"${style}${title}>${labelHtml}<span class="agent-chip-val">${value}</span></span>`;
+  };
+
+  const chips = [];
+  if (agent.agentId) chips.push(chip('id', escapeHtml(shortId), { cls: 'agent-chip-mono', title: agent.agentId }));
+  chips.push(chip('', escapeHtml(agent.status), { cls: `agent-chip-status agent-chip-${agent.status}` }));
+  chips.push(chip('⏱', formatDuration(elapsed)));
+  if (shortModel) chips.push(chip('model', escapeHtml(shortModel), { cls: 'agent-chip-mono' }));
   if (agent.agentName) {
-    const ownerColor = getOwnerColor(agent.agentName);
-    rows.push([
-      'Owner',
-      `<span class="task-owner-badge" style="background:${ownerColor.bg};color:${ownerColor.color}">${escapeHtml(agent.agentName)}</span>`,
-    ]);
+    const c = getOwnerColor(agent.agentName);
+    chips.push(
+      chip('owner', escapeHtml(agent.agentName), {
+        style: `background:${c.bg};color:${c.color};border-color:transparent;`,
+      }),
+    );
   }
-  if (agent.model)
-    rows.push(['Model', `<code style="font-size:12px;color:var(--text-tertiary)">${escapeHtml(agent.model)}</code>`]);
-  if (started) rows.push(['Started', started.toLocaleTimeString()]);
-  if (stopped) rows.push(['Stopped', stopped.toLocaleTimeString()]);
+  if (started) chips.push(chip('started', started.toLocaleTimeString()));
+  if (stopped) chips.push(chip('stopped', stopped.toLocaleTimeString()));
 
   const agentMsg = currentMessages.find((m) => m.tool === 'Agent' && m.agentId === agentId);
 
-  let html =
-    `<table style="width:100%;border-collapse:collapse;">` +
-    rows
-      .map(
-        ([k, v]) =>
-          `<tr><td style="padding:6px 12px 6px 0;color:var(--text-tertiary);white-space:nowrap;vertical-align:top;">${k}</td><td style="padding:6px 0;color:var(--text-primary);">${v}</td></tr>`,
-      )
-      .join('') +
-    `</table>`;
+  let html = `<div class="agent-chips">${chips.join('')}</div>`;
 
   const promptText = stripTeammateWrapper(agentMsg?.agentPrompt || agent.prompt || null);
   const responseText = agent.lastMessage ? stripAnsi(agent.lastMessage.trim()) : null;
@@ -5753,8 +5777,21 @@ Promise.all([
       }
     } else if (urlState.session) {
       await fetchTasks(urlState.session);
-    } else {
+    } else if (urlState.view === 'all') {
       showAllTasks();
+    } else {
+      const last = loadLastView();
+      if (last?.view === 'project' && last.projectPath && sessions.some((s) => s.project === last.projectPath)) {
+        try {
+          await fetchProjectView(last.projectPath);
+        } catch (_) {
+          showAllTasks();
+        }
+      } else if (last?.view === 'session' && last.session && sessions.some((s) => s.id === last.session)) {
+        await fetchTasks(last.session);
+      } else {
+        showAllTasks();
+      }
     }
     if (urlState.messages && currentSessionId) {
       toggleMessagePanel();
