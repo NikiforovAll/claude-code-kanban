@@ -478,9 +478,10 @@ async function fetchTasks(sessionId) {
     for (const k of Object.keys(ownerColorCache)) delete ownerColorCache[k];
     for (const k of Object.keys(teamColorMap)) delete teamColorMap[k];
     sessionJustSelected = true;
+    resetAgentState();
     updateUrl();
     renderSession();
-    await fetchAgents(sessionId);
+    fetchAgents(sessionId);
     if (!agentLogMode) fetchMessages(sessionId);
   } catch (error) {
     console.error('Failed to fetch tasks:', error);
@@ -497,13 +498,18 @@ const _AGENT_STALE_MS = 5 * 60 * 1000; // kept for reference; no longer used for
 const WAITING_TTL_MS = 30 * 60 * 1000;
 const AGENT_LOG_MAX = 8;
 
+function resetAgentState() {
+  currentAgents = [];
+  currentWaiting = null;
+  lastAgentsHash = '';
+  renderAgentFooter();
+}
+
 async function fetchAgents(sessionId) {
   try {
     const res = await fetch(`/api/sessions/${sessionId}/agents`);
     if (!res.ok) {
-      currentAgents = [];
-      currentWaiting = null;
-      renderAgentFooter();
+      resetAgentState();
       return;
     }
     const data = await res.json();
@@ -2064,10 +2070,7 @@ async function showAllTasks() {
     if (agentLogMode) exitAgentLogMode();
     currentSessionId = null;
     ownerFilter = '';
-    currentAgents = [];
-    currentWaiting = null;
-    lastAgentsHash = '';
-    renderAgentFooter();
+    resetAgentState();
     const res = await fetch('/api/tasks/all');
     allTasksCache = await res.json();
     let tasks = allTasksCache;

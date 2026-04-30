@@ -15,9 +15,11 @@ const {
   readMessagesPage: _readMessagesPageUncached,
   readSessionInfoFromJsonl,
   buildAgentProgressMap,
+  buildSessionDigest,
   readCompactSummaries,
   findTerminatedTeammates,
-  extractPromptFromTranscript
+  extractPromptFromTranscript,
+  extractModelFromTranscript
 } = require('./lib/parsers');
 
 if (process.argv.includes("--install") || process.argv.includes("--uninstall")) {
@@ -80,7 +82,10 @@ const WAITING_RESOLVE_GRACE_MS = 15000;
 
 function persistAgent(dir, agent) {
   const file = path.join(dir, agent.agentId + '.json');
-  fs.writeFile(file, JSON.stringify(agent), 'utf8').catch(() => {});
+  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
+  fs.writeFile(tmp, JSON.stringify(agent), 'utf8')
+    .then(() => fs.rename(tmp, file))
+    .catch(() => { fs.unlink(tmp).catch(() => {}); });
 }
 
 function checkWaitingForUser(agentDir, logMtime) {
@@ -210,8 +215,6 @@ app.use(express.static(path.join(__dirname, 'public')));
 const messageCache = new Map();
 const MESSAGE_CACHE_TTL = 5000;
 const MAX_CACHE_ENTRIES = 200;
-const progressMapCache = new Map();
-const terminatedCache = new Map();
 const compactSummaryCache = new Map();
 const taskCountsCache = new Map();
 const contextStatusCache = new Map();
@@ -325,12 +328,17 @@ function cachedByMtime(cache, cacheKey, filePath, loadFn, fallback) {
   } catch (_) { return fallback; }
 }
 
+const sessionDigestCache = new Map();
+function getSessionDigest(jsonlPath) {
+  return cachedByMtime(sessionDigestCache, jsonlPath, jsonlPath, () => buildSessionDigest(jsonlPath), { progressMap: {}, terminated: new Map() });
+}
+
 function getProgressMap(jsonlPath) {
-  return cachedByMtime(progressMapCache, jsonlPath, jsonlPath, () => buildAgentProgressMap(jsonlPath), {});
+  return getSessionDigest(jsonlPath).progressMap;
 }
 
 function getTerminatedTeammates(jsonlPath) {
-  return cachedByMtime(terminatedCache, jsonlPath, jsonlPath, () => findTerminatedTeammates(jsonlPath), new Set());
+  return getSessionDigest(jsonlPath).terminated;
 }
 
 function readRecentMessages(jsonlPath, limit = 10) {
@@ -1060,14 +1068,11 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
       } catch (_) {}
     }
 
-    function persistPrompt(agent, prompt) {
-      agent.prompt = prompt;
-      persistAgent(agentDir, agent);
-    }
+    const dirty = new Set();
 
-    const agentsNeedingPrompt = agents.filter(a => !a.prompt);
-    const agentsNeedingName = agents.filter(a => !a.agentName);
-    const agentsNeedingDesc = agents.filter(a => !a.description);
+    const agentsNeedingPrompt = agents.filter(a => !a.prompt && !a.promptUnavailable);
+    const agentsNeedingName = agents.filter(a => !a.agentName && !a.agentNameUnavailable);
+    const agentsNeedingDesc = agents.filter(a => !a.description && !a.descriptionUnavailable);
     if ((agentsNeedingPrompt.length || agentsNeedingName.length || agentsNeedingDesc.length) && meta.jsonlPath) {
       let byAgentId = {};
       let nameByAgentId = {};
@@ -1083,37 +1088,34 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
       for (const agent of agentsNeedingPrompt) {
         const prompt = byAgentId[agent.agentId]
           || (() => { try { return extractPromptFromTranscript(subagentJsonlPath(meta, agent.agentId)); } catch (_) { return null; } })();
-        if (prompt) persistPrompt(agent, prompt);
+        if (prompt) agent.prompt = prompt;
+        else agent.promptUnavailable = true;
+        dirty.add(agent);
       }
       for (const agent of agentsNeedingName) {
         if (nameByAgentId[agent.agentId]) agent.agentName = nameByAgentId[agent.agentId];
+        else agent.agentNameUnavailable = true;
+        dirty.add(agent);
       }
       for (const agent of agentsNeedingDesc) {
         if (descByAgentId[agent.agentId]) agent.description = descByAgentId[agent.agentId];
+        else agent.descriptionUnavailable = true;
+        dirty.add(agent);
       }
     }
 
-    const agentsNeedingModel = agents.filter(a => !a.model);
+    const agentsNeedingModel = agents.filter(a => !a.model && !a.modelUnavailable);
     if (agentsNeedingModel.length && meta.jsonlPath) {
       for (const agent of agentsNeedingModel) {
-        try {
-          const jsonl = subagentJsonlPath(meta, agent.agentId);
-          const content = readFileSync(jsonl, 'utf8');
-          for (const line of content.split('\n')) {
-            if (!line.trim()) continue;
-            try {
-              const obj = JSON.parse(line);
-              const model = obj.model || (obj.message && obj.message.model);
-              if (model) {
-                agent.model = model;
-                persistAgent(agentDir, agent);
-                break;
-              }
-            } catch (_) {}
-          }
-        } catch (_) {}
+        let model = null;
+        try { model = extractModelFromTranscript(subagentJsonlPath(meta, agent.agentId)); } catch (_) {}
+        if (model) agent.model = model;
+        else agent.modelUnavailable = true;
+        dirty.add(agent);
       }
     }
+
+    for (const agent of dirty) persistAgent(agentDir, agent);
     const teamColors = {};
     if (teamConfig?.members) {
       for (const m of teamConfig.members) {
