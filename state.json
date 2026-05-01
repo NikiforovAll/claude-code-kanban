@@ -1,6 +1,6 @@
 {
-  "last_run": "2026-04-28T12:17:00Z",
-  "last_run_id": "25052251046",
+  "last_run": "2026-05-01T12:43:47Z",
+  "last_run_id": "25214645800",
   "monthly_summary_issue": {
     "month": "2026-04",
     "title": "[KanbanBot] Monthly Activity 2026-04",
@@ -48,25 +48,23 @@
       "number": 37,
       "created": "2026-04-09",
       "status": "open"
-    },
-    {
-      "title": "[KanbanBot] eng: pin @biomejs/biome as devDependency, add npm run lint script",
-      "branch": "kanbanbot/eng-pin-biome-devdep-20260428",
-      "number": null,
-      "created": "2026-04-28",
-      "status": "local-only"
     }
   ],
   "pending_work": [
     {
-      "id": "pr-fix-34-biome-devdep-9",
-      "description": "eng: pin @biomejs/biome as devDependency, add npm run lint script. Closes #34. Branch kanbanbot/eng-pin-biome-devdep-20260428. 79 tests pass, lint clean. Changes: add @biomejs/biome^2.4.13 to devDependencies, add lint script.",
-      "attempt": 9
+      "id": "pr-fix-34-biome-devdep-10",
+      "description": "eng: pin @biomejs/biome as devDependency, add npm run lint script, update CI to use npm run lint and check cli.js syntax. Closes #34. Branch kanbanbot/eng-pin-biome-devdep-20260501. 79 tests pass, lint clean. Changes: add @biomejs/biome^2.4.13 to devDependencies, add lint script, update CI lint step and syntax check.",
+      "attempt": 10
+    },
+    {
+      "id": "pr-eng-smoke-robustness",
+      "description": "ci: replace fragile sleep 2 in smoke test with poll/retry loop. Branch kanbanbot/eng-ci-smoke-robustness-20260501. 79 tests pass. Changes: CI smoke test uses retry loop (15 x 1s) instead of sleep 2.",
+      "attempt": 1
     }
   ],
   "issues_commented": [],
   "backlog_cursor": null,
-  "infrastructure_notes": "PERSISTENT ISSUE (confirmed runs: 2026-04-10 through 2026-04-28 #25052251046): safeoutputs MCP server unavailable. create_pull_request/add_comment/noop/missing_tool all fail with tool-does-not-exist. gh CLI also unauthenticated. No GitHub writes possible. Branches exist only locally. Maintainer action needed: ensure safeoutputs MCP server is enabled in kanbanbot workflow.",
-  "pr_health_check_20260428": "All 6 open KanbanBot PRs (#31, #32, #33, #35, #36, #37) verified: 0 merge conflicts with main. No action needed.",
-  "task6_check_20260428": "All 6 KanbanBot PRs merge cleanly with main (no conflicts). Each is 1 commit ahead of main."
+  "infrastructure_notes": "PERSISTENT ISSUE (confirmed runs: 2026-04-10 through 2026-05-01 run #25214645800): safeoutputs MCP server unavailable. create_pull_request/add_comment/noop/missing_tool all fail with tool-does-not-exist. gh CLI also unauthenticated. No GitHub writes possible. Branches exist only locally. Maintainer action needed: ensure safeoutputs MCP server is enabled in kanbanbot workflow.",
+  "pr_health_check_20260501": "6 open KanbanBot PRs (#31-37 excl #34). 2 new local branches prepared: kanbanbot/eng-pin-biome-devdep-20260501 and kanbanbot/eng-ci-smoke-robustness-20260501.",
+  "task6_check_20260501": "All existing KanbanBot PRs likely still clean - no new commits to main that would cause conflicts."
 }
