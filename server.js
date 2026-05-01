@@ -1746,6 +1746,7 @@ contextStatusWatcher.on('all', (event, filePath) => {
   if (event === 'add' || event === 'change') {
     try {
       const data = JSON.parse(readFileSync(filePath, 'utf8'));
+      try { data._updatedAt = statSync(filePath).mtimeMs; } catch (_) { data._updatedAt = Date.now(); }
       contextStatusCache.set(sessionId, data);
       evictStaleCache(contextStatusCache);
     } catch (e) { /* ignore malformed */ }

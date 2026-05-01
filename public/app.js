@@ -4153,6 +4153,7 @@ document.addEventListener('keydown', (e) => {
     lastTasksHash = '';
     const refreshes = [fetchSessions()];
     if (currentSessionId) refreshes.push(fetchTasks(currentSessionId));
+    refreshRateLimits();
     Promise.all(refreshes)
       .then(() => showToast('Data refreshed', 'success'))
       .finally(() => {
@@ -5725,7 +5726,11 @@ function refreshRateLimits() {
     fetch('/api/context-status')
       .then((r) => r.json())
       .then((all) => {
-        const rl = Object.values(all || {}).find((e) => e?.rate_limits)?.rate_limits || null;
+        let freshest = null;
+        for (const e of Object.values(all || {})) {
+          if (e?.rate_limits && (!freshest || (e._updatedAt || 0) > (freshest._updatedAt || 0))) freshest = e;
+        }
+        const rl = freshest?.rate_limits || null;
         const fh = rl?.five_hour?.used_percentage ?? null;
         const sd = rl?.seven_day?.used_percentage ?? null;
         const key = `${fh}|${sd}`;
