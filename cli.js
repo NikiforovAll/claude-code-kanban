@@ -42,6 +42,16 @@ const COMMANDS = {
         },
         run: runSessionViewCli,
       },
+      pin: {
+        summary: 'Pin (or unpin) a session in the sidebar of connected browser tabs',
+        usage: 'claude-code-kanban session pin <id> [--sticky] [--unpin]',
+        flags: {
+          '<id>': 'Full session id, or a unique prefix',
+          '--sticky': 'Set sticky state (always shown, top of list)',
+          '--unpin': 'Clear pin/sticky state',
+        },
+        run: runSessionPinCli,
+      },
       peek: {
         summary: 'Show the last N messages from a session',
         usage: 'claude-code-kanban session peek <id> [--limit <n>] [--json]',
@@ -357,6 +367,31 @@ async function runSessionOpenCli(args) {
       return 1;
     }
     console.log(`Session opened: ${resolved.id}${resolved.customTitle ? ` (${resolved.customTitle})` : ''}`);
+    return 0;
+  } catch (e) { reportCliError(e); return 1; }
+}
+
+async function runSessionPinCli(args) {
+  const idArg = args.find(a => !a.startsWith('--'));
+  if (!idArg) {
+    printLeafHelp('session pin', COMMANDS.session.verbs.pin);
+    return 1;
+  }
+  const state = args.includes('--unpin') ? 'none' : args.includes('--sticky') ? 'sticky' : 'pinned';
+  const resolved = await resolveSessionByIdOrPrefix(idArg);
+  if (!resolved) return 1;
+  try {
+    const res = await cliFetch('/api/session/pin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: resolved.id, state })
+    });
+    if (!res.ok) {
+      console.error(`Pin failed (${res.status}): ${await res.text()}`);
+      return 1;
+    }
+    const label = state === 'none' ? 'unpinned' : state;
+    console.log(`Session ${label}: ${resolved.id}${resolved.customTitle ? ` (${resolved.customTitle})` : ''}`);
     return 0;
   } catch (e) { reportCliError(e); return 1; }
 }

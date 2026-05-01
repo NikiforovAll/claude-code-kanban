@@ -1531,6 +1531,21 @@ app.post('/api/session/open', async (req, res) => {
   }
 });
 
+app.post('/api/session/pin', async (req, res) => {
+  try {
+    const { id, state } = req.body || {};
+    if (!id || typeof id !== 'string') return res.status(400).json({ error: 'id is required' });
+    if (!['none', 'pinned', 'sticky'].includes(state)) {
+      return res.status(400).json({ error: 'state must be none|pinned|sticky' });
+    }
+    broadcast({ type: 'session:pin', id, state });
+    res.json({ success: true, id, state });
+  } catch (error) {
+    console.error('Error in /api/session/pin:', error);
+    res.status(500).json({ error: error.message || 'Failed' });
+  }
+});
+
 app.get('/api/preview', async (req, res) => {
   try {
     const abs = resolvePreviewPath(req.query.path);

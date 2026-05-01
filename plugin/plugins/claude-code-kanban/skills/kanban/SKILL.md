@@ -1,6 +1,6 @@
 ---
 name: kanban
-description: Drive the claude-code-kanban browser dashboard from this Claude session. Use this skill when the user mentions "kanban" together with "session" — e.g. "open this session in kanban", "show kanban", "focus current session in kanban", "preview this file in kanban", or asks to peek/view a kanban session.
+description: Drive the claude-code-kanban browser dashboard from this Claude session. Use this skill when the user mentions "kanban" together with "session" — e.g. "open this session in kanban", "show kanban", "focus current session in kanban", "pin/unpin a session in kanban", "preview this file in kanban", or asks to peek/view a kanban session.
 compatibility: Requires the `claude-code-kanban` CLI on PATH and the server running locally (default port 3456).
 ---
 
@@ -21,6 +21,20 @@ claude-code-kanban session open ${CLAUDE_SESSION_ID}
 ```
 
 Trigger phrases: "show this session in kanban", "focus current session", "open in kanban".
+
+## Pin the current session in kanban
+
+Pins the active Claude session in the sidebar so it stays visible regardless of filters. Three states: `pinned` (default), `sticky` (always at the top), or cleared via `--unpin`.
+
+```bash
+claude-code-kanban session pin ${CLAUDE_SESSION_ID}            # pin
+claude-code-kanban session pin ${CLAUDE_SESSION_ID} --sticky   # sticky at top
+claude-code-kanban session pin ${CLAUDE_SESSION_ID} --unpin    # clear
+```
+
+State applies to every connected browser tab (broadcast via SSE) and persists in each tab's localStorage. With no tabs open the command is a no-op.
+
+Trigger phrases: "pin this session", "pin in kanban", "make this session sticky", "unpin session".
 
 ## Preview a file in kanban
 

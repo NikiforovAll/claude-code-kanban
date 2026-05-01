@@ -1335,6 +1335,19 @@ function toggleSessionSticky(sessionId) {
   renderSessions();
 }
 
+function handleSessionPinEvent({ id, state }) {
+  if (!id) return;
+  pinnedSessionIds.delete(id);
+  stickySessionIds.delete(id);
+  if (state === 'pinned') pinnedSessionIds.add(id);
+  if (state === 'sticky') {
+    pinnedSessionIds.add(id);
+    stickySessionIds.add(id);
+  }
+  savePinnedSessions();
+  renderSessions();
+}
+
 function getSessionPinState(sessionId) {
   if (stickySessionIds.has(sessionId)) return 'sticky';
   if (pinnedSessionIds.has(sessionId)) return 'pinned';
@@ -4514,6 +4527,10 @@ function setupEventSource() {
 
       if (data.type === 'session:open') {
         handleSessionOpenEvent(data);
+      }
+
+      if (data.type === 'session:pin') {
+        handleSessionPinEvent(data);
       }
 
       if (data.type === 'team-update') {
