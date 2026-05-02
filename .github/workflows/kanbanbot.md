@@ -13,7 +13,7 @@ description: |
   Always polite, constructive, and mindful of the project's goals.
 
 on:
-  schedule: daily
+  schedule: "0 2 */2 * *"
   workflow_dispatch:
   slash_command:
     name: kanbanbot
