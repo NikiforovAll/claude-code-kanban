@@ -2,37 +2,30 @@
 
 These patches were prepared but could not be pushed as PRs due to safeoutputs MCP server failure.
 
-## Patch 1: eng-pin-biome-devdep-20260501 (Attempt 10)
+## Patch 1: eng-lint-smoke-20260502 (Attempt 1)
 
-Title: [KanbanBot] eng: pin @biomejs/biome as devDependency, add npm run lint script, and update CI
-Closes: #34
+Title: [KanbanBot] eng: add npm run lint script, extend syntax check, fix fragile smoke test
 Tests: 79/79 pass, lint clean
-Branch: kanbanbot/eng-pin-biome-devdep-20260501 (LOCAL ONLY - not pushed to remote)
+Branch: kanbanbot/eng-lint-smoke-20260502 (LOCAL ONLY - not pushed to remote)
 
 Changes:
-- Add `"@biomejs/biome": "^2.4.13"` to devDependencies in package.json
-- Add `"lint": "biome check --error-on-warnings public/app.js public/style.css"` script
-- Update CI lint step to use `npm run lint`
-- Update CI syntax check to also check `cli.js`
-- Update package-lock.json accordingly
+- Add `"lint": "biome check --error-on-warnings public/app.js public/style.css"` to package.json scripts
+- Update CI lint step to use `npm run lint` 
+- Extend CI syntax check: `node -c server.js && node -c cli.js && node -c install.js && node -c lib/parsers.js`
+- Fix smoke test: replace `sleep 2` with 15-iteration retry loop (1s each), capture SERVER_PID explicitly
 
-Previous attempts on branches:
-- kanbanbot/eng-pin-biome-devdep-20260407-c63b102d9635ea37 (remote, stale/old)
-- kanbanbot/eng-pin-biome-devdep-20260426 (local-only, attempt 8)
-- kanbanbot/eng-pin-biome-devdep-20260428 (local-only, attempt 9)
-- kanbanbot/eng-pin-biome-devdep-20260501 (local-only, attempt 10 - current)
+## Patch 2: improve-danger-css-var-20260502 (Attempt 1)
 
-## Patch 2: eng-ci-smoke-robustness-20260501 (Attempt 1)
-
-Title: [KanbanBot] ci: replace fragile sleep 2 in smoke test with poll/retry loop
+Title: [KanbanBot] css: add --danger CSS variable, replace hardcoded #ef4444 values
 Tests: 79/79 pass, lint clean
-Branch: kanbanbot/eng-ci-smoke-robustness-20260501 (LOCAL ONLY - not pushed to remote)
+Branch: kanbanbot/improve-danger-css-var-20260502 (LOCAL ONLY - not pushed to remote)
 
 Changes:
-- Replace `sleep 2` in CI smoke test with a retry loop (15 iterations, 1s apart)
-- Capture server PID explicitly for clean termination
+- Add `--danger: #ef4444` and `--danger-dim: rgba(239, 68, 68, 0.15)` to VARIABLES region
+- Replace all 6 hardcoded `#ef4444` occurrences with `var(--danger)` or `var(--danger-dim)`
+- Closes gap where app.js line 1601 already referenced `var(--danger)` but it was undefined in CSS
 
-## PR Health Status (2026-05-01)
+## Infrastructure Note
 
-6 open KanbanBot PRs (#31, #32, #33, #35, #36, #37) - no new conflicts expected.
-Issue #38 exists with "agentic-workflows" label - content unknown, could not investigate.
+safeoutputs MCP server has been unavailable since 2026-04-10. All branches are local-only.
+Maintainer should enable safeoutputs in kanbanbot workflow config.
