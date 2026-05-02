@@ -2575,6 +2575,40 @@ body::before {
   color: var(--text-primary);
 }
 
+.linked-doc-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.linked-doc-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.linked-doc-link {
+  color: var(--accent-text);
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 3px;
+  flex-shrink: 0;
+}
+
+.linked-doc-path {
+  color: var(--text-muted);
+  font-size: 11px;
+  opacity: 0.7;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
 /* #endregion */
 
 /* #region PERMISSION_PENDING */

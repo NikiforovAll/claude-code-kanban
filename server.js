@@ -1475,15 +1475,26 @@ async function readMarkdownFile(absPath) {
   }
 }
 
-function resolvePreviewPath(filePath) {
+function resolvePreviewPath(filePath, base) {
   if (!filePath || typeof filePath !== 'string') return null;
-  return path.isAbsolute(filePath) ? filePath : path.resolve(filePath);
+  if (path.isAbsolute(filePath)) return filePath;
+  if (base && typeof base === 'string' && path.isAbsolute(base)) {
+    let baseDir = base;
+    try {
+      if (statSync(base).isFile()) baseDir = path.dirname(base);
+    } catch {
+      // base doesn't exist — fall back to dirname if it looks like a file
+      if (path.extname(base)) baseDir = path.dirname(base);
+    }
+    return path.resolve(baseDir, filePath);
+  }
+  return path.resolve(filePath);
 }
 
 app.post('/api/preview', async (req, res) => {
   try {
-    const { path: filePath, sessionId } = req.body || {};
-    const abs = resolvePreviewPath(filePath);
+    const { path: filePath, sessionId, base } = req.body || {};
+    const abs = resolvePreviewPath(filePath, base);
     if (!abs) return res.status(400).json({ error: 'path is required' });
     const content = await readMarkdownFile(abs);
     broadcast({ type: 'preview:open', path: abs, content, sessionId: sessionId || null });
@@ -1548,7 +1559,7 @@ app.post('/api/session/pin', async (req, res) => {
 
 app.get('/api/preview', async (req, res) => {
   try {
-    const abs = resolvePreviewPath(req.query.path);
+    const abs = resolvePreviewPath(req.query.path, req.query.base);
     if (!abs) return res.status(400).json({ error: 'path is required' });
     const content = await readMarkdownFile(abs);
     res.json({ path: abs, content });

@@ -3957,6 +3957,19 @@ function matchKey(e, ...keys) {
   return keys.some((k) => e.key === k || e.code === k);
 }
 
+const MODAL_ESC_PRIORITY = ['preview-modal', 'msg-detail-modal', 'plan-modal'];
+const MODAL_CLOSERS = {
+  'preview-modal': () => closePreviewModal(),
+  'msg-detail-modal': () => {
+    closeMsgDetailModal();
+    msgDetailFollowLatest = false;
+  },
+  'plan-modal': () => closePlanModal(),
+  'team-modal': () => closeTeamModal(),
+  'agent-modal': () => closeAgentModal(),
+  'help-modal': () => closeHelpModal(),
+};
+
 document.addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') {
     return;
@@ -3969,9 +3982,13 @@ document.addEventListener('keydown', (e) => {
         closeScratchpad();
         return;
       }
-      // biome-ignore lint/suspicious/useIterableCallbackReturn: forEach side-effect
-      document.querySelectorAll('.modal-overlay.visible').forEach((m) => m.classList.remove('visible'));
-      msgDetailFollowLatest = false;
+      // Close only the topmost so a child Esc doesn't also dismiss its parent.
+      const visible = [...document.querySelectorAll('.modal-overlay.visible')];
+      const topId = MODAL_ESC_PRIORITY.find((id) => visible.some((m) => m.id === id)) || visible[visible.length - 1].id;
+      const close = MODAL_CLOSERS[topId];
+      if (close) close();
+      else document.getElementById(topId).classList.remove('visible');
+      e.stopImmediatePropagation();
     } else if (
       e.code === 'KeyM' &&
       e.shiftKey &&
@@ -4241,8 +4258,24 @@ function openPreviewModal(filePath, content) {
   currentPreviewPath = filePath;
   document.getElementById('preview-modal-title').textContent = filePath.split(/[\\/]/).pop();
   const { fm, body } = /\.(md|markdown)$/i.test(filePath) ? splitFrontmatter(content) : { fm: null, body: content };
-  document.getElementById('preview-modal-body').innerHTML =
-    (fm ? renderFrontmatterBlock(fm) : '') + renderMarkdown(body);
+  const bodyEl = document.getElementById('preview-modal-body');
+  bodyEl.innerHTML = (fm ? renderFrontmatterBlock(fm) : '') + renderMarkdown(body);
+  if (!bodyEl.dataset.relLinkBound) {
+    bodyEl.addEventListener('click', (e) => {
+      const a = e.target.closest('a[href]');
+      if (!a) return;
+      const href = a.getAttribute('href');
+      if (!href || href.startsWith('#')) return;
+      const isAbsoluteUrl = /^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith('//');
+      const isAbsolutePath = href.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(href);
+      if (isAbsoluteUrl) return;
+      if (!/\.(md|markdown)(#.*)?$/i.test(href)) return;
+      e.preventDefault();
+      const cleanHref = href.replace(/#.*$/, '');
+      openPreviewByPath(cleanHref, isAbsolutePath ? undefined : currentPreviewPath);
+    });
+    bodyEl.dataset.relLinkBound = '1';
+  }
   document.getElementById('preview-modal-meta').textContent = filePath;
   document.getElementById('preview-modal').classList.add('visible');
   updatePreviewLinkBtn();
@@ -4313,7 +4346,6 @@ function refreshInfoModalLinkedDocs() {
   bindLinkedDocsHandlers(node, _infoModalSessionId);
 }
 
-// biome-ignore lint/correctness/noUnusedVariables: used in HTML
 function closePreviewModal() {
   resetModalFullscreen('preview-modal');
   currentPreviewPath = null;
@@ -4325,10 +4357,12 @@ function openPreviewInEditor() {
   postAndToast('/api/open-in-editor', { file: currentPreviewPath }, 'in editor');
 }
 
-async function openPreviewByPath(filePath) {
+async function openPreviewByPath(filePath, base) {
   if (!filePath) return;
   try {
-    const r = await fetch(`/api/preview?path=${encodeURIComponent(filePath)}`);
+    const qs = new URLSearchParams({ path: filePath });
+    if (base) qs.set('base', base);
+    const r = await fetch(`/api/preview?${qs}`);
     if (!r.ok) {
       showToast('Preview file unavailable');
       return;
@@ -4372,22 +4406,33 @@ async function handlePreviewOpenEvent(data) {
   openPreviewModal(filePath, content);
 }
 
+function getSessionBaseDir(sessionId) {
+  const s = sessions.find((x) => x.id === sessionId);
+  return s?.cwd || s?.project || '';
+}
+
 function renderLinkedDocsHtml(sessionId) {
   const paths = getSessionPreviewPaths(sessionId);
   if (!paths.length) return '';
+  const baseDir = getSessionBaseDir(sessionId);
   const items = paths
     .map((p, i) => {
       const name = p.split(/[\\/]/).pop();
-      return `<a href="#" class="linked-doc-link" data-idx="${i}" title="${escapeHtml(p)}" style="color:var(--accent-text);text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px;">${escapeHtml(name)}</a>`;
+      const rel = baseDir ? toRelativeIfUnder(p, baseDir) : null;
+      const pathSpan = rel ? `<span class="linked-doc-path" title="${escapeHtml(p)}">${escapeHtml(rel)}</span>` : '';
+      return `<li class="linked-doc-item">
+        <a href="#" class="linked-doc-link" data-idx="${i}" title="${escapeHtml(p)}">${escapeHtml(name)}</a>
+        ${pathSpan}
+      </li>`;
     })
-    .join(', ');
+    .join('');
   return `<div class="linked-docs-section" style="margin-bottom:16px;font-size:12px;">
     <div style="font-size:11px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;display:flex;align-items:center;gap:6px;">
       ${linkSvg(12)}
       <span>Linked documents</span>
       <span style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:10px;padding:0 6px;font-size:10px;color:var(--text-secondary);">${paths.length}</span>
     </div>
-    <div>${items}</div>
+    <ul class="linked-doc-list">${items}</ul>
   </div>`;
 }
 
@@ -4396,10 +4441,11 @@ function bindLinkedDocsHandlers(container, sessionId) {
   const links = container.querySelectorAll('.linked-doc-link');
   if (!links.length) return;
   const paths = getSessionPreviewPaths(sessionId);
+  const base = getSessionBaseDir(sessionId);
   for (const link of links) {
     link.addEventListener('click', (e) => {
       e.preventDefault();
-      openPreviewByPath(paths[+link.dataset.idx]);
+      openPreviewByPath(paths[+link.dataset.idx], base);
     });
   }
 }
@@ -4746,6 +4792,18 @@ function escapeHtml(text) {
   const div = document.createElement('div');
   div.textContent = text;
   return div.innerHTML;
+}
+
+function toRelativeIfUnder(filePath, baseDir) {
+  if (!filePath || !baseDir) return null;
+  const fp = filePath.replace(/\\/g, '/').replace(/\/+$/, '');
+  const bd = baseDir.replace(/\\/g, '/').replace(/\/+$/, '');
+  const isWin = /^[a-zA-Z]:\//.test(fp) || /^[a-zA-Z]:\//.test(bd);
+  const a = isWin ? fp.toLowerCase() : fp;
+  const b = isWin ? bd.toLowerCase() : bd;
+  if (a === b) return '.';
+  if (!a.startsWith(`${b}/`)) return null;
+  return fp.slice(bd.length + 1);
 }
 
 function renderMarkdown(text) {
