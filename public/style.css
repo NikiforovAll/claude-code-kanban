@@ -22,6 +22,8 @@
   --success-dim: rgba(62, 207, 142, 0.18);
   --warning: #f0b429;
   --warning-dim: rgba(240, 180, 41, 0.18);
+  --danger: #ef4444;
+  --danger-dim: rgba(239, 68, 68, 0.15);
   --team: #60a5fa;
   --team-dim: rgba(96, 165, 250, 0.18);
   --plan: #86a886;
@@ -231,7 +233,7 @@ body::before {
 }
 
 .connection-dot.error {
-  background: #ef4444;
+  background: var(--danger);
 }
 
 .offline-overlay {
@@ -911,13 +913,13 @@ body::before {
 }
 
 .icon-btn-danger {
-  color: #ef4444;
+  color: var(--danger);
 }
 
 .icon-btn-danger:hover {
   background: rgba(239, 68, 68, 0.1);
   color: #dc2626;
-  border-color: #ef4444;
+  border-color: var(--danger);
 }
 
 /* #endregion */
@@ -1758,7 +1760,7 @@ body::before {
 }
 .agent-chip-error,
 .agent-chip-failed {
-  background: rgba(239, 68, 68, 0.15);
+  background: var(--danger-dim);
   color: rgb(220, 60, 60);
   border-color: rgba(239, 68, 68, 0.3);
 }
@@ -2674,7 +2676,7 @@ body.light .msg-assistant .msg-text {
 /* #region INTERACTIVE */
 .icon-btn.delete:hover {
   background: rgba(239, 68, 68, 0.1);
-  border-color: #ef4444;
+  border-color: var(--danger);
 }
 
 .column-header {
@@ -3239,8 +3241,8 @@ select.form-input option:checked {
 }
 
 .storage-item-badge.orphan {
-  background: rgba(239, 68, 68, 0.15);
-  color: #ef4444;
+  background: var(--danger-dim);
+  color: var(--danger);
 }
 
 .storage-item-badge.pinned {
@@ -3277,8 +3279,8 @@ select.form-input option:checked {
 }
 
 .storage-item-actions button.danger:hover {
-  background: rgba(239, 68, 68, 0.15);
-  color: #ef4444;
+  background: var(--danger-dim);
+  color: var(--danger);
 }
 
 .storage-group-header {
