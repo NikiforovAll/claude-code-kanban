@@ -1,40 +1,13 @@
 {
-  "last_run": "2026-05-02T12:37:33Z",
-  "last_run_id": "25252045025",
+  "last_run": "2026-05-03T05:29:00Z",
+  "last_run_id": "25270878414",
   "monthly_summary_issue": {
-    "month": "2026-04",
-    "title": "[KanbanBot] Monthly Activity 2026-04",
-    "number": 23
+    "month": "2026-05",
+    "title": "[KanbanBot] Monthly Activity 2026-05",
+    "number": null,
+    "note": "Created this run (aw_may2026)"
   },
   "kanbanbot_prs": [
-    {
-      "title": "[KanbanBot] perf: replace `transition: all` with specific property transitions",
-      "branch": "kanbanbot/perf-specific-transitions-9f589da92459d7ef",
-      "number": 31,
-      "created": "2026-04-04",
-      "status": "open"
-    },
-    {
-      "title": "[KanbanBot] refactor: extract renderOwnerBadge helper",
-      "branch": "kanbanbot/improve-task-card-owner-badge-715fa0dce541b035",
-      "number": 32,
-      "created": "2026-04-04",
-      "status": "open"
-    },
-    {
-      "title": "[KanbanBot] test: add missing coverage for customTitle, cwd",
-      "branch": "kanbanbot/test-missing-coverage-20260405-e66345c031fe9f54",
-      "number": 33,
-      "created": "2026-04-05",
-      "status": "open"
-    },
-    {
-      "title": "[KanbanBot] refactor: move context-window constants",
-      "branch": "kanbanbot/improve-ctx-constants-region-20260407-96ad55cf3c37bc56",
-      "number": 35,
-      "created": "2026-04-07",
-      "status": "open"
-    },
     {
       "title": "[KanbanBot] a11y: set aria-selected on keyboard-selected task cards",
       "branch": "kanbanbot/a11y-aria-selected-task-cards-20260408-d1ff40bf1d087b16",
@@ -43,27 +16,22 @@
       "status": "open"
     },
     {
-      "title": "[KanbanBot] refactor: extract updateProgressBar helper",
-      "branch": "kanbanbot/improve-progress-bar-helper-20260409-f2d77411a3014960",
-      "number": 37,
-      "created": "2026-04-09",
-      "status": "open"
-    }
-  ],
-  "pending_work": [
-    {
-      "id": "pr-eng-lint-smoke-20260502",
-      "description": "eng: add npm run lint script to package.json, update CI to use npm run lint, extend CI syntax check to cli.js+install.js+lib/parsers.js, fix smoke test (sleep 2 -> retry loop 15x1s). Branch kanbanbot/eng-lint-smoke-20260502. 79 tests pass, lint clean.",
-      "attempt": 1
+      "title": "[KanbanBot] test: add coverage for extractModelFromTranscript",
+      "branch": "kanbanbot/test-extract-model-transcript-20260503",
+      "number": null,
+      "created": "2026-05-03",
+      "status": "submitted"
     },
     {
-      "id": "pr-improve-danger-css-var-20260502",
-      "description": "css: add --danger and --danger-dim CSS variables to VARIABLES region; replace all hardcoded #ef4444 with var(--danger) and rgba(239,68,68,0.15) with var(--danger-dim). Also closes gap where app.js already referenced var(--danger) but it was undefined. Branch kanbanbot/improve-danger-css-var-20260502. 79 tests pass, lint clean.",
-      "attempt": 1
+      "title": "[KanbanBot] css: add --danger CSS variable, replace hardcoded #ef4444",
+      "branch": "kanbanbot/improve-danger-css-var-20260503",
+      "number": null,
+      "created": "2026-05-03",
+      "status": "submitted"
     }
   ],
+  "pending_work": [],
   "issues_commented": [],
   "backlog_cursor": null,
-  "infrastructure_notes": "PERSISTENT ISSUE (confirmed runs: 2026-04-10 through 2026-05-02 run #25252045025): safeoutputs MCP server unavailable. create_pull_request/add_comment/noop/missing_tool all fail with tool-does-not-exist. gh CLI also unauthenticated. No GitHub writes possible. Branches exist only locally. Maintainer action needed: ensure safeoutputs MCP server is enabled in kanbanbot workflow.",
-  "maintainer_note": "PR branches are prepared locally each run but cannot be pushed. Previous work (biome devDep #34) was resolved by maintainer directly. Same approach may be needed for these pending branches."
+  "infrastructure_notes": "safeoutputs MCP server confirmed working on run 25270878414 (2026-05-03). Previous runs (2026-04-10 to 2026-05-02) had MCP server failure - now resolved."
 }
