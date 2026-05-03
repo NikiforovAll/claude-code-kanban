@@ -59,7 +59,9 @@ function getUrlState() {
     project: params.get('project'),
     owner: params.get('owner'),
     search: params.get('search'),
-    messages: params.get('messages') === '1',
+    messages: params.has('messages')
+      ? params.get('messages') === '1'
+      : localStorage.getItem('message-panel-open') === 'true',
     projectView: params.get('projectView'),
   };
 }
@@ -653,6 +655,7 @@ async function refreshProjectAgents() {
 function toggleMessagePanel() {
   const panel = document.getElementById('message-panel');
   messagePanelOpen = !messagePanelOpen;
+  localStorage.setItem('message-panel-open', messagePanelOpen);
   panel.classList.toggle('visible', messagePanelOpen);
   document.getElementById('message-toggle')?.classList.toggle('active', messagePanelOpen);
   if (messagePanelOpen && currentSessionId) {
@@ -667,10 +670,13 @@ async function openSessionWithBookmarks(sessionId) {
   if (!messagePanelOpen) {
     const panel = document.getElementById('message-panel');
     messagePanelOpen = true;
+    localStorage.setItem('message-panel-open', 'true');
     panel.classList.add('visible');
     document.getElementById('message-toggle')?.classList.add('active');
   }
   await fetchTasks(sessionId);
+  if (currentMessages.length) renderMessages(currentMessages);
+  fetchMessages(sessionId);
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
