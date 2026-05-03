@@ -1824,6 +1824,9 @@ body::before {
 .message-panel.visible {
   display: flex;
 }
+.message-panel.msg-expanded-wide {
+  width: 60vw;
+}
 .message-panel-header {
   padding: 16px 20px;
   display: flex;
@@ -2787,8 +2790,8 @@ body.light .msg-assistant .msg-text {
 }
 
 .modal.fullscreen {
-  width: 90vw;
-  max-width: 90vw;
+  width: 80vw;
+  max-width: 80vw;
   height: 92vh;
   max-height: 92vh;
 }
@@ -2802,8 +2805,8 @@ body.light .msg-assistant .msg-text {
 }
 
 .modal.plan-modal.fullscreen {
-  width: 90vw;
-  max-width: 90vw;
+  width: 80vw;
+  max-width: 80vw;
   height: 92vh;
   max-height: 92vh;
 }

@@ -1503,10 +1503,25 @@ function closeMsgDetailModal() {
   msgDetailFollowLatest = false;
 }
 
+function _setModalWidth(modal, slot, on, maxWidth, width) {
+  const mwKey = `prev${slot}MaxWidth`;
+  const wKey = `prev${slot}Width`;
+  if (on) {
+    modal.dataset[mwKey] = modal.style.maxWidth || '';
+    modal.dataset[wKey] = modal.style.width || '';
+    modal.style.maxWidth = maxWidth;
+    modal.style.width = width;
+  } else {
+    modal.style.maxWidth = modal.dataset[mwKey] || '';
+    modal.style.width = modal.dataset[wKey] || '';
+  }
+}
+
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
 function toggleModalFullscreen(modalId) {
   const modal = document.querySelector(`#${modalId} .modal`);
   const isFs = modal.classList.toggle('fullscreen');
+  _setModalWidth(modal, 'Fs', isFs, '', '');
   updateFullscreenBtnIcon(`${modalId}-fullscreen-btn`, isFs);
 }
 
@@ -1737,17 +1752,30 @@ function highlightBash(escaped) {
 }
 
 let _expandIdCounter = 0;
+function _toggleExpand(btn) {
+  const f = document.getElementById(btn.dataset.expandId);
+  const t = btn.parentElement.nextElementSibling;
+  const expand = f.style.display === 'none';
+  f.style.display = expand ? 'block' : 'none';
+  t.style.display = expand ? 'none' : 'block';
+  btn.textContent = expand ? 'Show less' : 'Show more';
+  const panel = btn.closest('.message-panel');
+  if (panel) panel.classList.toggle('msg-expanded-wide', expand);
+  const modal = btn.closest('.modal');
+  if (modal) _setModalWidth(modal, 'Expand', expand, '60vw', '60vw');
+}
 function makeExpandToggle(_truncatedHtml, fullHtml, opts = {}) {
   const id = `expand-${++_expandIdCounter}`;
   const fontSize = opts.fontSize || '0.8rem';
   const maxHeight = opts.maxHeight || '';
-  const btn = `<button onclick="var f=document.getElementById('${id}'),t=this.parentElement.nextElementSibling,expand=f.style.display==='none';f.style.display=expand?'block':'none';t.style.display=expand?'none':'block';this.textContent=expand?'Show less':'Show more'" style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:${fontSize};text-decoration:underline;margin-left:6px">Show more</button>`;
+  const btn = `<button data-expand-id="${id}" onclick="_toggleExpand(this)" style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:${fontSize};text-decoration:underline;margin-left:6px">Show more</button>`;
   const mhStyle = maxHeight ? `max-height:${maxHeight};` : '';
   const full = `<pre id="${id}" class="msg-detail-pre" style="${mhStyle}overflow:auto;display:none">${fullHtml}</pre>`;
   return { btn, full };
 }
 
 function autoSizeModal(modal, body) {
+  if (modal.classList.contains('fullscreen')) return;
   modal.style.maxWidth = '';
   modal.classList.remove('has-mermaid');
   const hasMermaid = body.querySelector('pre.mermaid') !== null;
