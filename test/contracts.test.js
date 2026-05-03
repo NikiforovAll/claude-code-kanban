@@ -19,7 +19,8 @@ const {
   buildAgentProgressMap,
   readCompactSummaries,
   findTerminatedTeammates,
-  extractPromptFromTranscript
+  extractPromptFromTranscript,
+  extractModelFromTranscript
 } = require('../lib/parsers');
 
 const ajv = new Ajv({ allErrors: true, strict: false });
@@ -726,6 +727,46 @@ describe('Parser: readCompactSummaries', () => {
     try {
       const result = readCompactSummaries(sessionFile);
       assert.deepEqual(result, []);
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('Parser: extractModelFromTranscript', () => {
+  it('extracts model from assistant message.model field', () => {
+    const model = extractModelFromTranscript(path.join(FIXTURES_DIR, 'session.jsonl'));
+    assert.equal(model, 'claude-opus-4-6');
+  });
+
+  it('returns null for non-existent file', () => {
+    assert.throws(() => extractModelFromTranscript('/nonexistent/path.jsonl'));
+  });
+
+  it('returns null when no model field present', () => {
+    const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'parser-test-'));
+    const tmpFile = path.join(tmpDir, 'no-model.jsonl');
+    try {
+      writeFileSync(tmpFile, [
+        JSON.stringify({ type: 'user', message: { role: 'user', content: 'hello' }, timestamp: '2026-01-01T00:00:00Z' }),
+        JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [] }, timestamp: '2026-01-01T00:00:01Z' })
+      ].join('\n') + '\n');
+      const result = extractModelFromTranscript(tmpFile);
+      assert.equal(result, null);
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('extracts model from top-level model field', () => {
+    const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'parser-test-'));
+    const tmpFile = path.join(tmpDir, 'top-level-model.jsonl');
+    try {
+      writeFileSync(tmpFile, [
+        JSON.stringify({ type: 'assistant', model: 'claude-3-5-sonnet', message: { role: 'assistant', content: [] }, timestamp: '2026-01-01T00:00:00Z' })
+      ].join('\n') + '\n');
+      const result = extractModelFromTranscript(tmpFile);
+      assert.equal(result, 'claude-3-5-sonnet');
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }
