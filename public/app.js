@@ -2302,7 +2302,7 @@ function renderSessions() {
     const showCtx = !!session.contextStatus;
     const linkedDocsCount = getSessionPreviewPaths(session.id).length;
     const bookmarksCount = loadPins(session.id).length;
-    const tempClass = session.inProgress || session.hasWaitingForUser ? '' : session.hasRecentLog ? 'warm' : 'stale';
+    const tempClass = session.hasRecentLog || session.inProgress || session.hasWaitingForUser ? 'warm' : 'stale';
     return `
           <button onclick="fetchTasks('${session.id}')" data-session-id="${session.id}" class="session-item ${isActive ? 'active' : ''} ${session.hasWaitingForUser ? 'permission-pending' : ''} ${tempClass} ${showCtx ? 'has-context' : ''}" title="${tooltip}">
             <span class="session-pin-btn${pinClass}" onclick="event.stopPropagation();toggleSessionPin('${escapeHtml(session.id)}')" title="${pinTitle} session">${SESSION_PIN_SVG}</span>
@@ -5927,6 +5927,25 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
     window.parent?.postMessage({ type: 'hub:keydown', key: e.key }, '*');
   }
+});
+
+document.addEventListener('click', (e) => {
+  if (!window.__HUB__?.enabled) return;
+  const a = e.target.closest?.('a[href]');
+  if (!a) return;
+  const href = a.getAttribute('href');
+  if (!href) return;
+  let url;
+  try {
+    url = new URL(href, window.location.href);
+  } catch (_) {
+    return;
+  }
+  if (url.origin === window.location.origin) return;
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return;
+  e.preventDefault();
+  e.stopPropagation();
+  window.parent?.postMessage({ type: 'hub:openExternal', url: url.href }, '*');
 });
 
 window.hubNavigate = function hubNavigate(app, url) {
