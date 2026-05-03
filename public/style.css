@@ -549,14 +549,13 @@ body::before {
 
 .session-branch {
   font-size: 10px;
-  color: var(--text-muted);
+  color: var(--text-secondary);
   margin-top: 2px;
   display: block;
   font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', monospace;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  opacity: 0.7;
 }
 
 .session-plan {
@@ -1877,7 +1876,7 @@ body::before {
   width: 16px;
   height: 16px;
   margin-top: 2px;
-  opacity: 0.6;
+  opacity: 0.9;
 }
 .msg-body {
   flex: 1;
@@ -3712,7 +3711,39 @@ pre.mermaid svg {
 .session-item.kb-selected::before {
   width: 0;
 }
+.session-item.stale .session-time,
+.session-item.warm .session-time {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.session-item.stale .session-time::before,
+.session-item.warm .session-time::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.session-item.warm .session-time {
+  color: var(--success);
+}
+.session-item.warm .session-time::before {
+  background: var(--success);
+}
 .session-item.stale {
-  opacity: 0.6;
+  opacity: 0.85;
+}
+.session-item.stale:hover,
+.session-item.stale.active,
+.session-item.stale.kb-selected {
+  opacity: 1;
+}
+.session-item.stale .session-time {
+  color: var(--text-muted);
+}
+.session-item.stale .session-time::before {
+  background: transparent;
+  border: 1px solid var(--text-muted);
 }
 /* #endregion */

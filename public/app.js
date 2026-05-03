@@ -1623,9 +1623,9 @@ function getToolDetail(tool, params, detail) {
     const parts = [];
     if (params.offset) parts.push(`L${params.offset}`);
     if (params.limit) parts.push(`+${params.limit}`);
-    if (parts.length) extra = ` <span style="color:var(--text-muted);opacity:.7">${parts.join(' ')}</span>`;
+    if (parts.length) extra = ` <span style="color:var(--text-muted)">${parts.join(' ')}</span>`;
   }
-  return ` <span style="color:var(--text-muted)">${escapeHtml(detail)}</span>${extra}`;
+  return ` <span style="color:var(--text-secondary)">${escapeHtml(detail)}</span>${extra}`;
 }
 function renderTaskResult(toolResult) {
   if (!toolResult) return '';
@@ -2277,7 +2277,10 @@ function renderSessions() {
     const hasInProgress = session.inProgress > 0;
     const isLive =
       hasInProgress || (session.modifiedAt && Date.now() - new Date(session.modifiedAt).getTime() <= LIVE_INDICATOR_MS);
-    const sessionName = session.name || session.id;
+    const rawName = session.name || session.id;
+    const sessionName = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawName)
+      ? rawName.slice(0, 8)
+      : rawName;
     const useGrouped = sessionFilter === 'active' && session.project;
     const primaryName = useGrouped ? sessionName : session.project ? session.project.split('/').pop() : sessionName;
     const secondaryName = useGrouped ? null : session.project ? sessionName : null;
@@ -2299,8 +2302,9 @@ function renderSessions() {
     const showCtx = !!session.contextStatus;
     const linkedDocsCount = getSessionPreviewPaths(session.id).length;
     const bookmarksCount = loadPins(session.id).length;
+    const tempClass = session.inProgress || session.hasWaitingForUser ? '' : session.hasRecentLog ? 'warm' : 'stale';
     return `
-          <button onclick="fetchTasks('${session.id}')" data-session-id="${session.id}" class="session-item ${isActive ? 'active' : ''} ${session.hasWaitingForUser ? 'permission-pending' : ''} ${!session.hasRecentLog && !session.inProgress && !session.hasWaitingForUser ? 'stale' : ''} ${showCtx ? 'has-context' : ''}" title="${tooltip}">
+          <button onclick="fetchTasks('${session.id}')" data-session-id="${session.id}" class="session-item ${isActive ? 'active' : ''} ${session.hasWaitingForUser ? 'permission-pending' : ''} ${tempClass} ${showCtx ? 'has-context' : ''}" title="${tooltip}">
             <span class="session-pin-btn${pinClass}" onclick="event.stopPropagation();toggleSessionPin('${escapeHtml(session.id)}')" title="${pinTitle} session">${SESSION_PIN_SVG}</span>
             <div class="session-name">${escapeHtml(primaryName)}</div>
             ${secondaryName ? `<div class="session-secondary">${escapeHtml(secondaryName)}</div>` : ''}
