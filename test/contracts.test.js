@@ -17,6 +17,7 @@ const {
   readRecentMessages,
   readMessagesPage,
   buildAgentProgressMap,
+  buildSessionDigest,
   readCompactSummaries,
   findTerminatedTeammates,
   extractPromptFromTranscript
@@ -539,6 +540,66 @@ describe('Parser: buildAgentProgressMap', () => {
   it('returns empty map for non-existent file', () => {
     const map = buildAgentProgressMap('/nonexistent/path.jsonl');
     assert.deepEqual(map, {});
+  });
+});
+
+describe('Parser: buildSessionDigest', () => {
+  const jsonlPath = path.join(FIXTURES_DIR, 'session.jsonl');
+
+  it('returns progressMap and terminated fields', () => {
+    const result = buildSessionDigest(jsonlPath);
+    assert.ok(Object.prototype.hasOwnProperty.call(result, 'progressMap'));
+    assert.ok(Object.prototype.hasOwnProperty.call(result, 'terminated'));
+  });
+
+  it('progressMap matches buildAgentProgressMap output', () => {
+    const { progressMap } = buildSessionDigest(jsonlPath);
+    const map = buildAgentProgressMap(jsonlPath);
+    assert.deepEqual(progressMap, map);
+  });
+
+  it('terminated is a Map instance', () => {
+    const { terminated } = buildSessionDigest(jsonlPath);
+    assert.ok(terminated instanceof Map);
+  });
+
+  it('terminated is empty for fixture without terminated teammates', () => {
+    const { terminated } = buildSessionDigest(jsonlPath);
+    assert.ok(terminated instanceof Map);
+    assert.ok(terminated.has('worker-1'), 'should detect worker-1 as terminated');
+    assert.ok(terminated.has('worker-2'), 'should detect worker-2 as terminated via shutdown_response');
+  });
+
+  it('returns empty progressMap and empty terminated for non-existent file', () => {
+    const { progressMap, terminated } = buildSessionDigest('/nonexistent/path.jsonl');
+    assert.deepEqual(progressMap, {});
+    assert.ok(terminated instanceof Map);
+    assert.equal(terminated.size, 0);
+  });
+
+  it('detects teammate_terminated in synthetic JSONL', () => {
+    const { mkdtempSync: mdt, writeFileSync: wfs, rmSync: rms } = require('fs');
+    const tmpDir = mdt(path.join(os.tmpdir(), 'cck-digest-test-'));
+    try {
+      const jsonlFile = path.join(tmpDir, 'test.jsonl');
+      const line = JSON.stringify({
+        type: 'user',
+        timestamp: '2024-01-01T00:00:00.000Z',
+        message: {
+          content:
+            '<teammate-message teammate_id="reviewer">\n' +
+            '{"type":"teammate_terminated","from":"reviewer"}\n' +
+            '</teammate-message>',
+        },
+      });
+      wfs(jsonlFile, line + '\n');
+      const { terminated } = buildSessionDigest(jsonlFile);
+      assert.ok(terminated instanceof Map);
+      assert.equal(terminated.size, 1);
+      assert.ok(terminated.has('reviewer'));
+    } finally {
+      rms(tmpDir, { recursive: true });
+    }
   });
 });
 
