@@ -3,7 +3,7 @@
 const express = require('express');
 const path = require('path');
 const fs = require('fs').promises;
-const { existsSync, readdirSync, readFileSync, writeFileSync, statSync, createReadStream, unlinkSync } = require('fs');
+const { existsSync, readdirSync, readFileSync, writeFileSync, statSync, createReadStream, unlinkSync, mkdirSync, renameSync } = require('fs');
 const readline = require('readline');
 const chokidar = require('chokidar');
 const os = require('os');
@@ -73,6 +73,27 @@ const PLANS_DIR = path.join(CLAUDE_DIR, 'plans');
 const CCK_DIR = path.join(CLAUDE_DIR, '.cck');
 const AGENT_ACTIVITY_DIR = path.join(CCK_DIR, 'agent-activity');
 const CONTEXT_STATUS_DIR = path.join(CCK_DIR, 'context-status');
+const PINS_FILE = path.join(CCK_DIR, 'pins.json');
+
+// Server-side pin mirror (UI authoritative, server stores latest pushed state for CLI queries).
+function readPins() {
+  try {
+    const obj = JSON.parse(readFileSync(PINS_FILE, 'utf8'));
+    if (obj && typeof obj === 'object' && !Array.isArray(obj)) return obj;
+  } catch (_) {}
+  return {};
+}
+
+function writePins(pins) {
+  try {
+    mkdirSync(CCK_DIR, { recursive: true });
+    const tmp = `${PINS_FILE}.${process.pid}.${Date.now()}.tmp`;
+    writeFileSync(tmp, JSON.stringify(pins, null, 2), 'utf8');
+    renameSync(tmp, PINS_FILE);
+  } catch (e) {
+    console.error('Failed to write pins.json:', e.message);
+  }
+}
 
 const PERMISSION_TTL_MS = 1800000;
 const AGENT_TTL_MS = 3600000;
@@ -1561,10 +1582,26 @@ app.post('/api/session/pin', async (req, res) => {
     if (!['none', 'pinned', 'sticky'].includes(state)) {
       return res.status(400).json({ error: 'state must be none|pinned|sticky' });
     }
+    const pins = readPins();
+    if (state === 'none') delete pins[id];
+    else pins[id] = state;
+    writePins(pins);
     broadcast({ type: 'session:pin', id, state });
     res.json({ success: true, id, state });
   } catch (error) {
     console.error('Error in /api/session/pin:', error);
+    res.status(500).json({ error: error.message || 'Failed' });
+  }
+});
+
+app.get('/api/session/pins', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    const pins = readPins();
+    const items = Object.entries(pins).map(([id, state]) => ({ id, state }));
+    res.json({ pins, items });
+  } catch (error) {
+    console.error('Error in GET /api/session/pins:', error);
     res.status(500).json({ error: error.message || 'Failed' });
   }
 });

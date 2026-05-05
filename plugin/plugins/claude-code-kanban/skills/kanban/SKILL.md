@@ -32,9 +32,17 @@ claude-code-kanban session pin ${CLAUDE_SESSION_ID} --sticky   # sticky at top
 claude-code-kanban session pin ${CLAUDE_SESSION_ID} --unpin    # clear
 ```
 
-State applies to every connected browser tab (broadcast via SSE) and persists in each tab's localStorage. With no tabs open the command is a no-op.
-
 Trigger phrases: "pin this session", "pin in kanban", "make this session sticky", "unpin session".
+
+## List pinned sessions
+
+```bash
+claude-code-kanban session pins              # all pinned/sticky sessions
+claude-code-kanban session pins --sticky     # sticky only
+claude-code-kanban session pins --json       # JSON output
+```
+
+Trigger phrases: "show pinned sessions", "what's pinned", "list pins".
 
 ## Preview a file in kanban
 

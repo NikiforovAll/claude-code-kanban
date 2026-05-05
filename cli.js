@@ -14,13 +14,14 @@ const COMMANDS = {
     summary: 'List or open Claude Code sessions',
     verbs: {
       list: {
-        summary: 'List sessions',
-        usage: 'claude-code-kanban session list [--active] [--days <n>] [--project <name>] [--limit <n|all>] [--json]',
+        summary: 'List sessions (pinned/sticky always included)',
+        usage: 'claude-code-kanban session list [--active] [--days <n>] [--project <name>] [--limit <n|all>] [--no-pins] [--json]',
         flags: {
           '--active': 'Only sessions with recent activity (sidebar-style filter)',
           '--days <n>': 'Only sessions modified within the last N days (fractional ok, e.g. 0.5)',
           '--project <name>': 'Filter by project name (substring match)',
           '--limit <n|all>': 'Max rows to display (default: 10). Use "all" for no cap.',
+          '--no-pins': 'Disable always-include and sticky-first ordering for pinned sessions',
           '--json': 'Output JSON instead of a table',
         },
         run: runSessionListCli,
@@ -51,6 +52,15 @@ const COMMANDS = {
           '--unpin': 'Clear pin/sticky state',
         },
         run: runSessionPinCli,
+      },
+      pins: {
+        summary: 'List sessions pinned/stickied via the dashboard or CLI',
+        usage: 'claude-code-kanban session pins [--sticky] [--json]',
+        flags: {
+          '--sticky': 'Only sessions in sticky state',
+          '--json': 'Output JSON instead of a table',
+        },
+        run: runSessionPinsCli,
       },
       peek: {
         summary: 'Show the last N messages from a session',
@@ -239,11 +249,21 @@ function parseLimit(args, { fallback, allowAll = false }) {
   return { ok: true, limit: n };
 }
 
-async function fetchSessionsList(limit) {
+async function fetchSessionsList(limit, pinnedIds = []) {
   const q = limit === null ? 'all' : String(limit);
-  const res = await cliFetch(`/api/sessions?limit=${q}`);
+  const pinnedQ = pinnedIds.length ? `&pinned=${pinnedIds.join(',')}` : '';
+  const res = await cliFetch(`/api/sessions?limit=${q}${pinnedQ}`);
   if (!res.ok) throw new Error(`Failed to fetch sessions (${res.status})`);
   return res.json();
+}
+
+async function fetchPinsMap() {
+  try {
+    const res = await cliFetch('/api/session/pins');
+    if (!res.ok) return {};
+    const { pins = {} } = await res.json();
+    return pins;
+  } catch { return {}; }
 }
 
 async function resolveSessionByIdOrPrefix(idArg) {
@@ -273,6 +293,7 @@ async function resolveSessionByIdOrPrefix(idArg) {
 
 async function runSessionListCli(args) {
   const activeOnly = args.includes('--active');
+  const noPins = args.includes('--no-pins');
   const projectFilter = getArgValue(args, 'project');
   const daysArg = getArgValue(args, 'days');
   const days = daysArg !== null ? parseFloat(daysArg) : null;
@@ -284,27 +305,40 @@ async function runSessionListCli(args) {
   if (!parsed.ok) { console.error(parsed.error); return 1; }
   const limit = parsed.limit;
   const asJson = args.includes('--json');
+  const pinsMap = noPins ? {} : await fetchPinsMap();
+  const pinnedIds = Object.keys(pinsMap);
   const hasClientFilter = activeOnly || days !== null || projectFilter;
   let list;
   try {
-    list = await fetchSessionsList(hasClientFilter ? null : limit);
+    list = await fetchSessionsList(hasClientFilter ? null : limit, pinnedIds);
   } catch (e) {
     reportCliError(e);
     return 1;
   }
-  if (activeOnly) list = list.filter(isSessionActive);
+  const pinOf = id => pinsMap[id] || null;
+  if (activeOnly) list = list.filter(s => pinOf(s.id) || isSessionActive(s));
   if (days !== null) {
     const cutoff = Date.now() - days * 86_400_000;
-    list = list.filter(s => s.modifiedAt && new Date(s.modifiedAt).getTime() >= cutoff);
+    list = list.filter(s => pinOf(s.id) || (s.modifiedAt && new Date(s.modifiedAt).getTime() >= cutoff));
   }
   if (projectFilter) {
     const needle = projectFilter.toLowerCase();
     list = list.filter(s => (s.project || '').toLowerCase().includes(needle));
   }
-  const totalMatched = list.length;
-  if (limit !== null && list.length > limit) list = list.slice(0, limit);
+  const pinRank = id => pinOf(id) === 'sticky' ? 0 : pinOf(id) === 'pinned' ? 1 : 2;
+  list.sort((a, b) => {
+    const r = pinRank(a.id) - pinRank(b.id);
+    if (r !== 0) return r;
+    return new Date(b.modifiedAt || 0) - new Date(a.modifiedAt || 0);
+  });
+  if (limit !== null && list.length > limit) {
+    const top = list.slice(0, limit);
+    const topIds = new Set(top.map(s => s.id));
+    const extraPinned = list.filter(s => pinOf(s.id) && !topIds.has(s.id));
+    list = [...top, ...extraPinned];
+  }
   if (asJson) {
-    console.log(JSON.stringify(list, null, 2));
+    console.log(JSON.stringify(list.map(s => ({ ...s, pinState: pinOf(s.id) })), null, 2));
     return 0;
   }
   if (!list.length) {
@@ -313,6 +347,7 @@ async function runSessionListCli(args) {
   }
   const rows = list.map(s => ({
     id: s.id.slice(0, 8),
+    pin: pinOf(s.id) || '',
     status: sessionStatus(s),
     age: s.modifiedAt ? formatAge(Date.now() - new Date(s.modifiedAt).getTime()) : '-',
     tasks: `${s.completed}/${s.taskCount}`,
@@ -321,17 +356,15 @@ async function runSessionListCli(args) {
   }));
   const w = {
     id: 8,
+    pin: Math.max(3, ...rows.map(r => r.pin.length)),
     status: Math.max(6, ...rows.map(r => r.status.length)),
     age: Math.max(3, ...rows.map(r => r.age.length)),
     tasks: Math.max(5, ...rows.map(r => r.tasks.length)),
     project: Math.max(7, ...rows.map(r => r.project.length)),
   };
-  console.log(`${'ID'.padEnd(w.id)}  ${'STATUS'.padEnd(w.status)}  ${'AGE'.padEnd(w.age)}  ${'TASKS'.padEnd(w.tasks)}  ${'PROJECT'.padEnd(w.project)}  TITLE`);
+  console.log(`${'ID'.padEnd(w.id)}  ${'PIN'.padEnd(w.pin)}  ${'STATUS'.padEnd(w.status)}  ${'AGE'.padEnd(w.age)}  ${'TASKS'.padEnd(w.tasks)}  ${'PROJECT'.padEnd(w.project)}  TITLE`);
   for (const r of rows) {
-    console.log(`${r.id.padEnd(w.id)}  ${r.status.padEnd(w.status)}  ${r.age.padEnd(w.age)}  ${r.tasks.padEnd(w.tasks)}  ${r.project.padEnd(w.project)}  ${r.title}`);
-  }
-  if (limit !== null && totalMatched > limit) {
-    console.log(`\n... ${totalMatched - limit} more. Use --limit <n> or --limit all to see them.`);
+    console.log(`${r.id.padEnd(w.id)}  ${r.pin.padEnd(w.pin)}  ${r.status.padEnd(w.status)}  ${r.age.padEnd(w.age)}  ${r.tasks.padEnd(w.tasks)}  ${r.project.padEnd(w.project)}  ${r.title}`);
   }
   return 0;
 }
@@ -394,6 +427,53 @@ async function runSessionPinCli(args) {
     console.log(`Session ${label}: ${resolved.id}${resolved.customTitle ? ` (${resolved.customTitle})` : ''}`);
     return 0;
   } catch (e) { reportCliError(e); return 1; }
+}
+
+async function runSessionPinsCli(args) {
+  const stickyOnly = args.includes('--sticky');
+  const asJson = args.includes('--json');
+  const pinsMap = await fetchPinsMap();
+  const items = Object.entries(pinsMap)
+    .filter(([, state]) => !stickyOnly || state === 'sticky')
+    .map(([id, state]) => ({ id, state }));
+  if (!items.length) {
+    if (asJson) console.log('[]'); else console.log('No pinned sessions.');
+    return 0;
+  }
+  let sessions;
+  try {
+    sessions = await fetchSessionsList(items.length, items.map(p => p.id));
+  } catch (e) { reportCliError(e); return 1; }
+  const byId = new Map(sessions.map(s => [s.id, s]));
+  let rows = items
+    .map(p => {
+      const s = byId.get(p.id) || {};
+      return {
+        id: p.id,
+        state: p.state,
+        status: s.id ? sessionStatus(s) : '-',
+        age: s.modifiedAt ? formatAge(Date.now() - new Date(s.modifiedAt).getTime()) : '-',
+        project: path.basename(s.project || ''),
+        title: s.customTitle || s.name || s.slug || '',
+      };
+    })
+    .sort((a, b) => (a.state === b.state ? 0 : a.state === 'sticky' ? -1 : 1));
+  if (asJson) {
+    console.log(JSON.stringify(rows, null, 2));
+    return 0;
+  }
+  const w = {
+    id: 8,
+    state: Math.max(5, ...rows.map(r => r.state.length)),
+    status: Math.max(6, ...rows.map(r => r.status.length)),
+    age: Math.max(3, ...rows.map(r => r.age.length)),
+    project: Math.max(7, ...rows.map(r => r.project.length)),
+  };
+  console.log(`${'ID'.padEnd(w.id)}  ${'STATE'.padEnd(w.state)}  ${'STATUS'.padEnd(w.status)}  ${'AGE'.padEnd(w.age)}  ${'PROJECT'.padEnd(w.project)}  TITLE`);
+  for (const r of rows) {
+    console.log(`${r.id.slice(0, 8).padEnd(w.id)}  ${r.state.padEnd(w.state)}  ${r.status.padEnd(w.status)}  ${r.age.padEnd(w.age)}  ${r.project.padEnd(w.project)}  ${r.title}`);
+  }
+  return 0;
 }
 
 async function runSessionViewCli(args) {

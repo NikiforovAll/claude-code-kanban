@@ -1322,6 +1322,16 @@ function savePinnedSessions() {
   localStorage.setItem('sticky-sessions', JSON.stringify([...stickySessionIds]));
 }
 
+// Mirror pin state to server so it can be queried by the CLI. UI remains source of truth for itself.
+function offloadSessionPin(sessionId) {
+  const state = getSessionPinState(sessionId);
+  fetch('/api/session/pin', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: sessionId, state }),
+  }).catch(() => {});
+}
+
 function toggleSessionPin(sessionId) {
   if (pinnedSessionIds.has(sessionId)) {
     pinnedSessionIds.delete(sessionId);
@@ -1332,6 +1342,7 @@ function toggleSessionPin(sessionId) {
     if (sessionId === currentSessionId) deferredPinPlacement.add(sessionId);
   }
   savePinnedSessions();
+  offloadSessionPin(sessionId);
   renderSessions();
 }
 
@@ -1346,6 +1357,7 @@ function toggleSessionSticky(sessionId) {
     if (sessionId === currentSessionId) deferredPinPlacement.add(sessionId);
   }
   savePinnedSessions();
+  offloadSessionPin(sessionId);
   renderSessions();
 }
 
