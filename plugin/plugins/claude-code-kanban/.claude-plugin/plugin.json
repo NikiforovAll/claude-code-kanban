@@ -1,5 +1,5 @@
 {
   "name": "claude-code-kanban",
-  "version": "1.1.4",
+  "version": "1.1.5",
   "description": "Agent activity tracking for claude-code-kanban dashboard"
 }
