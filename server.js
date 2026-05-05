@@ -1190,6 +1190,31 @@ function subagentJsonlPath(meta, agentId) {
   );
 }
 
+// Claude Code can scatter a session's records across multiple project dirs
+// (e.g. main repo + worktree), so the subagent JSONL may live under a
+// different project dir than meta.jsonlPath. Fall back to scanning when the
+// derived path is missing.
+const subagentPathCache = new Map();
+function resolveSubagentJsonl(meta, sessionId, agentId) {
+  const primary = subagentJsonlPath(meta, agentId);
+  if (existsSync(primary)) return primary;
+  const key = sessionId + '/' + agentId;
+  if (subagentPathCache.has(key)) return subagentPathCache.get(key) || primary;
+  let found = null;
+  try {
+    for (const entry of readdirSync(PROJECTS_DIR, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const candidate = path.join(
+        PROJECTS_DIR, entry.name, sessionId,
+        'subagents', 'agent-' + agentId + '.jsonl'
+      );
+      if (existsSync(candidate)) { found = candidate; break; }
+    }
+  } catch (_) { /* projects dir missing */ }
+  subagentPathCache.set(key, found);
+  return found || primary;
+}
+
 app.get('/api/sessions/:sessionId/agents/:agentId/messages', (req, res) => {
   const sessionId = resolveSessionId(req.params.sessionId);
   const agentId = sanitizeAgentId(req.params.agentId);
@@ -1197,7 +1222,7 @@ app.get('/api/sessions/:sessionId/agents/:agentId/messages', (req, res) => {
   const metadata = loadSessionMetadata();
   const meta = metadata[sessionId];
   if (!meta?.jsonlPath) return res.json({ messages: [], agentId });
-  const subagentJsonl = subagentJsonlPath(meta, agentId);
+  const subagentJsonl = resolveSubagentJsonl(meta, sessionId, agentId);
   if (!existsSync(subagentJsonl)) return res.json({ messages: [], agentId });
   const messages = readRecentMessages(subagentJsonl, limit);
   res.json({ messages, agentId });
@@ -1212,7 +1237,7 @@ app.get('/api/sessions/:sessionId/agents/:agentId/messages/stream', (req, res) =
     res.status(404).json({ error: 'Session not found' });
     return;
   }
-  const subagentJsonl = subagentJsonlPath(meta, agentId);
+  const subagentJsonl = resolveSubagentJsonl(meta, sessionId, agentId);
 
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
