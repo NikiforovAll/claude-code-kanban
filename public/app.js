@@ -1207,6 +1207,9 @@ function togglePin(msgIndex) {
       text: m.text || null,
       fullText: m.fullText || null,
       tool: m.tool || null,
+      toolUseId: m.toolUseId || null,
+      toolResult: m.toolResult || null,
+      toolResultTruncated: m.toolResultTruncated || false,
       detail: m.detail || null,
       fullDetail: m.fullDetail || null,
       description: m.description || null,
@@ -1385,11 +1388,16 @@ function _renderPinToDetail(pin) {
     document.getElementById('msg-detail-title').textContent = pin.tool || 'Tool';
     const fullText = pin.fullDetail || pin.detail || '';
     const pinParamsHtml = renderToolParamsHtml(pin.params);
-    const pinResultHtml = renderToolResultHtml(pin.toolResult, pin.toolResultTruncated, pin.toolResultFull);
+    const pinResultHtml = renderToolResultHtml(
+      pin.toolResult,
+      pin.toolResultTruncated,
+      pin.toolResultFull,
+      pin.toolUseId,
+    );
     const pinDetailEscaped = escapeHtml(fullText);
     const pinDetailRendered = pin.tool === 'Bash' ? highlightBash(pinDetailEscaped) : pinDetailEscaped;
     body.innerHTML =
-      (fullText ? `<pre class="msg-detail-pre">${pinDetailRendered}</pre>` : '<em>No details</em>') +
+      (fullText ? `<pre class="${TINTED_PRE_CLASS}">${pinDetailRendered}</pre>` : '<em>No details</em>') +
       pinParamsHtml +
       pinResultHtml;
   } else if (pin.type === 'agent') {
@@ -1450,7 +1458,7 @@ function showMsgDetail(idx) {
     const taskResultHtml = TASK_TOOLS.has(m.tool) ? renderTaskResult(m.toolResult) : '';
     const toolResultHtml = hideResult
       ? ''
-      : renderToolResultHtml(m.toolResult, m.toolResultTruncated, m.toolResultFull);
+      : renderToolResultHtml(m.toolResult, m.toolResultTruncated, m.toolResultFull, m.toolUseId);
     const hasAgentTabs = m.tool === 'Agent' && m.agentId && (m.agentLastMessage || m.agentPrompt);
     let mainHtml;
     if (sendProto) {
@@ -1464,7 +1472,7 @@ function showMsgDetail(idx) {
     } else if (fullText) {
       const detailEscaped = escapeHtml(fullText);
       const detailRendered = m.tool === 'Bash' ? highlightBash(detailEscaped) : detailEscaped;
-      mainHtml = `${descHtml}<pre class="msg-detail-pre">${detailRendered}</pre>`;
+      mainHtml = `${descHtml}<pre class="${TINTED_PRE_CLASS}">${detailRendered}</pre>`;
     } else {
       mainHtml = TASK_TOOLS.has(m.tool) ? '' : '<em>No details</em>';
     }
@@ -1711,11 +1719,11 @@ function renderToolParamsHtml(params) {
     html += `<div style="margin-top:8px;padding-top:6px;border-top:1px solid var(--border)">`;
     if (params.old_string) {
       html += `<div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:2px">old_string</div>
-            <pre class="msg-detail-pre" style="max-height:200px;overflow:auto;border-left:3px solid #e55;padding-left:8px">${escapeHtml(params.old_string)}</pre>`;
+            <pre class="${TINTED_PRE_CLASS}" style="max-height:200px;overflow:auto;border-left:3px solid #e55;padding-left:8px">${escapeHtml(params.old_string)}</pre>`;
     }
     if (params.new_string) {
       html += `<div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:2px;margin-top:6px">new_string</div>
-            <pre class="msg-detail-pre" style="max-height:200px;overflow:auto;border-left:3px solid #5b5;padding-left:8px">${escapeHtml(params.new_string)}</pre>`;
+            <pre class="${TINTED_PRE_CLASS}" style="max-height:200px;overflow:auto;border-left:3px solid #5b5;padding-left:8px">${escapeHtml(params.new_string)}</pre>`;
     }
     html += `</div>`;
   }
@@ -1730,13 +1738,14 @@ function renderToolParamsHtml(params) {
       const toggle = makeExpandToggle(escapeHtml(truncContent), escapeHtml(params.content), {
         fontSize: '0.75rem',
         maxHeight: '500px',
+        tinted: true,
       });
       writeMoreBtn = ` ${toggle.btn}`;
       fullBlock = toggle.full;
     }
     html += `<div style="margin-top:8px;padding-top:6px;border-top:1px solid var(--border)">
           <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:2px">content${writeMoreBtn}</div>
-          <pre class="msg-detail-pre" style="max-height:300px;overflow:auto">${escapeHtml(truncContent)}</pre>
+          <pre class="${TINTED_PRE_CLASS}" style="max-height:300px;overflow:auto">${escapeHtml(truncContent)}</pre>
           ${fullBlock}
         </div>`;
   }
@@ -1770,26 +1779,31 @@ function highlightBash(escaped) {
     .replace(/((?:^|\s)(?:&amp;&amp;|\|\||[|;])(?:\s|$))/g, '<span style="color:#d4d4d4;font-weight:bold">$1</span>');
 }
 
+const TINTED_PRE_CLASS = 'msg-detail-pre msg-detail-pre-tinted';
 let _expandIdCounter = 0;
-function _toggleExpand(btn) {
-  const f = document.getElementById(btn.dataset.expandId);
-  const t = btn.parentElement.nextElementSibling;
-  const expand = f.style.display === 'none';
-  f.style.display = expand ? 'block' : 'none';
-  t.style.display = expand ? 'none' : 'block';
+function _applyExpandToggle(btn, fullEl) {
+  const truncEl = btn.parentElement.nextElementSibling;
+  const expand = fullEl.style.display === 'none';
+  fullEl.style.display = expand ? 'block' : 'none';
+  if (truncEl) truncEl.style.display = expand ? 'none' : 'block';
   btn.textContent = expand ? 'Show less' : 'Show more';
   const panel = btn.closest('.message-panel');
   if (panel) panel.classList.toggle('msg-expanded-wide', expand);
   const modal = btn.closest('.modal');
   if (modal) _setModalWidth(modal, 'Expand', expand, '60vw', '60vw');
 }
+function _toggleExpand(btn) {
+  const f = document.getElementById(btn.dataset.expandId);
+  if (f) _applyExpandToggle(btn, f);
+}
 function makeExpandToggle(_truncatedHtml, fullHtml, opts = {}) {
   const id = `expand-${++_expandIdCounter}`;
   const fontSize = opts.fontSize || '0.8rem';
   const maxHeight = opts.maxHeight || '';
-  const btn = `<button data-expand-id="${id}" onclick="_toggleExpand(this)" style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:${fontSize};text-decoration:underline;margin-left:6px">Show more</button>`;
+  const cls = opts.tinted ? TINTED_PRE_CLASS : 'msg-detail-pre';
+  const btn = `<button data-expand-id="${id}" onclick="_toggleExpand(this)" class="expand-toggle-btn" style="font-size:${fontSize}">Show more</button>`;
   const mhStyle = maxHeight ? `max-height:${maxHeight};` : '';
-  const full = `<pre id="${id}" class="msg-detail-pre" style="${mhStyle}overflow:auto;display:none">${fullHtml}</pre>`;
+  const full = `<pre id="${id}" class="${cls}" style="${mhStyle}overflow:auto;display:none">${fullHtml}</pre>`;
   return { btn, full };
 }
 
@@ -1809,7 +1823,7 @@ function autoSizeModal(modal, body) {
   if (desired > current) modal.style.maxWidth = `${desired}px`;
 }
 
-function renderToolResultHtml(toolResult, isTruncated, fullResult) {
+function renderToolResultHtml(toolResult, isTruncated, fullResult, toolUseId) {
   if (!toolResult) return '';
   const stripped = stripLineNumbers(toolResult);
   const escaped = escapeHtml(stripped);
@@ -1819,6 +1833,10 @@ function renderToolResultHtml(toolResult, isTruncated, fullResult) {
     const toggle = makeExpandToggle(escaped, escapeHtml(stripLineNumbers(fullResult)));
     truncLabel = toggle.btn;
     fullBlock = toggle.full;
+  } else if (isTruncated && toolUseId) {
+    const id = `expand-${++_expandIdCounter}`;
+    truncLabel = `<button data-expand-id="${id}" data-tool-use-id="${escapeHtml(toolUseId)}" onclick="_toggleToolResultExpand(this)" class="expand-toggle-btn" style="font-size:0.8rem">Show more</button>`;
+    fullBlock = `<pre id="${id}" class="msg-detail-pre" style="overflow:auto;display:none"></pre>`;
   } else if (isTruncated) {
     truncLabel = '<span style="color:var(--text-muted);font-size:0.8rem;margin-left:6px">(truncated)</span>';
   }
@@ -1829,10 +1847,40 @@ function renderToolResultHtml(toolResult, isTruncated, fullResult) {
       </div>`;
 }
 
+async function _toggleToolResultExpand(btn) {
+  const f = document.getElementById(btn.dataset.expandId);
+  if (!f) return;
+  if (!btn.dataset.loaded) {
+    if (!currentSessionId || !btn.dataset.toolUseId) return;
+    btn.disabled = true;
+    btn.textContent = 'Loading…';
+    try {
+      const r = await fetch(
+        `/api/sessions/${encodeURIComponent(currentSessionId)}/tool-result/${encodeURIComponent(btn.dataset.toolUseId)}`,
+      );
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const { content } = await r.json();
+      f.textContent = stripLineNumbers(content);
+      btn.dataset.loaded = '1';
+    } catch (_e) {
+      btn.textContent = 'Show more';
+      btn.disabled = false;
+      showToast('Failed to load full output');
+      return;
+    }
+    btn.disabled = false;
+  }
+  _applyExpandToggle(btn, f);
+}
+
 function buildToolContent(m) {
   let content = m.fullDetail || m.detail || '';
   if (m.toolResult) content += `\n\n--- Output ---\n\n${m.toolResultFull || m.toolResult}`;
   return content;
+}
+
+function getMessageDisplayContent(m) {
+  return m.type === 'tool_use' ? buildToolContent(m) : m.compactSummary || stripAnsi(m.fullText || m.text);
 }
 
 function getDetailMsg() {
@@ -1845,8 +1893,7 @@ function getDetailMsg() {
 async function copyMsgToClipboard(btn) {
   const m = getDetailMsg();
   if (!m) return;
-  const content = m.type === 'tool_use' ? buildToolContent(m) : stripAnsi(m.fullText || m.text);
-  copyWithFeedback(content, btn);
+  copyWithFeedback(getMessageDisplayContent(m), btn);
 }
 
 async function postAndToast(url, body, label) {
@@ -1866,9 +1913,8 @@ async function postAndToast(url, body, label) {
 async function openMsgInEditor() {
   const m = getDetailMsg();
   if (!m) return;
-  const content = m.type === 'tool_use' ? buildToolContent(m) : stripAnsi(m.fullText || m.text);
-  const title = m.type === 'tool_use' ? m.tool : m.type;
-  postAndToast('/api/open-in-editor', { content, title }, 'in editor');
+  const title = m.type === 'tool_use' ? m.tool : m.compactSummary ? 'compact-summary' : m.type;
+  postAndToast('/api/open-in-editor', { content: getMessageDisplayContent(m), title }, 'in editor');
 }
 
 function formatDuration(ms) {
@@ -4108,6 +4154,14 @@ document.addEventListener('keydown', (e) => {
     showStorageManager();
     return;
   }
+  if (e.key === '.' || e.key === '>') {
+    const sid = sessionsList.querySelector('.kb-selected')?.dataset.sessionId || currentSessionId;
+    if (sid) {
+      e.preventDefault();
+      (e.shiftKey ? toggleSessionSticky : toggleSessionPin)(sid);
+      return;
+    }
+  }
 
   // Tab toggles focus zone
   if (e.key === 'Tab') {
@@ -4145,12 +4199,6 @@ document.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
       activateSelectedSession();
-      return;
-    }
-    if (e.key === '.' || e.key === '>') {
-      e.preventDefault();
-      const sid = sessionsList.querySelector('.kb-selected')?.dataset.sessionId;
-      if (sid) (e.shiftKey ? toggleSessionSticky : toggleSessionPin)(sid);
       return;
     }
     if (e.key === 'Escape') {

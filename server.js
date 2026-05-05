@@ -19,7 +19,8 @@ const {
   readCompactSummaries,
   findTerminatedTeammates,
   extractPromptFromTranscript,
-  extractModelFromTranscript
+  extractModelFromTranscript,
+  readFullToolResult
 } = require('./lib/parsers');
 
 if (process.argv.includes("--install") || process.argv.includes("--uninstall")) {
@@ -1293,10 +1294,21 @@ app.get('/api/sessions/:sessionId/messages', (req, res) => {
     }
   }
   for (const msg of messages) {
-    if (msg.toolUseId) delete msg.toolUseId;
+    // Keep toolUseId on truncated tool results so the client can lazy-fetch the full text
+    if (msg.toolUseId && !msg.toolResultTruncated) delete msg.toolUseId;
     delete msg.promptId;
   }
   res.json({ messages, hasMore, sessionId: req.params.sessionId });
+});
+
+app.get('/api/sessions/:sessionId/tool-result/:toolUseId', (req, res) => {
+  const metadata = loadSessionMetadata();
+  const meta = metadata[req.params.sessionId];
+  const jsonlPath = meta?.jsonlPath;
+  if (!jsonlPath) return res.status(404).json({ error: 'session not found' });
+  const content = readFullToolResult(jsonlPath, req.params.toolUseId);
+  if (content == null) return res.status(404).json({ error: 'tool result not found' });
+  res.json({ toolUseId: req.params.toolUseId, content });
 });
 
 app.get('/api/version', (req, res) => {

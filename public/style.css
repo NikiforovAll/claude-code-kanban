@@ -2236,6 +2236,19 @@ body::before {
   font-family: var(--font-mono);
   font-size: 0.85rem;
 }
+.msg-detail-pre-tinted {
+  background: rgba(127, 127, 127, 0.15);
+  border-radius: 4px;
+  padding: 8px 10px;
+}
+.expand-toggle-btn {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+  margin-left: 6px;
+}
 .msg-cmd .msg-text code {
   background: var(--bg-hover);
   padding: 2px 6px;
