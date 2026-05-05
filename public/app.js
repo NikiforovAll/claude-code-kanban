@@ -1316,7 +1316,6 @@ function savePinnedSessions() {
   localStorage.setItem('sticky-sessions', JSON.stringify([...stickySessionIds]));
 }
 
-// biome-ignore lint/correctness/noUnusedVariables: used in HTML
 function toggleSessionPin(sessionId) {
   if (pinnedSessionIds.has(sessionId)) {
     pinnedSessionIds.delete(sessionId);
@@ -1328,7 +1327,6 @@ function toggleSessionPin(sessionId) {
   renderSessions();
 }
 
-// biome-ignore lint/correctness/noUnusedVariables: used in HTML
 function toggleSessionSticky(sessionId) {
   if (stickySessionIds.has(sessionId)) {
     stickySessionIds.delete(sessionId);
@@ -2332,7 +2330,8 @@ function renderSessions() {
 
     const pinState = getSessionPinState(session.id);
     const pinClass = pinState === 'sticky' ? ' sticky' : pinState === 'pinned' ? ' pinned' : '';
-    const pinTitle = pinState === 'pinned' || pinState === 'sticky' ? 'Unpin' : 'Pin';
+    const pinTitle =
+      pinState === 'pinned' || pinState === 'sticky' ? 'Unpin session (.)' : 'Pin session (. · > sticky)';
     const showCtx = !!session.contextStatus;
     const linkedDocsCount = getSessionPreviewPaths(session.id).length;
     const bookmarksCount = loadPins(session.id).length;
@@ -2860,17 +2859,26 @@ function getGroupSessionsContainer(header) {
 
 function getNavigableItems() {
   const items = [];
+  const walkGroupContainer = (container) => {
+    if (!container) return;
+    for (const child of container.children) {
+      if (child.classList.contains('pinned-sub-section')) {
+        const subHeader = child.querySelector('.pinned-sub-header');
+        if (subHeader) items.push(subHeader);
+        const subItems = child.querySelector('.pinned-sub-items');
+        if (subItems && !subItems.classList.contains('collapsed')) {
+          for (const s of subItems.querySelectorAll(':scope > .session-item')) items.push(s);
+        }
+      } else if (child.classList.contains('session-item')) {
+        items.push(child);
+      }
+    }
+  };
   for (const el of sessionsList.children) {
     if (el.classList.contains('project-group-header')) {
       items.push(el);
       if (!collapsedProjectGroups.has(el.dataset.groupPath)) {
-        const container = getGroupSessionsContainer(el);
-        if (container) {
-          for (const s of container.querySelectorAll('.session-item')) {
-            if (s.closest('.pinned-sub-items.collapsed')) continue;
-            items.push(s);
-          }
-        }
+        walkGroupContainer(getGroupSessionsContainer(el));
       }
     } else if (el.classList.contains('session-item')) {
       items.push(el);
@@ -2931,49 +2939,57 @@ function setGroupCollapsed(header, collapsed) {
   } catch (_) {}
 }
 
+function isGroupHeader(el) {
+  return el.classList.contains('project-group-header') || el.classList.contains('pinned-sub-header');
+}
+
+function findParentHeader(el) {
+  const subContainer = el.closest('.pinned-sub-items');
+  if (subContainer?.previousElementSibling?.classList.contains('pinned-sub-header')) {
+    return subContainer.previousElementSibling;
+  }
+  const container = el.closest('.project-group-sessions');
+  if (!container) return null;
+  let header = container.previousElementSibling;
+  while (header && !header.classList.contains('project-group-header')) header = header.previousElementSibling;
+  return header;
+}
+
 function handleSidebarHorizontal(direction) {
   const items = getNavigableItems();
   if (selectedSessionIdx < 0 || selectedSessionIdx >= items.length) return;
   const el = items[selectedSessionIdx];
-  const isHeader = el.classList.contains('project-group-header');
   const collapse = direction < 0;
 
-  if (isHeader) {
-    const groupPath = el.dataset.groupPath;
-    const isCollapsed = collapsedProjectGroups.has(groupPath);
+  if (isGroupHeader(el)) {
+    const isCollapsed = collapsedProjectGroups.has(el.dataset.groupPath);
     if (collapse) {
       if (!isCollapsed) setGroupCollapsed(el, true);
+    } else if (isCollapsed) {
+      setGroupCollapsed(el, false);
     } else {
-      if (isCollapsed) {
-        setGroupCollapsed(el, false);
-      } else {
-        navigateSession(1);
-      }
+      navigateSession(1);
     }
-  } else {
-    if (collapse) {
-      const container = el.closest('.project-group-sessions');
-      if (container) {
-        let header = container.previousElementSibling;
-        while (header && !header.classList.contains('project-group-header')) header = header.previousElementSibling;
-        if (header) {
-          const headerIdx = items.indexOf(header);
-          if (headerIdx >= 0) selectSessionByIndex(headerIdx, items);
-        }
-      }
-    } else {
-      activateSelectedSession(items);
-    }
+    return;
   }
+
+  if (!collapse) {
+    activateSelectedSession(items);
+    return;
+  }
+
+  const header = findParentHeader(el);
+  if (!header) return;
+  const headerIdx = items.indexOf(header);
+  if (headerIdx >= 0) selectSessionByIndex(headerIdx, items);
 }
 
 function activateSelectedSession(items) {
   items = items || getNavigableItems();
   if (selectedSessionIdx < 0 || selectedSessionIdx >= items.length) return;
   const el = items[selectedSessionIdx];
-  if (el.classList.contains('project-group-header')) {
-    const groupPath = el.dataset.groupPath;
-    setGroupCollapsed(el, !collapsedProjectGroups.has(groupPath));
+  if (isGroupHeader(el)) {
+    setGroupCollapsed(el, !collapsedProjectGroups.has(el.dataset.groupPath));
   } else {
     el.click();
   }
@@ -4119,6 +4135,12 @@ document.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
       activateSelectedSession();
+      return;
+    }
+    if (e.key === '.' || e.key === '>') {
+      e.preventDefault();
+      const sid = sessionsList.querySelector('.kb-selected')?.dataset.sessionId;
+      if (sid) (e.shiftKey ? toggleSessionSticky : toggleSessionPin)(sid);
       return;
     }
     if (e.key === 'Escape') {

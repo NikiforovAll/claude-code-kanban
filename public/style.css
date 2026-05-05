@@ -3488,7 +3488,8 @@ pre.mermaid svg {
   color: var(--text-primary);
 }
 
-.project-group-header.kb-selected {
+.project-group-header.kb-selected,
+.pinned-sub-header.kb-selected {
   color: var(--text-primary);
   background: var(--bg-hover);
   border-radius: 4px;
