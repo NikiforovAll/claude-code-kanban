@@ -4293,6 +4293,18 @@ document.addEventListener('keydown', (e) => {
     hubNavigate('memory', mSession?.project ? `?project=${encodeURIComponent(mSession.project)}` : undefined);
     return;
   }
+  if (e.code === 'KeyC' && e.shiftKey) {
+    e.preventDefault();
+    if (!contextSid) {
+      showToast('No session selected');
+      return;
+    }
+    navigator.clipboard
+      .writeText(contextSid)
+      .then(() => showToast(`Copied session id: ${contextSid.slice(0, 8)}`, 'success'))
+      .catch(() => showToast('Failed to copy session id'));
+    return;
+  }
   if (matchKey(e, 'KeyR')) {
     e.preventDefault();
     if (_manualRefreshing) return;
