@@ -496,6 +496,7 @@ async function fetchTasks(sessionId) {
     if (revealedStorageSessionId && sessionId !== revealedStorageSessionId) {
       revealedStorageSessionId = null;
     }
+    if (currentSessionId && currentSessionId !== sessionId) deferredPinPlacement.delete(currentSessionId);
     currentSessionId = sessionId;
     currentPins = loadPins(sessionId);
     ownerFilter = '';
@@ -1294,6 +1295,8 @@ function togglePinnedCollapse() {
 //#region PINNING
 let pinnedSessionIds = new Set();
 let stickySessionIds = new Set();
+// Pinning the currently-selected session keeps it in place until deselected (less UI movement).
+const deferredPinPlacement = new Set();
 
 function loadPinnedSessions() {
   try {
@@ -1320,8 +1323,10 @@ function toggleSessionPin(sessionId) {
   if (pinnedSessionIds.has(sessionId)) {
     pinnedSessionIds.delete(sessionId);
     stickySessionIds.delete(sessionId);
+    deferredPinPlacement.delete(sessionId);
   } else {
     pinnedSessionIds.add(sessionId);
+    if (sessionId === currentSessionId) deferredPinPlacement.add(sessionId);
   }
   savePinnedSessions();
   renderSessions();
@@ -1331,18 +1336,28 @@ function toggleSessionSticky(sessionId) {
   if (stickySessionIds.has(sessionId)) {
     stickySessionIds.delete(sessionId);
     pinnedSessionIds.delete(sessionId);
+    deferredPinPlacement.delete(sessionId);
   } else {
     pinnedSessionIds.add(sessionId);
     stickySessionIds.add(sessionId);
+    if (sessionId === currentSessionId) deferredPinPlacement.add(sessionId);
   }
   savePinnedSessions();
   renderSessions();
+}
+
+function isPlacedPinned(id) {
+  return pinnedSessionIds.has(id) && !deferredPinPlacement.has(id);
+}
+function isPlacedSticky(id) {
+  return stickySessionIds.has(id) && !deferredPinPlacement.has(id);
 }
 
 function handleSessionPinEvent({ id, state }) {
   if (!id) return;
   pinnedSessionIds.delete(id);
   stickySessionIds.delete(id);
+  deferredPinPlacement.delete(id);
   if (state === 'pinned') pinnedSessionIds.add(id);
   if (state === 'sticky') {
     pinnedSessionIds.add(id);
@@ -2382,12 +2397,10 @@ function renderSessions() {
     const groupPinned = localStorage.getItem('groupPinnedSessions') !== 'false';
     const renderGroupSessions = (sessions, pinKey) => {
       if (!groupPinned || pinnedSessionIds.size === 0) return sessions.map(renderSessionCard).join('');
-      const gPinned = sessions.filter((s) => pinnedSessionIds.has(s.id) && !stickySessionIds.has(s.id));
+      const gPinned = sessions.filter((s) => isPlacedPinned(s.id) && !isPlacedSticky(s.id));
       if (gPinned.length === 0) return sessions.map(renderSessionCard).join('');
       const gIdlePinned = gPinned.filter((s) => !isSessionActive(s));
-      const gUnpinned = sessions.filter(
-        (s) => !pinnedSessionIds.has(s.id) || isSessionActive(s) || stickySessionIds.has(s.id),
-      );
+      const gUnpinned = sessions.filter((s) => !isPlacedPinned(s.id) || isSessionActive(s) || isPlacedSticky(s.id));
       const pinCollapsed = collapsedProjectGroups.has(pinKey);
       if (gIdlePinned.length === 0 && !pinCollapsed) return gUnpinned.map(renderSessionCard).join('');
       return (
@@ -2414,8 +2427,7 @@ function renderSessions() {
       );
     };
     if (!groupPinned && (pinnedSessionIds.size > 0 || stickySessionIds.size > 0)) {
-      const pinWeight = (s) =>
-        stickySessionIds.has(s.id) ? 2 : pinnedSessionIds.has(s.id) && !isSessionActive(s) ? 1 : 0;
+      const pinWeight = (s) => (isPlacedSticky(s.id) ? 2 : isPlacedPinned(s.id) && !isSessionActive(s) ? 1 : 0);
       const pinSort = (a, b) => pinWeight(b) - pinWeight(a);
       for (const [, arr] of groups) arr.sort(pinSort);
       ungrouped.sort(pinSort);
@@ -2491,12 +2503,10 @@ function renderSessions() {
 
     sessionsList.innerHTML = html;
   } else {
-    const sticky = filteredSessions.filter((s) => stickySessionIds.has(s.id));
-    const idlePinned = filteredSessions.filter((s) => pinnedSessionIds.has(s.id) && !isSessionActive(s));
+    const sticky = filteredSessions.filter((s) => isPlacedSticky(s.id));
+    const idlePinned = filteredSessions.filter((s) => isPlacedPinned(s.id) && !isSessionActive(s));
     const rest = filteredSessions.filter(
-      (s) =>
-        (!pinnedSessionIds.has(s.id) && !stickySessionIds.has(s.id)) ||
-        (pinnedSessionIds.has(s.id) && isSessionActive(s)),
+      (s) => (!isPlacedPinned(s.id) && !isPlacedSticky(s.id)) || (isPlacedPinned(s.id) && isSessionActive(s)),
     );
     let html = '';
     if (sticky.length > 0) {
