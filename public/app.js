@@ -3997,7 +3997,6 @@ function _renderStorageLinkedDocs() {
 }
 
 function _storagePreviewLinkedDoc(path) {
-  closeStorageManager();
   openPreviewByPath(path);
 }
 
