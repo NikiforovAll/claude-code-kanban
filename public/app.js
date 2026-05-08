@@ -4304,6 +4304,33 @@ document.addEventListener('keydown', (e) => {
     hubNavigate('memory', mSession?.project ? `?project=${encodeURIComponent(mSession.project)}` : undefined);
     return;
   }
+  if (e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey && e.key === 'd') {
+    e.preventDefault();
+    if (!contextSid || dismissedSessionIds.has(contextSid)) return;
+    const prevIdx = selectedSessionIdx;
+    dismissedSessionIds.add(contextSid);
+    updateDismissBtnState();
+    renderSessions();
+    const newItems = getNavigableItems();
+    const targetIdx = newItems.length > 0 ? Math.max(0, prevIdx - 1) : -1;
+    // If the dismissed session is currently open, navigate to the previous one
+    if (currentSessionId === contextSid || selectedSessionId === contextSid) {
+      selectedSessionId = null;
+      if (targetIdx >= 0) {
+        const targetSid = newItems[targetIdx]?.dataset?.sessionId;
+        if (targetSid) {
+          fetchTasks(targetSid).then(() => selectSessionByIndex(targetIdx, getNavigableItems()));
+        } else {
+          showAllTasks().then(() => selectSessionByIndex(targetIdx, getNavigableItems()));
+        }
+      } else {
+        showAllTasks();
+      }
+    } else if (targetIdx >= 0) {
+      selectSessionByIndex(targetIdx, newItems);
+    }
+    return;
+  }
   if (e.code === 'KeyC' && e.shiftKey) {
     e.preventDefault();
     if (!contextSid) {
