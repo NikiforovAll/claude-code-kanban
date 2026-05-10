@@ -1088,6 +1088,29 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
           }
         }
       } catch (_) {}
+      // Mark agents whose spawning Agent tool_use was rejected by the user as stopped:
+      // the parent will never read their output, so they're orphans. Match by agentId
+      // when the digest already correlated tool_use→agent, else fall back to prompt text
+      // (the agent-spy hook doesn't record the spawning tool_use_id).
+      try {
+        const { rejectedAgentIds = new Set(), rejectedPrompts = new Set(), killedAgentIds = new Set() } =
+          getSessionDigest(meta.jsonlPath);
+        if (rejectedAgentIds.size || rejectedPrompts.size || killedAgentIds.size) {
+          for (const agent of liveAgents) {
+            if (agent.status !== 'active' && agent.status !== 'idle') continue;
+            let reason = null;
+            if (killedAgentIds.has(agent.agentId)) reason = 'killed-by-harness';
+            else if (rejectedAgentIds.has(agent.agentId) || (agent.prompt && rejectedPrompts.has(agent.prompt))) {
+              reason = 'orphaned-by-rejection';
+            }
+            if (!reason) continue;
+            agent.status = 'stopped';
+            agent.stoppedAt = agent.stoppedAt || new Date().toISOString();
+            agent.stopReason = agent.stopReason || reason;
+            persistAgent(agentDir, agent);
+          }
+        }
+      } catch (_) {}
     }
 
     const dirty = new Set();
