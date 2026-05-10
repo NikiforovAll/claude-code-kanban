@@ -1,6 +1,7 @@
 #!/bin/bash
-# Tracks subagent lifecycle: one JSON file per agent, grouped by session
-# Layout: ~/.claude/.cck/agent-activity/{sessionId}/{agentId}.json
+# Tracks subagent lifecycle: one append-only JSONL file per agent, grouped by session
+# Layout: ~/.claude/.cck/agent-activity/{sessionId}/{agentId}.jsonl
+# Each line is a lifecycle event (start | idle | stop). Server folds last-line-wins.
 
 INPUT=$(cat)
 
@@ -70,23 +71,16 @@ if [ "$EVENT" = "TeammateIdle" ] && [ -z "$AGENT_ID" ] && [ -n "$TEAMMATE_NAME" 
   [ ! -f "$MAP_FILE" ] && exit 0
   AGENT_ID=$(cat "$MAP_FILE")
   [ -z "$AGENT_ID" ] && exit 0
-  FILE="$DIR/$AGENT_ID.json"
+  FILE="$DIR/$AGENT_ID.jsonl"
   TS=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-  STARTED_AT="$TS"
-  if [ -f "$FILE" ]; then
-    PREV_START=$(jq -r '.startedAt // ""' "$FILE" 2>/dev/null)
-    [ -n "$PREV_START" ] && STARTED_AT="$PREV_START"
-  fi
-  cat > "$FILE" <<EOF
-{"agentId":"$AGENT_ID","type":"$TEAMMATE_NAME","status":"idle","startedAt":"$STARTED_AT","updatedAt":"$TS"}
-EOF
+  echo "{\"agentId\":\"$AGENT_ID\",\"type\":\"$TEAMMATE_NAME\",\"event\":\"idle\",\"status\":\"idle\",\"updatedAt\":\"$TS\"}" >> "$FILE"
   exit 0
 fi
 
 [ -z "$AGENT_ID" ] && exit 0
 
 DIR="$CCK_ACTIVITY/$SESSION_ID"
-FILE="$DIR/$AGENT_ID.json"
+FILE="$DIR/$AGENT_ID.jsonl"
 
 # On Start: skip if no type (internal agents like AskUserQuestion)
 # On Stop/Idle: only skip if no existing file (never tracked)
@@ -102,48 +96,19 @@ mkdir -p "$DIR"
 TS=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
 if [ "$EVENT" = "SubagentStart" ]; then
-  cat > "$FILE" <<EOF
-{"agentId":"$AGENT_ID","type":"$AGENT_TYPE_RAW","status":"active","startedAt":"$TS","updatedAt":"$TS"}
-EOF
-  # Write name→id mapping for TeammateIdle resolution
-  # Delete previous file only if not active (idle/stopped = teammate re-spawn, active = parallel subagent)
+  echo "{\"agentId\":\"$AGENT_ID\",\"type\":\"$AGENT_TYPE_RAW\",\"event\":\"start\",\"status\":\"active\",\"startedAt\":\"$TS\",\"updatedAt\":\"$TS\"}" >> "$FILE"
+  # Mapping always points at latest agent of this type (used by TeammateIdle resolution).
   if [ -n "$AGENT_TYPE_RAW" ]; then
-    MAP_FILE="$DIR/_name-${AGENT_TYPE_RAW}.id"
-    if [ -f "$MAP_FILE" ]; then
-      OLD_ID=$(cat "$MAP_FILE")
-      if [ -n "$OLD_ID" ] && [ "$OLD_ID" != "$AGENT_ID" ]; then
-        OLD_FILE="$DIR/$OLD_ID.json"
-        OLD_STATUS=""
-        [ -f "$OLD_FILE" ] && OLD_STATUS=$(jq -r '.status // ""' "$OLD_FILE" 2>/dev/null)
-        [ "$OLD_STATUS" != "active" ] && rm -f "$OLD_FILE"
-      fi
-    fi
-    echo -n "$AGENT_ID" > "$MAP_FILE"
+    echo -n "$AGENT_ID" > "$DIR/_name-${AGENT_TYPE_RAW}.id"
   fi
 
 elif [ "$EVENT" = "SubagentStop" ]; then
-  AGENT_TYPE="$AGENT_TYPE_RAW"
-  STARTED_AT="$TS"
-  if [ -f "$FILE" ]; then
-    eval "$(jq -r '@sh "PREV_TYPE=\(.type // "unknown")", @sh "PREV_START=\(.startedAt // "")"' "$FILE")"
-    [ -z "$AGENT_TYPE" ] && AGENT_TYPE="$PREV_TYPE"
-    [ -n "$PREV_START" ] && STARTED_AT="$PREV_START"
-  fi
   echo "$INPUT" | jq -c \
-    --arg id "$AGENT_ID" --arg type "$AGENT_TYPE" --arg started "$STARTED_AT" --arg ts "$TS" \
-    '{agentId: $id, type: $type, status: "stopped", startedAt: $started,
+    --arg id "$AGENT_ID" --arg type "$AGENT_TYPE_RAW" --arg ts "$TS" \
+    '{agentId: $id, type: $type, event: "stop", status: "stopped",
       lastMessage: (.last_assistant_message // ""), stoppedAt: $ts, updatedAt: $ts}' \
-    > "$FILE"
+    >> "$FILE"
 
 elif [ "$EVENT" = "TeammateIdle" ]; then
-  AGENT_TYPE="$AGENT_TYPE_RAW"
-  STARTED_AT="$TS"
-  if [ -f "$FILE" ]; then
-    eval "$(jq -r '@sh "PREV_TYPE=\(.type // "unknown")", @sh "PREV_START=\(.startedAt // "")"' "$FILE")"
-    [ -z "$AGENT_TYPE" ] && AGENT_TYPE="$PREV_TYPE"
-    [ -n "$PREV_START" ] && STARTED_AT="$PREV_START"
-  fi
-  cat > "$FILE" <<EOF
-{"agentId":"$AGENT_ID","type":"$AGENT_TYPE","status":"idle","startedAt":"$STARTED_AT","updatedAt":"$TS"}
-EOF
+  echo "{\"agentId\":\"$AGENT_ID\",\"type\":\"$AGENT_TYPE_RAW\",\"event\":\"idle\",\"status\":\"idle\",\"updatedAt\":\"$TS\"}" >> "$FILE"
 fi

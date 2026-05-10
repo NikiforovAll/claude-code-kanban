@@ -102,12 +102,19 @@ const SESSION_STALE_MS = 300000;
 
 const WAITING_RESOLVE_GRACE_MS = 15000;
 
+function readAgentJsonl(filePath) {
+  const raw = readFileSync(filePath, 'utf8');
+  const merged = {};
+  for (const line of raw.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    try { Object.assign(merged, JSON.parse(line)); } catch (_) { /* skip malformed */ }
+  }
+  return merged;
+}
+
 function persistAgent(dir, agent) {
-  const file = path.join(dir, agent.agentId + '.json');
-  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
-  fs.writeFile(tmp, JSON.stringify(agent), 'utf8')
-    .then(() => fs.rename(tmp, file))
-    .catch(() => { fs.unlink(tmp).catch(() => {}); });
+  const file = path.join(dir, agent.agentId + '.jsonl');
+  fs.appendFile(file, JSON.stringify({ ...agent, event: 'server-update' }) + '\n', 'utf8').catch(() => {});
 }
 
 function checkWaitingForUser(agentDir, logMtime) {
@@ -123,6 +130,10 @@ function checkWaitingForUser(agentDir, logMtime) {
     }
   } catch (e) { /* skip — missing or invalid */ }
   return null;
+}
+
+function agentDisplayName(agent) {
+  return agent.type || agent.name;
 }
 
 function isGhostAgent(agent) {
@@ -156,9 +167,9 @@ function checkAgentStatus(agentDir, stale, logMtime, isTeam) {
   if (result.waitingForUser) result.hasActive = true;
   if (stale && !isTeam) return result;
   try {
-    for (const file of readdirSync(agentDir).filter(f => f.endsWith('.json') && !f.startsWith('_'))) {
+    for (const file of readdirSync(agentDir).filter(f => f.endsWith('.jsonl') && !f.startsWith('_'))) {
       try {
-        const agent = JSON.parse(readFileSync(path.join(agentDir, file), 'utf8'));
+        const agent = readAgentJsonl(path.join(agentDir, file));
         if (isTeam && (agent.status === 'active' || agent.status === 'idle')) {
           result.hasActive = true;
           if (agent.status === 'active') result.hasRunning = true;
@@ -1050,17 +1061,17 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
     const isTeam = !!teamConfig;
     const teamMemberNames = isTeam ? new Set(teamConfig.members.map(m => m.name)) : null;
 
-    const files = readdirSync(agentDir).filter(f => f.endsWith('.json') && !f.startsWith('_'));
+    const files = readdirSync(agentDir).filter(f => f.endsWith('.jsonl') && !f.startsWith('_'));
     const agents = [];
     for (const file of files) {
       try {
-        const agent = JSON.parse(readFileSync(path.join(agentDir, file), 'utf8'));
+        const agent = readAgentJsonl(path.join(agentDir, file));
         if (isGhostAgent(agent)) continue;
         const agentTs = agent.updatedAt || agent.startedAt;
         const agentStale = !sessionStale && agentTs && (Date.now() - new Date(agentTs).getTime()) > AGENT_STALE_MS;
         if (!isAgentFresh(agent) || sessionStale || agentStale) {
           if (agent.status === 'active' || agent.status === 'idle') {
-            const agentName = agent.type || agent.name;
+            const agentName = agentDisplayName(agent);
             const isTeamMember = isTeam && agentName && teamMemberNames.has(agentName);
             if (!isTeamMember) {
               agent.status = 'stopped';
@@ -1077,7 +1088,7 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
         const terminated = getTerminatedTeammates(meta.jsonlPath);
         if (terminated.size) {
           for (const agent of liveAgents) {
-            const agentName = agent.type || agent.name;
+            const agentName = agentDisplayName(agent);
             if (agentName && terminated.has(agentName)) {
               const terminatedAt = terminated.get(agentName);
               if (terminatedAt && agent.startedAt && terminatedAt < agent.startedAt) continue;
@@ -1168,14 +1179,40 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
       }
       if (Object.keys(teamColors).length) {
         for (const agent of agents) {
-          const name = agent.type || agent.name;
+          const name = agentDisplayName(agent);
           if (name && teamColors[name]) agent.color = teamColors[name];
         }
       }
     }
 
+    // Collapse teammate re-spawns: when a teammate goes idle and is later re-engaged,
+    // a fresh agentId is spawned. Hide older idle/stopped entries when a newer same-name
+    // teammate exists; never hide an `active` agent (parallel teammate work would vanish).
+    // Subagents (Explore, general-purpose, etc.) are not in teamMemberNames and bypass
+    // dedup entirely, so parallel siblings of the same subagent type remain visible.
+    let visibleAgents = agents;
+    if (teamMemberNames && teamMemberNames.size) {
+      const groups = new Map();
+      for (const a of agents) {
+        const t = agentDisplayName(a);
+        if (!t || !teamMemberNames.has(t)) continue;
+        const list = groups.get(t) || [];
+        list.push(a);
+        groups.set(t, list);
+      }
+      const hidden = new Set();
+      for (const list of groups.values()) {
+        if (list.length < 2) continue;
+        list.sort((a, b) => new Date(b.startedAt || 0) - new Date(a.startedAt || 0));
+        for (const older of list.slice(1)) {
+          if (older.status === 'idle' || older.status === 'stopped') hidden.add(older.agentId);
+        }
+      }
+      if (hidden.size) visibleAgents = agents.filter(a => !hidden.has(a.agentId));
+    }
+
     const waitingForUser = checkWaitingForUser(agentDir, logMtime);
-    res.json({ agents, waitingForUser, teamColors });
+    res.json({ agents: visibleAgents, waitingForUser, teamColors });
   } catch (e) {
     res.json({ agents: [], waitingForUser: null });
   }
@@ -1184,13 +1221,14 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
 app.post('/api/sessions/:sessionId/agents/:agentId/stop', (req, res) => {
   const sessionId = resolveSessionId(req.params.sessionId);
   const agentId = sanitizeAgentId(req.params.agentId);
-  const agentFile = path.join(AGENT_ACTIVITY_DIR, sessionId, agentId + '.json');
+  const agentFile = path.join(AGENT_ACTIVITY_DIR, sessionId, agentId + '.jsonl');
   if (!existsSync(agentFile)) return res.status(404).json({ error: 'Agent not found' });
   try {
-    const agent = JSON.parse(readFileSync(agentFile, 'utf8'));
+    const agent = readAgentJsonl(agentFile);
     agent.status = 'stopped';
     agent.stoppedAt = new Date().toISOString();
-    writeFileSync(agentFile, JSON.stringify(agent), 'utf8'); // sync — response depends on write
+    const stopEvt = { agentId, type: agent.type, event: 'user-stop', status: 'stopped', stoppedAt: agent.stoppedAt, updatedAt: agent.stoppedAt };
+    writeFileSync(agentFile, readFileSync(agentFile, 'utf8') + JSON.stringify(stopEvt) + '\n', 'utf8'); // sync — response depends on write
     // Also remove waiting state if present
     const waitingFile = path.join(AGENT_ACTIVITY_DIR, sessionId, '_waiting.json');
     if (existsSync(waitingFile)) unlinkSync(waitingFile);
@@ -1331,8 +1369,8 @@ app.get('/api/sessions/:sessionId/messages', (req, res) => {
         if (entry.description) msg.agentDescription = entry.description;
         if (entry.prompt && !msg.agentPrompt) msg.agentPrompt = entry.prompt;
         try {
-          const agentFile = path.join(agentDir, entry.agentId + '.json');
-          const agent = JSON.parse(readFileSync(agentFile, 'utf8'));
+          const agentFile = path.join(agentDir, entry.agentId + '.jsonl');
+          const agent = readAgentJsonl(agentFile);
           if (agent.lastMessage) msg.agentLastMessage = agent.lastMessage;
           if (agent.prompt && !msg.agentPrompt) msg.agentPrompt = agent.prompt;
           const prompt = msg.agentPrompt || entry.prompt;
@@ -1819,14 +1857,16 @@ const agentActivityWatcher = chokidar.watch(AGENT_ACTIVITY_DIR, {
 const AGENT_FILE_CAP = 20;
 
 agentActivityWatcher.on('all', (event, filePath) => {
-  if ((event === 'add' || event === 'change' || event === 'unlink') && filePath.endsWith('.json')) {
+  const base = path.basename(filePath);
+  const isAgentEvent = filePath.endsWith('.jsonl') || base === '_waiting.json';
+  if ((event === 'add' || event === 'change' || event === 'unlink') && isAgentEvent) {
     const relativePath = path.relative(AGENT_ACTIVITY_DIR, filePath);
     const sessionId = relativePath.split(path.sep)[0];
     // Cleanup: if session dir exceeds cap, delete oldest files by mtime
-    if (event === 'add') {
+    if (event === 'add' && filePath.endsWith('.jsonl')) {
       try {
         const sessionDir = path.join(AGENT_ACTIVITY_DIR, sessionId);
-        const files = readdirSync(sessionDir).filter(f => f.endsWith('.json') && !f.startsWith('_'));
+        const files = readdirSync(sessionDir).filter(f => f.endsWith('.jsonl') && !f.startsWith('_'));
         if (files.length > AGENT_FILE_CAP) {
           const withStats = files.map(f => {
             const fp = path.join(sessionDir, f);
