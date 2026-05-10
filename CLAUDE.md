@@ -55,7 +55,6 @@ When modifying a feature, open **both** the JS region and the matching CSS regio
 | DOM | Cached DOM element references |
 | DATA_FETCHING | `fetchSessions()`, `fetchTasks()`, `fetchAgents()`, `fetchMessages()` |
 | BULK_DELETE | Session-wide task deletion, topological sort |
-| LIVE_UPDATES | Active task ticker in sidebar |
 | MESSAGE_PANEL | Message log panel: toggle, render, latest message |
 | PINNING | Message/session/agent pin/unpin logic, localStorage |
 | MODALS | Message detail modal, fullscreen toggle |
@@ -82,7 +81,6 @@ When modifying a feature, open **both** the JS region and the matching CSS regio
 | SESSION_INFO | Session info modal: metadata grid, team config, plan |
 | PLAN | Plan viewer modal, refresh, open-in-editor |
 | OWNER_FILTER | Per-owner task filter in kanban header |
-| LAYOUT_SYNC | ResizeObserver to sync sidebar/view header heights |
 | PWA | Service worker registration |
 | INIT | Boot sequence: load theme → load state → setup SSE → first fetch |
 
@@ -93,7 +91,7 @@ When modifying a feature, open **both** the JS region and the matching CSS regio
 | VARIABLES | CSS custom properties (colors, fonts) |
 | RESET · SCROLLBAR · LAYOUT | Box model reset, scrollbar, flex app shell |
 | SIDEBAR · SIDEBAR_SECTIONS | Sidebar chrome, collapse, filter dropdowns |
-| LIVE_UPDATES | Active task ticker styles |
+| COLLAPSIBLE | Shared collapse-chevron and collapsible-section transitions |
 | SESSIONS | Session cards, progress bars, status badges |
 | FOOTER | Sidebar footer |
 | MAIN · EMPTY_STATE · SESSION_VIEW | Main content area, placeholder, session wrapper |

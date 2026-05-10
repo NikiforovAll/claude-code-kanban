@@ -4,6 +4,8 @@ let currentSessionId = null;
 let currentTasks = [];
 let viewMode = 'session';
 let sessionFilter = 'active';
+// Only meaningful while sessionFilter === 'active' (filterBySessions clears it otherwise)
+const activityFilter = new Set(); // kinds: 'waiting' | 'active'
 let sessionLimit = '20';
 let filterProject = '__recent__'; // null = all, '__recent__' = last 24h, or project path
 let recentProjects = new Set();
@@ -144,7 +146,6 @@ const inProgressCount = document.getElementById('in-progress-count');
 const completedCount = document.getElementById('completed-count');
 const detailPanel = document.getElementById('detail-panel');
 const detailContent = document.getElementById('detail-content');
-const connectionStatus = document.getElementById('connection-status');
 const CONTENT_TRUNCATE_MAX = 1500;
 const COLUMNS = [{ el: pendingTasks }, { el: inProgressTasks }, { el: completedTasks }];
 
@@ -186,7 +187,7 @@ async function fetchSessions(includeTasks = true) {
 
     sessions = newSessions;
     renderSessions();
-    renderLiveUpdatesFromCache();
+    renderActivityChip();
   } catch (error) {
     console.error('Failed to fetch sessions:', error);
   }
@@ -412,15 +413,7 @@ function fuzzyMatch(text, query) {
 
 //#endregion
 
-//#region LIVE_UPDATES
-function renderLiveUpdatesFromCache() {
-  let activeTasks = allTasksCache.filter((t) => t.status === 'in_progress' && !isInternalTask(t));
-  if (filterProject) {
-    activeTasks = activeTasks.filter((t) => matchesProjectFilter(t.project));
-  }
-  renderLiveUpdates(activeTasks);
-}
-
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
 function toggleSection(containerId, chevronId) {
   const container = document.getElementById(containerId);
   const chevron = document.getElementById(chevronId);
@@ -429,38 +422,90 @@ function toggleSection(containerId, chevronId) {
   localStorage.setItem(`${containerId}Collapsed`, collapsed);
 }
 
-// biome-ignore lint/correctness/noUnusedVariables: used in HTML
-function toggleLiveUpdates() {
-  toggleSection('live-updates', 'live-updates-chevron');
+function isWaitingSession(s) {
+  return !!s.hasWaitingForUser;
+}
+function isActiveSession(s) {
+  return !s.hasWaitingForUser && (s.inProgress > 0 || s.hasRecentLog || s.hasRunningAgents);
 }
 
-function renderLiveUpdates(activeTasks) {
-  const container = document.getElementById('live-updates');
+const ACTIVITY_PREDICATES = {
+  waiting: isWaitingSession,
+  active: isActiveSession,
+};
 
-  if (activeTasks.length === 0) {
-    container.innerHTML = '<div class="live-empty">No active tasks</div>';
-    return;
+let lastChipKey = '';
+
+function renderActivityChip() {
+  const container = document.getElementById('activity-chips');
+  if (!container) return;
+
+  let waiting = 0;
+  let active = 0;
+  for (const s of sessions) {
+    if (s.hasWaitingForUser) waiting++;
+    else if (s.inProgress > 0 || s.hasRecentLog || s.hasRunningAgents) active++;
   }
 
-  container.innerHTML = activeTasks
-    .map(
-      (task) => `
-        <div class="live-item" onclick="openLiveTask('${task.sessionId}', '${task.id}')">
-          <span class="pulse"></span>
-          <div class="live-item-content">
-            <div class="live-item-action" title="${escapeHtml(task.activeForm || task.subject)}">${escapeHtml(task.activeForm || task.subject)}</div>
-            <div class="live-item-session" title="${escapeHtml(task.sessionName || task.sessionId)}">${escapeHtml(task.sessionName || task.sessionId)}</div>
-          </div>
-        </div>
-      `,
-    )
+  const key = `${waiting}|${active}|${[...activityFilter].sort().join(',')}`;
+  if (key === lastChipKey) return;
+  lastChipKey = key;
+
+  const chips = [
+    {
+      kind: 'waiting',
+      count: waiting,
+      label: `${waiting} waiting`,
+      title: `${waiting} session${waiting === 1 ? '' : 's'} waiting for input`,
+    },
+    {
+      kind: 'active',
+      count: active,
+      label: `${active} active`,
+      title: `${active} session${active === 1 ? '' : 's'} with running work or recent activity`,
+    },
+  ];
+
+  container.innerHTML = chips
+    .map((c) => {
+      const isOn = activityFilter.has(c.kind);
+      const classes = [
+        'activity-chip',
+        `activity-${c.kind}`,
+        c.count === 0 ? 'activity-zero' : '',
+        isOn ? 'activity-filter-on' : '',
+      ]
+        .filter(Boolean)
+        .join(' ');
+      const hint = isOn ? ' — click to clear filter' : ` — click to filter to ${c.kind}`;
+      return `
+        <button type="button"
+          class="${classes}"
+          onclick="setActivityFilter('${c.kind}')"
+          aria-pressed="${isOn ? 'true' : 'false'}"
+          title="${escapeHtml(c.title + hint)}">
+          <span class="activity-dot"></span>
+          <span class="activity-label">${escapeHtml(c.label)}</span>
+        </button>
+      `;
+    })
     .join('');
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
-async function openLiveTask(sessionId, taskId) {
-  await fetchTasks(sessionId);
-  showTaskDetail(taskId, sessionId);
+function setActivityFilter(kind) {
+  if (activityFilter.has(kind)) activityFilter.delete(kind);
+  else activityFilter.add(kind);
+  // active/waiting only make sense with the active session filter on
+  const targetFilter = activityFilter.size > 0 ? 'active' : sessionFilter;
+  if (targetFilter !== sessionFilter) {
+    sessionFilter = targetFilter;
+    const dropdown = document.getElementById('session-filter');
+    if (dropdown) dropdown.value = targetFilter;
+    updateUrl();
+  }
+  renderSessions();
+  renderActivityChip();
 }
 
 let lastCurrentTasksHash = '';
@@ -2239,7 +2284,7 @@ async function showAllTasks() {
     updateUrl();
     renderAllTasks();
     renderSessions();
-    renderLiveUpdatesFromCache();
+    renderActivityChip();
   } catch (error) {
     console.error('Failed to fetch all tasks:', error);
   }
@@ -2313,7 +2358,11 @@ function renderSessions() {
     filteredSessions = filteredSessions.filter((s) => matchesProjectFilter(s.project));
   }
 
-  // Apply search filter
+  if (activityFilter.size > 0) {
+    const preds = [...activityFilter].map((k) => ACTIVITY_PREDICATES[k]).filter(Boolean);
+    if (preds.length) filteredSessions = filteredSessions.filter((s) => preds.some((p) => p(s)));
+  }
+
   if (searchQuery) {
     const taskMatchIds = new Set();
     for (const t of allTasksCache) {
@@ -2334,7 +2383,7 @@ function renderSessions() {
     filteredSessions = filteredSessions.filter(matchesSearch);
 
     // Re-add pinned/sticky sessions that match the query but were excluded by active filter
-    if (pinnedSessionIds.size > 0 || stickySessionIds.size > 0) {
+    if (activityFilter.size === 0 && (pinnedSessionIds.size > 0 || stickySessionIds.size > 0)) {
       const filteredIds = new Set(filteredSessions.map((s) => s.id));
       const missingPinned = sessions.filter((s) => isAnyPinned(s.id) && !filteredIds.has(s.id) && matchesSearch(s));
       if (missingPinned.length) filteredSessions = [...missingPinned, ...filteredSessions];
@@ -2342,7 +2391,8 @@ function renderSessions() {
   }
 
   // Include pinned/sticky sessions even if they don't match active/recent filter
-  if (!searchQuery && (pinnedSessionIds.size > 0 || stickySessionIds.size > 0)) {
+  // (skipped when an activity chip filter is on — user explicitly asked for a slice)
+  if (activityFilter.size === 0 && !searchQuery && (pinnedSessionIds.size > 0 || stickySessionIds.size > 0)) {
     const filteredIds = new Set(filteredSessions.map((s) => s.id));
     const missingPinned = sessions.filter((s) => isAnyPinned(s.id) && !filteredIds.has(s.id));
     if (missingPinned.length) filteredSessions = [...missingPinned, ...filteredSessions];
@@ -3546,7 +3596,6 @@ async function refreshCurrentView() {
     await showAllTasks();
   } else if (currentSessionId) {
     await fetchTasks(currentSessionId);
-    renderLiveUpdatesFromCache();
   } else {
     await fetchSessions();
   }
@@ -4650,20 +4699,12 @@ function setupEventSource() {
       wasConnected = true;
       retryDelay = 1000;
       hideOffline();
-      connectionStatus.innerHTML = `
-            <span class="connection-dot live"></span>
-            <span>Connected</span>
-          `;
     };
 
     eventSource.onerror = () => {
       eventSource.close();
       failCount++;
       console.warn('[SSE] Connection lost, retrying in', retryDelay, 'ms');
-      connectionStatus.innerHTML = `
-            <span class="connection-dot error"></span>
-            <span>Reconnecting...</span>
-          `;
       if (failCount >= 2) showOffline();
       setTimeout(connect, retryDelay);
       retryDelay = Math.min(retryDelay * 2, 30000);
@@ -4693,7 +4734,7 @@ function setupEventSource() {
           if (viewMode === 'all') {
             currentTasks = filterProject ? allTasksCache.filter((t) => matchesProjectFilter(t.project)) : allTasksCache;
             renderAllTasks();
-            renderLiveUpdatesFromCache();
+            renderActivityChip();
           } else if (viewMode === 'project' && currentProjectPath) {
             const hasUpdate = currentProjectSessionIds.some((id) => pendingTaskSessionIds.has(id));
             if (hasUpdate) fetchProjectView(currentProjectPath);
@@ -5122,8 +5163,10 @@ function getOwnerColor(name) {
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
 function filterBySessions(value) {
   sessionFilter = value;
+  if (value !== 'active') activityFilter.clear();
   updateUrl();
   renderSessions();
+  renderActivityChip();
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
@@ -5386,7 +5429,7 @@ function initPanelResize(panelId, handleId, cssVar, storageKey) {
   });
 
   function onMove(e) {
-    const w = Math.min(900, Math.max(320, startWidth - (e.clientX - startX)));
+    const w = Math.max(200, startWidth - (e.clientX - startX));
     panel.style.setProperty(cssVar, `${w}px`);
   }
 
@@ -5810,15 +5853,6 @@ function filterByOwner(value) {
 
 //#endregion
 
-//#region LAYOUT_SYNC
-const sidebarHeader = document.querySelector('.sidebar-header');
-const viewHeader = document.querySelector('.view-header');
-new ResizeObserver(() => {
-  sidebarHeader.style.height = `${viewHeader.offsetHeight}px`;
-}).observe(viewHeader);
-
-//#endregion
-
 //#region PWA
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js');
@@ -5828,14 +5862,10 @@ if ('serviceWorker' in navigator) {
 
 //#region INIT
 loadTheme();
-['live-updates', 'sessions-filters'].forEach((id) => {
-  if (localStorage.getItem(`${id}Collapsed`) === 'true') {
-    document.getElementById(id).classList.add('collapsed');
-    document
-      .getElementById(id === 'live-updates' ? 'live-updates-chevron' : 'sessions-chevron')
-      .classList.add('rotated');
-  }
-});
+if (localStorage.getItem('sessions-filtersCollapsed') === 'true') {
+  document.getElementById('sessions-filters').classList.add('collapsed');
+  document.getElementById('sessions-chevron').classList.add('rotated');
+}
 
 document.addEventListener('DOMContentLoaded', () => {
   if (typeof marked !== 'undefined' && typeof hljs !== 'undefined') {

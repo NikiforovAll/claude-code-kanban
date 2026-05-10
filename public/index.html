@@ -44,37 +44,13 @@
     <!-- Sidebar -->
     <aside class="sidebar">
       <header class="sidebar-header">
-        <div class="logo">
-          <div class="logo-mark">
-            <svg viewBox="4 6 16 12" fill="none" stroke="currentColor" stroke-width="2.5">
-              <path d="M5 13l4 4L19 7"/>
-            </svg>
-          </div>
-          <span class="logo-text">Dashboard</span>
-        </div>
-        <div id="connection-status" class="connection">
-          <span class="connection-dot"></span>
-          <span>Connecting</span>
-        </div>
+        <div id="activity-chips" class="activity-chips"></div>
         <button id="sidebar-toggle" class="sidebar-toggle-btn" onclick="toggleSidebar()" title="Toggle sidebar" aria-label="Toggle sidebar">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M15 18l-6-6 6-6"/>
           </svg>
         </button>
       </header>
-
-      <!-- Live Updates -->
-      <div class="sidebar-section">
-        <div class="section-header" onclick="toggleLiveUpdates()" style="cursor: pointer;">
-          <span>Live Updates</span>
-          <svg id="live-updates-chevron" class="collapse-chevron" viewBox="0 0 24 24">
-            <path d="M6 9l6 6 6-6"/>
-          </svg>
-        </div>
-        <div id="live-updates" class="live-updates">
-          <div class="live-empty">No active tasks</div>
-        </div>
-      </div>
 
       <!-- Tasks -->
       <div class="sidebar-section flex-1">
