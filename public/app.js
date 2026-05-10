@@ -2458,6 +2458,7 @@ function renderSessions() {
     const showCtx = !!session.contextStatus;
     const linkedDocsCount = getSessionPreviewPaths(session.id).length;
     const bookmarksCount = loadPins(session.id).length;
+    const hasScratchpad = !!(localStorage.getItem(_sessionScratchpadKey(session.id)) || '').trim();
     const tempClass = session.hasRecentLog || session.inProgress || session.hasWaitingForUser ? 'warm' : 'stale';
     return `
           <button onclick="fetchTasks('${session.id}')" data-session-id="${session.id}" class="session-item ${isActive ? 'active' : ''} ${session.hasWaitingForUser ? 'permission-pending' : ''} ${tempClass} ${showCtx ? 'has-context' : ''}" title="${tooltip}">
@@ -2474,6 +2475,7 @@ function renderSessions() {
                 ${session.hasPlan ? `<span class="plan-indicator" onclick="event.stopPropagation(); openPlanForSession('${session.id}')" title="View plan"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span>` : ''}
                 ${linkedDocsCount > 0 ? `<span class="linked-docs-badge" onclick="event.stopPropagation(); showSessionInfoModal('${session.id}')" title="${linkedDocsCount} linked document${linkedDocsCount > 1 ? 's' : ''}">${linkSvg(10)}${linkedDocsCount}</span>` : ''}
                 ${bookmarksCount > 0 ? `<span class="bookmarks-badge" onclick="event.stopPropagation(); openSessionWithBookmarks('${session.id}')" title="${bookmarksCount} bookmarked message${bookmarksCount > 1 ? 's' : ''}"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>${bookmarksCount}</span>` : ''}
+                ${hasScratchpad ? `<span class="scratchpad-badge" onclick="event.stopPropagation(); openSessionScratchpad('${session.id}')" title="Open scratchpad"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></span>` : ''}
                 ${session.hasRunningAgents ? '<span class="agent-badge" title="Active agents">🤖</span>' : ''}
                 ${session.planSourceSessionId ? `<span class="plan-indicator" title="Implements plan — click to reveal plan session" onclick="event.stopPropagation(); revealPlanSession('${escapeHtml(session.planSourceSessionId)}')">📋</span>` : ''}
                 ${session.hasWaitingForUser ? '<span class="agent-badge" title="Waiting for user">❓</span>' : ''}
@@ -3613,9 +3615,17 @@ const _scratchpadCharcount = document.getElementById('scratchpad-charcount');
 
 let _scratchpadKeyOverride = null;
 
+function _sessionScratchpadKey(sessionId) {
+  return `scratchpad-${sessionId}`;
+}
+
+function _isSessionScratchpadKey(key) {
+  return key.startsWith('scratchpad-') && !key.startsWith('scratchpad-project:');
+}
+
 function _scratchpadKey() {
   if (_scratchpadKeyOverride) return _scratchpadKeyOverride;
-  if (currentSessionId) return `scratchpad-${currentSessionId}`;
+  if (currentSessionId) return _sessionScratchpadKey(currentSessionId);
   if (currentProjectPath) return `scratchpad-project:${currentProjectPath}`;
   return null;
 }
@@ -3626,6 +3636,11 @@ function toggleScratchpad() {
   } else {
     showScratchpad();
   }
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML onclick
+function openSessionScratchpad(sessionId) {
+  showScratchpad(_sessionScratchpadKey(sessionId));
 }
 
 function showScratchpad(keyOverride) {
@@ -3652,10 +3667,15 @@ function saveScratchpad() {
   const key = _scratchpadKey();
   if (!key) return;
   const val = _scratchpadTextarea.value;
-  if (val.trim()) {
+  const had = !!(localStorage.getItem(key) || '').trim();
+  const has = !!val.trim();
+  if (has) {
     localStorage.setItem(key, val);
   } else {
     localStorage.removeItem(key);
+  }
+  if (had !== has && _isSessionScratchpadKey(key)) {
+    renderSessions();
   }
 }
 
@@ -4075,7 +4095,7 @@ function _findOrphanedKeys() {
     const key = localStorage.key(i);
     if (key.startsWith('pinned-messages-')) {
       if (!known.has(key.slice('pinned-messages-'.length))) orphaned.push(key);
-    } else if (key.startsWith('scratchpad-') && !key.startsWith('scratchpad-project:')) {
+    } else if (_isSessionScratchpadKey(key)) {
       if (!known.has(key.slice('scratchpad-'.length))) orphaned.push(key);
     } else if (key.startsWith(PREVIEW_STORAGE_PREFIX)) {
       if (!known.has(key.slice(PREVIEW_STORAGE_PREFIX.length))) orphaned.push(key);

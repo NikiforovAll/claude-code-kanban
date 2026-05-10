@@ -2536,7 +2536,8 @@ body::before {
 }
 
 .linked-docs-badge,
-.bookmarks-badge {
+.bookmarks-badge,
+.scratchpad-badge {
   display: inline-flex;
   align-items: center;
   gap: 2px;
@@ -2552,7 +2553,8 @@ body::before {
 }
 
 .linked-docs-badge:hover,
-.bookmarks-badge:hover {
+.bookmarks-badge:hover,
+.scratchpad-badge:hover {
   border-color: var(--accent);
   color: var(--text-primary);
 }
