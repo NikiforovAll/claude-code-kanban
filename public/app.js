@@ -6034,6 +6034,12 @@ function makeLimitCell(label, bucket) {
   const strong = document.createElement('strong');
   strong.textContent = pct == null ? '-%' : `${Math.ceil(pct)}%`;
   cell.appendChild(strong);
+  if (reset) {
+    const r = document.createElement('span');
+    r.className = 'footer-limit-reset';
+    r.textContent = ` (${reset})`;
+    cell.appendChild(r);
+  }
   return cell;
 }
 function makeLimitSpan(rl) {
