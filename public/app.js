@@ -1152,6 +1152,14 @@ const ICON_TASK =
   '<svg class="msg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>';
 const ICON_WEB =
   '<svg class="msg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>';
+const ICON_OPEN_EXTERNAL =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3h7v7"/><path d="M10 14L21 3"/><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/></svg>';
+const ICON_COPY =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+const ICON_CHECKMARK =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M20 6L9 17l-5-5"/></svg>';
+const ICON_AGENT_WAITING =
+  '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
 const TOOL_ICONS = {
   Bash: '<svg class="msg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="18" rx="2"/><polyline points="7 10 10 13 7 16"/><line x1="13" y1="16" x2="17" y2="16"/></svg>',
   Read: '<svg class="msg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>',
@@ -1470,10 +1478,6 @@ function _renderPinToDetail(pin) {
 }
 
 const SESSION_PIN_SVG = PIN_SVG.replace('width="14" height="14"', 'width="12" height="12"');
-const MARKETPLACE_SVG =
-  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg>';
-const MEMORY_SVG =
-  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>';
 const LINK_SVG_PATHS =
   '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>';
 const linkSvg = (size) =>
@@ -1649,8 +1653,7 @@ async function copyWithFeedback(text, btn) {
     await navigator.clipboard.writeText(text);
     btn.dataset.copying = '1';
     const svg = btn.innerHTML;
-    btn.innerHTML =
-      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M20 6L9 17l-5-5"/></svg>';
+    btn.innerHTML = ICON_CHECKMARK;
     setTimeout(() => {
       btn.innerHTML = svg;
       delete btn.dataset.copying;
@@ -2476,12 +2479,9 @@ function renderSessions() {
                 ${linkedDocsCount > 0 ? `<span class="linked-docs-badge" onclick="event.stopPropagation(); showSessionInfoModal('${session.id}')" title="${linkedDocsCount} linked document${linkedDocsCount > 1 ? 's' : ''}">${linkSvg(10)}${linkedDocsCount}</span>` : ''}
                 ${bookmarksCount > 0 ? `<span class="bookmarks-badge" onclick="event.stopPropagation(); openSessionWithBookmarks('${session.id}')" title="${bookmarksCount} bookmarked message${bookmarksCount > 1 ? 's' : ''}"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>${bookmarksCount}</span>` : ''}
                 ${hasScratchpad ? `<span class="scratchpad-badge" onclick="event.stopPropagation(); openSessionScratchpad('${session.id}')" title="Open scratchpad"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></span>` : ''}
-                ${session.hasRunningAgents ? '<span class="agent-badge" title="Active agents">🤖</span>' : ''}
-                ${session.planSourceSessionId ? `<span class="plan-indicator" title="Implements plan — click to reveal plan session" onclick="event.stopPropagation(); revealPlanSession('${escapeHtml(session.planSourceSessionId)}')">📋</span>` : ''}
-                ${session.hasWaitingForUser ? '<span class="agent-badge" title="Waiting for user">❓</span>' : ''}
-                ${(window.__HUB__?.enabled || appConfig.marketplaceUrl) && session.project ? `<span class="marketplace-btn" data-project-path="${escapeHtml(session.project)}" onclick="event.stopPropagation(); openMarketplace(this.dataset.projectPath)" title="Open in Marketplace">${MARKETPLACE_SVG}</span>` : ''}
-                ${(window.__HUB__?.enabled || appConfig.memoryUrl) && session.project ? `<span class="marketplace-btn" data-project-path="${escapeHtml(session.project)}" onclick="event.stopPropagation(); openMemory(this.dataset.projectPath)" title="Open in Memory">${MEMORY_SVG}</span>` : ''}
-                ${isLive ? '<span class="pulse"></span>' : ''}
+                ${session.planSourceSessionId ? `<span class="plan-indicator" title="Implements plan — click to reveal plan session" onclick="event.stopPropagation(); revealPlanSession('${escapeHtml(session.planSourceSessionId)}')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span>` : ''}
+                ${session.hasWaitingForUser ? `<span class="agent-badge agent-badge-waiting" title="Waiting for user">${ICON_AGENT_WAITING}</span>` : ''}
+                ${isLive || session.hasRunningAgents ? `<span class="pulse" title="${isLive ? 'Live' : 'Active agents'}"></span>` : ''}
               </span>
               <div class="progress-bar"><div class="progress-fill" style="width: ${percent}%"></div></div>
               <span class="progress-text">${session.completed}/${total}</span>
@@ -5088,7 +5088,7 @@ function renderAgentTabs(promptHtml, responseHtml, promptText, responseText) {
   }
   if (!tabs.length) return '';
   const defaultTab = responseHtml ? 'response' : tabs[0].key;
-  const copyBtnHtml = `<button class="agent-tab-copy" title="Copy" onclick="copyAgentTabActive('${id}',this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button>`;
+  const copyBtnHtml = `<button class="agent-tab-copy" title="Copy" onclick="copyAgentTabActive('${id}',this)">${ICON_COPY}</button>`;
   const tabsHtml = tabs
     .map(
       (t) =>
@@ -5493,13 +5493,13 @@ async function showSessionInfoModal(sessionId) {
   // and re-rendered when they arrive, so the modal doesn't block on network.
   _planSessionId = sessionId;
   const cachedTasks = currentSessionId === sessionId ? currentTasks : [];
-  showInfoModal(session, null, cachedTasks, null);
+  showInfoModal(session, null, cachedTasks, null, null);
 
-  const rerender = (teamConfig, tasks, planContent) => {
+  const rerender = (teamConfig, tasks, planContent, parentInfo) => {
     if (_planSessionId !== sessionId) return; // user opened a different modal
     const modal = document.getElementById('team-modal');
     if (!modal?.classList.contains('visible')) return; // user closed modal — don't reopen
-    showInfoModal(session, teamConfig, tasks, planContent);
+    showInfoModal(session, teamConfig, tasks, planContent, parentInfo);
   };
 
   const teamPromise = session.isTeam
@@ -5520,8 +5520,17 @@ async function showSessionInfoModal(sessionId) {
           .then((r) => (r.ok ? r.json() : []))
           .catch(() => []);
 
-  const [teamConfig, planContent, tasks] = await Promise.all([teamPromise, planPromise, tasksPromise]);
-  rerender(teamConfig, tasks, planContent);
+  const parentPromise = fetch(`/api/sessions/${sessionId}/parent`)
+    .then((r) => (r.ok ? r.json() : null))
+    .catch(() => null);
+
+  const [teamConfig, planContent, tasks, parentInfo] = await Promise.all([
+    teamPromise,
+    planPromise,
+    tasksPromise,
+    parentPromise,
+  ]);
+  rerender(teamConfig, tasks, planContent, parentInfo);
 }
 
 let _infoModalSessionId = null;
@@ -5538,7 +5547,7 @@ function updateStickyBtnState() {
   if (svg) svg.setAttribute('fill', isSticky ? 'currentColor' : 'none');
 }
 
-function showInfoModal(session, teamConfig, tasks, planContent) {
+function showInfoModal(session, teamConfig, tasks, planContent, parentInfo) {
   const modal = document.getElementById('team-modal');
   const titleEl = document.getElementById('team-modal-title');
   const bodyEl = document.getElementById('team-modal-body');
@@ -5558,6 +5567,13 @@ function showInfoModal(session, teamConfig, tasks, planContent) {
   // Each row: [label, displayValue, { openPath?, copyValue? }]
   const infoRows = [];
   infoRows.push(['Session', session.id, { openClaudeDir: true, openFile: session.jsonlPath }]);
+  if (parentInfo?.parentSessionId) {
+    infoRows.push([
+      'Forked from',
+      parentInfo.parentSessionId,
+      { openClaudeDir: true, openFile: parentInfo.parentJsonlPath, openSession: parentInfo.parentSessionId },
+    ]);
+  }
   if (session.slug && session.hasPlan) {
     infoRows.push(['Slug', session.slug, { openClaudeDir: true, openFile: session.planPath }]);
   }
@@ -5589,19 +5605,25 @@ function showInfoModal(session, teamConfig, tasks, planContent) {
     "font-family: 'IBM Plex Mono', monospace; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; color: var(--accent-text); text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 3px;";
   const plainStyle =
     "font-family: 'IBM Plex Mono', monospace; font-size: 12px; user-select: all; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;";
-  html += `<div class="team-modal-meta" style="margin-bottom: 16px; display: grid; grid-template-columns: auto 1fr auto; gap: 6px 12px; align-items: center;">`;
+  html += `<div class="team-modal-meta info-grid">`;
   infoRows.forEach(([label, value, opts]) => {
     const copyVal = escapeHtml(value).replace(/"/g, '&quot;');
     html += `<span style="font-weight: 500; color: var(--text-secondary); font-size: 12px; white-space: nowrap;">${label}</span>`;
-    if (opts?.openClaudeDir || opts?.openPath) {
-      const folder = opts.openClaudeDir ? '' : escapeHtml(opts.openPath).replace(/"/g, '&quot;');
-      const file = opts.openFile ? escapeHtml(opts.openFile).replace(/"/g, '&quot;') : '';
-      html += `<span data-folder="${folder}" data-file="${file}" data-claude-dir="${opts.openClaudeDir ? '1' : ''}" onclick="openFolderInEditor(this.dataset.claudeDir ? undefined : this.dataset.folder, this.dataset.file || undefined)" style="${clickableStyle}" title="Open in editor">${escapeHtml(value)}</span>`;
+    if (opts?.openSession) {
+      const sid = _escapeForJsAttr(escapeHtml(opts.openSession).replace(/"/g, '&quot;'));
+      html += `<span onclick="openSessionFromInfo('${sid}')" style="${clickableStyle}" title="Open session in app">${escapeHtml(value)}</span>`;
     } else {
       html += `<span style="${plainStyle}" title="${copyVal}">${escapeHtml(value)}</span>`;
     }
     const jsCopyVal = _escapeForJsAttr(copyVal);
-    html += `<button onclick="navigator.clipboard.writeText('${jsCopyVal}'); this.textContent='✓'; setTimeout(() => this.textContent='Copy', 1000)" style="padding: 2px 8px; font-size: 11px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 4px; color: var(--text-secondary); cursor: pointer; white-space: nowrap;">Copy</button>`;
+    const copyBtn = `<button onclick="copyWithFeedback('${jsCopyVal}', this)" title="Copy">${ICON_COPY}</button>`;
+    let openBtn = '';
+    if (opts?.openClaudeDir || opts?.openPath) {
+      const folder = opts.openClaudeDir ? '' : escapeHtml(opts.openPath).replace(/"/g, '&quot;');
+      const file = opts.openFile ? escapeHtml(opts.openFile).replace(/"/g, '&quot;') : '';
+      openBtn = `<button data-folder="${folder}" data-file="${file}" data-claude-dir="${opts.openClaudeDir ? '1' : ''}" onclick="openFolderInEditor(this.dataset.claudeDir ? undefined : this.dataset.folder, this.dataset.file || undefined)" title="Open in editor">${ICON_OPEN_EXTERNAL}</button>`;
+    }
+    html += `<span class="info-row-actions">${copyBtn}${openBtn}</span>`;
   });
   html += `</div>`;
 
@@ -5687,6 +5709,11 @@ function showInfoModal(session, teamConfig, tasks, planContent) {
   updateDismissBtnState();
   const costBtn = document.getElementById('session-info-cost-btn');
   if (costBtn) costBtn.style.display = window.__HUB__?.enabled || appConfig.costUrl ? '' : 'none';
+  const mkBtn = document.getElementById('session-info-marketplace-btn');
+  const memBtn = document.getElementById('session-info-memory-btn');
+  const proj = session.project;
+  if (mkBtn) mkBtn.style.display = proj && (window.__HUB__?.enabled || appConfig.marketplaceUrl) ? '' : 'none';
+  if (memBtn) memBtn.style.display = proj && (window.__HUB__?.enabled || appConfig.memoryUrl) ? '' : 'none';
   modal.classList.add('visible');
 
   if (alreadyVisible) return; // re-render during deferred hydration — key handler already attached
@@ -5705,6 +5732,12 @@ function showInfoModal(session, teamConfig, tasks, planContent) {
 function closeTeamModal() {
   document.getElementById('team-modal').classList.remove('visible');
   _planSessionId = null;
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+function openSessionFromInfo(sessionId) {
+  closeTeamModal();
+  fetchTasks(sessionId);
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
@@ -5801,7 +5834,6 @@ function openCost(sessionId) {
   }
 }
 
-// biome-ignore lint/correctness/noUnusedVariables: used in HTML
 function openMarketplace(projectPath) {
   const params = new URLSearchParams({ project: projectPath });
   if (window.__HUB__?.enabled) {
@@ -5813,7 +5845,6 @@ function openMarketplace(projectPath) {
   }
 }
 
-// biome-ignore lint/correctness/noUnusedVariables: used in HTML
 function openMemory(projectPath) {
   const params = new URLSearchParams({ project: projectPath });
   if (window.__HUB__?.enabled) {
@@ -5823,6 +5854,19 @@ function openMemory(projectPath) {
     url.search = params.toString();
     window.open(url.toString(), '_blank');
   }
+}
+
+function openForInfoModalProject(open) {
+  const s = sessions.find((x) => x.id === _infoModalSessionId);
+  if (s?.project) open(s.project);
+}
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+function openMarketplaceForInfoModal() {
+  openForInfoModalProject(openMarketplace);
+}
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+function openMemoryForInfoModal() {
+  openForInfoModalProject(openMemory);
 }
 
 //#endregion

@@ -1252,29 +1252,121 @@ function subagentJsonlPath(meta, agentId) {
 }
 
 // Claude Code can scatter a session's records across multiple project dirs
-// (e.g. main repo + worktree), so the subagent JSONL may live under a
-// different project dir than meta.jsonlPath. Fall back to scanning when the
-// derived path is missing.
+// (e.g. main repo + worktree) and across sibling sessionId dirs when a
+// session is forked/resumed — the subagent JSONL stays under the original
+// parent sessionId. Fall back to scanning when the derived path is missing.
 const subagentPathCache = new Map();
+function findSubagentJsonlInProject(projPath, sessionId, agentId) {
+  const sameSid = path.join(projPath, sessionId, 'subagents', 'agent-' + agentId + '.jsonl');
+  if (existsSync(sameSid)) return sameSid;
+  let sessions;
+  try { sessions = readdirSync(projPath, { withFileTypes: true }); } catch { return null; }
+  for (const sess of sessions) {
+    if (!sess.isDirectory() || sess.name === sessionId) continue;
+    const candidate = path.join(projPath, sess.name, 'subagents', 'agent-' + agentId + '.jsonl');
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
 function resolveSubagentJsonl(meta, sessionId, agentId) {
   const primary = subagentJsonlPath(meta, agentId);
   if (existsSync(primary)) return primary;
   const key = sessionId + '/' + agentId;
-  if (subagentPathCache.has(key)) return subagentPathCache.get(key) || primary;
+  const cached = subagentPathCache.get(key);
+  if (cached) return cached;
   let found = null;
-  try {
-    for (const entry of readdirSync(PROJECTS_DIR, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue;
-      const candidate = path.join(
-        PROJECTS_DIR, entry.name, sessionId,
-        'subagents', 'agent-' + agentId + '.jsonl'
-      );
-      if (existsSync(candidate)) { found = candidate; break; }
-    }
-  } catch (_) { /* projects dir missing */ }
-  subagentPathCache.set(key, found);
+  const parent = lookupParentSession(sessionId);
+  if (parent.parentSessionId && parent.parentJsonlPath) {
+    const projDir = path.dirname(parent.parentJsonlPath);
+    const candidate = path.join(projDir, parent.parentSessionId, 'subagents', 'agent-' + agentId + '.jsonl');
+    if (existsSync(candidate)) found = candidate;
+  }
+  if (!found) {
+    try {
+      for (const proj of readdirSync(PROJECTS_DIR, { withFileTypes: true })) {
+        if (!proj.isDirectory()) continue;
+        found = findSubagentJsonlInProject(path.join(PROJECTS_DIR, proj.name), sessionId, agentId);
+        if (found) break;
+      }
+    } catch (_) { /* projects dir missing */ }
+  }
+  if (found) subagentPathCache.set(key, found);
   return found || primary;
 }
+
+// Claude Code marks fork lineage in two ways:
+//   1. `logicalParentUuid` on a system record (when present) points to a uuid
+//      in the parent session's JSONL.
+//   2. When absent, the fork copies the parent's early records verbatim, so
+//      the earliest `uuid` in this session also exists (same uuid+timestamp)
+//      in the parent's JSONL.
+// We try (1) first, then fall back to (2).
+const parentSessionCache = new Map();
+// Both anchor signals live in the first few records (system marker on top,
+// fork-copy starts at line 0), so cap the scan instead of reading the whole file.
+const FORK_ANCHOR_SCAN_LINES = 10;
+function findForkAnchorUuid(jsonlPath) {
+  let text;
+  try { text = readFileSync(jsonlPath, 'utf8'); } catch { return null; }
+  let firstUuid = null;
+  let scanned = 0;
+  for (const l of text.split('\n')) {
+    if (!l) continue;
+    if (scanned++ >= FORK_ANCHOR_SCAN_LINES) break;
+    try {
+      const d = JSON.parse(l);
+      if (d.logicalParentUuid) return d.logicalParentUuid;
+      if (!firstUuid && d.uuid) firstUuid = d.uuid;
+    } catch { /* skip malformed */ }
+  }
+  return firstUuid;
+}
+function findSessionContainingUuid(projectDir, targetUuid, excludeJsonlPath) {
+  let files;
+  try { files = readdirSync(projectDir); } catch { return null; }
+  const candidates = [];
+  for (const f of files) {
+    if (!f.endsWith('.jsonl')) continue;
+    const fp = path.join(projectDir, f);
+    if (fp === excludeJsonlPath) continue;
+    let text;
+    try { text = readFileSync(fp, 'utf8'); } catch { continue; }
+    if (!text.includes(targetUuid)) continue;
+    for (const l of text.split('\n')) {
+      if (!l || !l.includes(targetUuid)) continue;
+      try {
+        const d = JSON.parse(l);
+        if (d.uuid === targetUuid && d.sessionId) {
+          let mtime = 0;
+          try { mtime = statSync(fp).mtimeMs; } catch { /* ignore */ }
+          candidates.push({ parentSessionId: d.sessionId, parentJsonlPath: fp, mtime });
+          break;
+        }
+      } catch { /* skip */ }
+    }
+  }
+  if (!candidates.length) return null;
+  candidates.sort((a, b) => a.mtime - b.mtime);
+  const { parentSessionId, parentJsonlPath } = candidates[0];
+  return { parentSessionId, parentJsonlPath };
+}
+function lookupParentSession(sessionId) {
+  if (parentSessionCache.has(sessionId)) return parentSessionCache.get(sessionId);
+  const meta = loadSessionMetadata()[sessionId];
+  const result = { parentSessionId: null, parentJsonlPath: null };
+  if (meta?.jsonlPath) {
+    const anchorUuid = findForkAnchorUuid(meta.jsonlPath);
+    if (anchorUuid) {
+      const hit = findSessionContainingUuid(path.dirname(meta.jsonlPath), anchorUuid, meta.jsonlPath);
+      if (hit) Object.assign(result, hit);
+    }
+  }
+  if (result.parentSessionId) parentSessionCache.set(sessionId, result);
+  return result;
+}
+app.get('/api/sessions/:sessionId/parent', (req, res) => {
+  res.json(lookupParentSession(resolveSessionId(req.params.sessionId)));
+});
 
 app.get('/api/sessions/:sessionId/agents/:agentId/messages', (req, res) => {
   const sessionId = resolveSessionId(req.params.sessionId);

@@ -1743,6 +1743,55 @@ body::before {
   border-top: 1px solid var(--border);
 }
 
+.info-grid {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 6px 12px;
+  align-items: center;
+  margin-bottom: 16px;
+}
+.info-row-actions {
+  display: flex;
+  gap: 4px;
+  opacity: 0.3;
+  transition: opacity 0.15s ease;
+}
+.info-grid:hover .info-row-actions {
+  opacity: 1;
+}
+.info-row-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition:
+    background 0.1s ease,
+    border-color 0.1s ease,
+    color 0.1s ease;
+}
+.info-row-actions button:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+.info-row-actions button svg {
+  width: 12px;
+  height: 12px;
+  display: block;
+}
+@media (hover: none) {
+  .info-row-actions {
+    opacity: 1;
+  }
+}
+
 /* #endregion */
 
 /* #region OWNER_FILTER */
@@ -2106,6 +2155,11 @@ body::before {
 .agent-tab-copy:hover {
   opacity: 1;
   color: var(--text-primary);
+}
+.agent-tab-copy svg {
+  width: 14px;
+  height: 14px;
+  display: block;
 }
 .toast {
   position: fixed;
@@ -2531,8 +2585,26 @@ body::before {
   border: 1px solid var(--border);
 }
 .agent-badge {
-  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   cursor: default;
+  line-height: 1;
+  flex-shrink: 0;
+  color: var(--text-secondary);
+}
+.agent-badge-waiting {
+  color: var(--warning);
+  animation: agent-badge-pulse 1.6s ease-in-out infinite;
+}
+@keyframes agent-badge-pulse {
+  0%,
+  100% {
+    opacity: 0.65;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 .linked-docs-badge,
@@ -3500,22 +3572,6 @@ pre.mermaid svg {
 
 .project-view-btn:hover {
   color: var(--accent);
-}
-
-.marketplace-btn {
-  color: #888;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  transition:
-    color 0.15s,
-    filter 0.15s;
-  border-radius: 3px;
-}
-
-.marketplace-btn:hover {
-  color: var(--accent);
-  filter: drop-shadow(0 0 3px var(--accent));
 }
 
 .project-group-header .group-count {
