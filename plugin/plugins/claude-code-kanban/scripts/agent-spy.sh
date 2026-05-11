@@ -38,17 +38,17 @@ if [ "$EVENT" = "SessionStart" ]; then
 fi
 
 # PostToolUse / non-waiting PreToolUse: clear waiting state
-if [ "$EVENT" = "PostToolUse" ] || { [ "$EVENT" = "PreToolUse" ] && [ "$TOOL_NAME" != "AskUserQuestion" ]; }; then
+if [ "$EVENT" = "PostToolUse" ] || { [ "$EVENT" = "PreToolUse" ] && [ "$TOOL_NAME" != "AskUserQuestion" ] && [ "$TOOL_NAME" != "ExitPlanMode" ]; }; then
   WFILE="$CCK_ACTIVITY/$SESSION_ID/_waiting.json"
   rm -f "$WFILE"
   [ "$EVENT" = "PostToolUse" ] && exit 0
 fi
 
-# Plan mode tools don't fire PostToolUse — skip to avoid stale markers
-[ "$TOOL_NAME" = "EnterPlanMode" ] || [ "$TOOL_NAME" = "ExitPlanMode" ] && exit 0
+# EnterPlanMode has no waiting semantics — skip
+[ "$TOOL_NAME" = "EnterPlanMode" ] && exit 0
 
 # Waiting-for-user events → write _waiting.json marker
-if [ "$EVENT" = "PermissionRequest" ] || { [ "$EVENT" = "PreToolUse" ] && [ "$TOOL_NAME" = "AskUserQuestion" ]; }; then
+if [ "$EVENT" = "PermissionRequest" ] || { [ "$EVENT" = "PreToolUse" ] && { [ "$TOOL_NAME" = "AskUserQuestion" ] || [ "$TOOL_NAME" = "ExitPlanMode" ]; }; }; then
   DIR="$CCK_ACTIVITY/$SESSION_ID"
   mkdir -p "$DIR"
   KIND="permission"

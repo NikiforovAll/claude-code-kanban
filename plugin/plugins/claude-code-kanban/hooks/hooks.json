@@ -70,6 +70,16 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "matcher": "ExitPlanMode",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/agent-spy.sh",
+            "timeout": 5
+          }
+        ]
       }
     ],
     "PostToolUse": [
