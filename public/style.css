@@ -2282,6 +2282,59 @@ body::before {
   border-radius: 3px;
   font-size: 11px;
 }
+.user-attach-chips {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+.user-attach-chip {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+}
+.msg-text-muted {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.user-attach-section {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.user-attach-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.user-attach-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.user-attach-image {
+  max-width: 100%;
+  max-height: 480px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg-hover);
+}
+.user-attach-toolresult {
+  margin-top: 6px;
+}
+.user-attach-toolresult > summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: 4px 0;
+}
+.user-attach-toolresult > summary code {
+  font-size: 10px;
+}
 .msg-item.msg-system {
   border-left: 3px solid var(--border);
 }
@@ -2300,6 +2353,30 @@ body::before {
 .msg-item.msg-idle {
   border-left: 3px solid var(--border);
   opacity: 0.75;
+}
+.msg-item.msg-waiting {
+  border-left: 3px solid var(--warning, #f5a623);
+  background: color-mix(in srgb, var(--warning, #f5a623) 8%, transparent);
+  animation: msg-waiting-pulse 2s ease-in-out infinite;
+}
+.msg-waiting .msg-text {
+  font-weight: 600;
+}
+.msg-waiting-preview {
+  font-size: 11px;
+  opacity: 0.85;
+  margin-top: 2px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+@keyframes msg-waiting-pulse {
+  0%,
+  100% {
+    background: color-mix(in srgb, var(--warning, #f5a623) 8%, transparent);
+  }
+  50% {
+    background: color-mix(in srgb, var(--warning, #f5a623) 16%, transparent);
+  }
 }
 .msg-item.msg-idle .msg-icon {
   width: 12px;

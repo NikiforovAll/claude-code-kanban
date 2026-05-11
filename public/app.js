@@ -18,6 +18,7 @@ let bulkDeleteSessionId = null; // Track session for bulk delete
 let ownerFilter = '';
 let currentAgents = [];
 let currentWaiting = null;
+let lastWaitingHash = '';
 let lastAgentsHash = '';
 let messagePanelOpen = false;
 let lastMessagesHash = '';
@@ -443,11 +444,12 @@ function renderActivityChip() {
   let waiting = 0;
   let active = 0;
   for (const s of sessions) {
+    if (dismissedSessionIds.has(s.id)) continue;
     if (s.hasWaitingForUser) waiting++;
     else if (s.inProgress > 0 || s.hasRecentLog || s.hasRunningAgents) active++;
   }
 
-  const key = `${waiting}|${active}|${[...activityFilter].sort().join(',')}`;
+  const key = `${waiting}|${active}|${dismissedSessionIds.size}|${[...activityFilter].sort().join(',')}`;
   if (key === lastChipKey) return;
   lastChipKey = key;
 
@@ -565,15 +567,18 @@ async function fetchTasks(sessionId) {
   }
 }
 
-const _AGENT_COOLDOWN_MS = 3 * 60 * 1000;
-const _AGENT_STALE_MS = 5 * 60 * 1000; // kept for reference; no longer used for force-stopping
+// #region TIMINGS
 const WAITING_TTL_MS = 30 * 60 * 1000;
 const AGENT_LOG_MAX = 8;
+const LIVE_INDICATOR_MS = 10 * 1000;
+const ACTIVE_PLAN_MS = 10 * 60 * 1000;
+// #endregion
 
 function resetAgentState() {
   currentAgents = [];
   currentWaiting = null;
   lastAgentsHash = '';
+  lastWaitingHash = '';
   renderAgentFooter();
 }
 
@@ -595,6 +600,11 @@ async function fetchAgents(sessionId) {
     for (const k of Object.keys(ownerColorCache)) delete ownerColorCache[k];
     renderAgentFooter();
     if (currentSessionId === sessionId) renderKanban();
+    const waitHash = JSON.stringify(currentWaiting);
+    if (waitHash !== lastWaitingHash) {
+      lastWaitingHash = waitHash;
+      if (messagePanelOpen && currentMessages.length) renderMessages(currentMessages);
+    }
   } catch (e) {
     console.error('[fetchAgents]', e);
   }
@@ -899,6 +909,11 @@ function parseCommandMessage(text) {
   return null;
 }
 
+function parseCommandArgs(text) {
+  const m = (text || '').match(/<command-args>([^<]*)<\/command-args>/);
+  return m?.[1].trim() || '';
+}
+
 function cleanMessageText(text) {
   const cmd = parseCommandMessage(text);
   if (cmd) return cmd;
@@ -1051,11 +1066,25 @@ function renderMessageList(messages) {
           </div>`);
       } else {
         const cmd = parseCommandMessage(m.text);
+        const cmdArgs = cmd ? parseCommandArgs(m.fullText || m.text) : '';
         const displayText = cmd ? cmd : escapeHtml(cleanMessageText(m.text));
         const isCmd = !!cmd;
+        const cmdArgsHtml =
+          cmd && cmdArgs ? ` <span style="color:var(--text-secondary)">${escapeHtml(cmdArgs)}</span>` : '';
+        const chips = [];
+        const imgCount = m.images?.length || 0;
+        const trCount = m.toolResultRefs?.length || 0;
+        if (imgCount) chips.push(`<span class="user-attach-chip">${imgCount} image${imgCount > 1 ? 's' : ''}</span>`);
+        if (trCount)
+          chips.push(`<span class="user-attach-chip">${trCount} tool result${trCount > 1 ? 's' : ''}</span>`);
+        const chipsHtml = chips.length ? `<div class="user-attach-chips">${chips.join('')}</div>` : '';
+        let textHtml;
+        if (displayText) textHtml = isCmd ? `<code>${escapeHtml(displayText)}</code>` : displayText;
+        else if (chips.length) textHtml = '<em class="msg-text-muted">(attachment)</em>';
+        else textHtml = '';
         parts.push(`<div class="msg-item msg-user${isCmd ? ' msg-cmd' : ''}" ${clickable}>
             ${MSG_ICON_USER}
-            <div class="msg-body"><div class="msg-text">${isCmd ? `<code>${escapeHtml(displayText)}</code>` : displayText}</div><div class="msg-time">${formatDate(m.timestamp)}</div></div>${pinBtn}
+            <div class="msg-body"><div class="msg-text">${textHtml}${cmdArgsHtml}</div>${chipsHtml}<div class="msg-time">${formatDate(m.timestamp)}</div></div>${pinBtn}
           </div>`);
       }
     } else if (m.type === 'assistant') {
@@ -1103,6 +1132,45 @@ function toggleToolGroup(id) {
   if (el) el.classList.toggle('show');
 }
 
+const WAITING_PLAN_PREVIEW_CHARS = 120;
+const WAITING_PREVIEW_MAX_CHARS = 200;
+
+function getWaitingLabel(kind, tool) {
+  if (kind !== 'question') return `Awaiting permission: ${tool}`;
+  if (tool === 'ExitPlanMode') return 'Plan awaiting approval';
+  return 'Question pending';
+}
+
+function getWaitingPreview(toolInput) {
+  if (!toolInput) return '';
+  try {
+    const parsed = JSON.parse(toolInput);
+    if (parsed.questions?.[0]?.question) return parsed.questions[0].question;
+    if (parsed.plan) {
+      const t = parsed.plan.match(/^#\s+(.+)/m);
+      return t ? t[1] : parsed.plan.slice(0, WAITING_PLAN_PREVIEW_CHARS);
+    }
+    if (parsed.command) return parsed.command;
+    if (parsed.file_path) return parsed.file_path;
+  } catch (_) {
+    /* toolInput may be truncated/non-JSON */
+  }
+  return '';
+}
+
+function renderWaitingEntry() {
+  if (!currentWaiting?.timestamp) return '';
+  const age = Date.now() - new Date(currentWaiting.timestamp).getTime();
+  if (age >= WAITING_TTL_MS) return '';
+  const tool = currentWaiting.toolName || 'unknown';
+  const label = getWaitingLabel(currentWaiting.kind, tool);
+  const preview = getWaitingPreview(currentWaiting.toolInput);
+  const previewHtml = preview
+    ? `<div class="msg-waiting-preview">${escapeHtml(preview.slice(0, WAITING_PREVIEW_MAX_CHARS))}</div>`
+    : '';
+  return `<div class="msg-item msg-waiting">${ICON_CHAT}<div class="msg-body"><div class="msg-text">${escapeHtml(label)}</div>${previewHtml}<div class="msg-time">waiting…</div></div></div>`;
+}
+
 function renderMessages(messages) {
   const container = document.getElementById('message-panel-content');
   const pinnedContainer = document.getElementById('message-panel-pinned');
@@ -1116,7 +1184,7 @@ function renderMessages(messages) {
     currentMessages.length >= MSG_MAX_LOADED
       ? `<div class="msg-limit-banner">Showing last ${MSG_MAX_LOADED} messages</div>`
       : '';
-  container.innerHTML = limitBanner + msgsHtml;
+  container.innerHTML = limitBanner + msgsHtml + renderWaitingEntry();
   if (!msgUserScrolledUp) container.scrollTop = container.scrollHeight;
   // Auto-load more if content doesn't overflow yet
   if (
@@ -1160,6 +1228,8 @@ const ICON_CHECKMARK =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M20 6L9 17l-5-5"/></svg>';
 const ICON_AGENT_WAITING =
   '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
+const ICON_CHAT =
+  '<svg class="msg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
 const TOOL_ICONS = {
   Bash: '<svg class="msg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="18" rx="2"/><polyline points="7 10 10 13 7 16"/><line x1="13" y1="16" x2="17" y2="16"/></svg>',
   Read: '<svg class="msg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>',
@@ -1177,8 +1247,8 @@ const TOOL_ICONS = {
   TaskList: ICON_TASK,
   ToolSearch:
     '<svg class="msg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>',
-  AskUserQuestion:
-    '<svg class="msg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
+  AskUserQuestion: ICON_CHAT,
+  ExitPlanMode: ICON_CHAT,
   Skill:
     '<svg class="msg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>',
   WebFetch: ICON_WEB,
@@ -1486,6 +1556,40 @@ const linkSvg = (size) =>
 //#endregion
 
 //#region MODALS
+function renderUserAttachments(m) {
+  const parts = [];
+  if (m.images?.length && m.uuid && currentSessionId) {
+    const imgs = m.images
+      .map((img) => {
+        const url = `/api/sessions/${encodeURIComponent(currentSessionId)}/user-image/${encodeURIComponent(m.uuid)}/${img.blockIndex}`;
+        return `<img src="${url}" loading="lazy" alt="user image" class="user-attach-image" />`;
+      })
+      .join('');
+    parts.push(
+      `<div class="user-attach-section"><div class="user-attach-label">Attached images</div><div class="user-attach-images">${imgs}</div></div>`,
+    );
+  }
+  if (m.toolResultRefs?.length) {
+    const refs = m.toolResultRefs
+      .map((ref) => {
+        const safeId = escapeHtml(ref.toolUseId);
+        const shortId = ref.toolUseId.length > 14 ? `${ref.toolUseId.slice(0, 14)}…` : ref.toolUseId;
+        const preview = ref.preview ? escapeHtml(ref.preview) : '<em>(no text)</em>';
+        const expandId = `user-tr-${ref.toolUseId}`;
+        return `<details class="user-attach-toolresult">
+          <summary>Tool result <code>${escapeHtml(shortId)}</code></summary>
+          <pre class="${TINTED_PRE_CLASS}" id="${expandId}">${preview}</pre>
+          <button type="button" class="tool-result-expand-btn" data-expand-id="${expandId}" data-tool-use-id="${safeId}" onclick="_toggleToolResultExpand(this)">Show full</button>
+        </details>`;
+      })
+      .join('');
+    parts.push(
+      `<div class="user-attach-section"><div class="user-attach-label">Tool results in this message</div>${refs}</div>`,
+    );
+  }
+  return parts.join('');
+}
+
 function showMsgDetail(idx) {
   currentMsgDetailIdx = idx;
   const m = currentMessages[idx];
@@ -1550,25 +1654,27 @@ function showMsgDetail(idx) {
       body.innerHTML = renderMarkdown(text);
     }
   } else {
-    const rawText = stripAnsi(m.fullText || m.text);
+    const rawText = stripAnsi(m.fullText || m.text || '');
     const cmd = m.type === 'user' ? parseCommandMessage(rawText) : null;
     document.getElementById('msg-detail-title').textContent =
       m.type === 'assistant' ? 'Claude' : m.systemLabel ? 'System' : 'User';
     document.getElementById('msg-detail-agent-btn').style.display = 'none';
+    const userExtras = m.type === 'user' ? renderUserAttachments(m) : '';
     if (m.compactSummary) {
-      body.innerHTML = renderMarkdown(m.compactSummary);
+      body.innerHTML = renderMarkdown(m.compactSummary) + userExtras;
     } else if (cmd) {
-      const argsMatch = rawText.match(/<command-args>([^<]*)<\/command-args>/);
-      const args = argsMatch?.[1].trim() ? argsMatch[1].trim() : null;
+      const args = parseCommandArgs(rawText) || null;
       const cleanBody = rawText
         .replace(/<command-[^>]+>[\s\S]*?<\/command-[^>]+>/g, '')
         .replace(/<local-command-[^>]+>[\s\S]*?<\/local-command-[^>]+>/g, '')
         .trim();
       let cmdHtml = `<code>${escapeHtml(cmd)}${args ? ` ${escapeHtml(args)}` : ''}</code>`;
       if (cleanBody) cmdHtml += `<div style="margin-top:10px">${renderMarkdown(cleanBody)}</div>`;
-      body.innerHTML = cmdHtml;
+      body.innerHTML = cmdHtml + userExtras;
+    } else if (rawText) {
+      body.innerHTML = renderMarkdown(rawText) + userExtras;
     } else {
-      body.innerHTML = renderMarkdown(rawText);
+      body.innerHTML = userExtras || '<em>No content</em>';
     }
   }
   const modal = document.getElementById('msg-detail-modal').querySelector('.modal');
@@ -2325,10 +2431,8 @@ function renderSessions() {
 
   // Filter pipeline: active filter → force-include revealed/current (non-pinned) sessions →
   // project filter → search filter → ensure pinned/sticky sessions are always included
-  const LIVE_INDICATOR_MS = 10 * 1000;
   let filteredSessions = sessions;
   if (sessionFilter === 'active') {
-    const ACTIVE_PLAN_MS = 15 * 60 * 1000;
     const now = Date.now();
     const activeSessionIds = new Set();
     filteredSessions = filteredSessions.filter((s) => {
@@ -4380,6 +4484,7 @@ document.addEventListener('keydown', (e) => {
     dismissedSessionIds.add(contextSid);
     updateDismissBtnState();
     renderSessions();
+    renderActivityChip();
     const newItems = getNavigableItems();
     const targetIdx = newItems.length > 0 ? Math.max(0, prevIdx - 1) : -1;
     // If the dismissed session is currently open, navigate to the previous one
@@ -5749,6 +5854,7 @@ function toggleDismissSession(sessionId) {
   }
   updateDismissBtnState();
   renderSessions();
+  renderActivityChip();
 }
 
 function updateDismissBtnState() {

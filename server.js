@@ -20,7 +20,8 @@ const {
   findTerminatedTeammates,
   extractPromptFromTranscript,
   extractModelFromTranscript,
-  readFullToolResult
+  readFullToolResult,
+  readUserImage
 } = require('./lib/parsers');
 
 if (process.argv.includes("--install") || process.argv.includes("--uninstall")) {
@@ -95,12 +96,16 @@ function writePins(pins) {
   }
 }
 
-const PERMISSION_TTL_MS = 1800000;
-const AGENT_TTL_MS = 3600000;
-const AGENT_STALE_MS = 900000;
-const SESSION_STALE_MS = 300000;
-
-const WAITING_RESOLVE_GRACE_MS = 15000;
+// #region TIMINGS
+const PERMISSION_TTL_MS = 30 * 60 * 1000;
+const AGENT_TTL_MS = 60 * 60 * 1000;
+const AGENT_STALE_MS = 30 * 60 * 1000; // safety net for crashed sessions
+const SESSION_STALE_MS = 5 * 60 * 1000;
+const WAITING_RESOLVE_GRACE_MS = 15 * 1000;
+const CTX_CLEANUP_MAX_AGE_MS = 2 * 60 * 60 * 1000;
+const CLEANUP_MAX_AGE_MS = 2 * 24 * 60 * 60 * 1000;
+const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
+// #endregion
 
 function readAgentJsonl(filePath) {
   const raw = readFileSync(filePath, 'utf8');
@@ -1510,6 +1515,19 @@ app.get('/api/sessions/:sessionId/tool-result/:toolUseId', (req, res) => {
   res.json({ toolUseId: req.params.toolUseId, content });
 });
 
+app.get('/api/sessions/:sessionId/user-image/:msgUuid/:blockIndex', (req, res) => {
+  const metadata = loadSessionMetadata();
+  const meta = metadata[req.params.sessionId];
+  const jsonlPath = meta?.jsonlPath;
+  if (!jsonlPath) return res.status(404).end();
+  const img = readUserImage(jsonlPath, req.params.msgUuid, req.params.blockIndex);
+  if (!img) return res.status(404).end();
+  const buf = Buffer.from(img.data, 'base64');
+  res.setHeader('Content-Type', img.mediaType);
+  res.setHeader('Cache-Control', 'no-store');
+  res.end(buf);
+});
+
 app.get('/api/version', (req, res) => {
   const pkg = require('./package.json');
   res.json({ version: pkg.version });
@@ -2012,7 +2030,6 @@ contextStatusWatcher.on('all', (event, filePath) => {
   }
 });
 
-const CTX_CLEANUP_MAX_AGE_MS = 2 * 60 * 60 * 1000;
 async function cleanupContextStatus() {
   try {
     const entries = await fs.readdir(CONTEXT_STATUS_DIR);
@@ -2030,10 +2047,6 @@ async function cleanupContextStatus() {
     }
   } catch (e) { /* dir may not exist */ }
 }
-
-// Cleanup agent-activity folders older than 2 days
-const CLEANUP_MAX_AGE_MS = 2 * 24 * 60 * 60 * 1000;
-const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 
 async function cleanupAgentActivity() {
   try {
