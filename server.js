@@ -8,7 +8,7 @@ const readline = require('readline');
 const chokidar = require('chokidar');
 const os = require('os');
 const crypto = require('crypto');
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 
 const {
   readRecentMessages: _readRecentMessagesUncached,
@@ -159,6 +159,45 @@ function isAgentFresh(agent) {
   return (Date.now() - new Date(ts).getTime()) < AGENT_TTL_MS;
 }
 
+// Claude Code records gitBranch from the launch-time repo and never updates it
+// when cwd shifts (Bash `cd`, submodule, sibling repo). Resolve on-demand from
+// the live cwd instead. Cached per-cwd with a short TTL so a list refresh
+// across N sessions sharing one cwd spawns git at most once per TTL window.
+const gitBranchCache = new Map();
+const GIT_BRANCH_TTL_MS = 30000;
+const GIT_BRANCH_CACHE_MAX = 500;
+function getGitBranch(cwd) {
+  if (!cwd) return null;
+  const now = Date.now();
+  const cached = gitBranchCache.get(cwd);
+  if (cached && now - cached.ts < GIT_BRANCH_TTL_MS) return cached.branch;
+  let branch = null;
+  try {
+    const r = spawnSync('git', ['-C', cwd, 'rev-parse', '--abbrev-ref', 'HEAD'], {
+      encoding: 'utf8', timeout: 500, windowsHide: true
+    });
+    if (r.status === 0) {
+      const out = (r.stdout || '').trim();
+      if (out && out !== 'HEAD') branch = out;
+    }
+  } catch (_) {}
+  gitBranchCache.set(cwd, { branch, ts: now });
+  if (gitBranchCache.size > GIT_BRANCH_CACHE_MAX) {
+    const firstKey = gitBranchCache.keys().next().value;
+    gitBranchCache.delete(firstKey);
+  }
+  return branch;
+}
+
+// Only spawn git when cwd has diverged from the launch project — that's the
+// only case the JSONL value is wrong. Saves N spawns on a typical list build.
+function resolveSessionGitBranch(meta) {
+  if (meta.cwd && meta.project && meta.cwd !== meta.project) {
+    return getGitBranch(meta.cwd) || meta.gitBranch || null;
+  }
+  return meta.gitBranch || null;
+}
+
 function getSessionLogStat(meta) {
   if (!meta.jsonlPath) return { mtime: null, hasMessages: false };
   try {
@@ -223,6 +262,11 @@ const clients = new Set();
 let sessionMetadataCache = {};
 let lastMetadataRefresh = 0;
 const METADATA_CACHE_TTL = 10000; // 10 seconds
+// Watcher-driven invalidation. `change` events (append to existing jsonl) only
+// dirty the one path so we can do a targeted refresh; `add` / `unlink` events
+// are structural and force a full rescan.
+const dirtyMetadataPaths = new Set();
+let metadataNeedsFullScan = true;
 
 const SAFE_ID_RE = /^[a-zA-Z0-9_-]+$/;
 function isSafeId(id) {
@@ -388,10 +432,50 @@ function readRecentMessages(jsonlPath, limit = 10) {
 /**
  * Scan all project directories to find session JSONL files and extract slugs
  */
+// Returns false when sessionId is unknown — caller must promote to full scan.
+function refreshSessionMetadataPath(jsonlPath) {
+  const sessionId = path.basename(jsonlPath, '.jsonl');
+  if (!isSafeId(sessionId)) return false;
+  const existing = sessionMetadataCache[sessionId];
+  if (!existing) return false;
+  let info;
+  try {
+    info = readSessionInfoFromJsonl(jsonlPath);
+  } catch (_) {
+    return false;
+  }
+  // Shadow JSONLs (continued from a worktree) hold only custom-title / agent-
+  // name records — no projectPath. Don't let a shadow clobber the real entry.
+  const shadow = existing.project && !info.projectPath;
+  if (shadow) {
+    if (!existing.slug && info.slug) existing.slug = info.slug;
+    if (!existing.customTitle && info.customTitle) existing.customTitle = info.customTitle;
+    return true;
+  }
+  if (info.slug) existing.slug = info.slug;
+  if (info.cwd) existing.cwd = info.cwd;
+  if (info.gitBranch) existing.gitBranch = info.gitBranch;
+  if (info.customTitle) existing.customTitle = info.customTitle;
+  return true;
+}
+
 function loadSessionMetadata() {
   const now = Date.now();
-  if (now - lastMetadataRefresh < METADATA_CACHE_TTL) {
-    return sessionMetadataCache;
+
+  if (!metadataNeedsFullScan && now - lastMetadataRefresh < METADATA_CACHE_TTL) {
+    if (dirtyMetadataPaths.size > 0) {
+      for (const p of dirtyMetadataPaths) {
+        if (!refreshSessionMetadataPath(p)) {
+          // Unknown sessionId — structural change snuck in. Promote to full.
+          metadataNeedsFullScan = true;
+          break;
+        }
+      }
+      dirtyMetadataPaths.clear();
+      if (!metadataNeedsFullScan) return sessionMetadataCache;
+    } else {
+      return sessionMetadataCache;
+    }
   }
 
   const metadata = {};
@@ -522,6 +606,8 @@ function loadSessionMetadata() {
 
   sessionMetadataCache = metadata;
   lastMetadataRefresh = now;
+  metadataNeedsFullScan = false;
+  dirtyMetadataPaths.clear();
   return metadata;
 }
 
@@ -600,7 +686,7 @@ function buildSessionObject(id, meta, overrides = {}) {
     project: meta.project || null,
     cwd: meta.cwd || null,
     description: meta.description || null,
-    gitBranch: meta.gitBranch || null,
+    gitBranch: resolveSessionGitBranch(meta),
     customTitle: meta.customTitle || null,
     taskCount: 0,
     completed: 0,
@@ -2005,18 +2091,27 @@ console.log(`Watching for team changes in: ${TEAMS_DIR}`);
 const projectsWatcher = chokidar.watch(PROJECTS_DIR, {
   persistent: true,
   ignoreInitial: true,
-  depth: 2
+  depth: 2,
+  awaitWriteFinish: { stabilityThreshold: 150, pollInterval: 50 }
 });
 
 projectsWatcher.on('all', (event, filePath) => {
-  if ((event === 'add' || event === 'change' || event === 'unlink') && filePath.endsWith('.jsonl')) {
+  if (event !== 'add' && event !== 'change' && event !== 'unlink') return;
+  if (filePath.endsWith('.jsonl')) {
     if (event === 'unlink') {
       loopInfoStateByPath.delete(filePath);
     } else {
       // Warm the incremental scan state so the next request does no IO.
       try { refreshLoopInfoState(filePath); } catch (_) {}
     }
-    lastMetadataRefresh = 0;
+    // add/unlink reshape the session set — promote to full rescan.
+    if (event === 'change') dirtyMetadataPaths.add(filePath);
+    else metadataNeedsFullScan = true;
+    broadcast({ type: 'metadata-update' });
+  } else if (path.basename(filePath) === 'sessions-index.json') {
+    // Index holds description / created / customTitle that the targeted
+    // refresh doesn't touch — promote to full rescan.
+    metadataNeedsFullScan = true;
     broadcast({ type: 'metadata-update' });
   }
 });
@@ -2029,7 +2124,9 @@ const plansWatcher = chokidar.watch(PLANS_DIR, {
 
 plansWatcher.on('all', (event, filePath) => {
   if ((event === 'add' || event === 'change' || event === 'unlink') && filePath.endsWith('.md')) {
-    lastMetadataRefresh = 0;
+    // Plan files don't affect cached session metadata — getPlanInfo is called
+    // fresh from buildSessionObject on every list build. The broadcast alone
+    // is enough to trigger a client refetch.
     broadcast({ type: 'metadata-update' });
     if (event === 'change') {
       const slug = path.basename(filePath, '.md');
