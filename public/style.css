@@ -2358,6 +2358,28 @@ body::before {
   border-left: 3px solid var(--warning, #f5a623);
   background: color-mix(in srgb, var(--warning, #f5a623) 8%, transparent);
   animation: msg-waiting-pulse 2s ease-in-out infinite;
+  cursor: pointer;
+}
+.msg-waiting-discard {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px;
+  opacity: 0;
+  transition: opacity 0.15s;
+  margin-left: auto;
+  align-self: flex-start;
+  line-height: 0;
+}
+.msg-item.msg-waiting:hover .msg-waiting-discard {
+  opacity: 0.6;
+}
+.msg-waiting-discard:hover {
+  /* biome-ignore lint/complexity/noImportantStyles: override parent hover opacity */
+  opacity: 1 !important;
+  color: var(--danger, #e54d4d);
 }
 .msg-waiting .msg-text {
   font-weight: 600;

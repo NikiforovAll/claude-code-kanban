@@ -604,6 +604,7 @@ async function fetchAgents(sessionId) {
     if (waitHash !== lastWaitingHash) {
       lastWaitingHash = waitHash;
       if (messagePanelOpen && currentMessages.length) renderMessages(currentMessages);
+      maybeFollowLatest();
     }
   } catch (e) {
     console.error('[fetchAgents]', e);
@@ -1159,16 +1160,33 @@ function getWaitingPreview(toolInput) {
 }
 
 function renderWaitingEntry() {
-  if (!currentWaiting?.timestamp) return '';
-  const age = Date.now() - new Date(currentWaiting.timestamp).getTime();
-  if (age >= WAITING_TTL_MS) return '';
+  if (!isWaitingFresh()) return '';
   const tool = currentWaiting.toolName || 'unknown';
   const label = getWaitingLabel(currentWaiting.kind, tool);
   const preview = getWaitingPreview(currentWaiting.toolInput);
   const previewHtml = preview
     ? `<div class="msg-waiting-preview">${escapeHtml(preview.slice(0, WAITING_PREVIEW_MAX_CHARS))}</div>`
     : '';
-  return `<div class="msg-item msg-waiting">${ICON_CHAT}<div class="msg-body"><div class="msg-text">${escapeHtml(label)}</div>${previewHtml}<div class="msg-time">waiting…</div></div></div>`;
+  const discardBtn = `<button class="msg-waiting-discard" title="Discard permission prompt" onclick="event.stopPropagation();discardWaiting()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>`;
+  return `<div class="msg-item msg-waiting" onclick="msgDetailFollowLatest=false;showWaitingDetail()">${ICON_CHAT}<div class="msg-body"><div class="msg-text">${escapeHtml(label)}</div>${previewHtml}<div class="msg-time">waiting…</div></div>${discardBtn}</div>`;
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML onclick
+async function discardWaiting() {
+  if (!currentSessionId) return;
+  try {
+    const res = await fetch(`/api/sessions/${encodeURIComponent(currentSessionId)}/waiting/discard`, {
+      method: 'POST',
+    });
+    if (res.ok) {
+      currentWaiting = null;
+      if (currentMsgDetailIdx === MSG_DETAIL_WAITING_IDX) closeMsgDetailModal();
+      renderMessages(currentMessages);
+      renderAgentFooter();
+    }
+  } catch (e) {
+    console.error('[discardWaiting]', e);
+  }
 }
 
 function renderMessages(messages) {
@@ -1199,6 +1217,7 @@ function renderMessages(messages) {
 
 let currentMsgDetailIdx = null;
 let msgDetailFollowLatest = false;
+const MSG_DETAIL_WAITING_IDX = -2;
 let currentPins = [];
 let pinnedCollapsed = false;
 
@@ -2137,7 +2156,7 @@ function renderAgentFooter() {
     )
     .slice(0, AGENT_LOG_MAX);
 
-  const permFresh = currentWaiting?.timestamp && now - new Date(currentWaiting.timestamp).getTime() < WAITING_TTL_MS;
+  const permFresh = isWaitingFresh();
 
   if (visible.length === 0 && !permFresh) {
     footer.classList.remove('visible');
@@ -4293,7 +4312,13 @@ document.addEventListener('keydown', (e) => {
     } else if (document.getElementById('msg-detail-modal').classList.contains('visible')) {
       if (matchKey(e, 'ArrowDown', 'KeyJ')) {
         e.preventDefault();
-        if (currentMsgDetailIdx < currentMessages.length - 1) {
+        if (currentMsgDetailIdx === MSG_DETAIL_WAITING_IDX) {
+          msgDetailFollowLatest = true;
+          showWaitingDetail();
+        } else if (currentMsgDetailIdx === currentMessages.length - 1 && isWaitingFresh()) {
+          msgDetailFollowLatest = false;
+          showWaitingDetail();
+        } else if (currentMsgDetailIdx < currentMessages.length - 1) {
           msgDetailFollowLatest = false;
           showMsgDetail(currentMsgDetailIdx + 1);
         } else if (currentMsgDetailIdx === currentMessages.length - 1) {
@@ -4302,7 +4327,12 @@ document.addEventListener('keydown', (e) => {
         }
       } else if (matchKey(e, 'ArrowUp', 'KeyK')) {
         e.preventDefault();
-        if (currentMsgDetailIdx > 0) {
+        if (currentMsgDetailIdx === MSG_DETAIL_WAITING_IDX) {
+          if (currentMessages.length) {
+            msgDetailFollowLatest = false;
+            showMsgDetail(currentMessages.length - 1);
+          }
+        } else if (currentMsgDetailIdx > 0) {
           msgDetailFollowLatest = false;
           showMsgDetail(currentMsgDetailIdx - 1);
         }
@@ -4327,6 +4357,9 @@ document.addEventListener('keydown', (e) => {
     const msgDetailModal = document.getElementById('msg-detail-modal');
     if (msgDetailModal.classList.contains('visible')) {
       closeMsgDetailModal();
+    } else if (isWaitingFresh()) {
+      msgDetailFollowLatest = true;
+      showWaitingDetail();
     } else if (currentMessages.length) {
       msgDetailFollowLatest = true;
       showMsgDetail(currentMessages.length - 1);
@@ -5091,9 +5124,48 @@ function renderContextDetail(raw) {
 
 //#region UTILS
 function maybeFollowLatest() {
-  if (msgDetailFollowLatest && currentMessages.length) {
+  if (!msgDetailFollowLatest) return;
+  if (isWaitingFresh()) {
+    showWaitingDetail();
+  } else if (currentMessages.length) {
     showMsgDetail(currentMessages.length - 1);
   }
+}
+
+function isWaitingFresh() {
+  if (!currentWaiting?.timestamp) return false;
+  return Date.now() - new Date(currentWaiting.timestamp).getTime() < WAITING_TTL_MS;
+}
+
+function showWaitingDetail() {
+  if (!isWaitingFresh()) return;
+  currentMsgDetailIdx = MSG_DETAIL_WAITING_IDX;
+  const tool = currentWaiting.toolName || 'unknown';
+  const label = getWaitingLabel(currentWaiting.kind, tool);
+  const body = document.getElementById('msg-detail-body');
+  let inputHtml = '';
+  if (currentWaiting.toolInput) {
+    let pretty = currentWaiting.toolInput;
+    try {
+      pretty = JSON.stringify(JSON.parse(currentWaiting.toolInput), null, 2);
+    } catch (_) {
+      /* keep raw */
+    }
+    inputHtml = `<pre class="${TINTED_PRE_CLASS}">${escapeHtml(pretty)}</pre>`;
+  }
+  body.innerHTML = inputHtml;
+  document.getElementById('msg-detail-title').textContent = label;
+  document.getElementById('msg-detail-agent-btn').style.display = 'none';
+  const modal = document.getElementById('msg-detail-modal').querySelector('.modal');
+  autoSizeModal(modal, body);
+  modal.classList.toggle('live', msgDetailFollowLatest);
+  const overlay = document.getElementById('msg-detail-modal');
+  overlay.classList.toggle('live-overlay', msgDetailFollowLatest);
+  const meta = [formatDate(currentWaiting.timestamp), 'waiting'];
+  document.getElementById('msg-detail-meta').textContent = meta.join(' · ');
+  currentPinDetailId = null;
+  updateMsgDetailPinState();
+  overlay.classList.add('visible');
 }
 
 function isSessionActive(s) {

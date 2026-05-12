@@ -1223,6 +1223,20 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
   }
 });
 
+function clearWaitingFile(sessionId) {
+  try { unlinkSync(path.join(AGENT_ACTIVITY_DIR, sessionId, '_waiting.json')); }
+  catch (e) { if (e.code !== 'ENOENT') throw e; }
+}
+
+app.post('/api/sessions/:sessionId/waiting/discard', (req, res) => {
+  try {
+    clearWaitingFile(resolveSessionId(req.params.sessionId));
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to discard waiting' });
+  }
+});
+
 app.post('/api/sessions/:sessionId/agents/:agentId/stop', (req, res) => {
   const sessionId = resolveSessionId(req.params.sessionId);
   const agentId = sanitizeAgentId(req.params.agentId);
@@ -1234,9 +1248,7 @@ app.post('/api/sessions/:sessionId/agents/:agentId/stop', (req, res) => {
     agent.stoppedAt = new Date().toISOString();
     const stopEvt = { agentId, type: agent.type, event: 'user-stop', status: 'stopped', stoppedAt: agent.stoppedAt, updatedAt: agent.stoppedAt };
     writeFileSync(agentFile, readFileSync(agentFile, 'utf8') + JSON.stringify(stopEvt) + '\n', 'utf8'); // sync — response depends on write
-    // Also remove waiting state if present
-    const waitingFile = path.join(AGENT_ACTIVITY_DIR, sessionId, '_waiting.json');
-    if (existsSync(waitingFile)) unlinkSync(waitingFile);
+    clearWaitingFile(sessionId);
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: 'Failed to stop agent' });
