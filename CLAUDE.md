@@ -37,6 +37,7 @@ public/app.js       All JS (~3520 lines)
 ## Conventions
 
 - **Read-only observer** — Claude Code owns task state, dashboard only reads
+- **Parser changes → update `docs/session-scanning.md`** — any change to `lib/parsers.js` or to the session-list hot path (`buildSessionObject`, `loadSessionMetadata`, the watchers, or any cache feeding them) must keep that doc current. It tracks the hot-path rule ("no full-JSONL reads in `buildSessionObject`"), per-function cache strategies, and watcher wiring. If you add, remove, or change a parser entry-point or its cache, update the doc in the same change.
 - **XSS safety** — `escapeHtml()` for user data, `DOMPurify.sanitize(marked.parse(...))` for markdown
 - **No framework** — multi-file vanilla JS, CSS variables for dark/light theming
 - **`#region` markers** — VS Code foldable `#region`/`#endregion` blocks in `app.js` and `style.css`

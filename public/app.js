@@ -2599,6 +2599,7 @@ function renderSessions() {
                 ${session.sharedTaskList ? `<span class="shared-tasklist-badge" title="Shared task list: ${escapeHtml(session.sharedTaskList)}">${linkSvg(12)}</span>` : ''}
                 ${isTeam || session.project || showCtx ? `<span class="team-info-btn" onclick="event.stopPropagation(); showSessionInfoModal('${session.id}')" title="View session info">ℹ</span>` : ''}
                 ${session.hasPlan ? `<span class="plan-indicator" onclick="event.stopPropagation(); openPlanForSession('${session.id}')" title="View plan"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span>` : ''}
+                ${renderLoopBadge(session)}
                 ${linkedDocsCount > 0 ? `<span class="linked-docs-badge" onclick="event.stopPropagation(); showSessionInfoModal('${session.id}')" title="${linkedDocsCount} linked document${linkedDocsCount > 1 ? 's' : ''}">${linkSvg(10)}${linkedDocsCount}</span>` : ''}
                 ${bookmarksCount > 0 ? `<span class="bookmarks-badge" onclick="event.stopPropagation(); openSessionWithBookmarks('${session.id}')" title="${bookmarksCount} bookmarked message${bookmarksCount > 1 ? 's' : ''}"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>${bookmarksCount}</span>` : ''}
                 ${hasScratchpad ? `<span class="scratchpad-badge" onclick="event.stopPropagation(); openSessionScratchpad('${session.id}')" title="Open scratchpad"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></span>` : ''}
@@ -4270,7 +4271,7 @@ function matchKey(e, ...keys) {
   return keys.some((k) => e.key === k || e.code === k);
 }
 
-const MODAL_ESC_PRIORITY = ['preview-modal', 'msg-detail-modal', 'plan-modal'];
+const MODAL_ESC_PRIORITY = ['preview-modal', 'msg-detail-modal', 'plan-modal', 'loop-modal'];
 const MODAL_CLOSERS = {
   'preview-modal': () => closePreviewModal(),
   'msg-detail-modal': () => {
@@ -4278,6 +4279,7 @@ const MODAL_CLOSERS = {
     msgDetailFollowLatest = false;
   },
   'plan-modal': () => closePlanModal(),
+  'loop-modal': () => closeLoopModal(),
   'team-modal': () => closeTeamModal(),
   'agent-modal': () => closeAgentModal(),
   'help-modal': () => closeHelpModal(),
@@ -5954,6 +5956,110 @@ function refreshOpenPlan() {
       }
     })
     .catch(() => {});
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+function showLoopModal(sessionId) {
+  const body = document.getElementById('loop-modal-body');
+  body.innerHTML = '<div style="padding:16px;color:var(--text-secondary);">Loading…</div>';
+  document.getElementById('loop-modal').classList.add('visible');
+  fetch(`/api/sessions/${sessionId}/loop`)
+    .then((r) => (r.ok ? r.json() : { wakeups: [], crons: [] }))
+    .catch(() => ({ wakeups: [], crons: [] }))
+    .then((data) => {
+      renderLoopModalBody(data);
+    });
+}
+
+function fmtLoopDelay(s) {
+  if (s == null) return '';
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.round(s / 60)}m`;
+  return `${(s / 3600).toFixed(1)}h`;
+}
+
+function fmtLoopFireTime(timestamp, delaySeconds) {
+  if (!timestamp || delaySeconds == null) return { abs: '', rel: '', status: '' };
+  const fireMs = new Date(timestamp).getTime() + delaySeconds * 1000;
+  const fireDate = new Date(fireMs);
+  const diff = fireMs - Date.now();
+  const abs = fireDate.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+  const absSec = Math.abs(Math.round(diff / 1000));
+  const rel =
+    absSec < 60 ? `${absSec}s` : absSec < 3600 ? `${Math.round(absSec / 60)}m` : `${(absSec / 3600).toFixed(1)}h`;
+  if (diff > 0) return { abs, rel: `in ${rel}`, status: 'pending' };
+  return { abs, rel: `${rel} ago`, status: 'fired' };
+}
+
+const LOOP_CLOCK_SVG =
+  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>';
+const LOOP_CRON_SVG =
+  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8v4l3 3"/><circle cx="12" cy="12" r="10"/></svg>';
+
+function loopField(label, value, mono = false) {
+  if (!value) return '';
+  const inner = mono ? `<code>${escapeHtml(value)}</code>` : escapeHtml(value);
+  return `<div class="loop-field"><div class="loop-field-label">${label}</div><div class="loop-field-val">${inner}</div></div>`;
+}
+
+function renderLoopRow(item, kind) {
+  const when = item.timestamp ? formatDate(item.timestamp) : '';
+  let headline = '';
+  let footer = '';
+  let fields = '';
+  if (kind === 'wakeup') {
+    const fire = fmtLoopFireTime(item.timestamp, item.delaySeconds);
+    const delayLbl = item.delaySeconds != null ? `delay ${fmtLoopDelay(item.delaySeconds)}` : '';
+    if (fire.abs) {
+      headline = `<div class="loop-headline loop-fire-${fire.status}">${LOOP_CLOCK_SVG}<span class="loop-headline-rel">${fire.status === 'pending' ? 'Fires' : 'Fired'} ${escapeHtml(fire.rel)}</span><span class="loop-headline-abs">${escapeHtml(fire.abs)}</span></div>`;
+    }
+    fields = loopField('Reason', item.reason) + loopField('Prompt', item.prompt, true);
+    footer = `<div class="loop-foot">scheduled ${escapeHtml(when)}${delayLbl ? ` · ${delayLbl}` : ''}</div>`;
+  } else {
+    if (item.cron) {
+      headline = `<div class="loop-headline">${LOOP_CRON_SVG}<span class="loop-headline-rel"><code>${escapeHtml(item.cron)}</code></span></div>`;
+    }
+    fields = loopField('Description', item.description) + loopField('Prompt', item.prompt, true);
+    footer = `<div class="loop-foot">created ${escapeHtml(when)}</div>`;
+  }
+  return `<div class="loop-row">${headline}${fields}${footer}</div>`;
+}
+
+function renderLoopModalBody(data) {
+  const body = document.getElementById('loop-modal-body');
+  const wakeups = data.wakeups || [];
+  const crons = data.crons || [];
+  if (!wakeups.length && !crons.length) {
+    body.innerHTML =
+      '<div style="padding:24px;text-align:center;color:var(--text-secondary);">No scheduled wakeups or cron jobs.</div>';
+    return;
+  }
+  const section = (title, items, kind) =>
+    items.length
+      ? `<h4 class="loop-section-title">${title} <span class="loop-count">${items.length}</span></h4>${items.map((i) => renderLoopRow(i, kind)).join('')}`
+      : '';
+  body.innerHTML = section('Wakeups', wakeups, 'wakeup') + section('Cron jobs', crons, 'cron');
+}
+
+function renderLoopBadge(session) {
+  const li = session.loopInfo;
+  const total = (li?.wakeupCount || 0) + (li?.cronCount || 0);
+  if (total === 0) return '';
+  let tip = `${li.wakeupCount} wakeup${li.wakeupCount === 1 ? '' : 's'}, ${li.cronCount} cron${li.cronCount === 1 ? '' : 's'}`;
+  if (li.latest?.timestamp && li.latest.delaySeconds != null) {
+    const f = fmtLoopFireTime(li.latest.timestamp, li.latest.delaySeconds);
+    if (f.abs) tip += ` — latest ${f.status === 'pending' ? 'fires' : 'fired'} ${f.rel} (${f.abs})`;
+  }
+  return `<span class="loop-badge" onclick="event.stopPropagation(); showLoopModal('${session.id}')" title="${escapeHtml(tip)}"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></span>`;
+}
+
+function closeLoopModal() {
+  document.getElementById('loop-modal').classList.remove('visible');
 }
 
 function openPlanForSession(sid) {

@@ -21,7 +21,9 @@ const {
   extractPromptFromTranscript,
   extractModelFromTranscript,
   readFullToolResult,
-  readUserImage
+  readUserImage,
+  updateLoopInfo,
+  buildLoopInfoFromState
 } = require('./lib/parsers');
 
 if (process.argv.includes("--install") || process.argv.includes("--uninstall")) {
@@ -536,6 +538,51 @@ function getPlanInfo(slug) {
   }
 }
 
+// Hide wakeups whose fire time is more than this far in the past — long /loop
+// sessions otherwise produce dozens of stale entries that drown the badge.
+const WAKEUP_FIRED_GRACE_MS = 5 * 60 * 1000;
+
+function isWakeupActive(w, now = Date.now()) {
+  if (!w || !w.timestamp || w.delaySeconds == null) return true;
+  const fireMs = new Date(w.timestamp).getTime() + w.delaySeconds * 1000;
+  return (now - fireMs) <= WAKEUP_FIRED_GRACE_MS;
+}
+
+function filterActiveLoopInfo(info) {
+  const now = Date.now();
+  return {
+    wakeups: info.wakeups.filter(w => isWakeupActive(w, now)),
+    crons: info.crons
+  };
+}
+
+// Per-path incremental scan state. Populated lazily on first access and
+// updated in place; the projectsWatcher event handler keeps entries warm so
+// the request path does O(1) work in steady state.
+const loopInfoStateByPath = new Map();
+
+function refreshLoopInfoState(jsonlPath) {
+  if (!jsonlPath) return null;
+  const prev = loopInfoStateByPath.get(jsonlPath);
+  const next = updateLoopInfo(jsonlPath, prev);
+  if (next) loopInfoStateByPath.set(jsonlPath, next);
+  return next;
+}
+
+function getLoopInfoSummary(meta) {
+  const empty = { wakeupCount: 0, cronCount: 0, latest: null };
+  if (!meta?.jsonlPath) return empty;
+  try {
+    const state = refreshLoopInfoState(meta.jsonlPath);
+    const filtered = filterActiveLoopInfo(buildLoopInfoFromState(state));
+    return {
+      wakeupCount: filtered.wakeups.length,
+      cronCount: filtered.crons.length,
+      latest: filtered.wakeups[filtered.wakeups.length - 1] || filtered.crons[filtered.crons.length - 1] || null
+    };
+  } catch (_) { return empty; }
+}
+
 function getSessionDisplayName(sessionId, meta) {
   if (meta?.customTitle) return meta.customTitle;
   if (meta?.slug) return meta.slug;
@@ -573,6 +620,7 @@ function buildSessionObject(id, meta, overrides = {}) {
     projectDir: meta.jsonlPath ? path.dirname(meta.jsonlPath) : null,
     contextStatus: getContextStatus(id, meta),
     ...getPlanInfo(meta.slug),
+    loopInfo: getLoopInfoSummary(meta),
     ...overrides,
     // Remove internal-only field
     _logStat: undefined,
@@ -971,6 +1019,23 @@ app.get('/api/sessions/:sessionId/plan', async (req, res) => {
   } catch (error) {
     console.error('Error reading plan:', error);
     res.status(500).json({ error: 'Failed to read plan' });
+  }
+});
+
+app.get('/api/sessions/:sessionId/loop', (req, res) => {
+  try {
+    const metadata = loadSessionMetadata();
+    const meta = metadata[req.params.sessionId];
+    if (!meta?.jsonlPath) return res.json({ wakeups: [], crons: [] });
+    const state = refreshLoopInfoState(meta.jsonlPath);
+    const filtered = filterActiveLoopInfo(buildLoopInfoFromState(state));
+    res.json({
+      wakeups: [...filtered.wakeups].reverse(),
+      crons: [...filtered.crons].reverse()
+    });
+  } catch (error) {
+    console.error('Error reading loop info:', error);
+    res.status(500).json({ error: 'Failed to read loop info' });
   }
 });
 
@@ -1945,7 +2010,12 @@ const projectsWatcher = chokidar.watch(PROJECTS_DIR, {
 
 projectsWatcher.on('all', (event, filePath) => {
   if ((event === 'add' || event === 'change' || event === 'unlink') && filePath.endsWith('.jsonl')) {
-    // Invalidate cache on any change
+    if (event === 'unlink') {
+      loopInfoStateByPath.delete(filePath);
+    } else {
+      // Warm the incremental scan state so the next request does no IO.
+      try { refreshLoopInfoState(filePath); } catch (_) {}
+    }
     lastMetadataRefresh = 0;
     broadcast({ type: 'metadata-update' });
   }

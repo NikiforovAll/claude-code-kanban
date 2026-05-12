@@ -604,6 +604,25 @@
     </div>
   </div>
 
+  <!-- Loop Wakeups Modal -->
+  <div id="loop-modal" class="modal-overlay" onclick="closeLoopModal()">
+    <div class="modal plan-modal" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <h3 id="loop-modal-title" class="modal-title" style="display:flex;align-items:center;gap:8px;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          Loop activity
+        </h3>
+        <button class="modal-close" aria-label="Close dialog" onclick="closeLoopModal()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div id="loop-modal-body" class="modal-body" style="overflow-y:auto;flex:0 1 auto;min-height:0;"></div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" onclick="closeLoopModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
   <div id="agent-modal" class="modal-overlay plan-modal-overlay" onclick="closeAgentModal()">
     <div class="modal plan-modal" onclick="event.stopPropagation()">
       <div class="modal-header">

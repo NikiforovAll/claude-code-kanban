@@ -1615,6 +1615,136 @@ body::before {
   border-color: var(--plan);
 }
 
+.loop-badge {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-deep);
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+}
+
+.loop-badge:hover {
+  border-color: var(--accent, var(--plan));
+  color: var(--accent, var(--plan));
+}
+
+.loop-section-title {
+  margin: 14px 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.loop-section-title:first-child {
+  margin-top: 4px;
+}
+
+.loop-count {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.loop-row {
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  margin-bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.loop-row:has(.loop-fire-pending) {
+  border-left-color: var(--accent, var(--plan));
+}
+
+.loop-headline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.loop-headline-rel {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.loop-headline-abs {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-left: auto;
+}
+
+.loop-fire-pending {
+  color: var(--accent, var(--plan));
+}
+.loop-fire-fired {
+  color: var(--text-secondary);
+}
+.loop-fire-fired .loop-headline-rel {
+  font-weight: 500;
+}
+
+.loop-field {
+  display: grid;
+  grid-template-columns: 80px 1fr;
+  gap: 10px;
+  align-items: start;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.loop-field-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+  padding-top: 3px;
+}
+
+.loop-field-val {
+  color: var(--text-primary);
+  word-break: break-word;
+}
+
+.loop-field-val code {
+  background: var(--bg);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.loop-foot {
+  font-size: 11px;
+  color: var(--text-secondary);
+  padding-top: 6px;
+  border-top: 1px dashed var(--border);
+  font-variant-numeric: tabular-nums;
+}
+
 /* #endregion */
 
 /* #region OWNER_BADGE */
