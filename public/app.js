@@ -2509,16 +2509,25 @@ function renderSessions() {
     filteredSessions = filteredSessions.filter(matchesSearch);
 
     // Re-add pinned/sticky sessions that match the query but were excluded by active filter
-    if (activityFilter.size === 0 && (pinnedSessionIds.size > 0 || stickySessionIds.size > 0)) {
+    if (
+      sessionFilter === 'active' &&
+      activityFilter.size === 0 &&
+      (pinnedSessionIds.size > 0 || stickySessionIds.size > 0)
+    ) {
       const filteredIds = new Set(filteredSessions.map((s) => s.id));
       const missingPinned = sessions.filter((s) => isAnyPinned(s.id) && !filteredIds.has(s.id) && matchesSearch(s));
       if (missingPinned.length) filteredSessions = [...missingPinned, ...filteredSessions];
     }
   }
 
-  // Include pinned/sticky sessions even if they don't match active/recent filter
-  // (skipped when an activity chip filter is on — user explicitly asked for a slice)
-  if (activityFilter.size === 0 && !searchQuery && (pinnedSessionIds.size > 0 || stickySessionIds.size > 0)) {
+  // Include pinned/sticky sessions even if they don't match the active filter.
+  // Only in the "active" view — the "all" view is a plain list with no pin prioritization.
+  if (
+    sessionFilter === 'active' &&
+    activityFilter.size === 0 &&
+    !searchQuery &&
+    (pinnedSessionIds.size > 0 || stickySessionIds.size > 0)
+  ) {
     const filteredIds = new Set(filteredSessions.map((s) => s.id));
     const missingPinned = sessions.filter((s) => isAnyPinned(s.id) && !filteredIds.has(s.id));
     if (missingPinned.length) filteredSessions = [...missingPinned, ...filteredSessions];
@@ -2737,31 +2746,7 @@ function renderSessions() {
 
     sessionsList.innerHTML = html;
   } else {
-    const sticky = filteredSessions.filter((s) => isPlacedSticky(s.id));
-    const idlePinned = filteredSessions.filter((s) => isPlacedPinned(s.id) && !isSessionActive(s));
-    const rest = filteredSessions.filter(
-      (s) => (!isPlacedPinned(s.id) && !isPlacedSticky(s.id)) || (isPlacedPinned(s.id) && isSessionActive(s)),
-    );
-    let html = '';
-    if (sticky.length > 0) {
-      html += sticky.map(renderSessionCard).join('');
-    }
-    const isCollapsed = collapsedProjectGroups.has('__pinned__');
-    const hasPinned = pinnedSessionIds.size > 0 && filteredSessions.some((s) => pinnedSessionIds.has(s.id));
-    if (idlePinned.length > 0 || (hasPinned && isCollapsed)) {
-      html += `
-            <div class="project-group-header${isCollapsed ? ' collapsed' : ''}" data-group-path="__pinned__">
-              <svg class="group-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-              <span class="group-name">Pinned</span>
-              <span class="group-count">${idlePinned.length}</span>
-            </div>
-            <div class="project-group-sessions${isCollapsed ? ' collapsed' : ''}">
-              ${idlePinned.map(renderSessionCard).join('')}
-            </div>
-          `;
-    }
-    html += rest.map(renderSessionCard).join('');
-    sessionsList.innerHTML = html;
+    sessionsList.innerHTML = filteredSessions.map(renderSessionCard).join('');
   }
 
   const navItems = getNavigableItems();
