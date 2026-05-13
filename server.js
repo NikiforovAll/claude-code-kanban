@@ -933,11 +933,11 @@ app.get('/api/sessions', async (req, res) => {
       if (group.length < 2) continue;
       group.sort((a, b) => new Date(a.modifiedAt) - new Date(b.modifiedAt));
       const planSession = group.find(s => s.hasPlan);
-      const implSession = group.find(s => s !== planSession && new Date(s.modifiedAt) >= new Date(planSession?.modifiedAt || 0));
-      if (planSession && implSession) {
+      const linkedSession = group.find(s => s !== planSession && !s.hasPlan && new Date(s.modifiedAt) >= new Date(planSession?.modifiedAt || 0));
+      if (planSession && linkedSession) {
         planSession.hasWaitingForUser = false;
-        planSession.planImplementationSessionId = implSession.id;
-        implSession.planSourceSessionId = planSession.id;
+        planSession.planImplementationSessionId = linkedSession.id;
+        linkedSession.planSourceSessionId = planSession.id;
       }
     }
 
@@ -1462,16 +1462,11 @@ function resolveSubagentJsonl(meta, sessionId, agentId) {
   return found || primary;
 }
 
-// Claude Code marks fork lineage in two ways:
-//   1. `logicalParentUuid` on a system record (when present) points to a uuid
-//      in the parent session's JSONL.
-//   2. When absent, the fork copies the parent's early records verbatim, so
-//      the earliest `uuid` in this session also exists (same uuid+timestamp)
-//      in the parent's JSONL.
-// We try (1) first, then fall back to (2).
+// Claude Code fork-copies the parent's early messages verbatim into the child JSONL
+// (same UUIDs, same content). We detect forks by finding the child's first UUID in
+// another session's JSONL. Birthtime (not mtime) is used to resolve which is the
+// parent — mtime changes when a session is resumed, but birthtime is immutable.
 const parentSessionCache = new Map();
-// Both anchor signals live in the first few records (system marker on top,
-// fork-copy starts at line 0), so cap the scan instead of reading the whole file.
 const FORK_ANCHOR_SCAN_LINES = 10;
 function findForkAnchorUuid(jsonlPath) {
   let text;
@@ -1483,20 +1478,23 @@ function findForkAnchorUuid(jsonlPath) {
     if (scanned++ >= FORK_ANCHOR_SCAN_LINES) break;
     try {
       const d = JSON.parse(l);
-      if (d.logicalParentUuid) return d.logicalParentUuid;
       if (!firstUuid && d.uuid) firstUuid = d.uuid;
     } catch { /* skip malformed */ }
   }
   return firstUuid;
 }
-function findSessionContainingUuid(projectDir, targetUuid, excludeJsonlPath) {
+function findSessionContainingUuid(projectDir, targetUuid, excludeJsonlPath, maxBirthtimeMs) {
   let files;
   try { files = readdirSync(projectDir); } catch { return null; }
-  const candidates = [];
+  let best = null;
   for (const f of files) {
     if (!f.endsWith('.jsonl')) continue;
     const fp = path.join(projectDir, f);
     if (fp === excludeJsonlPath) continue;
+    let birthtime = 0;
+    try { birthtime = statSync(fp).birthtimeMs; } catch { continue; }
+    if (maxBirthtimeMs != null && birthtime >= maxBirthtimeMs) continue;
+    if (best && birthtime >= best.birthtime) continue;
     let text;
     try { text = readFileSync(fp, 'utf8'); } catch { continue; }
     if (!text.includes(targetUuid)) continue;
@@ -1505,18 +1503,14 @@ function findSessionContainingUuid(projectDir, targetUuid, excludeJsonlPath) {
       try {
         const d = JSON.parse(l);
         if (d.uuid === targetUuid && d.sessionId) {
-          let mtime = 0;
-          try { mtime = statSync(fp).mtimeMs; } catch { /* ignore */ }
-          candidates.push({ parentSessionId: d.sessionId, parentJsonlPath: fp, mtime });
+          best = { parentSessionId: d.sessionId, parentJsonlPath: fp, birthtime };
           break;
         }
       } catch { /* skip */ }
     }
   }
-  if (!candidates.length) return null;
-  candidates.sort((a, b) => a.mtime - b.mtime);
-  const { parentSessionId, parentJsonlPath } = candidates[0];
-  return { parentSessionId, parentJsonlPath };
+  if (!best) return null;
+  return { parentSessionId: best.parentSessionId, parentJsonlPath: best.parentJsonlPath };
 }
 function lookupParentSession(sessionId) {
   if (parentSessionCache.has(sessionId)) return parentSessionCache.get(sessionId);
@@ -1525,11 +1519,15 @@ function lookupParentSession(sessionId) {
   if (meta?.jsonlPath) {
     const anchorUuid = findForkAnchorUuid(meta.jsonlPath);
     if (anchorUuid) {
-      const hit = findSessionContainingUuid(path.dirname(meta.jsonlPath), anchorUuid, meta.jsonlPath);
-      if (hit) Object.assign(result, hit);
+      let selfBirthtime;
+      try { selfBirthtime = statSync(meta.jsonlPath).birthtimeMs; } catch { /* ignore */ }
+      if (selfBirthtime != null) {
+        const hit = findSessionContainingUuid(path.dirname(meta.jsonlPath), anchorUuid, meta.jsonlPath, selfBirthtime);
+        if (hit) Object.assign(result, hit);
+      }
     }
   }
-  if (result.parentSessionId) parentSessionCache.set(sessionId, result);
+  parentSessionCache.set(sessionId, result);
   return result;
 }
 app.get('/api/sessions/:sessionId/parent', (req, res) => {
