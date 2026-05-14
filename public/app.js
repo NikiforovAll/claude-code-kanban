@@ -498,6 +498,7 @@ function renderActivityChip() {
 function setActivityFilter(kind) {
   if (activityFilter.has(kind)) activityFilter.delete(kind);
   else activityFilter.add(kind);
+  localStorage.setItem('activityFilter', JSON.stringify([...activityFilter]));
   // active/waiting only make sense with the active session filter on
   const targetFilter = activityFilter.size > 0 ? 'active' : sessionFilter;
   if (targetFilter !== sessionFilter) {
@@ -6238,6 +6239,11 @@ try {
   const cg = JSON.parse(localStorage.getItem('collapsedGroups') || '[]');
   // biome-ignore lint/suspicious/useIterableCallbackReturn: forEach side-effect
   cg.forEach((p) => collapsedProjectGroups.add(p));
+} catch (_) {}
+try {
+  const af = JSON.parse(localStorage.getItem('activityFilter') || '[]');
+  // biome-ignore lint/suspicious/useIterableCallbackReturn: forEach side-effect
+  af.forEach((k) => activityFilter.add(k));
 } catch (_) {}
 initSidebarResize();
 loadPanelWidths();
