@@ -1316,14 +1316,21 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
       }
     }
 
-    const agentsNeedingModel = agents.filter(a => !a.model && !a.modelUnavailable);
+    // Retry stopped agents even if modelUnavailable was set — it may have been marked
+    // unavailable while the agent was still active and its JSONL wasn't ready yet.
+    const agentsNeedingModel = agents.filter(a => !a.model && (!a.modelUnavailable || a.status === 'stopped'));
     if (agentsNeedingModel.length && meta.jsonlPath) {
       for (const agent of agentsNeedingModel) {
         let model = null;
         try { model = extractModelFromTranscript(subagentJsonlPath(meta, agent.agentId)); } catch (_) {}
-        if (model) agent.model = model;
-        else agent.modelUnavailable = true;
-        dirty.add(agent);
+        if (model) {
+          agent.model = model;
+          delete agent.modelUnavailable;
+          dirty.add(agent);
+        } else if (agent.status === 'stopped' && !agent.modelUnavailable) {
+          agent.modelUnavailable = true;
+          dirty.add(agent);
+        }
       }
     }
 
