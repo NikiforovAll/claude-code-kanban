@@ -31,7 +31,7 @@ These run only when an API request is served (no background timer).
 | Function | Cache | TTL | Source |
 |---|---|---|---|
 | `loadSessionMetadata()` | `sessionMetadataCache` | `METADATA_CACHE_TTL = 10000` ms (per-path dirty set for hot updates) | `server.js:389` |
-| `readSessionInfoFromJsonl()` | `sessionInfoCache` | inode-keyed; `slug`+`projectPath` pinned, `cwd` refreshed from appended bytes only | `lib/parsers.js:225` |
+| `readSessionInfoFromJsonl()` | `sessionInfoCache` | inode-keyed; `slug`+`projectPath`+`logicalParentUuid` pinned, `cwd` refreshed from appended bytes only | `lib/parsers.js:225` |
 | `getGitBranch(cwd)` | `gitBranchCache` | `GIT_BRANCH_TTL_MS = 30000` ms, keyed by `cwd` | `server.js` |
 | Task-map scan | `sessionToTaskListCache` | `TASK_MAP_SCAN_TTL = 5000` ms | `server.js:271` |
 | `readRecentMessages()` / session info | `messageCache` (keyed by mtime) | invalidates on file mtime change | `server.js:382` |
@@ -44,6 +44,8 @@ A FS event from the matching watcher updates the metadata pipeline incrementally
 - `plansWatcher` → no metadata invalidation; `getPlanInfo` runs fresh inside `buildSessionObject` every call. The broadcast alone is enough to make clients refetch.
 
 `gitBranch` recorded in the JSONL is pinned to the launch-time repo and goes stale as soon as `cwd` shifts (Bash `cd`, submodule, sibling repo). `buildSessionObject` resolves the live branch via `getGitBranch(cwd)` (`git rev-parse --abbrev-ref HEAD`, cached per-cwd) and falls back to the JSONL value when the spawn fails.
+
+`readSessionInfoFromJsonl` also captures `logicalParentUuid` from any `compact_boundary` record found in the bounded preamble (head cap 1 MB). The `/api/sessions` compact-continuation suppression pass reads this off the cached metadata — no per-request full-JSONL rescan. `findCompactAnchorUuid` remains as a fallback in `lookupParentSession` for paths that bypass the metadata cache.
 
 ### 3. Periodic timers (cleanup only — not scanning)
 

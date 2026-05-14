@@ -3,7 +3,7 @@
 const express = require('express');
 const path = require('path');
 const fs = require('fs').promises;
-const { existsSync, readdirSync, readFileSync, writeFileSync, statSync, createReadStream, unlinkSync, mkdirSync, renameSync } = require('fs');
+const { existsSync, readdirSync, readFileSync, writeFileSync, statSync, createReadStream, unlinkSync, mkdirSync, renameSync, openSync, readSync, closeSync } = require('fs');
 const readline = require('readline');
 const chokidar = require('chokidar');
 const os = require('os');
@@ -456,6 +456,7 @@ function refreshSessionMetadataPath(jsonlPath) {
   if (info.cwd) existing.cwd = info.cwd;
   if (info.gitBranch) existing.gitBranch = info.gitBranch;
   if (info.customTitle) existing.customTitle = info.customTitle;
+  if (info.logicalParentUuid) existing.logicalParentUuid = info.logicalParentUuid;
   return true;
 }
 
@@ -540,7 +541,8 @@ function loadSessionMetadata() {
           cwd: sessionInfo.cwd || null,
           gitBranch: sessionInfo.gitBranch || null,
           customTitle: sessionInfo.customTitle || null,
-          jsonlPath: jsonlPath
+          jsonlPath: jsonlPath,
+          logicalParentUuid: sessionInfo.logicalParentUuid || null
         };
         sessionIds.push(sessionId);
       }
@@ -940,6 +942,20 @@ app.get('/api/sessions', async (req, res) => {
         linkedSession.planSourceSessionId = planSession.id;
       }
     }
+
+    // Suppress parent sessions that have a compact continuation — compaction is involuntary
+    // (context limit hit), not an intentional fork. Only the continuation is shown.
+    const compactSuppressed = new Set();
+    for (const [sid] of sessionsMap) {
+      const compactAnchor = metadata[sid]?.logicalParentUuid;
+      if (!compactAnchor) continue;
+      const parent = lookupParentSession(sid);
+      if (parent.parentSessionId && sessionsMap.has(parent.parentSessionId)) {
+        compactSuppressed.add(parent.parentSessionId);
+        sessionsMap.get(sid).continuedFromSessionId = parent.parentSessionId;
+      }
+    }
+    for (const sid of compactSuppressed) sessionsMap.delete(sid);
 
     // Backfill contextStatus for already-built sessions that are pinned
     for (const pid of pinnedIds) {
@@ -1469,26 +1485,48 @@ function resolveSubagentJsonl(meta, sessionId, agentId) {
   return found || primary;
 }
 
-// Claude Code fork-copies the parent's early messages verbatim into the child JSONL
-// (same UUIDs, same content). We detect forks by finding the child's first UUID in
-// another session's JSONL. Birthtime (not mtime) is used to resolve which is the
-// parent — mtime changes when a session is resumed, but birthtime is immutable.
+// Claude Code creates child sessions in two ways:
+//   Fork: copies the parent's early messages verbatim (same UUIDs). Anchor = first UUID.
+//   Compact: writes a compact_boundary record with logicalParentUuid in the preamble.
+// Birthtime (not mtime) identifies the parent — mtime changes on resume, birthtime is immutable.
 const parentSessionCache = new Map();
 const FORK_ANCHOR_SCAN_LINES = 10;
 function findForkAnchorUuid(jsonlPath) {
   let text;
   try { text = readFileSync(jsonlPath, 'utf8'); } catch { return null; }
-  let firstUuid = null;
-  let scanned = 0;
+  let firstUuid = null, scanned = 0;
   for (const l of text.split('\n')) {
     if (!l) continue;
     if (scanned++ >= FORK_ANCHOR_SCAN_LINES) break;
-    try {
-      const d = JSON.parse(l);
-      if (!firstUuid && d.uuid) firstUuid = d.uuid;
-    } catch { /* skip malformed */ }
+    try { const d = JSON.parse(l); if (!firstUuid && d.uuid) firstUuid = d.uuid; } catch { /* skip malformed */ }
   }
   return firstUuid;
+}
+// Fallback when metadata cache lacks logicalParentUuid (older entries, cold cache).
+// Hot path reads from metadata directly; this never runs from the suppression loop.
+// Bounded read (~1 MB) mirrors readSessionInfoFromJsonl's HEAD_MAX — compact_boundary
+// always sits in the preamble before the first user/assistant record.
+const COMPACT_ANCHOR_READ_MAX = 1048576;
+function findCompactAnchorUuid(jsonlPath) {
+  let fd;
+  try {
+    fd = openSync(jsonlPath, 'r');
+    const buf = Buffer.alloc(COMPACT_ANCHOR_READ_MAX);
+    const n = readSync(fd, buf, 0, COMPACT_ANCHOR_READ_MAX, 0);
+    const text = buf.toString('utf8', 0, n);
+    const lastNl = text.lastIndexOf('\n');
+    const complete = lastNl >= 0 ? text.slice(0, lastNl) : text;
+    for (const l of complete.split('\n')) {
+      if (!l) continue;
+      try {
+        const d = JSON.parse(l);
+        if (d.type === 'user' || d.type === 'assistant') return null;
+        if (d.subtype === 'compact_boundary' && d.logicalParentUuid) return d.logicalParentUuid;
+      } catch { /* skip malformed */ }
+    }
+    return null;
+  } catch { return null; }
+  finally { if (fd !== undefined) { try { closeSync(fd); } catch {} } }
 }
 function findSessionContainingUuid(projectDir, targetUuid, excludeJsonlPath, maxBirthtimeMs) {
   let files;
@@ -1522,9 +1560,11 @@ function findSessionContainingUuid(projectDir, targetUuid, excludeJsonlPath, max
 function lookupParentSession(sessionId) {
   if (parentSessionCache.has(sessionId)) return parentSessionCache.get(sessionId);
   const meta = loadSessionMetadata()[sessionId];
-  const result = { parentSessionId: null, parentJsonlPath: null };
+  const result = { parentSessionId: null, parentJsonlPath: null, isCompact: false };
   if (meta?.jsonlPath) {
-    const anchorUuid = findForkAnchorUuid(meta.jsonlPath);
+    const compactAnchor = meta.logicalParentUuid || findCompactAnchorUuid(meta.jsonlPath);
+    result.isCompact = !!compactAnchor;
+    const anchorUuid = compactAnchor ?? findForkAnchorUuid(meta.jsonlPath);
     if (anchorUuid) {
       let selfBirthtime;
       try { selfBirthtime = statSync(meta.jsonlPath).birthtimeMs; } catch { /* ignore */ }
