@@ -494,10 +494,20 @@ function renderActivityChip() {
     .join('');
 }
 
-// biome-ignore lint/correctness/noUnusedVariables: used in HTML
-function setActivityFilter(kind) {
+function toggleActivityKind(kind) {
   if (activityFilter.has(kind)) activityFilter.delete(kind);
   else activityFilter.add(kind);
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+function setActivityFilter(kind) {
+  if (kind === 'active') {
+    // waiting is a sub-state of active — couple them so one click covers all running sessions
+    toggleActivityKind('active');
+    toggleActivityKind('waiting');
+  } else {
+    toggleActivityKind(kind);
+  }
   localStorage.setItem('activityFilter', JSON.stringify([...activityFilter]));
   // active/waiting only make sense with the active session filter on
   const targetFilter = activityFilter.size > 0 ? 'active' : sessionFilter;
@@ -4257,13 +4267,14 @@ function matchKey(e, ...keys) {
   return keys.some((k) => e.key === k || e.code === k);
 }
 
-const MODAL_ESC_PRIORITY = ['preview-modal', 'msg-detail-modal', 'plan-modal', 'loop-modal'];
+const MODAL_ESC_PRIORITY = ['preview-modal', 'msg-detail-modal', 'tool-stats-modal', 'plan-modal', 'loop-modal'];
 const MODAL_CLOSERS = {
   'preview-modal': () => closePreviewModal(),
   'msg-detail-modal': () => {
     closeMsgDetailModal();
     msgDetailFollowLatest = false;
   },
+  'tool-stats-modal': () => closeToolStatsModal(),
   'plan-modal': () => closePlanModal(),
   'loop-modal': () => closeLoopModal(),
   'team-modal': () => closeTeamModal(),
@@ -5886,6 +5897,7 @@ function showInfoModal(session, teamConfig, tasks, planContent, parentInfo) {
   const keyHandler = (e) => {
     if (e.key === 'Escape') {
       if (document.getElementById('plan-modal').classList.contains('visible')) return;
+      if (document.getElementById('tool-stats-modal').classList.contains('visible')) return;
       e.preventDefault();
       closeTeamModal();
       document.removeEventListener('keydown', keyHandler);
@@ -6139,6 +6151,105 @@ function openMemoryForInfoModal() {
   openForInfoModalProject(openMemory);
 }
 
+//#endregion
+
+//#region TOOL_STATS_MODAL
+let _toolStatsSortCol = 'count';
+let _toolStatsSortDir = 'desc';
+let _toolStatsData = null;
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+function showToolStatsModal(sessionId) {
+  if (!sessionId) return;
+  const body = document.getElementById('tool-stats-modal-body');
+  body.innerHTML = '<div style="padding:16px;color:var(--text-secondary);">Loading…</div>';
+  document.getElementById('tool-stats-modal').classList.add('visible');
+
+  fetch(`/api/sessions/${sessionId}/tool-stats`)
+    .then((r) => (r.ok ? r.json() : null))
+    .catch(() => null)
+    .then((data) => {
+      if (!data) {
+        body.innerHTML = '<div style="padding:16px;color:var(--text-secondary);">Failed to load tool statistics.</div>';
+        return;
+      }
+      _toolStatsSortCol = 'count';
+      _toolStatsSortDir = 'desc';
+      _toolStatsData = data;
+      body.innerHTML = renderToolStatsBody(data);
+    });
+}
+
+function renderToolStatsBody(data) {
+  const { totalCalls, uniqueTools, totalFailed, tools } = data;
+
+  const summary = `
+    <div class="tool-stats-summary">
+      <div class="tool-stats-chip"><span class="tool-stats-chip-val">${totalCalls}</span><span class="tool-stats-chip-lbl">Total calls</span></div>
+      <div class="tool-stats-chip"><span class="tool-stats-chip-val">${uniqueTools}</span><span class="tool-stats-chip-lbl">Unique tools</span></div>
+      <div class="tool-stats-chip"><span class="tool-stats-chip-val${totalFailed > 0 ? ' failed' : ''}">${totalFailed}</span><span class="tool-stats-chip-lbl">Failed</span></div>
+    </div>`;
+
+  if (!tools?.length) {
+    return (
+      summary +
+      '<div style="padding:24px;text-align:center;color:var(--text-tertiary);">No tool calls recorded in this session.</div>'
+    );
+  }
+
+  const sorted = [...tools].sort((a, b) => {
+    if (_toolStatsSortCol === 'name')
+      return _toolStatsSortDir === 'asc' ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name);
+    return _toolStatsSortDir === 'asc'
+      ? a[_toolStatsSortCol] - b[_toolStatsSortCol]
+      : b[_toolStatsSortCol] - a[_toolStatsSortCol];
+  });
+  const arrow = (col) => (col === _toolStatsSortCol ? (_toolStatsSortDir === 'asc' ? ' ▲' : ' ▼') : '');
+
+  const table = `<table class="tool-stats-table">
+    <thead><tr>
+      <th onclick="toolStatsSortBy('name')">Tool${arrow('name')}</th>
+      <th onclick="toolStatsSortBy('count')">Calls${arrow('count')}</th>
+      <th onclick="toolStatsSortBy('success')">✓ Success${arrow('success')}</th>
+      <th onclick="toolStatsSortBy('failed')">✗ Failed${arrow('failed')}</th>
+      <th onclick="toolStatsSortBy('impact')" title="Share of total tool output by character count">Impact${arrow('impact')}</th>
+    </tr></thead>
+    <tbody>${sorted
+      .map(
+        (t) => `<tr>
+      <td class="tool-name">${escapeHtml(t.name)}</td>
+      <td>${t.count}</td>
+      <td>${t.success > 0 ? `<span class="badge-success">${t.success}</span>` : '—'}</td>
+      <td>${t.failed > 0 ? `<span class="badge-failed">${t.failed}</span>` : '—'}</td>
+      <td class="impact-cell">${
+        t.impact != null
+          ? `<div class="impact-cell-inner"><div class="impact-bar-wrap"><div class="impact-bar-fill" style="width:${t.impact}%"></div></div><span class="impact-pct">${t.impact < 1 ? '<1' : t.impact}%</span></div>`
+          : '—'
+      }</td>
+    </tr>`,
+      )
+      .join('')}</tbody>
+  </table>`;
+
+  return summary + table;
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+function toolStatsSortBy(col) {
+  if (_toolStatsSortCol === col) {
+    _toolStatsSortDir = _toolStatsSortDir === 'asc' ? 'desc' : 'asc';
+  } else {
+    _toolStatsSortCol = col;
+    _toolStatsSortDir = col === 'name' ? 'asc' : 'desc';
+  }
+  if (!_toolStatsData) return;
+  const body = document.getElementById('tool-stats-modal-body');
+  body.innerHTML = renderToolStatsBody(_toolStatsData);
+}
+
+function closeToolStatsModal() {
+  document.getElementById('tool-stats-modal').classList.remove('visible');
+}
 //#endregion
 
 //#region OWNER_FILTER

@@ -543,7 +543,26 @@
       <div id="team-modal-body" class="modal-body"></div>
       <div class="modal-footer">
         <button id="session-info-dismiss-btn" class="btn btn-secondary" onclick="toggleDismissSession(_infoModalSessionId); closeTeamModal()">Dismiss</button>
+        <button class="btn btn-secondary" onclick="showToolStatsModal(_infoModalSessionId)" title="Tool invocation statistics">Tool Stats</button>
         <button class="btn btn-primary" onclick="closeTeamModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tool Stats Modal (stacked on top of info modal) -->
+  <div id="tool-stats-modal" class="modal-overlay plan-modal-overlay" onclick="closeToolStatsModal()">
+    <div class="modal tool-stats-modal" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <h3 id="tool-stats-modal-title" class="modal-title">Tool Statistics</h3>
+        <button class="modal-close" aria-label="Close dialog" onclick="closeToolStatsModal()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M18 6L6 18M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+      <div id="tool-stats-modal-body" class="modal-body" style="overflow-y:auto;flex:1 1 auto;min-height:0;"></div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" onclick="closeToolStatsModal()">Close</button>
       </div>
     </div>
   </div>

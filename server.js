@@ -1683,6 +1683,112 @@ app.get('/api/sessions/:sessionId/tool-result/:toolUseId', (req, res) => {
   res.json({ toolUseId: req.params.toolUseId, content });
 });
 
+const toolStatsCache = new Map();
+
+function buildToolStats(jsonlPath) {
+  const toolUseById = {};     // tool_use_id -> { displayName, isSkill }
+  const seenResults = new Set();
+  const toolMap = {};         // displayName -> { count, success, failed, outputBytes }
+  const skillPromptIds = {};  // promptId -> [skillDisplayName, ...]
+  const promptOutputBytes = {}; // promptId -> total outputBytes in that turn
+
+  const content = readFileSync(jsonlPath, 'utf8');
+  for (const line of content.split('\n')) {
+    if (!line) continue;
+    let obj;
+    try { obj = JSON.parse(line); } catch (_) { continue; }
+
+    if (obj.type === 'assistant' && Array.isArray(obj.message?.content)) {
+      for (const block of obj.message.content) {
+        if (block.type === 'tool_use' && block.name && block.id) {
+          const isSkill = block.name === 'Skill';
+          const displayName = isSkill && block.input?.skill
+            ? `Skill(${block.input.skill})`
+            : block.name === 'Agent' && block.input?.subagent_type
+            ? `Agent(${block.input.subagent_type})`
+            : block.name;
+          toolUseById[block.id] = { displayName, isSkill };
+        }
+      }
+    } else if (obj.type === 'user' && Array.isArray(obj.message?.content)) {
+      const promptId = obj.promptId;
+      for (const block of obj.message.content) {
+        if (block.type !== 'tool_result' || !block.tool_use_id) continue;
+        const entry = toolUseById[block.tool_use_id];
+        if (!entry) continue;
+        const { displayName, isSkill } = entry;
+        seenResults.add(block.tool_use_id);
+        if (!toolMap[displayName]) toolMap[displayName] = { count: 0, success: 0, failed: 0, outputBytes: 0 };
+        toolMap[displayName].count++;
+        const raw = typeof block.content === 'string' ? block.content
+          : Array.isArray(block.content) ? block.content.map(b => b.text || '').join('\n') : '';
+        const bytes = raw.length;
+        toolMap[displayName].outputBytes += bytes;
+        if (promptId) {
+          promptOutputBytes[promptId] = (promptOutputBytes[promptId] || 0) + bytes;
+          if (isSkill) {
+            if (!skillPromptIds[promptId]) skillPromptIds[promptId] = [];
+            skillPromptIds[promptId].push(displayName);
+          }
+        }
+        const lower = raw.toLowerCase();
+        const failed = /^error/i.test(raw.trimStart())
+          || /exit code [1-9]/.test(lower)
+          || lower.includes('command failed')
+          || (lower.includes('failed') && lower.includes('error'));
+        if (failed) toolMap[displayName].failed++;
+        else toolMap[displayName].success++;
+      }
+    }
+  }
+
+  // Count tool_use blocks that never got a tool_result
+  for (const [id, { displayName }] of Object.entries(toolUseById)) {
+    if (seenResults.has(id)) continue;
+    if (!toolMap[displayName]) toolMap[displayName] = { count: 0, success: 0, failed: 0, outputBytes: 0 };
+    toolMap[displayName].count++;
+  }
+
+  // Approximate Skill impact: replace tiny dispatch bytes with the full turn's output
+  for (const [promptId, skillNames] of Object.entries(skillPromptIds)) {
+    const turnBytes = promptOutputBytes[promptId] || 0;
+    for (const name of skillNames) {
+      if (toolMap[name]) toolMap[name].outputBytes = turnBytes;
+    }
+  }
+
+  let totalCalls = 0, totalFailed = 0, totalOutputBytes = 0;
+  for (const s of Object.values(toolMap)) {
+    totalCalls += s.count;
+    totalFailed += s.failed;
+    totalOutputBytes += s.outputBytes || 0;
+  }
+  const uniqueTools = Object.keys(toolMap).length;
+
+  const tools = [];
+  for (const [name, stats] of Object.entries(toolMap)) {
+    const impact = totalOutputBytes > 0 ? Math.round((stats.outputBytes || 0) / totalOutputBytes * 100) : 0;
+    const displayName = name.startsWith('mcp__') ? name.split('__').slice(2).join('__') || name : name;
+    tools.push({ name: displayName, count: stats.count, success: stats.success, failed: stats.failed, impact });
+  }
+
+  return { totalCalls, uniqueTools, totalFailed, tools };
+}
+
+app.get('/api/sessions/:sessionId/tool-stats', (req, res) => {
+  const metadata = loadSessionMetadata();
+  const meta = metadata[req.params.sessionId];
+  const jsonlPath = meta?.jsonlPath;
+  if (!jsonlPath) return res.status(404).json({ error: 'session not found' });
+  try {
+    const data = cachedByMtime(toolStatsCache, jsonlPath, jsonlPath, () => buildToolStats(jsonlPath), null);
+    if (!data) return res.status(404).json({ error: 'could not parse session' });
+    res.json({ sessionId: req.params.sessionId, ...data });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get('/api/sessions/:sessionId/user-image/:msgUuid/:blockIndex', (req, res) => {
   const metadata = loadSessionMetadata();
   const meta = metadata[req.params.sessionId];
