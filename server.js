@@ -159,6 +159,10 @@ function isAgentFresh(agent) {
   return (Date.now() - new Date(ts).getTime()) < AGENT_TTL_MS;
 }
 
+function isAgentLive(agent) {
+  return agent.status === 'active' || agent.status === 'idle';
+}
+
 // Claude Code records gitBranch from the launch-time repo and never updates it
 // when cwd shifts (Bash `cd`, submodule, sibling repo). Resolve on-demand from
 // the live cwd instead. Cached per-cwd with a short TTL so a list refresh
@@ -216,7 +220,7 @@ function checkAgentStatus(agentDir, stale, logMtime, isTeam) {
     for (const file of readdirSync(agentDir).filter(f => f.endsWith('.jsonl') && !f.startsWith('_'))) {
       try {
         const agent = readAgentJsonl(path.join(agentDir, file));
-        if (isTeam && (agent.status === 'active' || agent.status === 'idle')) {
+        if (isTeam && isAgentLive(agent)) {
           result.hasActive = true;
           if (agent.status === 'active') result.hasRunning = true;
         } else if (isAgentFresh(agent)) {
@@ -1242,7 +1246,7 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
         const agentTs = agent.updatedAt || agent.startedAt;
         const agentStale = !sessionStale && agentTs && (Date.now() - new Date(agentTs).getTime()) > AGENT_STALE_MS;
         if (!isAgentFresh(agent) || sessionStale || agentStale) {
-          if (agent.status === 'active' || agent.status === 'idle') {
+          if (isAgentLive(agent)) {
             const agentName = agentDisplayName(agent);
             const isTeamMember = isTeam && agentName && teamMemberNames.has(agentName);
             if (!isTeamMember) {
@@ -1254,7 +1258,7 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
         agents.push(agent);
       } catch (e) { /* skip invalid */ }
     }
-    const liveAgents = agents.filter(a => a.status === 'active' || a.status === 'idle');
+    const liveAgents = agents.filter(isAgentLive);
     if (liveAgents.length && meta.jsonlPath) {
       try {
         const terminated = getTerminatedTeammates(meta.jsonlPath);
@@ -1280,7 +1284,7 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
           getSessionDigest(meta.jsonlPath);
         if (rejectedAgentIds.size || rejectedPrompts.size || killedAgentIds.size) {
           for (const agent of liveAgents) {
-            if (agent.status !== 'active' && agent.status !== 'idle') continue;
+            if (!isAgentLive(agent)) continue;
             let reason = null;
             if (killedAgentIds.has(agent.agentId)) reason = 'killed-by-harness';
             else if (rejectedAgentIds.has(agent.agentId) || (agent.prompt && rejectedPrompts.has(agent.prompt))) {
@@ -1298,13 +1302,16 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
 
     const dirty = new Set();
 
-    const agentsNeedingPrompt = agents.filter(a => !a.prompt && !a.promptUnavailable);
-    const agentsNeedingName = agents.filter(a => !a.agentName && !a.agentNameUnavailable);
-    const agentsNeedingDesc = agents.filter(a => !a.description && !a.descriptionUnavailable);
-    if ((agentsNeedingPrompt.length || agentsNeedingName.length || agentsNeedingDesc.length) && meta.jsonlPath) {
-      let byAgentId = {};
-      let nameByAgentId = {};
-      let descByAgentId = {};
+    // Agents may be missing prompt/name/description because the parent's agent_progress
+    // event or the subagent's own transcript hadn't been written yet at last poll. While
+    // the agent is still active, keep retrying instead of latching *Unavailable permanently
+    // (same pattern as agentsNeedingModel below). Each field shares the same resolve flow:
+    // look up in progressMap by agentId, fall back to per-field extractor, persist only
+    // on actual change.
+    const byAgentId = {};
+    const nameByAgentId = {};
+    const descByAgentId = {};
+    if (meta.jsonlPath) {
       try {
         const progressMap = getProgressMap(meta.jsonlPath);
         for (const entry of Object.values(progressMap)) {
@@ -1313,22 +1320,34 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
           if (entry.description && !descByAgentId[entry.agentId]) descByAgentId[entry.agentId] = entry.description;
         }
       } catch (_) {}
-      for (const agent of agentsNeedingPrompt) {
-        const prompt = byAgentId[agent.agentId]
-          || (() => { try { return extractPromptFromTranscript(subagentJsonlPath(meta, agent.agentId)); } catch (_) { return null; } })();
-        if (prompt) agent.prompt = prompt;
-        else agent.promptUnavailable = true;
-        dirty.add(agent);
-      }
-      for (const agent of agentsNeedingName) {
-        if (nameByAgentId[agent.agentId]) agent.agentName = nameByAgentId[agent.agentId];
-        else agent.agentNameUnavailable = true;
-        dirty.add(agent);
-      }
-      for (const agent of agentsNeedingDesc) {
-        if (descByAgentId[agent.agentId]) agent.description = descByAgentId[agent.agentId];
-        else agent.descriptionUnavailable = true;
-        dirty.add(agent);
+    }
+    const reconcileFields = [
+      {
+        field: 'prompt',
+        flag: 'promptUnavailable',
+        lookup: (a) => {
+          if (byAgentId[a.agentId]) return byAgentId[a.agentId];
+          try { return extractPromptFromTranscript(subagentJsonlPath(meta, a.agentId)); } catch (_) { return null; }
+        },
+      },
+      { field: 'agentName',   flag: 'agentNameUnavailable',   lookup: (a) => nameByAgentId[a.agentId] || null },
+      { field: 'description', flag: 'descriptionUnavailable', lookup: (a) => descByAgentId[a.agentId] || null },
+    ];
+    if (meta.jsonlPath) {
+      for (const { field, flag, lookup } of reconcileFields) {
+        for (const agent of agents) {
+          if (agent[field]) continue;
+          if (agent[flag] && !isAgentLive(agent)) continue;
+          const value = lookup(agent);
+          if (value) {
+            agent[field] = value;
+            delete agent[flag];
+            dirty.add(agent);
+          } else if (!isAgentLive(agent) && !agent[flag]) {
+            agent[flag] = true;
+            dirty.add(agent);
+          }
+        }
       }
     }
 

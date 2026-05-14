@@ -654,7 +654,7 @@ describe('Parser: extractPromptFromTranscript', () => {
     }
   });
 
-  it('truncates long content to 500 characters', () => {
+  it('returns long content in full (no truncation)', () => {
     tmpDir = mkdtempSync(path.join(os.tmpdir(), 'parser-test-'));
     const longText = 'x'.repeat(600);
     const file = path.join(tmpDir, 'prompt.jsonl');
@@ -665,7 +665,8 @@ describe('Parser: extractPromptFromTranscript', () => {
     }) + '\n');
     try {
       const result = extractPromptFromTranscript(file);
-      assert.equal(result.length, 500);
+      assert.equal(result.length, 600);
+      assert.equal(result, longText);
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }
