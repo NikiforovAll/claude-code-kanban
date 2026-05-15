@@ -3470,6 +3470,20 @@ select.form-input option:checked {
   font-weight: 600;
 }
 
+.badge-rejected {
+  display: inline-block;
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.tool-stats-chip-val.rejected {
+  color: #f59e0b;
+}
+
 .impact-bar-wrap {
   width: 48px;
   height: 6px;

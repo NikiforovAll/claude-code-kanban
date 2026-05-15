@@ -1777,7 +1777,7 @@ function buildToolStats(jsonlPath) {
         if (!entry) continue;
         const { displayName, isSkill } = entry;
         seenResults.add(block.tool_use_id);
-        if (!toolMap[displayName]) toolMap[displayName] = { count: 0, success: 0, failed: 0, outputBytes: 0 };
+        if (!toolMap[displayName]) toolMap[displayName] = { count: 0, success: 0, failed: 0, rejected: 0, outputBytes: 0 };
         toolMap[displayName].count++;
         const raw = typeof block.content === 'string' ? block.content
           : Array.isArray(block.content) ? block.content.map(b => b.text || '').join('\n') : '';
@@ -1790,13 +1790,17 @@ function buildToolStats(jsonlPath) {
             skillPromptIds[promptId].push(displayName);
           }
         }
-        const lower = raw.toLowerCase();
-        const failed = /^error/i.test(raw.trimStart())
-          || /exit code [1-9]/.test(lower)
-          || lower.includes('command failed')
-          || (lower.includes('failed') && lower.includes('error'));
-        if (failed) toolMap[displayName].failed++;
-        else toolMap[displayName].success++;
+        const isRejected = typeof obj.toolUseResult === 'string' && /rejected/i.test(obj.toolUseResult);
+        if (isRejected) toolMap[displayName].rejected++;
+        else {
+          const lower = raw.toLowerCase();
+          const failed = /^error/i.test(raw.trimStart())
+            || /exit code [1-9]/.test(lower)
+            || lower.includes('command failed')
+            || (lower.includes('failed') && lower.includes('error'));
+          if (failed) toolMap[displayName].failed++;
+          else toolMap[displayName].success++;
+        }
       }
     }
   }
@@ -1804,7 +1808,7 @@ function buildToolStats(jsonlPath) {
   // Count tool_use blocks that never got a tool_result
   for (const [id, { displayName }] of Object.entries(toolUseById)) {
     if (seenResults.has(id)) continue;
-    if (!toolMap[displayName]) toolMap[displayName] = { count: 0, success: 0, failed: 0, outputBytes: 0 };
+    if (!toolMap[displayName]) toolMap[displayName] = { count: 0, success: 0, failed: 0, rejected: 0, outputBytes: 0 };
     toolMap[displayName].count++;
   }
 
@@ -1816,10 +1820,11 @@ function buildToolStats(jsonlPath) {
     }
   }
 
-  let totalCalls = 0, totalFailed = 0, totalOutputBytes = 0;
+  let totalCalls = 0, totalFailed = 0, totalRejected = 0, totalOutputBytes = 0;
   for (const s of Object.values(toolMap)) {
     totalCalls += s.count;
     totalFailed += s.failed;
+    totalRejected += s.rejected;
     totalOutputBytes += s.outputBytes || 0;
   }
   const uniqueTools = Object.keys(toolMap).length;
@@ -1828,10 +1833,10 @@ function buildToolStats(jsonlPath) {
   for (const [name, stats] of Object.entries(toolMap)) {
     const impact = totalOutputBytes > 0 ? Math.round((stats.outputBytes || 0) / totalOutputBytes * 100) : 0;
     const displayName = name.startsWith('mcp__') ? name.split('__').slice(2).join('__') || name : name;
-    tools.push({ name: displayName, count: stats.count, success: stats.success, failed: stats.failed, impact });
+    tools.push({ name: displayName, count: stats.count, success: stats.success, failed: stats.failed, rejected: stats.rejected, impact });
   }
 
-  return { totalCalls, uniqueTools, totalFailed, tools };
+  return { totalCalls, uniqueTools, totalFailed, totalRejected, tools };
 }
 
 app.get('/api/sessions/:sessionId/tool-stats', (req, res) => {

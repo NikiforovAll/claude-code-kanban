@@ -6181,13 +6181,14 @@ function showToolStatsModal(sessionId) {
 }
 
 function renderToolStatsBody(data) {
-  const { totalCalls, uniqueTools, totalFailed, tools } = data;
+  const { totalCalls, uniqueTools, totalFailed, totalRejected, tools } = data;
 
   const summary = `
     <div class="tool-stats-summary">
       <div class="tool-stats-chip"><span class="tool-stats-chip-val">${totalCalls}</span><span class="tool-stats-chip-lbl">Total calls</span></div>
       <div class="tool-stats-chip"><span class="tool-stats-chip-val">${uniqueTools}</span><span class="tool-stats-chip-lbl">Unique tools</span></div>
       <div class="tool-stats-chip"><span class="tool-stats-chip-val${totalFailed > 0 ? ' failed' : ''}">${totalFailed}</span><span class="tool-stats-chip-lbl">Failed</span></div>
+      <div class="tool-stats-chip"><span class="tool-stats-chip-val${totalRejected > 0 ? ' rejected' : ''}">${totalRejected}</span><span class="tool-stats-chip-lbl">Rejected</span></div>
     </div>`;
 
   if (!tools?.length) {
@@ -6212,6 +6213,7 @@ function renderToolStatsBody(data) {
       <th onclick="toolStatsSortBy('count')">Calls${arrow('count')}</th>
       <th onclick="toolStatsSortBy('success')">✓ Success${arrow('success')}</th>
       <th onclick="toolStatsSortBy('failed')">✗ Failed${arrow('failed')}</th>
+      <th onclick="toolStatsSortBy('rejected')">⊘ Rejected${arrow('rejected')}</th>
       <th onclick="toolStatsSortBy('impact')" title="Share of total tool output by character count">Impact${arrow('impact')}</th>
     </tr></thead>
     <tbody>${sorted
@@ -6221,6 +6223,7 @@ function renderToolStatsBody(data) {
       <td>${t.count}</td>
       <td>${t.success > 0 ? `<span class="badge-success">${t.success}</span>` : '—'}</td>
       <td>${t.failed > 0 ? `<span class="badge-failed">${t.failed}</span>` : '—'}</td>
+      <td>${t.rejected > 0 ? `<span class="badge-rejected">${t.rejected}</span>` : '—'}</td>
       <td class="impact-cell">${
         t.impact != null
           ? `<div class="impact-cell-inner"><div class="impact-bar-wrap"><div class="impact-bar-fill" style="width:${t.impact}%"></div></div><span class="impact-pct">${t.impact < 1 ? '<1' : t.impact}%</span></div>`
