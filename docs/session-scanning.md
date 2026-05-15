@@ -47,7 +47,37 @@ A FS event from the matching watcher updates the metadata pipeline incrementally
 
 `readSessionInfoFromJsonl` also captures `logicalParentUuid` from any `compact_boundary` record found in the bounded preamble (head cap 1 MB). The `/api/sessions` compact-continuation suppression pass reads this off the cached metadata — no per-request full-JSONL rescan. `findCompactAnchorUuid` remains as a fallback in `lookupParentSession` for paths that bypass the metadata cache.
 
-### 3. Periodic timers (cleanup only — not scanning)
+### 3. Boot-time prewarm
+
+`prewarmCaches()` runs once via `setImmediate` after `app.listen` fires. It primes the metadata + loop-info caches in the background so the first user request lands warm.
+
+Steps, with periodic `setImmediate` yields so any inbound request isn't starved:
+
+1. `loadSessionMetadata()` — full directory scan, populates `sessionMetadataCache`.
+2. For each metadata entry: `refreshLoopInfoState(meta.jsonlPath)` — primes `loopInfoStateByPath` so the per-session loop scan is a single `statSync` afterwards.
+
+Previously this also pre-warmed `gitBranchCache` per distinct `cwd` and ran a self-request to `/api/sessions?limit=all` to drive task-count / plan / team / agent caches. Both were removed once the `/api/sessions` handler grew a **cheap-probe** for `?filter=active`: inactive non-pinned sessions short-circuit before `buildSessionObject`, so the survivors (typically <10) don't need bulk-warmed caches. The self-request was 690× wasted work for an active-filter first hit.
+
+No new SSE event. Watchers remain authoritative for incremental updates after boot.
+
+### 3b. Cheap-probe on `?filter=active`
+
+In `/api/sessions`, when `req.query.filter === 'active'`, each candidate session is gated by a probe **before** the expensive enrichers (`buildSessionObject`, `getPlanInfo`, `loadTeamConfig`, `resolveSessionGitBranch`, `getLoopInfoSummary`, `getContextStatus`):
+
+```
+hasMessages && (
+  logAge <= SESSION_STALE_MS        // hasRecentLog
+  || agentStatus.hasActive
+  || agentStatus.waitingForUser
+  || pending > 0 || inProgress > 0  // pass 1 only (tasks dir exists)
+)
+```
+
+Pinned IDs (regular pins, sticky pins, revealed-plan, revealed-storage, focused `currentSessionId`) bypass the probe and always get full enrichment. The post-filter at the end of the handler stays as a safety net but operates on a now-small map.
+
+Cost: per-candidate work is one `statSync`, one `getTaskCounts` map lookup, one `checkAgentStatus` file check. ~690 candidates → ~5 survivors hit `buildSessionObject`.
+
+### 4. Periodic timers (cleanup only — not scanning)
 
 | Timer | Interval | Purpose |
 |---|---|---|
@@ -57,7 +87,7 @@ A FS event from the matching watcher updates the metadata pipeline incrementally
 
 No timer enumerates projects or sessions.
 
-### 4. Client-side polling
+### 5. Client-side polling
 
 `public/app.js` is largely SSE-driven, with one polling exception:
 

@@ -733,6 +733,7 @@ app.get('/api/sessions', async (req, res) => {
 
     const pinnedParam = req.query.pinned;
     const pinnedIds = pinnedParam ? new Set(pinnedParam.split(',').filter(Boolean)) : new Set();
+    const activeFilter = req.query.filter === 'active';
 
     const metadata = loadSessionMetadata();
     const sessionsMap = new Map();
@@ -755,6 +756,24 @@ app.get('/api/sessions', async (req, res) => {
           const logAge = logMtime ? Date.now() - logMtime : Infinity;
           const stale = logAge > AGENT_STALE_MS;
 
+          const isTeam = isTeamSession(entry.name);
+          const teamConfig = isTeam ? loadTeamConfig(entry.name) : null;
+          const resolvedAgentDir = path.join(AGENT_ACTIVITY_DIR, teamConfig?.leadSessionId || entry.name);
+          const agentStatus = checkAgentStatus(resolvedAgentDir, stale, logMtime, isTeam);
+
+          // Cheap-probe: when filter=active, skip expensive enrichment for inactive non-pinned sessions.
+          // Mirrors the post-filter predicate using only signals already computed above.
+          if (activeFilter && !pinnedIds.has(entry.name)) {
+            const hasRecentLog = logAge <= SESSION_STALE_MS;
+            const cheaplyActive = logStat.hasMessages && (
+              hasRecentLog
+              || agentStatus.hasActive
+              || !!agentStatus.waitingForUser
+              || (pending > 0 || inProgress > 0)
+            );
+            if (!cheaplyActive) continue;
+          }
+
           // Use newest of: task file mtime, JSONL mtime, directory mtime
           let modifiedAt = newestTaskMtime ? newestTaskMtime.toISOString() : stat.mtime.toISOString();
           if (logMtime) {
@@ -762,16 +781,8 @@ app.get('/api/sessions', async (req, res) => {
             if (jsonlMtime > modifiedAt) modifiedAt = jsonlMtime;
           }
 
-          const isTeam = isTeamSession(entry.name);
-          const teamConfig = isTeam ? loadTeamConfig(entry.name) : null;
           const memberCount = teamConfig?.members?.length || 0;
           const planInfo = getPlanInfo(meta.slug);
-
-          const resolvedAgentDir = (() => {
-            const rid = teamConfig?.leadSessionId || entry.name;
-            return path.join(AGENT_ACTIVITY_DIR, rid);
-          })();
-          const agentStatus = checkAgentStatus(resolvedAgentDir, stale, logMtime, isTeam);
 
           sessionsMap.set(entry.name, buildSessionObject(entry.name, meta, {
             _logStat: logStat,
@@ -848,14 +859,24 @@ app.get('/api/sessions', async (req, res) => {
         const logMtime = logStat.mtime;
         const logAge = logMtime ? Date.now() - logMtime : Infinity;
         const stale = logAge > AGENT_STALE_MS;
+        const metaIsTeam = isTeamSession(sessionId);
+        const metaAgentDir = path.join(AGENT_ACTIVITY_DIR, sessionId);
+        const metaAgentStatus = checkAgentStatus(metaAgentDir, stale, logMtime, metaIsTeam);
+
+        // Cheap-probe: no tasks here (metadata-only), so active = recent log OR live agent.
+        if (activeFilter && !pinnedIds.has(sessionId)) {
+          const hasRecentLog = logAge <= SESSION_STALE_MS;
+          const cheaplyActive = logStat.hasMessages && (
+            hasRecentLog || metaAgentStatus.hasActive || !!metaAgentStatus.waitingForUser
+          );
+          if (!cheaplyActive) continue;
+        }
+
         let modifiedAt = meta.created || null;
         if (logMtime) {
           const jsonlMtime = new Date(logMtime).toISOString();
           if (!modifiedAt || jsonlMtime > modifiedAt) modifiedAt = jsonlMtime;
         }
-        const metaIsTeam = isTeamSession(sessionId);
-        const metaAgentDir = path.join(AGENT_ACTIVITY_DIR, sessionId);
-        const metaAgentStatus = checkAgentStatus(metaAgentDir, stale, logMtime, metaIsTeam);
         sessionsMap.set(sessionId, buildSessionObject(sessionId, meta, {
           _logStat: logStat,
           modifiedAt: modifiedAt || new Date(0).toISOString(),
@@ -986,6 +1007,22 @@ app.get('/api/sessions', async (req, res) => {
         _logStat: pinnedLogStat,
         modifiedAt: modifiedAt || new Date(0).toISOString(),
       }));
+    }
+
+    // Server-side activity filter (mirrors the client predicate in public/app.js).
+    // Pinned IDs bypass — they should always be in the response.
+    if (activeFilter) {
+      const isActive = (s) =>
+        s.hasMessages && (
+          (!s.sharedTaskList && (s.pending > 0 || s.inProgress > 0))
+          || s.hasActiveAgents
+          || s.hasWaitingForUser
+          || s.hasRecentLog
+        );
+      for (const [id, s] of sessionsMap) {
+        if (pinnedIds.has(id)) continue;
+        if (!isActive(s)) sessionsMap.delete(id);
+      }
     }
 
     // Convert map to array and sort by most recently modified
@@ -2426,13 +2463,38 @@ cleanupContextStatus();
 setInterval(cleanupAgentActivity, CLEANUP_INTERVAL_MS);
 setInterval(cleanupContextStatus, 30 * 60 * 1000);
 
-const server = app.listen(PORT, () => {
+// Warm the metadata + loop-info caches in the background so the first user
+// request lands warm. The cheap-probe in /api/sessions skips per-session
+// enrichment for inactive sessions, so we no longer drive a full self-request
+// here — that was 690× wasted work for an active-filter first hit.
+// Yields to the event loop periodically so any inbound request isn't starved.
+async function prewarmCaches() {
+  const t0 = Date.now();
+  try {
+    const metadata = loadSessionMetadata();
+
+    let i = 0;
+    for (const meta of Object.values(metadata)) {
+      if (meta?.jsonlPath) {
+        try { refreshLoopInfoState(meta.jsonlPath); } catch {}
+      }
+      if (++i % 50 === 0) await new Promise(r => setImmediate(r));
+    }
+
+    console.log(`[prewarm] done in ${Date.now() - t0}ms (${Object.keys(metadata).length} sessions)`);
+  } catch (e) {
+    console.warn('[prewarm] failed:', e.message);
+  }
+}
+
+  const server = app.listen(PORT, () => {
     const actualPort = server.address().port;
     console.log(`Claude Task Kanban running at http://localhost:${actualPort}`);
 
     if (process.argv.includes('--open')) {
       import('open').then(open => open.default(`http://localhost:${actualPort}`));
     }
+    setImmediate(prewarmCaches);
   });
 
   server.on('error', (err) => {
@@ -2445,6 +2507,7 @@ const server = app.listen(PORT, () => {
         if (process.argv.includes('--open')) {
           import('open').then(open => open.default(`http://localhost:${actualPort}`));
         }
+        setImmediate(prewarmCaches);
       });
     } else {
       throw err;

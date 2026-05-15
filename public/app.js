@@ -161,12 +161,16 @@ async function fetchSessions(includeTasks = true) {
     const allPinnedIds = new Set([...pinnedSessionIds, ...stickySessionIds]);
     if (revealedPlanSessionId) allPinnedIds.add(revealedPlanSessionId);
     if (revealedStorageSessionId) allPinnedIds.add(revealedStorageSessionId);
+    // When server filters by activity, the focused session may not be active —
+    // include it in pinned so the server still returns it.
+    if (sessionFilter === 'active' && currentSessionId) allPinnedIds.add(currentSessionId);
     const pinnedParam = allPinnedIds.size > 0 ? `&pinned=${[...allPinnedIds].join(',')}` : '';
     const projectParam =
       filterProject && filterProject !== '__recent__' ? `&project=${encodeURIComponent(filterProject)}` : '';
-    const sessionsPromise = fetch(`/api/sessions?limit=${sessionLimit}${pinnedParam}${projectParam}`).then((r) =>
-      r.json(),
-    );
+    const filterParam = sessionFilter === 'active' ? '&filter=active' : '';
+    const sessionsPromise = fetch(
+      `/api/sessions?limit=${sessionLimit}${pinnedParam}${projectParam}${filterParam}`,
+    ).then((r) => r.json());
 
     let newSessions, newTasks;
     if (includeTasks) {
@@ -582,7 +586,6 @@ async function fetchTasks(sessionId) {
 const WAITING_TTL_MS = 30 * 60 * 1000;
 const AGENT_LOG_MAX = 8;
 const LIVE_INDICATOR_MS = 10 * 1000;
-const ACTIVE_PLAN_MS = 10 * 60 * 1000;
 // #endregion
 
 function resetAgentState() {
@@ -2463,7 +2466,6 @@ function renderSessions() {
   // project filter → search filter → ensure pinned/sticky sessions are always included
   let filteredSessions = sessions;
   if (sessionFilter === 'active') {
-    const now = Date.now();
     const activeSessionIds = new Set();
     filteredSessions = filteredSessions.filter((s) => {
       if (dismissedSessionIds.has(s.id)) return false;
@@ -2472,8 +2474,7 @@ function renderSessions() {
         ((!s.sharedTaskList && (s.pending > 0 || s.inProgress > 0)) ||
           s.hasActiveAgents ||
           s.hasWaitingForUser ||
-          s.hasRecentLog ||
-          (s.hasPlan && !s.planImplementationSessionId && now - new Date(s.modifiedAt).getTime() <= ACTIVE_PLAN_MS));
+          s.hasRecentLog);
       if (isActive) activeSessionIds.add(s.id);
       return isActive;
     });
