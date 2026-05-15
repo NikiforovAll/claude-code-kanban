@@ -925,16 +925,21 @@ app.get('/api/sessions', async (req, res) => {
             existing.memberCount = cfg.members?.length || 0;
             existing.name = existing.name || cfg.name || dir.name;
             teamLeaderIds.add(leaderId);
-            // Attach team-named task directory if present
+            // Attach team-named task directory if present.
+            // Prefer team task dir over an empty session-UUID task dir — when a team session has
+            // both a UUID-named dir (often empty: just .lock/.highwatermark) and a team-named dir
+            // holding the real tasks, the leader card otherwise shows 0/0.
             const teamTaskDir = path.join(TASKS_DIR, dir.name);
-            if (!existing.tasksDir && existsSync(teamTaskDir)) {
+            if (existsSync(teamTaskDir)) {
               const counts = getTaskCounts(teamTaskDir);
-              existing.taskCount = counts.taskCount;
-              existing.completed = counts.completed;
-              existing.inProgress = counts.inProgress;
-              existing.pending = counts.pending;
-              existing.tasksDir = teamTaskDir;
-              existing.sharedTaskList = dir.name;
+              if (!existing.tasksDir || counts.taskCount > (existing.taskCount || 0)) {
+                existing.taskCount = counts.taskCount;
+                existing.completed = counts.completed;
+                existing.inProgress = counts.inProgress;
+                existing.pending = counts.pending;
+                existing.tasksDir = teamTaskDir;
+                existing.sharedTaskList = dir.name;
+              }
             }
             // Re-check agent status with isTeam=true
             const agentDir = path.join(AGENT_ACTIVITY_DIR, leaderId);
