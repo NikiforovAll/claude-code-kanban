@@ -2716,6 +2716,7 @@ function renderSessions() {
       const folderName = projectPath.split(/[/\\]/).pop();
       const isCollapsed = collapsedProjectGroups.has(projectPath);
       const escapedPath = escapeHtml(projectPath);
+      const activeCount = projectSessions.reduce((n, s) => n + (isSessionActive(s) ? 1 : 0), 0);
       const breadcrumbParts = projectPath
         .replace(/^\/home\/[^/]+/, '~')
         .split(/[/\\]/)
@@ -2728,7 +2729,7 @@ function renderSessions() {
             <div class="project-group-header${isCollapsed ? ' collapsed' : ''}" data-group-path="${escapedPath}">
               <svg class="group-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
               <span class="group-name">${escapeHtml(folderName)}</span>
-              <span class="group-count">${projectSessions.length}</span>
+              <span class="group-count" title="${activeCount} active / ${projectSessions.length} total">${activeCount > 0 ? `<span class="group-count-active">${activeCount}</span><span class="group-count-sep">/</span>` : ''}${projectSessions.length}</span>
               <span class="project-view-btn" data-project-path="${escapedPath}" title="Open project view — combined tasks from all sessions">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
               </span>
@@ -2742,11 +2743,12 @@ function renderSessions() {
 
     if (ungrouped.length > 0 && sortedGroups.length > 0) {
       const isCollapsed = collapsedProjectGroups.has('__ungrouped__');
+      const ungroupedActive = ungrouped.reduce((n, s) => n + (isSessionActive(s) ? 1 : 0), 0);
       html += `
             <div class="project-group-header${isCollapsed ? ' collapsed' : ''}" data-group-path="__ungrouped__">
               <svg class="group-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
               <span class="group-name">Ungrouped</span>
-              <span class="group-count">${ungrouped.length}</span>
+              <span class="group-count" title="${ungroupedActive} active / ${ungrouped.length} total">${ungroupedActive > 0 ? `<span class="group-count-active">${ungroupedActive}</span><span class="group-count-sep">/</span>` : ''}${ungrouped.length}</span>
             </div>
             <div class="project-group-sessions${isCollapsed ? ' collapsed' : ''}">
               ${renderGroupSessions(ungrouped, '__pinned___ungrouped__')}

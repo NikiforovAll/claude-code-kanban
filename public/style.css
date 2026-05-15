@@ -3963,6 +3963,16 @@ pre.mermaid svg {
   line-height: 1;
 }
 
+.project-group-header .group-count-active {
+  color: var(--success);
+  font-weight: 500;
+}
+
+.project-group-header .group-count-sep {
+  margin: 0 1px;
+  opacity: 0.5;
+}
+
 .project-group-header .group-path-toggle {
   color: var(--text-muted);
   cursor: pointer;
