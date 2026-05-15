@@ -1147,42 +1147,80 @@ function toggleToolGroup(id) {
   if (el) el.classList.toggle('show');
 }
 
-const WAITING_PLAN_PREVIEW_CHARS = 120;
-const WAITING_PREVIEW_MAX_CHARS = 200;
-
 function getWaitingLabel(kind, tool) {
   if (kind !== 'question') return `Awaiting permission: ${tool}`;
   if (tool === 'ExitPlanMode') return 'Plan awaiting approval';
   return 'Question pending';
 }
 
-function getWaitingPreview(toolInput) {
-  if (!toolInput) return '';
-  try {
-    const parsed = JSON.parse(toolInput);
-    if (parsed.questions?.[0]?.question) return parsed.questions[0].question;
-    if (parsed.plan) {
-      const t = parsed.plan.match(/^#\s+(.+)/m);
-      return t ? t[1] : parsed.plan.slice(0, WAITING_PLAN_PREVIEW_CHARS);
-    }
-    if (parsed.command) return parsed.command;
-    if (parsed.file_path) return parsed.file_path;
-  } catch (_) {
-    /* toolInput may be truncated/non-JSON */
+function getWaitingPill(kind, tool) {
+  if (kind === 'question' && tool === 'ExitPlanMode') return 'Plan awaiting approval';
+  if (kind === 'question') return 'Question pending';
+  return 'Awaiting permission';
+}
+
+function deriveWaitingDetail(tool, params) {
+  if (!params) return '';
+  const trunc = (s) => (s.length > 80 ? `${s.slice(0, 80)}...` : s);
+  if (params.file_path) return params.file_path.replace(/^.*[/\\]/, '');
+  if (params.command) return trunc(params.command);
+  if (params.pattern) return trunc(params.pattern);
+  if (params.query) return trunc(params.query);
+  if (params.url) return trunc(params.url);
+  if (params.skill) {
+    const s = params.skill + (typeof params.args === 'string' ? ` ${params.args}` : '');
+    return trunc(s);
   }
+  if (tool === 'AskUserQuestion' && params.questions?.[0]?.question) return trunc(params.questions[0].question);
+  if (tool === 'ExitPlanMode' && typeof params.plan === 'string') {
+    const t = params.plan.match(/^#\s+(.+)/m);
+    return trunc(t ? t[1] : params.plan);
+  }
+  if (params.description) return trunc(String(params.description));
   return '';
+}
+
+function renderWaitingBody(tool, params) {
+  if (!params) return '';
+  if (tool === 'AskUserQuestion' && Array.isArray(params.questions)) {
+    const items = params.questions
+      .map((q) => {
+        const head = `<div style="font-weight:600">${escapeHtml(q.question || '')}</div>`;
+        const opts = Array.isArray(q.options)
+          ? `<ul style="margin:2px 0 0 16px;padding:0">${q.options
+              .map(
+                (o) =>
+                  `<li><span style="font-weight:600">${escapeHtml(o.label || '')}</span>${o.description ? ` — <span style="color:var(--text-muted)">${escapeHtml(o.description)}</span>` : ''}</li>`,
+              )
+              .join('')}</ul>`
+          : '';
+        return `<div style="margin-top:6px">${head}${opts}</div>`;
+      })
+      .join('');
+    return items;
+  }
+  return renderToolParamsHtml(params);
 }
 
 function renderWaitingEntry() {
   if (!isWaitingFresh()) return '';
   const tool = currentWaiting.toolName || 'unknown';
-  const label = getWaitingLabel(currentWaiting.kind, tool);
-  const preview = getWaitingPreview(currentWaiting.toolInput);
-  const previewHtml = preview
-    ? `<div class="msg-waiting-preview">${escapeHtml(preview.slice(0, WAITING_PREVIEW_MAX_CHARS))}</div>`
-    : '';
+  let params = null;
+  if (currentWaiting.toolInput) {
+    try {
+      params = JSON.parse(currentWaiting.toolInput);
+    } catch (_) {
+      /* toolInput may be truncated/non-JSON */
+    }
+  }
+  const pillText = getWaitingPill(currentWaiting.kind, tool);
+  const detail = deriveWaitingDetail(tool, params);
+  const detailHtml = detail ? ` <span style="color:var(--text-secondary)">${escapeHtml(detail)}</span>` : '';
+  const bodyHtml = renderWaitingBody(tool, params);
+  const bodyWrap = bodyHtml ? `<div class="msg-waiting-body">${bodyHtml}</div>` : '';
+  const pill = `<span class="msg-waiting-pill">${escapeHtml(pillText)}</span>`;
   const discardBtn = `<button class="msg-waiting-discard" title="Discard permission prompt" onclick="event.stopPropagation();discardWaiting()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>`;
-  return `<div class="msg-item msg-waiting" onclick="msgDetailFollowLatest=false;showWaitingDetail()">${ICON_CHAT}<div class="msg-body"><div class="msg-text">${escapeHtml(label)}</div>${previewHtml}<div class="msg-time">waiting…</div></div>${discardBtn}</div>`;
+  return `<div class="msg-item msg-waiting" onclick="msgDetailFollowLatest=false;showWaitingDetail()">${getToolIcon(tool)}<div class="msg-body"><div class="msg-text">${pill} <span style="font-weight:600">${escapeHtml(tool)}</span>${detailHtml}</div>${bodyWrap}<div class="msg-time">waiting…</div></div>${discardBtn}</div>`;
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML onclick

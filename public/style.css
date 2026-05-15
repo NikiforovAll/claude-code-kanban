@@ -2501,12 +2501,27 @@ body::before {
   color: var(--danger, #e54d4d);
 }
 .msg-waiting .msg-text {
-  font-weight: 600;
+  font-weight: 500;
 }
-.msg-waiting-preview {
-  font-size: 11px;
-  opacity: 0.85;
-  margin-top: 2px;
+.msg-waiting-pill {
+  display: inline-block;
+  padding: 1px 6px;
+  margin-right: 6px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--warning, #f5a623) 22%, transparent);
+  color: var(--warning, #f5a623);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  vertical-align: middle;
+}
+.msg-waiting-body {
+  font-size: 12px;
+  margin-top: 4px;
+  word-break: break-word;
+}
+.msg-waiting-body pre {
   white-space: pre-wrap;
   word-break: break-word;
 }
