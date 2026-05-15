@@ -58,7 +58,7 @@ if [ "$EVENT" = "PermissionRequest" ] || { [ "$EVENT" = "PreToolUse" ] && { [ "$
     status: "waiting",
     kind: $kind,
     toolName: (.tool_name // "unknown"),
-    toolInput: ((.tool_input | tostring)[0:200] // ""),
+    toolInput: ((.tool_input | tostring) // ""),
     timestamp: $ts
   }' > "$DIR/_waiting.json"
   exit 0
