@@ -1935,9 +1935,23 @@ function renderToolParamsHtml(params) {
   if (!params) return '';
   const BLOCK_KEYS = new Set(['old_string', 'new_string', 'content', 'plan']);
   const badges = [],
-    blocks = [];
+    blocks = [],
+    jsonBlocks = [];
   for (const [k, v] of Object.entries(params)) {
     if (BLOCK_KEYS.has(k)) continue;
+    if (v !== null && typeof v === 'object') {
+      let pretty;
+      try {
+        pretty = JSON.stringify(v, null, 2);
+      } catch (_) {
+        pretty = String(v);
+      }
+      if (pretty.length > CONTENT_TRUNCATE_MAX) {
+        pretty = pretty.slice(0, CONTENT_TRUNCATE_MAX) + '\n... (truncated)';
+      }
+      jsonBlocks.push({ k, pretty });
+      continue;
+    }
     const display = typeof v === 'boolean' ? (v ? 'yes' : 'no') : String(v);
     if (display.length > 60) {
       blocks.push({ k, display });
@@ -1951,6 +1965,12 @@ function renderToolParamsHtml(params) {
   if (badges.length) html += `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px">${badges.join('')}</div>`;
   for (const { k, display } of blocks) {
     html += `<div style="margin-top:6px;font-size:0.75rem"><span style="color:var(--text-muted)">${escapeHtml(k)}:</span> <span style="word-break:break-all">${escapeHtml(display)}</span></div>`;
+  }
+  for (const { k, pretty } of jsonBlocks) {
+    html += `<div style="margin-top:8px;padding-top:6px;border-top:1px solid var(--border)">
+          <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:2px">${escapeHtml(k)}</div>
+          <pre class="${TINTED_PRE_CLASS}" style="max-height:300px;overflow:auto;font-size:0.75rem">${escapeHtml(pretty)}</pre>
+        </div>`;
   }
   if (params.old_string || params.new_string) {
     html += `<div style="margin-top:8px;padding-top:6px;border-top:1px solid var(--border)">`;
