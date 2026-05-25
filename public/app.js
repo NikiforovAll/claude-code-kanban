@@ -1395,6 +1395,20 @@ function togglePin(msgIndex) {
     currentPins.splice(idx, 1);
   } else {
     pinnedCollapsed = false;
+    // Strip large server-truncated `*Full` payloads (Write contentFull,
+    // MCP passthrough <k>Full) before stashing in localStorage — a few
+    // pinned big writes can blow past the per-origin quota. On pin
+    // expand, the modal falls back to the truncated string + the lazy
+    // /api/sessions/:id/tool-result/:toolUseId endpoint.
+    let paramsForPin = null;
+    if (m.params) {
+      paramsForPin = {};
+      for (const [k, v] of Object.entries(m.params)) {
+        if (k === 'contentFull') continue;
+        if (k.endsWith('Full') && typeof v === 'string' && typeof m.params[k.slice(0, -4)] === 'string') continue;
+        paramsForPin[k] = v;
+      }
+    }
     currentPins.push({
       id,
       type: m.type,
@@ -1404,6 +1418,9 @@ function togglePin(msgIndex) {
       toolUseId: m.toolUseId || null,
       toolResult: m.toolResult || null,
       toolResultTruncated: m.toolResultTruncated || false,
+      toolResultFull: null,
+      answerPayload: m.answerPayload || null,
+      params: paramsForPin,
       detail: m.detail || null,
       fullDetail: m.fullDetail || null,
       description: m.description || null,
@@ -1712,7 +1729,9 @@ function showMsgDetail(idx) {
     } else {
       mainHtml = TASK_TOOLS.has(m.tool) ? '' : '<em>No details</em>';
     }
-    body.innerHTML = mainHtml + toolParamsHtml + taskResultHtml + (hasAgentTabs ? '' : toolResultHtml) + agentExtraHtml;
+    const answersHtml = m.answerPayload ? renderAnswerPayloadHtml(m.answerPayload) : '';
+    body.innerHTML =
+      mainHtml + toolParamsHtml + answersHtml + taskResultHtml + (hasAgentTabs ? '' : toolResultHtml) + agentExtraHtml;
   } else if (m.type === 'teammate') {
     document.getElementById('msg-detail-title').textContent = m.teammateId || 'Teammate';
     document.getElementById('msg-detail-agent-btn').style.display = 'none';
@@ -1931,14 +1950,57 @@ function renderTaskResult(toolResult) {
   return `${html}</div>`;
 }
 
+function renderAnswerPayloadHtml(answerPayload) {
+  if (!answerPayload?.answers || typeof answerPayload.answers !== 'object') return '';
+  const qs = Array.isArray(answerPayload.questions) ? answerPayload.questions : [];
+  const findOptionDesc = (qText, label) => {
+    const q = qs.find((x) => x && x.question === qText);
+    if (!q || !Array.isArray(q.options)) return null;
+    const opt = q.options.find((o) => o && o.label === label);
+    return opt?.description ? opt.description : null;
+  };
+  const rows = Object.entries(answerPayload.answers)
+    .map(([q, a]) => {
+      const ansList = Array.isArray(a) ? a : [a];
+      const items = ansList
+        .map((label) => {
+          const desc = findOptionDesc(q, label);
+          const descHtml = desc ? ` <span style="color:var(--text-muted)">— ${escapeHtml(desc)}</span>` : '';
+          return `<li><span style="font-weight:600">${escapeHtml(String(label))}</span>${descHtml}</li>`;
+        })
+        .join('');
+      return `<div style="margin-top:6px">
+      <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:2px">${escapeHtml(q)}</div>
+      <ul style="margin:2px 0 0 16px;padding:0">${items}</ul>
+    </div>`;
+    })
+    .join('');
+  return `<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border)">
+    <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:4px">Answers</div>
+    ${rows}
+  </div>`;
+}
+
 function renderToolParamsHtml(params) {
   if (!params) return '';
-  const BLOCK_KEYS = new Set(['old_string', 'new_string', 'content', 'plan']);
+  const BLOCK_KEYS = new Set(['old_string', 'new_string', 'content', 'contentFull', 'plan']);
   const badges = [],
     blocks = [],
     jsonBlocks = [];
   for (const [k, v] of Object.entries(params)) {
     if (BLOCK_KEYS.has(k)) continue;
+    // Skip sibling `<k>Full` entries — they're used as expand targets, not
+    // rendered as their own field. Only treat it as a sibling when the
+    // trimmed key holds a server-truncated string (ends with the truncation
+    // marker), otherwise a real param that happens to end in "Full" would
+    // disappear.
+    if (k.endsWith('Full')) {
+      const baseKey = k.slice(0, -4);
+      const base = params[baseKey];
+      if (typeof base === 'string' && base.endsWith('... (truncated)') && typeof v === 'string') {
+        continue;
+      }
+    }
     if (v !== null && typeof v === 'object') {
       let pretty;
       try {
@@ -1947,14 +2009,16 @@ function renderToolParamsHtml(params) {
         pretty = String(v);
       }
       if (pretty.length > CONTENT_TRUNCATE_MAX) {
-        pretty = pretty.slice(0, CONTENT_TRUNCATE_MAX) + '\n... (truncated)';
+        pretty = `${pretty.slice(0, CONTENT_TRUNCATE_MAX)}\n... (truncated)`;
       }
       jsonBlocks.push({ k, pretty });
       continue;
     }
     const display = typeof v === 'boolean' ? (v ? 'yes' : 'no') : String(v);
     if (display.length > 60) {
-      blocks.push({ k, display });
+      const fullKey = `${k}Full`;
+      const full = typeof params[fullKey] === 'string' ? params[fullKey] : null;
+      blocks.push({ k, display, full });
     } else {
       badges.push(
         `<span style="display:inline-flex;align-items:center;gap:3px;padding:1px 6px;border-radius:3px;background:var(--bg-secondary);font-size:0.75rem"><span style="color:var(--text-muted)">${escapeHtml(k)}:</span> ${escapeHtml(display)}</span>`,
@@ -1963,8 +2027,13 @@ function renderToolParamsHtml(params) {
   }
   let html = '';
   if (badges.length) html += `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px">${badges.join('')}</div>`;
-  for (const { k, display } of blocks) {
-    html += `<div style="margin-top:6px;font-size:0.75rem"><span style="color:var(--text-muted)">${escapeHtml(k)}:</span> <span style="word-break:break-all">${escapeHtml(display)}</span></div>`;
+  for (const { k, display, full } of blocks) {
+    let suffix = '';
+    if (full && full.length > display.length) {
+      const toggle = makeExpandToggle(escapeHtml(display), escapeHtml(full), { fontSize: '0.75rem' });
+      suffix = ` ${toggle.btn}${toggle.full}`;
+    }
+    html += `<div style="margin-top:6px;font-size:0.75rem"><span style="color:var(--text-muted)">${escapeHtml(k)}:</span> <span style="word-break:break-all">${escapeHtml(display)}</span>${suffix}</div>`;
   }
   for (const { k, pretty } of jsonBlocks) {
     html += `<div style="margin-top:8px;padding-top:6px;border-top:1px solid var(--border)">
@@ -1985,14 +2054,18 @@ function renderToolParamsHtml(params) {
     html += `</div>`;
   }
   if (params.content) {
-    const contentTruncated = params.content.length > CONTENT_TRUNCATE_MAX;
-    const truncContent = contentTruncated
-      ? `${params.content.slice(0, CONTENT_TRUNCATE_MAX)}\n... (truncated)`
+    // params.contentFull is set by the server when the truncated `content`
+    // ends with `... (truncated)`. Fall back to params.content otherwise so
+    // small writes render as before.
+    const fullContent = params.contentFull || params.content;
+    const isTruncated = !!params.contentFull || params.content.length > CONTENT_TRUNCATE_MAX;
+    const truncContent = isTruncated
+      ? `${params.content.slice(0, CONTENT_TRUNCATE_MAX)}${params.content.length > CONTENT_TRUNCATE_MAX ? '\n... (truncated)' : ''}`
       : params.content;
     let writeMoreBtn = '',
       fullBlock = '';
-    if (contentTruncated) {
-      const toggle = makeExpandToggle(escapeHtml(truncContent), escapeHtml(params.content), {
+    if (isTruncated) {
+      const toggle = makeExpandToggle(escapeHtml(truncContent), escapeHtml(fullContent), {
         fontSize: '0.75rem',
         maxHeight: '500px',
         tinted: true,
@@ -2170,6 +2243,16 @@ async function postAndToast(url, body, label) {
 async function openMsgInEditor() {
   const m = getDetailMsg();
   if (!m) return;
+  // Write/Edit tool calls record the source path — open that directly instead
+  // of dumping the rendered modal body into a temp buffer.
+  const filePath =
+    m.type === 'tool_use' && (m.tool === 'Write' || m.tool === 'Edit')
+      ? m.params?.file_path || m.fullDetail || null
+      : null;
+  if (filePath) {
+    postAndToast('/api/open-in-editor', { file: filePath }, 'in editor');
+    return;
+  }
   const title = m.type === 'tool_use' ? m.tool : m.compactSummary ? 'compact-summary' : m.type;
   postAndToast('/api/open-in-editor', { content: getMessageDisplayContent(m), title }, 'in editor');
 }
