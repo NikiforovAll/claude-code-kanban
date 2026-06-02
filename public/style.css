@@ -525,6 +525,24 @@ body::before {
   text-overflow: ellipsis;
 }
 
+.session-goal {
+  font-size: 10px;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  color: var(--warning);
+}
+.session-goal .session-goal-icon {
+  margin-right: 3px;
+  font-weight: 700;
+}
+.session-goal:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .session-item.plan-reveal {
   outline: 1.5px solid var(--plan);
   background: var(--plan-dim);
@@ -1866,6 +1884,36 @@ body::before {
   margin-top: 16px;
   padding-top: 12px;
   border-top: 1px solid var(--border);
+}
+
+.info-goal-card {
+  margin: 12px 0;
+  padding: 10px 14px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--warning);
+  border-radius: 8px;
+}
+.info-goal-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+}
+.info-goal-icon {
+  color: var(--warning);
+}
+.info-goal-text {
+  margin-top: 6px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .info-grid {

@@ -2755,6 +2755,7 @@ function renderSessions() {
             ${secondaryName ? `<div class="session-secondary">${escapeHtml(secondaryName)}</div>` : ''}
             ${gitBranch ? `<div class="session-branch">${gitBranch}</div>` : ''}
             ${session.planTitle ? `<div class="session-plan">${escapeHtml(session.planTitle)}</div>` : ''}
+            ${renderGoalSubtitle(session)}
             <div class="session-progress">
               <span class="session-indicators">
                 ${isTeam ? `<span class="team-badge" title="${memberCount} team members"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>${memberCount}</span>` : ''}
@@ -5947,6 +5948,13 @@ function showInfoModal(session, teamConfig, tasks, planContent, parentInfo) {
   });
   html += `</div>`;
 
+  if (session.goal?.condition) {
+    html += `<div class="info-goal-card">
+          <div class="info-goal-head"><span class="info-goal-icon">◎</span>Goal</div>
+          <div class="info-goal-text">${escapeHtml(session.goal.condition)}</div>
+        </div>`;
+  }
+
   if (session.contextStatus) {
     html += `<hr style="border: none; border-top: 1px solid var(--border); margin: 12px 0;">`;
     html += renderContextDetail(session.contextStatus);
@@ -6186,6 +6194,16 @@ function renderLoopModalBody(data) {
       ? `<h4 class="loop-section-title">${title} <span class="loop-count">${items.length}</span></h4>${items.map((i) => renderLoopRow(i, kind)).join('')}`
       : '';
   body.innerHTML = section('Wakeups', wakeups, 'wakeup') + section('Cron jobs', crons, 'cron');
+}
+
+function renderGoalSubtitle(session) {
+  const g = session.goal;
+  if (!g?.condition) return '';
+  const short = g.condition.length > 70 ? `${g.condition.slice(0, 70)}…` : g.condition;
+  // Only active (unmet) goals reach here — a met goal auto-clears. Clicking
+  // opens the info modal (full text); stopPropagation so it doesn't also
+  // trigger the card's fetchTasks.
+  return `<div class="session-goal" onclick="event.stopPropagation(); showSessionInfoModal('${session.id}')" title="${escapeHtml(g.condition)}"><span class="session-goal-icon">◎</span>${escapeHtml(short)}</div>`;
 }
 
 function renderLoopBadge(session) {

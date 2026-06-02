@@ -460,6 +460,8 @@ function refreshSessionMetadataPath(jsonlPath) {
   if (info.cwd) existing.cwd = info.cwd;
   if (info.gitBranch) existing.gitBranch = info.gitBranch;
   if (info.customTitle) existing.customTitle = info.customTitle;
+  // Direct assign (not guarded) so a /goal clear propagates as null.
+  existing.goal = info.goal || null;
   if (info.logicalParentUuid) existing.logicalParentUuid = info.logicalParentUuid;
   return true;
 }
@@ -545,6 +547,7 @@ function loadSessionMetadata() {
           cwd: sessionInfo.cwd || null,
           gitBranch: sessionInfo.gitBranch || null,
           customTitle: sessionInfo.customTitle || null,
+          goal: sessionInfo.goal || null,
           jsonlPath: jsonlPath,
           logicalParentUuid: sessionInfo.logicalParentUuid || null
         };
@@ -694,6 +697,7 @@ function buildSessionObject(id, meta, overrides = {}) {
     description: meta.description || null,
     gitBranch: resolveSessionGitBranch(meta),
     customTitle: meta.customTitle || null,
+    goal: meta.goal || null,
     taskCount: 0,
     completed: 0,
     inProgress: 0,

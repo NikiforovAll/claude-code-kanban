@@ -31,7 +31,7 @@ These run only when an API request is served (no background timer).
 | Function | Cache | TTL | Source |
 |---|---|---|---|
 | `loadSessionMetadata()` | `sessionMetadataCache` | `METADATA_CACHE_TTL = 10000` ms (per-path dirty set for hot updates) | `server.js:389` |
-| `readSessionInfoFromJsonl()` | `sessionInfoCache` | inode-keyed; `slug`+`projectPath`+`logicalParentUuid` pinned, `cwd` refreshed from appended bytes only | `lib/parsers.js:225` |
+| `readSessionInfoFromJsonl()` | `sessionInfoCache` | inode-keyed; `slug`+`projectPath`+`logicalParentUuid` pinned, `cwd`+`goal` refreshed from appended bytes only | `lib/parsers.js:225` |
 | `getGitBranch(cwd)` | `gitBranchCache` | `GIT_BRANCH_TTL_MS = 30000` ms, keyed by `cwd` | `server.js` |
 | Task-map scan | `sessionToTaskListCache` | `TASK_MAP_SCAN_TTL = 5000` ms | `server.js:271` |
 | `readRecentMessages()` / session info | `messageCache` (keyed by mtime) | invalidates on file mtime change | `server.js:382` |
@@ -46,6 +46,8 @@ A FS event from the matching watcher updates the metadata pipeline incrementally
 `gitBranch` recorded in the JSONL is pinned to the launch-time repo and goes stale as soon as `cwd` shifts (Bash `cd`, submodule, sibling repo). `buildSessionObject` resolves the live branch via `getGitBranch(cwd)` (`git rev-parse --abbrev-ref HEAD`, cached per-cwd) and falls back to the JSONL value when the spawn fails.
 
 `readSessionInfoFromJsonl` also captures `logicalParentUuid` from any `compact_boundary` record found in the bounded preamble (head cap 1 MB). The `/api/sessions` compact-continuation suppression pass reads this off the cached metadata — no per-request full-JSONL rescan. `findCompactAnchorUuid` remains as a fallback in `lookupParentSession` for paths that bypass the metadata cache.
+
+The same scan also extracts the active session `goal` (`{condition}` or `null`) from `/goal`. The condition is carried by `goal_status` attachment records (latest-wins as the Stop hook re-evaluates). Only an **unmet** goal is surfaced — a `met:true` status means the goal was satisfied and auto-cleared by Claude Code, so it is treated as removal (`null`), exactly like a `/goal clear` command line. Extraction is folded into the existing per-line `applyLine` (forward, last-write-wins) plus the tail backward-scan (tail bytes are newer, so a tail goal/met/clear supersedes the head value) — **no extra IO**, it rides the bytes already read for `cwd`/`slug`. `goal` is cached in `sessionInfoCache`, merged through `loadSessionMetadata`/`refreshSessionMetadataPath` (direct-assigned, not guarded, so a met/clear propagates as `null`), and surfaced by `buildSessionObject`. The client renders a compact truncated subtitle on the session card and the full condition in the session-info modal; it never feeds `getSessionDisplayName`, so a user rename (`customTitle`) always takes precedence.
 
 ### 3. Boot-time prewarm
 
