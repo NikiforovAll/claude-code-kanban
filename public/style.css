@@ -22,6 +22,8 @@
   --success-dim: rgba(62, 207, 142, 0.18);
   --warning: #f0b429;
   --warning-dim: rgba(240, 180, 41, 0.18);
+  --danger: #ef5350;
+  --danger-dim: rgba(239, 83, 80, 0.18);
   --team: #60a5fa;
   --team-dim: rgba(96, 165, 250, 0.18);
   --plan: #86a886;
@@ -1742,7 +1744,7 @@ body::before {
 }
 
 .loop-field-val code {
-  background: var(--bg);
+  background: var(--bg-deep);
   padding: 2px 6px;
   border-radius: 4px;
   font-family: var(--mono);
@@ -1835,8 +1837,8 @@ body::before {
   font-size: 11px;
   font-weight: 500;
   border-radius: 999px;
-  border: 1px solid var(--border-color, rgba(127, 127, 127, 0.25));
-  background: var(--bg-secondary, rgba(127, 127, 127, 0.08));
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
   color: var(--text-secondary);
   white-space: nowrap;
   line-height: 1.4;
@@ -2098,7 +2100,7 @@ body::before {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: var(--hover);
+  background: var(--bg-hover);
   color: var(--text-secondary);
   font-size: 10px;
   font-weight: 600;
@@ -2218,7 +2220,7 @@ body::before {
 }
 .pinned-item-unpin:hover {
   opacity: 1;
-  color: var(--danger, #e55);
+  color: var(--danger);
 }
 .msg-pin-btn.pinned svg,
 #msg-detail-pin-btn.active svg,
@@ -2318,7 +2320,7 @@ body::before {
 }
 .agent-tab-copy {
   margin-left: auto;
-  background: var(--surface-hover);
+  background: var(--bg-hover);
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 4px 6px;
@@ -2551,7 +2553,7 @@ body::before {
 .msg-waiting-discard:hover {
   /* biome-ignore lint/complexity/noImportantStyles: override parent hover opacity */
   opacity: 1 !important;
-  color: var(--danger, #e54d4d);
+  color: var(--danger);
 }
 .msg-waiting .msg-text {
   font-weight: 500;
@@ -2671,7 +2673,7 @@ body::before {
   display: inline-block;
   padding: 2px 10px;
   border-radius: 4px;
-  background: var(--bg-secondary);
+  background: var(--bg-surface);
   color: var(--text-secondary);
   font-size: 0.8rem;
   font-weight: 600;
@@ -2711,7 +2713,7 @@ body::before {
   left: 50%;
   transform: translateX(-50%);
   background: var(--accent);
-  color: var(--bg);
+  color: var(--bg-deep);
   border: none;
   border-radius: 16px;
   padding: 6px 16px;
@@ -2727,7 +2729,7 @@ body::before {
 .msg-loading-more {
   text-align: center;
   padding: 8px;
-  color: var(--text-dim);
+  color: var(--text-muted);
   font-size: 12px;
 }
 .msg-limit-banner {
@@ -2872,7 +2874,7 @@ body::before {
 .agent-dismiss-btn {
   font-size: 12px;
   padding: 4px 10px;
-  background: var(--bg-tertiary);
+  background: var(--bg-elevated);
   color: var(--text-secondary);
   border: 1px solid var(--border);
 }
@@ -3003,6 +3005,8 @@ body.light {
   --success-dim: rgba(26, 138, 90, 0.15);
   --warning: #b07d0a;
   --warning-dim: rgba(176, 125, 10, 0.15);
+  --danger: #c0392b;
+  --danger-dim: rgba(192, 57, 43, 0.15);
   --plan: #5a7a5a;
   --plan-dim: rgba(90, 122, 90, 0.15);
 }
@@ -3214,7 +3218,7 @@ body.light .msg-assistant .msg-text {
 }
 
 .preview-fm .fm-v {
-  color: var(--text, inherit);
+  color: var(--text-primary);
   word-break: break-word;
   white-space: pre-wrap;
 }
@@ -3439,7 +3443,7 @@ select.form-input option:checked {
   display: flex;
   flex-direction: column;
   align-items: center;
-  background: var(--bg-secondary);
+  background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 10px 16px;
@@ -3454,7 +3458,7 @@ select.form-input option:checked {
 }
 
 .tool-stats-chip-val.failed {
-  color: var(--status-failed, #ef4444);
+  color: var(--danger);
 }
 
 .tool-stats-chip-lbl {
@@ -3495,14 +3499,14 @@ select.form-input option:checked {
 }
 
 .tool-stats-table tbody tr:nth-child(even) {
-  background: var(--bg-secondary);
+  background: var(--bg-surface);
 }
 
 .tool-stats-table tbody td {
   padding: 6px 10px;
   text-align: right;
   color: var(--text-primary);
-  border-bottom: 1px solid var(--border-subtle, var(--border));
+  border-bottom: 1px solid var(--border);
 }
 
 .tool-stats-table tbody td.tool-name {
@@ -3556,7 +3560,7 @@ select.form-input option:checked {
   width: 48px;
   height: 6px;
   border-radius: 3px;
-  background: var(--bg-hover, var(--bg-secondary));
+  background: var(--bg-hover);
   flex-shrink: 0;
   overflow: hidden;
 }
@@ -3593,7 +3597,7 @@ select.form-input option:checked {
   font-size: 13px;
   line-height: 1.6;
   color: var(--text-primary);
-  background: var(--bg-primary);
+  background: var(--bg-deep);
   border: 1px solid var(--border);
   border-radius: 8px;
   outline: none;
@@ -3861,6 +3865,8 @@ select.form-input option:checked {
     --success-dim: rgba(26, 138, 90, 0.15);
     --warning: #b07d0a;
     --warning-dim: rgba(176, 125, 10, 0.15);
+    --danger: #c0392b;
+    --danger-dim: rgba(192, 57, 43, 0.15);
     --plan: #5a7a5a;
     --plan-dim: rgba(90, 122, 90, 0.15);
   }
