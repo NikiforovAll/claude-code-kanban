@@ -2401,7 +2401,8 @@ function renderAgentFooter() {
           : '';
         const agentColor = resolveNamedColor(a.color);
         const colorStyle = agentColor ? ` style="border-left:3px solid ${agentColor.color}"` : '';
-        return `<div class="agent-card"${colorStyle} onclick="showAgentModal('${a.agentId}')">
+        const selectedClass = a.agentId === currentAgentModalId ? ' selected' : '';
+        return `<div class="agent-card${selectedClass}" data-agent-id="${escapeHtml(a.agentId)}"${colorStyle} onclick="showAgentModal('${a.agentId}')">
           <div class="agent-type-row">${typeNs ? `<span class="agent-type-ns">${escapeHtml(typeNs)}</span>` : ''}<span class="agent-type-name">${escapeHtml(typeName)}</span>${nameBadgeHtml}</div>
           <div class="agent-status-row"><span class="agent-dot ${a.status}"></span><span class="agent-status">${statusText}</span></div>
           ${msgHtml}
@@ -2493,6 +2494,7 @@ function showAgentModal(agentId) {
   const agent = findAgentById(agentId);
   if (!agent) return;
   currentAgentModalId = agentId;
+  highlightSelectedAgent();
   const modal = document.getElementById('agent-modal');
   const title = document.getElementById('agent-modal-title');
   const body = document.getElementById('agent-modal-body');
@@ -2562,6 +2564,16 @@ function showAgentModal(agentId) {
 function closeAgentModal() {
   resetModalFullscreen('agent-modal');
   currentAgentModalId = null;
+  highlightSelectedAgent();
+}
+
+function highlightSelectedAgent() {
+  const content = document.getElementById('agent-footer-content');
+  if (!content) return;
+  for (const el of content.querySelectorAll('.agent-card.selected')) el.classList.remove('selected');
+  if (currentAgentModalId == null) return;
+  const el = content.querySelector(`.agent-card[data-agent-id="${currentAgentModalId}"]`);
+  if (el) el.classList.add('selected');
 }
 
 //#endregion

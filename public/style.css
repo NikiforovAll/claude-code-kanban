@@ -2808,18 +2808,28 @@ body::before {
   flex-direction: column;
   gap: 3px;
   padding: 8px 12px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
+  background: var(--bg-deep);
+  border: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
   border-radius: 8px;
   white-space: nowrap;
   min-width: 0;
   overflow: hidden;
-  transition: opacity 0.3s;
+  transition:
+    opacity 0.3s,
+    border-color 0.15s ease;
   cursor: pointer;
   position: relative;
 }
 .agent-card:hover {
+  border-color: color-mix(in srgb, var(--accent) 60%, var(--border));
+}
+.agent-card.selected,
+.agent-card.selected:hover {
+  background: var(--bg-elevated);
   border-color: var(--accent);
+  box-shadow:
+    0 0 0 1px var(--accent-dim),
+    0 0 12px var(--accent-dim);
 }
 .agent-card.fading {
   opacity: 0.4;
