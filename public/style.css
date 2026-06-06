@@ -2065,7 +2065,7 @@ body::before {
   border-left: 3px solid var(--accent);
 }
 .msg-item.msg-tool {
-  border-left: 3px solid var(--team);
+  border-left: 2px solid color-mix(in srgb, var(--text-muted) 45%, transparent);
   font-size: 11px;
   padding: 5px 10px;
   color: var(--text-secondary);
