@@ -18,6 +18,7 @@
   --accent-text: #f0a070;
   --accent-dim: rgba(232, 111, 51, 0.22);
   --accent-glow: rgba(232, 111, 51, 0.55);
+  --gold: #d9b667;
   --success: #3ecf8e;
   --success-dim: rgba(62, 207, 142, 0.18);
   --warning: #f0b429;
@@ -2059,7 +2060,17 @@ body::before {
   border: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
 }
 .msg-item.msg-user {
-  border-left: 3px solid var(--text-muted);
+  border-left: 3px solid var(--gold);
+}
+.msg-queued-tag {
+  margin-left: 8px;
+  padding: 0 5px;
+  border-radius: 3px;
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--gold);
+  background: color-mix(in srgb, var(--gold) 14%, transparent);
 }
 .msg-item.msg-assistant {
   border-left: 3px solid var(--accent);
@@ -3001,6 +3012,7 @@ body.light {
   --accent-text: #b85a20;
   --accent-dim: rgba(232, 111, 51, 0.18);
   --accent-glow: rgba(232, 111, 51, 0.5);
+  --gold: #a8842f;
   --success: #1a8a5a;
   --success-dim: rgba(26, 138, 90, 0.15);
   --warning: #b07d0a;
@@ -3861,6 +3873,7 @@ select.form-input option:checked {
     --text-muted: #888888;
     --accent-dim: rgba(232, 111, 51, 0.18);
     --accent-glow: rgba(232, 111, 51, 0.5);
+    --gold: #a8842f;
     --success: #1a8a5a;
     --success-dim: rgba(26, 138, 90, 0.15);
     --warning: #b07d0a;
