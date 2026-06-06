@@ -1594,18 +1594,19 @@ body::before {
   align-items: center;
   justify-content: center;
   font-size: 11px;
-  background: var(--bg-deep);
+  background: transparent;
   border: 1px solid transparent;
   border-radius: 4px;
-  color: var(--team);
+  color: var(--text-muted);
   cursor: pointer;
   flex-shrink: 0;
   transition: all 0.15s ease;
 }
 
 .team-info-btn:hover {
-  background: var(--team-dim);
-  border-color: var(--team);
+  background: var(--bg-hover);
+  border-color: var(--border);
+  color: var(--text-secondary);
 }
 
 .plan-indicator {
@@ -4230,8 +4231,8 @@ pre.mermaid svg {
 .session-item.kb-selected:hover,
 .session-item.active.kb-selected {
   background: var(--bg-elevated);
-  border-color: var(--team);
-  box-shadow: 0 0 0 1px var(--team-dim);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-dim);
 }
 
 .session-item.kb-selected::before {
