@@ -5924,9 +5924,9 @@ function showInfoModal(session, teamConfig, tasks, planContent, parentInfo) {
     infoRows.push(['Team Config', teamConfig.configPath, { openPath: configDir, openFile: teamConfig.configPath }]);
   }
   const clickableStyle =
-    "font-family: 'IBM Plex Mono', monospace; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; color: var(--accent-text); text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 3px;";
+    'font-family: var(--mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; color: var(--accent-text); text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 3px;';
   const plainStyle =
-    "font-family: 'IBM Plex Mono', monospace; font-size: 12px; user-select: all; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;";
+    'font-family: var(--mono); font-size: 12px; color: var(--text-primary); user-select: all; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;';
   html += `<div class="team-modal-meta info-grid">`;
   infoRows.forEach(([label, value, opts]) => {
     const copyVal = escapeHtml(value).replace(/"/g, '&quot;');

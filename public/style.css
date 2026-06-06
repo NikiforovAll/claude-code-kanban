@@ -662,10 +662,10 @@ body::before {
   gap: 8px;
 }
 .detail-context-stats .stat-label {
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
 }
 .detail-context-stats .stat-value {
-  color: var(--text-secondary);
+  color: var(--text-primary);
 }
 .detail-context-stats .stat-divider {
   grid-column: 1 / -1;
@@ -3418,13 +3418,14 @@ select.form-input option:checked {
 }
 
 .btn-secondary {
-  background: var(--bg-elevated);
-  color: var(--text-primary);
+  background: transparent;
+  color: var(--text-secondary);
   border: 1px solid var(--border);
 }
 
 .btn-secondary:hover {
   background: var(--bg-hover);
+  color: var(--text-primary);
   border-color: var(--text-muted);
 }
 
