@@ -28,6 +28,9 @@
   --plan-dim: rgba(134, 168, 134, 0.18);
   --mono: 'IBM Plex Mono', monospace;
   --serif: 'Playfair Display', serif;
+  /* aliases: many rules reference --font-mono/--font-serif; keep them on-brand */
+  --font-mono: var(--mono);
+  --font-serif: var(--serif);
 }
 
 * {
@@ -85,7 +88,7 @@ body::before {
 .sidebar {
   width: var(--sidebar-width, 300px);
   background: var(--bg-surface);
-  border-right: 1px solid var(--border);
+  border-right: 1px solid color-mix(in srgb, var(--border) 35%, transparent);
   box-shadow: 1px 0 12px rgba(0, 0, 0, 0.04);
   display: flex;
   flex-direction: column;
@@ -510,7 +513,7 @@ body::before {
   color: var(--text-secondary);
   margin-top: 2px;
   display: block;
-  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', monospace;
+  font-family: var(--mono);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -824,6 +827,8 @@ body::before {
   font-size: 26px;
   font-weight: 400;
   letter-spacing: -0.03em;
+  line-height: 1.15;
+  text-wrap: balance;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -1164,7 +1169,7 @@ body::before {
   width: var(--detail-panel-width, 540px);
   height: 100vh;
   background: var(--bg-surface);
-  border-left: 1px solid var(--border);
+  border-left: 1px solid color-mix(in srgb, var(--border) 35%, transparent);
   box-shadow: -8px 0 24px rgba(0, 0, 0, 0.15);
   display: none;
   flex-direction: column;
@@ -1740,7 +1745,7 @@ body::before {
   background: var(--bg);
   padding: 2px 6px;
   border-radius: 4px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--mono);
   font-size: 12px;
 }
 
@@ -2002,8 +2007,8 @@ body::before {
   right: 0;
   width: var(--message-panel-width, 540px);
   height: 100vh;
-  background: var(--bg-surface);
-  border-left: 1px solid var(--border);
+  background: var(--bg-deep);
+  border-left: 1px solid color-mix(in srgb, var(--border) 35%, transparent);
   box-shadow: -8px 0 24px rgba(0, 0, 0, 0.15);
   display: none;
   flex-direction: column;
@@ -2047,9 +2052,9 @@ body::before {
   padding: 8px 10px;
   border-radius: 6px;
   font-size: 12px;
-  line-height: 1.5;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
+  line-height: 1.4;
+  background: var(--bg-surface);
+  border: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
 }
 .msg-item.msg-user {
   border-left: 3px solid var(--text-muted);
@@ -2983,10 +2988,10 @@ body::before {
 /* #region LIGHT_THEME */
 body.light {
   --bg-deep: #e8e6e3;
-  --bg-surface: #f4f3f1;
-  --bg-elevated: #dddbd8;
+  --bg-surface: #efede9;
+  --bg-elevated: #fbfaf9;
   --bg-hover: #d2d0cc;
-  --border: #a09b94;
+  --border: #cfcbc4;
   --text-primary: #0a0a0a;
   --text-secondary: #444444;
   --text-tertiary: #666666;
@@ -3584,7 +3589,7 @@ select.form-input option:checked {
   max-height: 50vh;
   resize: vertical;
   padding: 12px;
-  font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+  font-family: var(--mono);
   font-size: 13px;
   line-height: 1.6;
   color: var(--text-primary);
@@ -3842,10 +3847,10 @@ select.form-input option:checked {
 @media (prefers-color-scheme: light) {
   body:not(.dark-forced) {
     --bg-deep: #e8e6e3;
-    --bg-surface: #f4f3f1;
-    --bg-elevated: #dddbd8;
+    --bg-surface: #efede9;
+    --bg-elevated: #fbfaf9;
     --bg-hover: #d2d0cc;
-    --border: #a09b94;
+    --border: #cfcbc4;
     --text-primary: #0a0a0a;
     --text-secondary: #444444;
     --text-tertiary: #666666;
