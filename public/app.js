@@ -511,6 +511,8 @@ function setActivityFilter(kind) {
     // waiting is a sub-state of active — couple them so one click covers all running sessions
     toggleActivityKind('active');
     toggleActivityKind('waiting');
+    // Expand sections that have active sessions so they're visible on click
+    if (activityFilter.has('active')) expandActiveGroups();
   } else {
     toggleActivityKind(kind);
   }
@@ -2829,6 +2831,8 @@ function renderSessions() {
 
   // Group active sessions by project
   if (sessionFilter === 'active') {
+    // Auto-expand a collapsed section when newly-active work lands in it (live refresh).
+    expandActiveGroups({ onlyNew: true });
     const groups = new Map();
     const ungrouped = [];
     for (const session of filteredSessions) {
@@ -3368,9 +3372,35 @@ function setGroupCollapsed(header, collapsed) {
   header.classList.toggle('collapsed', collapsed);
   const container = getGroupSessionsContainer(header);
   if (container) container.classList.toggle('collapsed', collapsed);
+  persistCollapsedGroups();
+}
+
+function persistCollapsedGroups() {
   try {
     localStorage.setItem('collapsedGroups', JSON.stringify([...collapsedProjectGroups]));
   } catch (_) {}
+}
+
+let prevActiveSessionIds = null; // null until primed by the first onlyNew pass
+
+// Expand collapsed project sections that contain active sessions; leave the rest collapsed.
+// onlyNew: expand only for sessions that became active since the last call, so a section the
+// user manually collapsed stays collapsed until NEW active work lands in it (live refresh path).
+// The first onlyNew pass only primes the tracking set — it respects saved collapse state on load.
+// onlyNew=false force-expands every section with active work (explicit chip click).
+function expandActiveGroups({ onlyNew = false } = {}) {
+  const primed = prevActiveSessionIds !== null;
+  const activeIds = new Set();
+  let changed = false;
+  for (const s of sessions) {
+    if (!isSessionActive(s)) continue;
+    activeIds.add(s.id);
+    if (onlyNew && (!primed || prevActiveSessionIds.has(s.id))) continue;
+    if (collapsedProjectGroups.delete(s.project || '__ungrouped__')) changed = true;
+  }
+  prevActiveSessionIds = activeIds;
+  if (changed) persistCollapsedGroups();
+  // renderSessions() re-renders headers/containers from the updated set
 }
 
 function isGroupHeader(el) {
