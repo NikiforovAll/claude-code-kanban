@@ -27,6 +27,8 @@ let agentDurationInterval = null;
 let agentPollInterval = null;
 let selectedTaskId = null;
 let selectedSessionId = null;
+// Task stays selected (keyboard nav) but its white highlight is dimmed once the detail panel closes.
+let taskHighlightDimmed = false;
 let focusZone = 'board'; // 'board' | 'sidebar'
 let appConfig = { marketplaceUrl: null, costUrl: null, memoryUrl: null };
 let selectedSessionIdx = -1;
@@ -1029,7 +1031,7 @@ function renderToolItem(m, i, compact) {
       ? `onclick="showAgentModal('${escapeHtml(m.agentId)}')" ${combinedStyle}`
       : `onclick="msgDetailFollowLatest=false;showMsgDetail(${i})" ${combinedStyle}`;
   const pinBtn = renderMsgPinBtn(m, i);
-  return `<div class="msg-item msg-tool${compactClass}" ${itemClickAttr}>
+  return `<div class="msg-item msg-tool${compactClass}" data-msg-idx="${i}" ${itemClickAttr}>
       ${getToolIcon(m.tool)}
       <div class="msg-body"><div class="msg-text">${escapeHtml(m.tool)}${toolDetail}${agentLink}</div><div class="msg-time">${formatDate(m.timestamp)}</div></div>${agentLogBtn}${pinBtn}
     </div>`;
@@ -1071,7 +1073,7 @@ function renderMessageList(messages) {
       continue;
     }
 
-    const clickable = `onclick="msgDetailFollowLatest=false;showMsgDetail(${i})" style="cursor:pointer"`;
+    const clickable = `data-msg-idx="${i}" onclick="msgDetailFollowLatest=false;showMsgDetail(${i})" style="cursor:pointer"`;
     const pinBtn = renderMsgPinBtn(m, i);
     if (m.type === 'user') {
       if (m.systemLabel) {
@@ -1256,6 +1258,7 @@ function renderMessages(messages) {
       ? `<div class="msg-limit-banner">Showing last ${MSG_MAX_LOADED} messages</div>`
       : '';
   container.innerHTML = limitBanner + msgsHtml + renderWaitingEntry();
+  highlightSelectedMsg();
   if (!msgUserScrolledUp) container.scrollTop = container.scrollHeight;
   // Auto-load more if content doesn't overflow yet
   if (
@@ -1270,6 +1273,8 @@ function renderMessages(messages) {
 
 let currentMsgDetailIdx = null;
 let msgDetailFollowLatest = false;
+// Message stays tracked but its highlight is dimmed once the detail modal closes.
+let msgHighlightDimmed = false;
 const MSG_DETAIL_WAITING_IDX = -2;
 let currentPins = [];
 let pinnedCollapsed = false;
@@ -1689,10 +1694,22 @@ function renderUserAttachments(m) {
   return parts.join('');
 }
 
+// Highlight the message whose detail is open, mirroring task-card selection.
+function highlightSelectedMsg() {
+  const container = document.getElementById('message-panel-content');
+  if (!container) return;
+  for (const el of container.querySelectorAll('.msg-item.selected')) el.classList.remove('selected');
+  if (msgHighlightDimmed || currentMsgDetailIdx == null || currentMsgDetailIdx < 0) return;
+  const el = container.querySelector(`.msg-item[data-msg-idx="${currentMsgDetailIdx}"]`);
+  if (el) el.classList.add('selected');
+}
+
 function showMsgDetail(idx) {
   currentMsgDetailIdx = idx;
+  msgHighlightDimmed = false;
   const m = currentMessages[idx];
   if (!m) return;
+  highlightSelectedMsg();
   const body = document.getElementById('msg-detail-body');
   if (m.type === 'tool_use') {
     document.getElementById('msg-detail-title').textContent = m.tool;
@@ -1796,6 +1813,12 @@ function showMsgDetail(idx) {
 function closeMsgDetailModal() {
   resetModalFullscreen('msg-detail-modal');
   msgDetailFollowLatest = false;
+  // Drop the message highlight on close, mirroring task-card behavior.
+  msgHighlightDimmed = true;
+  const container = document.getElementById('message-panel-content');
+  if (container) {
+    for (const el of container.querySelectorAll('.msg-item.selected')) el.classList.remove('selected');
+  }
 }
 
 function _setModalWidth(modal, slot, on, maxWidth, width) {
@@ -3091,7 +3114,7 @@ function renderKanban() {
       document.querySelector(`.task-card[data-task-id="${selectedTaskId}"][data-session-id="${selectedSessionId}"]`) ||
       document.querySelector(`.task-card[data-task-id="${selectedTaskId}"]`);
     if (card) {
-      if (focusZone === 'board') card.classList.add('selected');
+      if (focusZone === 'board' && !taskHighlightDimmed) card.classList.add('selected');
     } else {
       selectedTaskId = null;
       selectedSessionId = null;
@@ -3179,6 +3202,7 @@ function selectTask(taskId, sessionId) {
   if (prev) prev.classList.remove('selected');
   selectedTaskId = taskId;
   selectedSessionId = sessionId;
+  taskHighlightDimmed = false;
   if (!taskId) return;
   const card =
     document.querySelector(`.task-card[data-task-id="${taskId}"][data-session-id="${sessionId}"]`) ||
@@ -3419,6 +3443,8 @@ function setFocusZone(zone) {
       }
     }
   } else {
+    // Focusing the board is an explicit nav gesture — restore the highlight.
+    taskHighlightDimmed = false;
     // Session changed while in sidebar — reset stale selection
     if (selectedSessionId && selectedSessionId !== currentSessionId) {
       selectedTaskId = null;
@@ -3721,6 +3747,10 @@ async function addNote(event, taskId, sessionId) {
 function closeDetailPanel() {
   detailPanel.classList.remove('visible');
   document.getElementById('delete-task-btn').style.display = 'none';
+  // Keep the task selected for keyboard nav, but drop its white highlight.
+  taskHighlightDimmed = true;
+  const sel = document.querySelector('.task-card.selected');
+  if (sel) sel.classList.remove('selected');
 }
 
 let deleteTaskId = null;
@@ -5295,6 +5325,8 @@ function isWaitingFresh() {
 function showWaitingDetail() {
   if (!isWaitingFresh()) return;
   currentMsgDetailIdx = MSG_DETAIL_WAITING_IDX;
+  msgHighlightDimmed = false;
+  highlightSelectedMsg();
   const tool = currentWaiting.toolName || 'unknown';
   const label = getWaitingLabel(currentWaiting.kind, tool);
   const body = document.getElementById('msg-detail-body');
