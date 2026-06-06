@@ -257,6 +257,19 @@ describe('Parser: parseJsonlLine', () => {
     const parsed = parseJsonlLine(lines[6]);
     assert.equal(parsed.type, 'file-history-snapshot');
   });
+
+  it('parses queued message (queue-operation enqueue)', () => {
+    const parsed = parseJsonlLine(JSON.stringify({
+      type: 'queue-operation',
+      operation: 'enqueue',
+      timestamp: '2026-06-06T16:00:44.682Z',
+      sessionId: 'abc',
+      content: 'can we use gold for user message'
+    }));
+    assert.equal(parsed.role, 'user');
+    assert.equal(parsed.queued, true);
+    assert.equal(parsed.content, 'can we use gold for user message');
+  });
 });
 
 describe('Parser: readRecentMessages', () => {

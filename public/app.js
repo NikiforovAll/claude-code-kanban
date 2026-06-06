@@ -1097,9 +1097,10 @@ function renderMessageList(messages) {
         if (displayText) textHtml = isCmd ? `<code>${escapeHtml(displayText)}</code>` : displayText;
         else if (chips.length) textHtml = '<em class="msg-text-muted">(attachment)</em>';
         else textHtml = '';
-        parts.push(`<div class="msg-item msg-user${isCmd ? ' msg-cmd' : ''}" ${clickable}>
+        const queuedTag = m.queued ? '<span class="msg-queued-tag">queued</span>' : '';
+        parts.push(`<div class="msg-item msg-user${isCmd ? ' msg-cmd' : ''}${m.queued ? ' msg-queued' : ''}" ${clickable}>
             ${MSG_ICON_USER}
-            <div class="msg-body"><div class="msg-text">${textHtml}${cmdArgsHtml}</div>${chipsHtml}<div class="msg-time">${formatDate(m.timestamp)}</div></div>${pinBtn}
+            <div class="msg-body"><div class="msg-text">${textHtml}${cmdArgsHtml}</div>${chipsHtml}<div class="msg-time">${formatDate(m.timestamp)}${queuedTag}</div></div>${pinBtn}
           </div>`);
       }
     } else if (m.type === 'assistant') {

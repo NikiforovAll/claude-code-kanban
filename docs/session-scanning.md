@@ -37,6 +37,8 @@ These run only when an API request is served (no background timer).
 | `readRecentMessages()` / session info | `messageCache` (keyed by mtime) | invalidates on file mtime change | `server.js:382` |
 | `updateLoopInfo()` (ScheduleWakeup / Cron* scan) | `loopInfoStateByPath` (per-path incremental state) | warmed by `projectsWatcher` events; request path is O(1) on hit | `lib/parsers.js` + `server.js` |
 
+> `readRecentMessages()` dispatches transcript lines by `type`. Besides `user`/`assistant`/`teammate`, it surfaces `queue-operation` (`operation: 'enqueue'`) lines as user messages flagged `queued: true`. Queued text lives at the top-level `content`, not under `message.content`, and is never re-emitted as a `type:'user'` line, so without this branch it never renders.
+
 A FS event from the matching watcher updates the metadata pipeline incrementally:
 
 - `projectsWatcher` `change` (jsonl appended) → `dirtyMetadataPaths.add(filePath)`. The next `loadSessionMetadata()` call runs `refreshSessionMetadataPath` on each dirty entry — one `stat` + tail-delta read per file, no directory walk.
