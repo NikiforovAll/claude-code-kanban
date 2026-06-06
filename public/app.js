@@ -1647,10 +1647,20 @@ const linkSvg = (size) =>
 //#region MODALS
 function renderUserAttachments(m) {
   const parts = [];
-  if (m.images?.length && m.uuid && currentSessionId) {
+  if (m.images?.length && currentSessionId) {
+    const sid = encodeURIComponent(currentSessionId);
     const imgs = m.images
       .map((img) => {
-        const url = `/api/sessions/${encodeURIComponent(currentSessionId)}/user-image/${encodeURIComponent(m.uuid)}/${img.blockIndex}`;
+        // Cache-kind images live on disk (image-cache/<sessionId>/<n>.png); base64
+        // images are read from the JSONL block and need the message uuid.
+        let url;
+        if (img.kind === 'cache') {
+          url = `/api/sessions/${sid}/cached-image/${img.n}`;
+        } else if (m.uuid) {
+          url = `/api/sessions/${sid}/user-image/${encodeURIComponent(m.uuid)}/${img.blockIndex}`;
+        } else {
+          return '';
+        }
         return `<img src="${url}" loading="lazy" alt="user image" class="user-attach-image" />`;
       })
       .join('');

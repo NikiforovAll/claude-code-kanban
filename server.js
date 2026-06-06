@@ -22,6 +22,7 @@ const {
   extractModelFromTranscript,
   readFullToolResult,
   readUserImage,
+  readCachedImage,
   updateLoopInfo,
   buildLoopInfoFromState
 } = require('./lib/parsers');
@@ -1910,6 +1911,14 @@ app.get('/api/sessions/:sessionId/user-image/:msgUuid/:blockIndex', (req, res) =
   res.setHeader('Content-Type', img.mediaType);
   res.setHeader('Cache-Control', 'no-store');
   res.end(buf);
+});
+
+app.get('/api/sessions/:sessionId/cached-image/:n', (req, res) => {
+  const img = readCachedImage(req.params.sessionId, req.params.n);
+  if (!img) return res.status(404).end();
+  res.setHeader('Content-Type', img.mediaType);
+  res.setHeader('Cache-Control', 'no-store');
+  res.end(img.buffer);
 });
 
 app.get('/api/version', (req, res) => {
