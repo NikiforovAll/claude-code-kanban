@@ -1075,11 +1075,11 @@ body::before {
 .task-card.selected,
 .task-card.selected:hover {
   background: var(--bg-elevated);
-  border-color: var(--team);
-  border-left: 2px solid var(--team);
+  border-color: var(--accent);
+  border-left: 2px solid var(--accent);
   box-shadow:
-    0 0 0 1px var(--team-dim),
-    0 0 12px var(--team-dim);
+    0 0 0 1px var(--accent-dim),
+    0 0 12px var(--accent-dim);
   opacity: 1;
 }
 
@@ -2083,8 +2083,8 @@ body::before {
 .msg-item.selected:hover {
   background: var(--bg-elevated);
   box-shadow:
-    0 0 0 1px var(--team),
-    0 0 12px var(--team-dim);
+    0 0 0 1px var(--accent),
+    0 0 12px var(--accent-dim);
 }
 .msg-icon {
   flex-shrink: 0;
