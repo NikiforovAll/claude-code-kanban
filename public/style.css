@@ -817,7 +817,7 @@ body::before {
 
 /* #region HEADER */
 .view-header {
-  padding: 16px 24px;
+  padding: 12px 24px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-surface);
   display: flex;
@@ -827,7 +827,7 @@ body::before {
 
 .view-title {
   font-family: var(--serif);
-  font-size: 26px;
+  font-size: 20px;
   font-weight: 400;
   letter-spacing: -0.03em;
   line-height: 1.15;
