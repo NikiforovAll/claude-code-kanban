@@ -454,22 +454,15 @@ body::before {
   padding: 12px 14px;
   margin-bottom: 4px;
   background: transparent;
-  border: 1px solid transparent;
+  border: 1px solid var(--border);
   border-radius: 8px;
   text-align: left;
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow:
-    0 1px 3px rgba(0, 0, 0, 0.12),
-    0 1px 2px rgba(0, 0, 0, 0.08);
-}
-
-.session-item:hover {
-  background: var(--bg-hover);
 }
 
 .session-item.active {
-  background: var(--bg-elevated);
+  background: var(--bg-deep);
   border-color: var(--accent);
 }
 
@@ -1173,7 +1166,7 @@ body::before {
   height: 100vh;
   background: var(--bg-surface);
   border-left: 1px solid color-mix(in srgb, var(--border) 35%, transparent);
-  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.15);
+  box-shadow: -1px 0 12px rgba(0, 0, 0, 0.04);
   display: none;
   flex-direction: column;
   z-index: 100;
@@ -2011,7 +2004,7 @@ body::before {
   height: 100vh;
   background: var(--bg-deep);
   border-left: 1px solid color-mix(in srgb, var(--border) 35%, transparent);
-  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.15);
+  box-shadow: -1px 0 12px rgba(0, 0, 0, 0.04);
   display: none;
   flex-direction: column;
   z-index: 99;
@@ -4226,11 +4219,6 @@ pre.mermaid svg {
 
 .session-item:hover::before {
   width: 0;
-}
-
-.sidebar-focused .session-item.active {
-  background: transparent;
-  border-color: var(--accent);
 }
 
 .sidebar-focused .session-item.active::before {

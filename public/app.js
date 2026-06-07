@@ -3216,8 +3216,7 @@ async function onColumnDrop(e) {
 
 //#region KEYBOARD_NAV
 function selectTask(taskId, sessionId) {
-  const prev = document.querySelector('.task-card.selected');
-  if (prev) prev.classList.remove('selected');
+  clearTaskSelection();
   selectedTaskId = taskId;
   selectedSessionId = sessionId;
   taskHighlightDimmed = false;
@@ -3332,6 +3331,11 @@ function getSessionItems() {
 function clearKbSelection() {
   const prev = sessionsList.querySelector('.kb-selected');
   if (prev) prev.classList.remove('kb-selected');
+}
+
+function clearTaskSelection() {
+  const prev = document.querySelector('.task-card.selected');
+  if (prev) prev.classList.remove('selected');
 }
 
 function selectSessionByIndex(idx, items) {
@@ -3464,8 +3468,7 @@ function setFocusZone(zone) {
   // Clear all zone visuals
   sidebar.classList.remove('sidebar-focused');
   clearKbSelection();
-  const selCard = document.querySelector('.task-card.selected');
-  if (selCard) selCard.classList.remove('selected');
+  clearTaskSelection();
 
   focusZone = zone;
   if (zone === 'sidebar') {
@@ -3791,10 +3794,8 @@ async function addNote(event, taskId, sessionId) {
 function closeDetailPanel() {
   detailPanel.classList.remove('visible');
   document.getElementById('delete-task-btn').style.display = 'none';
-  // Keep the task selected for keyboard nav, but drop its white highlight.
-  taskHighlightDimmed = true;
-  const sel = document.querySelector('.task-card.selected');
-  if (sel) sel.classList.remove('selected');
+  // Keep the task selected AND highlighted after closing (no dim-off).
+  taskHighlightDimmed = false;
 }
 
 let deleteTaskId = null;
@@ -4648,7 +4649,10 @@ document.addEventListener('keydown', (e) => {
       return;
     }
     if (e.key === 'Escape') {
-      setFocusZone('board');
+      // Plain unfocus — drop the keyboard cursor without jumping into the board
+      document.querySelector('.sidebar').classList.remove('sidebar-focused');
+      clearKbSelection();
+      focusZone = 'board';
       return;
     }
   }
@@ -4699,6 +4703,11 @@ document.addEventListener('keydown', (e) => {
     if (detailPanel.classList.contains('visible')) closeDetailPanel();
     else if (agentLogMode) exitAgentLogMode();
     else if (messagePanelOpen) toggleMessagePanel();
+    else {
+      // Nothing open — plain unfocus: drop the task-card selection highlight
+      clearTaskSelection();
+      selectedTaskId = null;
+    }
     return;
   }
 
