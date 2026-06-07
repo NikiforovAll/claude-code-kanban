@@ -39,6 +39,8 @@ These run only when an API request is served (no background timer).
 
 > `readRecentMessages()` dispatches transcript lines by `type`. Besides `user`/`assistant`/`teammate`, it surfaces `queue-operation` (`operation: 'enqueue'`) lines as user messages flagged `queued: true`. Queued text lives at the top-level `content`, not under `message.content`, and is never re-emitted as a `type:'user'` line, so without this branch it never renders.
 
+> **Compaction → one chip.** A single `/compact` writes up to four records around the boundary: the `/compact` command-name, the `isCompactSummary` continuation summary, the `compact_boundary`, and the `Compacted (ctrl+o…)` stdout echo. To avoid rendering three+ markers per compaction, `readRecentMessages()` keeps only the `isCompactSummary` record — emitted as a `type:'user'` system message with `systemLabel:'Compacted'` and the summary body on `compactSummary` (preamble stripped). The command-name and stdout echo are mapped to `__skip__` in `getSystemMessageLabel()`, and the adjacent-`Compacted` collapse pass carries `compactSummary` onto the surviving chip. The frontend renders the chip collapsed and expands `compactSummary` as markdown on click. Assumes the modern inline-summary format; legacy sessions whose summary lives in `subagents/agent-acompact-*.jsonl` are surfaced separately via `readCompactSummaries()`.
+
 A FS event from the matching watcher updates the metadata pipeline incrementally:
 
 - `projectsWatcher` `change` (jsonl appended) → `dirtyMetadataPaths.add(filePath)`. The next `loadSessionMetadata()` call runs `refreshSessionMetadataPath` on each dirty entry — one `stat` + tail-delta read per file, no directory walk.
