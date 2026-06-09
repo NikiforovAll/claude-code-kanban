@@ -2101,7 +2101,7 @@ body::before {
   overflow: hidden;
 }
 .msg-assistant .msg-text {
-  color: var(--accent-text);
+  color: var(--text-primary);
 }
 .msg-tool .msg-text {
   color: var(--text-secondary);
