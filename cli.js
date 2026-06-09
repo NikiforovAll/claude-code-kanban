@@ -145,7 +145,7 @@ function printTopHelp() {
   console.log('  --help, -h            Show help (top-level, noun-level, or leaf-level)');
   console.log('  --version, -v         Print version and exit');
   console.log('\nServer mode (no subcommand):');
-  console.log('  --port <n>            Port to listen on (default 3456)');
+  console.log('  --port <n>            Port to listen on (default 3541)');
   console.log('  --dir <path>          Override Claude config dir (default ~/.claude)');
   console.log('  --open                Open browser on start');
   console.log('  --install, --uninstall    Install or remove the agent-spy hook');
@@ -187,7 +187,7 @@ function getArgValue(args, name) {
   return args[idx + 1] && !args[idx + 1].startsWith('--') ? args[idx + 1] : null;
 }
 
-function cliPort() { return process.env.PORT || 3456; }
+function cliPort() { return process.env.PORT || 3541; }
 function unreachable() { return `Cannot reach cck server on port ${cliPort()}. Start it first with "claude-code-kanban".`; }
 
 class CliUnreachable extends Error { constructor() { super(unreachable()); this.code = 'unreachable'; } }

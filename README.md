@@ -34,7 +34,7 @@ All changes are non-destructive — existing settings are preserved.
 npx claude-code-kanban --open
 ```
 
-Open http://localhost:3456 (or use `--open` to auto-launch the browser).
+Open http://localhost:3541 (or use `--open` to auto-launch the browser).
 
 ### 3. Use Claude Code as usual
 
@@ -64,7 +64,7 @@ npx claude-code-kanban --open            # Auto-open browser
 npx claude-code-kanban --dir=~/.claude-work  # Custom Claude config dir
 ```
 
-If port 3456 is in use, the server falls back to a random available port.
+If port 3541 is in use, the server falls back to a random available port.
 
 ### Global install
 

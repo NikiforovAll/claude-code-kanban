@@ -7,7 +7,7 @@
 ## Commands
 
 ```bash
-npm start            # port 3456
+npm start            # port 3541
 npm run dev          # start + open browser
 ```
 

@@ -38,7 +38,7 @@ if (require("./cli").runCli(process.argv)) return;
 
 
 const app = express();
-const PORT = process.env.PORT || 3456;
+const PORT = process.env.PORT || 3541;
 
 // Parse --dir flag for custom Claude directory
 function getClaudeDir() {

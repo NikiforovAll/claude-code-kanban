@@ -39,7 +39,7 @@ SSE debouncing: 500ms for tasks, 2s for metadata.
 - SSE endpoint for real-time updates
 - REST API for data fetching
 - Session cache with 10s TTL
-- Port fallback (default 3456)
+- Port fallback (default 3541)
 
 ## Frontend Regions (app.js)
 

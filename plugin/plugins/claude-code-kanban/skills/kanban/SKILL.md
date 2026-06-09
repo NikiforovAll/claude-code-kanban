@@ -1,7 +1,7 @@
 ---
 name: kanban
 description: Drive the claude-code-kanban browser dashboard from this Claude session. Use this skill when the user mentions "kanban" together with "session" — e.g. "open this session in kanban", "show kanban", "focus current session in kanban", "pin/unpin a session in kanban", "preview this file in kanban", or asks to peek/view a kanban session.
-compatibility: Requires the `claude-code-kanban` CLI on PATH and the server running locally (default port 3456).
+compatibility: Requires the `claude-code-kanban` CLI on PATH and the server running locally (default port 3541).
 ---
 
 # Kanban Skill
@@ -69,6 +69,6 @@ Add `--json` to any list-style verb for machine-readable output.
 
 ## Troubleshooting
 
-- **"Cannot reach cck server on port 3456"** → ask the user to start it: `claude-code-kanban` (or `npm start` in the cck repo).
+- **"Cannot reach cck server on port 3541"** → ask the user to start it: `claude-code-kanban` (or `npm start` in the cck repo).
 - **Different port** → set `PORT=<n>` env var when invoking the CLI.
 - **Ambiguous session prefix (HTTP 409)** → use the full id. With `${CLAUDE_SESSION_ID}` this won't happen.
