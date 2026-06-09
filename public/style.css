@@ -2103,6 +2103,62 @@ body::before {
 .msg-assistant .msg-text {
   color: var(--text-primary);
 }
+.msg-text-md {
+  display: block; /* override .msg-text -webkit-box clamp */
+  -webkit-line-clamp: none;
+  white-space: normal; /* override .msg-text pre-wrap */
+  font-size: 12px;
+}
+/* Element spacing/borders come from .rendered-md (also on .msg-md-content);
+   these are only the compact-feed deltas: smaller type + code/quote chrome. */
+.msg-text-md table,
+.msg-text-md pre,
+.msg-text-md code {
+  font-size: 11px;
+}
+.msg-text-md h1,
+.msg-text-md h2,
+.msg-text-md h3,
+.msg-text-md h4,
+.msg-text-md h5,
+.msg-text-md h6 {
+  font-size: 12px;
+  font-weight: 600;
+}
+.msg-text-md pre {
+  padding: 6px 8px;
+  background: var(--bg-hover);
+  border-radius: 4px;
+  overflow-x: auto;
+}
+.msg-text-md blockquote {
+  padding-left: 8px;
+  border-left: 2px solid var(--border);
+  color: var(--text-secondary);
+}
+.msg-md-content > :first-child {
+  margin-top: 0;
+}
+.msg-md-content > :last-child {
+  margin-bottom: 0;
+}
+/* Soften just the bottom edge of a truncated preview so it reads as "continues"
+   without obscuring the last line of text. */
+.msg-md-content.is-truncated {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 0.85em), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 0.85em), transparent);
+}
+.msg-md-more {
+  display: block;
+  width: fit-content;
+  margin: 3px auto 0 0;
+  padding: 1px 8px;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: var(--bg-hover);
+  border-radius: 9px;
+}
 .msg-tool .msg-text {
   color: var(--text-secondary);
 }

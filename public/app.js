@@ -945,6 +945,130 @@ function cleanMessageText(text) {
     .trim();
 }
 
+// A GFM table delimiter row (|---|:--:|): only pipes/dashes/colons/spaces, with
+// at least one dash. Pairs with a preceding line that has cells to mark a table.
+function isTableDelimiter(line) {
+  const l = (line || '').trim();
+  return l.includes('-') && /^\|?[ :|-]+\|?$/.test(l);
+}
+
+// Cut a string to at most `max` chars at a word boundary (no mid-word chops).
+function truncateAtWord(s, max) {
+  if (s.length <= max) return s;
+  const cut = s.slice(0, max);
+  const sp = cut.lastIndexOf(' ');
+  return (sp > max * 0.6 ? cut.slice(0, sp) : cut).trimEnd();
+}
+
+// Build a markdown preview for an assistant message: render real markdown but
+// truncate on clean structural boundaries so the feed stays compact and the
+// output is always valid markdown (never cut mid code-fence or mid table-row).
+// Prose is bounded by a line count AND a char budget (long single paragraphs are
+// cut at a word boundary). Returns { md, remainder } where remainder is a short
+// label describing what was cut (e.g. "+12 lines"), or '' when nothing was cut.
+function buildAssistantPreview(text) {
+  const lines = stripAnsi(text || '')
+    .replace(/\r/g, '')
+    .split('\n');
+  const MAX_LINES = 5; // non-blank content lines kept before truncating
+  const MAX_CHARS = 280; // total prose/code/table chars kept
+  const MAX_ROWS = 3; // table body rows
+  const MAX_CODE_LINES = 8; // lines kept inside a fenced code block
+  const countRest = (idx) => {
+    let c = 0;
+    for (let j = idx; j < lines.length; j++) if (lines[j].trim()) c++;
+    return c;
+  };
+  const pluralize = (n, word) => `+${n} ${word}${n > 1 ? 's' : ''}`;
+  const out = [];
+  let remainder = '';
+  let content = 0;
+  let chars = 0;
+  let i = 0;
+
+  for (; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    if (content >= MAX_LINES || chars >= MAX_CHARS) {
+      const rest = countRest(i);
+      if (rest) remainder = pluralize(rest, 'line');
+      break;
+    }
+
+    // Fenced code block — copy verbatim (capped), never break the fence open.
+    const fence = trimmed.match(/^(```|~~~)/);
+    if (fence) {
+      const marker = fence[1];
+      out.push(line);
+      let codeLines = 0;
+      let dropped = 0;
+      // Advance to the real closing fence, keeping at most MAX_CODE_LINES lines,
+      // so leftover code isn't re-parsed as top-level markdown after the cap.
+      for (i++; i < lines.length && !lines[i].trim().startsWith(marker); i++) {
+        if (codeLines < MAX_CODE_LINES) {
+          out.push(lines[i]);
+          codeLines++;
+          chars += lines[i].length;
+        } else {
+          dropped++;
+        }
+      }
+      out.push(marker); // close the fence (covers capped / unterminated blocks)
+      content++;
+      if (dropped) {
+        // Stop at the truncated code block rather than resuming after the gap.
+        remainder = pluralize(dropped, 'code line');
+        break;
+      }
+      continue;
+    }
+
+    // Table — keep header + separator + up to MAX_ROWS body rows.
+    if (line.includes('|') && isTableDelimiter(lines[i + 1])) {
+      out.push(line, lines[i + 1]);
+      content++;
+      chars += line.length;
+      i++;
+      let rows = 0;
+      let droppedRows = 0;
+      while (lines[i + 1]?.includes('|')) {
+        if (rows >= MAX_ROWS) {
+          // Skip remaining rows so they aren't re-rendered as prose lines.
+          droppedRows++;
+          i++;
+          continue;
+        }
+        out.push(lines[++i]);
+        rows++;
+      }
+      if (droppedRows) {
+        // Stop at the truncated table — don't resume with later content across
+        // the gap; the "+N rows" chip signals the table continues.
+        remainder = pluralize(droppedRows, 'row');
+        break;
+      }
+      continue;
+    }
+
+    // Prose / list / heading — bound by the remaining char budget, cutting a
+    // long line at a word boundary rather than rendering a giant paragraph.
+    const remaining = MAX_CHARS - chars;
+    if (trimmed && line.length > remaining) {
+      out.push(truncateAtWord(line, remaining));
+      // Mid-line word cut — line counts would be misleading; count only the
+      // additional full lines that follow, else just signal "more".
+      const rest = countRest(i + 1);
+      remainder = rest ? pluralize(rest, 'line') : 'more';
+      break;
+    }
+    out.push(line);
+    chars += line.length;
+    if (trimmed) content++;
+  }
+
+  return { md: out.join('\n').trim(), remainder };
+}
+
 function renderMsgPinBtn(m, i) {
   const pinned = isPinned(m);
   return `<button class="msg-pin-btn${pinned ? ' pinned' : ''}" onclick="event.stopPropagation();togglePin(${i})" title="${pinned ? 'Unpin' : 'Pin'} message">${PIN_SVG}</button>`;
@@ -1162,9 +1286,16 @@ function renderMessageList(messages) {
           </div>`);
       }
     } else if (m.type === 'assistant') {
+      const preview = buildAssistantPreview(m.fullText || m.text);
+      const moreChip = preview.remainder ? `<div class="msg-md-more">${escapeHtml(preview.remainder)}</div>` : '';
+      const bodyHtml = preview.md
+        ? `<div class="msg-text msg-text-md">
+            <div class="msg-md-content rendered-md${preview.remainder ? ' is-truncated' : ''}">${renderMarkdown(preview.md)}</div>${moreChip}
+          </div>`
+        : `<div class="msg-text">${escapeHtml(cleanMessageText(m.text))}</div>`;
       parts.push(`<div class="msg-item msg-assistant" ${clickable}>
           ${MSG_ICON_ASSISTANT}
-          <div class="msg-body"><div class="msg-text">${escapeHtml(cleanMessageText(m.text))}</div><div class="msg-time">${m.model ? `${escapeHtml(m.model)} · ` : ''}${formatDate(m.timestamp)}</div></div>${pinBtn}
+          <div class="msg-body">${bodyHtml}<div class="msg-time">${m.model ? `${escapeHtml(m.model)} · ` : ''}${formatDate(m.timestamp)}</div></div>${pinBtn}
         </div>`);
     } else if (m.type === 'teammate') {
       if (m.teammateId && m.color && !teamColorMap[m.teammateId]) teamColorMap[m.teammateId] = m.color;
