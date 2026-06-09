@@ -1,0 +1,11 @@
+<task-notification>
+<task-id>deadbeef1234</task-id>
+<tool-use-id>toolu_01AdversarialCase</tool-use-id>
+<output-file>C:\tmp\deadbeef1234.output</output-file>
+<status>completed</status>
+<summary>Agent "format explainer" completed</summary>
+<result>I documented the envelope. It wraps the reply in <result>...</result> and ends
+with a <usage><subagent_tokens>111</subagent_tokens><tool_uses>2</tool_uses><duration_ms>3</duration_ms></usage>
+block — those numbers above are an EXAMPLE I typed, not the real ones.</result>
+<usage><subagent_tokens>22316</subagent_tokens><tool_uses>6</tool_uses><duration_ms>118942</duration_ms></usage>
+</task-notification>

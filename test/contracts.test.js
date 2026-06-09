@@ -13,6 +13,8 @@ const {
   parseTeamConfig,
   parseSessionsIndex,
   parseJsonlLine,
+  parseTaskNotification,
+  getSystemMessageLabel,
   readSessionInfoFromJsonl,
   readRecentMessages,
   readMessagesPage,
@@ -740,6 +742,185 @@ describe('Parser: readCompactSummaries', () => {
     try {
       const result = readCompactSummaries(sessionFile);
       assert.deepEqual(result, []);
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// --- Background task-notification parsing ---
+// Locks how a <task-notification> envelope (injected as a user message when a
+// background agent finishes) is parsed. Without this, the raw text renders as
+// jibberish: the task-id/tool-use-id/output-file collapse into one run-on line
+// and <usage> becomes the concatenated number "223166118942".
+
+describe('parseTaskNotification', () => {
+  const raw = loadFixture('task-notification.txt');
+
+  it('extracts the envelope metadata fields', () => {
+    const n = parseTaskNotification(raw);
+    assert.equal(n.taskId, 'ae80b022c427830bd');
+    assert.equal(n.toolUseId, 'toolu_01ADyr5ZhrBszz2DR2SuDfmm');
+    assert.equal(
+      n.outputFile,
+      'C:\\Users\\NIKIFO~1\\AppData\\Local\\Temp\\claude\\C--Users-nikiforovall-dev-claude-code-hub\\854e2df3-1604-474e-9e7a-6e8f1a4bf09c\\tasks\\ae80b022c427830bd.output'
+    );
+    assert.equal(n.status, 'completed');
+    assert.equal(n.summary, 'Agent "Emulate work A" completed');
+  });
+
+  it('keeps the agent result intact and excludes the wrapper', () => {
+    const n = parseTaskNotification(raw);
+    assert.ok(n.result.startsWith('test agent A done'));
+    assert.ok(n.result.includes('Total active time ~90s via spaced waits.'));
+    assert.ok(!n.result.includes('<task-notification>'));
+    assert.ok(!n.result.includes('<usage>'));
+  });
+
+  it('parses <usage> into structured numbers (the "223166118942" run-on)', () => {
+    const { usage } = parseTaskNotification(raw);
+    assert.deepEqual(usage, { subagentTokens: 22316, toolUses: 6, durationMs: 118942 });
+  });
+
+  it('returns null for non-notification text', () => {
+    assert.equal(parseTaskNotification('just a normal message'), null);
+    assert.equal(parseTaskNotification(null), null);
+    assert.equal(parseTaskNotification(undefined), null);
+  });
+
+  it('getSystemMessageLabel uses the summary as the chip label', () => {
+    assert.equal(getSystemMessageLabel(raw), 'Agent "Emulate work A" completed');
+  });
+
+  // <result>/<usage> carry unescaped agent text. When an agent describes this very
+  // format, its reply contains literal </result> and a fake <usage> block. The real
+  // closing tags are always last, so parsing must NOT truncate on the embedded ones.
+  it('does not truncate when the result embeds literal </result> and <usage>', () => {
+    const adv = parseTaskNotification(loadFixture('task-notification-adversarial.txt'));
+    assert.equal(adv.taskId, 'deadbeef1234');
+    assert.equal(adv.summary, 'Agent "format explainer" completed');
+    // Full result kept, including the embedded markers it describes.
+    assert.ok(adv.result.includes('<result>...</result>'));
+    assert.ok(adv.result.includes('those numbers above are an EXAMPLE'));
+    assert.ok(adv.result.endsWith('not the real ones.'));
+    // The REAL usage (last block) wins over the example embedded in the result.
+    assert.deepEqual(adv.usage, { subagentTokens: 22316, toolUses: 6, durationMs: 118942 });
+  });
+});
+
+// End-to-end: a task-notification must render as a system message (clean result
+// body + summary/usage chip), NEVER as a raw user message — on BOTH the normally
+// delivered (type:'user') path and the queued (queue-operation) path.
+describe('readRecentMessages: task-notification rendering', () => {
+  const raw = loadFixture('task-notification.txt');
+  const dummy = JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'x' }] }, timestamp: '2026-06-09T20:00:00Z' });
+
+  function readOne(notifLine) {
+    const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'parser-test-'));
+    const sessionFile = path.join(tmpDir, 'notif-session.jsonl');
+    // First line is treated as potentially-partial and dropped, so lead with a dummy.
+    writeFileSync(sessionFile, [dummy, notifLine].join('\n') + '\n');
+    try {
+      return readRecentMessages(sessionFile, 10);
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }
+
+  function assertCleanNotification(msg) {
+    assert.ok(msg, 'notification message present');
+    // Rich chip: summary + usage suffix.
+    assert.equal(msg.systemLabel, 'Agent "Emulate work A" completed · 22.3k tok · 6 tools · 119s');
+    // Body is the agent result, not the envelope.
+    assert.ok(msg.text.startsWith('test agent A done'));
+    assert.ok(!msg.text.includes('<task-notification>'));
+    assert.ok(!msg.text.includes('<output-file>'));
+    assert.ok(!msg.text.includes('22316'));
+    // Tagged for client-side grouping + agent-type join.
+    assert.equal(msg.taskNotification, true);
+    assert.equal(msg.taskId, 'ae80b022c427830bd');
+  }
+
+  it('normalizes the normally-delivered (type:"user") notification', () => {
+    const msgs = readOne(JSON.stringify({ type: 'user', message: { role: 'user', content: raw }, timestamp: '2026-06-09T20:36:00Z' }));
+    assertCleanNotification(msgs.find((m) => m.systemLabel && m.systemLabel.startsWith('Agent "Emulate work A"')));
+  });
+
+  it('normalizes the queued (queue-operation enqueue) notification', () => {
+    const msgs = readOne(JSON.stringify({ type: 'queue-operation', operation: 'enqueue', content: raw, timestamp: '2026-06-09T20:36:00Z' }));
+    assertCleanNotification(msgs.find((m) => m.systemLabel && m.systemLabel.startsWith('Agent "Emulate work A"')));
+  });
+
+  it('emits the enqueue+delivered pair sharing one taskId (so the client groups them)', () => {
+    const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'parser-test-'));
+    const sessionFile = path.join(tmpDir, 'notif-session.jsonl');
+    writeFileSync(sessionFile, [
+      dummy,
+      JSON.stringify({ type: 'queue-operation', operation: 'enqueue', content: raw, timestamp: '2026-06-09T20:56:12.176Z' }),
+      JSON.stringify({ type: 'user', message: { role: 'user', content: raw }, timestamp: '2026-06-09T20:56:12.189Z' })
+    ].join('\n') + '\n');
+    try {
+      const notifs = readRecentMessages(sessionFile, 10).filter((m) => m.taskNotification);
+      assert.equal(notifs.length, 2);
+      assert.ok(notifs.every((m) => m.taskId === 'ae80b022c427830bd'));
+      // One came from the queued path, one from the delivered path.
+      assert.deepEqual(notifs.map((m) => !!m.queued).sort(), [false, true]);
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// Foreground agents report cost on their completion toolUseResult
+// (totalTokens/totalToolUseCount/totalDurationMs), not via a <task-notification>.
+// buildAgentProgressMap must capture those as a formatted usageText chip — the same
+// " · Nk tok · N tools · Ns" string a background agent gets — keyed by tool_use_id.
+describe('buildAgentProgressMap: foreground agent usage chip', () => {
+  it('captures totalTokens/toolUses/duration as a usageText chip', () => {
+    const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'parser-test-'));
+    const file = path.join(tmpDir, 'fg-agent.jsonl');
+    const dummy = JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'x' }] }, timestamp: '2026-06-10T10:00:00Z' });
+    const completion = JSON.stringify({
+      type: 'user',
+      message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_fg1', content: 'done' }] },
+      toolUseResult: {
+        status: 'completed',
+        agentId: 'fgagent123',
+        agentType: 'Explore',
+        prompt: 'You are the REUSE reviewer ...',
+        totalTokens: 31485,
+        totalToolUseCount: 5,
+        totalDurationMs: 33551
+      },
+      timestamp: '2026-06-10T10:00:34Z'
+    });
+    writeFileSync(file, [dummy, completion].join('\n') + '\n');
+    try {
+      const map = buildAgentProgressMap(file);
+      const entry = map['toolu_fg1'];
+      assert.ok(entry, 'progressMap entry for the agent tool_use_id');
+      assert.equal(entry.agentId, 'fgagent123');
+      assert.equal(entry.usageText, ' · 31.5k tok · 5 tools · 34s');
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('omits usageText when the toolUseResult carries no cost numbers', () => {
+    const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'parser-test-'));
+    const file = path.join(tmpDir, 'fg-agent-nousage.jsonl');
+    const dummy = JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'x' }] }, timestamp: '2026-06-10T10:00:00Z' });
+    const completion = JSON.stringify({
+      type: 'user',
+      message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_fg2', content: 'done' }] },
+      toolUseResult: { status: 'completed', agentId: 'fgagent456', prompt: 'p' },
+      timestamp: '2026-06-10T10:00:10Z'
+    });
+    writeFileSync(file, [dummy, completion].join('\n') + '\n');
+    try {
+      const entry = buildAgentProgressMap(file)['toolu_fg2'];
+      assert.ok(entry);
+      assert.equal(entry.usageText, null);
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }

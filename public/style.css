@@ -2147,6 +2147,12 @@ body::before {
 .msg-agent-link:hover {
   opacity: 1;
 }
+.msg-agent-usage {
+  color: var(--text-muted);
+  font-size: 10px;
+  opacity: 0.55;
+  margin-left: 6px;
+}
 .msg-pin-btn {
   flex-shrink: 0;
   background: none;
@@ -2910,6 +2916,10 @@ body::before {
 }
 .agent-badge-waiting {
   color: var(--warning);
+  animation: agent-badge-pulse 1.6s ease-in-out infinite;
+}
+.agent-badge-active {
+  color: var(--accent, var(--text-secondary));
   animation: agent-badge-pulse 1.6s ease-in-out infinite;
 }
 @keyframes agent-badge-pulse {

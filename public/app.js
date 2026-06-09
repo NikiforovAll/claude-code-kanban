@@ -1019,10 +1019,17 @@ function toolGroupKey(m) {
 
 function renderToolItem(m, i, compact) {
   const toolDetail = getToolDetail(m.tool, m.params, m.detail);
+  // m.agentId is resolved server-side even while the agent is still running (correlated
+  // from the live agent-activity files), so the ⇗ link, agent-log button, and modal
+  // click all light up DURING the run, identical to post-completion.
   const agentLink =
     m.tool === 'Agent' && m.agentId
       ? ` <span class="msg-agent-link" title="View agent" onclick="event.stopPropagation();showAgentModal('${escapeHtml(m.agentId)}')">⇗</span>`
       : '';
+  // Usage chip (tokens · tools · duration) on completed Agent rows — same stats a
+  // background agent shows, sourced here from the foreground toolUseResult.
+  const agentUsage =
+    m.tool === 'Agent' && m.agentUsage ? `<span class="msg-agent-usage">${escapeHtml(m.agentUsage)}</span>` : '';
   const agentLogBtn = resolveAgentLogBtn(m);
   const recipientColor = m.tool === 'SendMessage' && m.params?.to ? resolveNamedColor(teamColorMap[m.params.to]) : null;
   const borderStyle = recipientColor ? `border-left:3px solid ${recipientColor.color};` : '';
@@ -1035,7 +1042,7 @@ function renderToolItem(m, i, compact) {
   const pinBtn = renderMsgPinBtn(m, i);
   return `<div class="msg-item msg-tool${compactClass}" data-msg-idx="${i}" ${itemClickAttr}>
       ${getToolIcon(m.tool)}
-      <div class="msg-body"><div class="msg-text">${escapeHtml(m.tool)}${toolDetail}${agentLink}</div><div class="msg-time">${formatDate(m.timestamp)}</div></div>${agentLogBtn}${pinBtn}
+      <div class="msg-body"><div class="msg-text">${escapeHtml(m.tool)}${toolDetail}${agentLink}${agentUsage}</div><div class="msg-time">${formatDate(m.timestamp)}</div></div>${agentLogBtn}${pinBtn}
     </div>`;
 }
 
@@ -1071,6 +1078,53 @@ function renderMessageList(messages) {
       }
 
       parts.push(renderToolItem(m, i, false));
+      i++;
+      continue;
+    }
+
+    // Background task-notifications: the harness writes each one twice (an enqueue
+    // record + the delivered type:'user' record, same taskId). Collapse a run of
+    // same-taskId notifications into one ×N group (like tool groups), prefixed with
+    // the agent type joined from the loaded agents list.
+    if (m.taskNotification) {
+      let runEnd = i + 1;
+      while (runEnd < messages.length && messages[runEnd].taskNotification && messages[runEnd].taskId === m.taskId)
+        runEnd++;
+      const count = runEnd - i;
+      const agentType = m.taskId ? currentAgents.find((a) => a.agentId === m.taskId)?.type : null;
+      const typePrefix = agentType ? `${escapeHtml(agentType)} · ` : '';
+      const labelHtml = `${typePrefix}<code>${escapeHtml(m.systemLabel || 'Background task')}</code>`;
+      // Shared header row for both the single notification and the ×N group header.
+      const headerRow = (extraClass, onclick, badge, queuedTag) =>
+        `<div class="msg-item msg-system${extraClass}" ${onclick} style="cursor:pointer">
+            ${ICON_AGENT}
+            <div class="msg-body"><div class="msg-text">${labelHtml}${badge}</div><div class="msg-time">${formatDate(m.timestamp)}${queuedTag}</div></div>${renderMsgPinBtn(m, i)}
+          </div>`;
+
+      if (count >= 2) {
+        const gid = `task-group-${i}`;
+        const items = Array.from({ length: count }, (_, j) => {
+          const r = messages[i + j];
+          const idx = i + j;
+          return `<div class="msg-item msg-system msg-tool-grouped" data-msg-idx="${idx}" onclick="msgDetailFollowLatest=false;showMsgDetail(${idx})" style="cursor:pointer">
+              ${ICON_AGENT}
+              <div class="msg-body"><div class="msg-text">${r.queued ? 'queued' : 'delivered'}</div><div class="msg-time">${formatDate(r.timestamp)}</div></div>
+            </div>`;
+        }).join('');
+        parts.push(`<div class="msg-tool-group">
+            ${headerRow(' msg-tool-group-header', `onclick="toggleToolGroup('${gid}')"`, `<span class="tool-count-badge">×${count}</span>`, '')}
+            <div class="msg-tool-group-items" id="${gid}">${items}</div>
+          </div>`);
+        i = runEnd;
+        continue;
+      }
+
+      // Not collapsed (the enqueue/delivered pair wasn't consecutive): tag the queued
+      // record with the same golden marker used for other queued messages.
+      const queuedTag = m.queued ? '<span class="msg-queued-tag">queued</span>' : '';
+      parts.push(
+        headerRow('', `data-msg-idx="${i}" onclick="msgDetailFollowLatest=false;showMsgDetail(${i})"`, '', queuedTag),
+      );
       i++;
       continue;
     }
@@ -1309,6 +1363,8 @@ const ICON_CHECKMARK =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M20 6L9 17l-5-5"/></svg>';
 const ICON_AGENT_WAITING =
   '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
+const ICON_AGENT_ACTIVE =
+  '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/><line x1="8" y1="16" x2="8" y2="16"/><line x1="16" y1="16" x2="16" y2="16"/></svg>';
 const ICON_CHAT =
   '<svg class="msg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
 const TOOL_ICONS = {
@@ -2519,10 +2575,18 @@ function showAgentModal(agentId) {
     return `<span class="agent-chip${cls}"${style}${title}>${labelHtml}<span class="agent-chip-val">${value}</span></span>`;
   };
 
+  // Agent cost stats live on the launch row's message (resolved from the completion
+  // toolUseResult), not on the agent-activity record — so read them from there.
+  const agentMsg = currentMessages.find((m) => m.tool === 'Agent' && m.agentId === agentId);
+  const usageStats = agentMsg?.agentUsageStats || null;
+  const fmtTok = (t) => (t >= 1000 ? `${(t / 1000).toFixed(1).replace(/\.0$/, '')}k` : `${t}`);
+
   const chips = [];
   if (agent.agentId) chips.push(chip('id', escapeHtml(shortId), { cls: 'agent-chip-mono', title: agent.agentId }));
   chips.push(chip('', escapeHtml(agent.status), { cls: `agent-chip-status agent-chip-${agent.status}` }));
   chips.push(chip('⏱', formatDuration(elapsed)));
+  if (usageStats?.tokens != null) chips.push(chip('tokens', fmtTok(usageStats.tokens), { cls: 'agent-chip-mono' }));
+  if (usageStats?.tools != null) chips.push(chip('tools', String(usageStats.tools), { cls: 'agent-chip-mono' }));
   if (shortModel) chips.push(chip('model', escapeHtml(shortModel), { cls: 'agent-chip-mono' }));
   if (agent.agentName) {
     const c = getOwnerColor(agent.agentName);
@@ -2534,8 +2598,6 @@ function showAgentModal(agentId) {
   }
   if (started) chips.push(chip('started', started.toLocaleTimeString()));
   if (stopped) chips.push(chip('stopped', stopped.toLocaleTimeString()));
-
-  const agentMsg = currentMessages.find((m) => m.tool === 'Agent' && m.agentId === agentId);
 
   let html = `<div class="agent-chips">${chips.join('')}</div>`;
 
@@ -2818,6 +2880,7 @@ function renderSessions() {
                 ${hasScratchpad ? `<span class="scratchpad-badge" onclick="event.stopPropagation(); openSessionScratchpad('${session.id}')" title="Open scratchpad"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></span>` : ''}
                 ${session.planSourceSessionId ? `<span class="plan-indicator" title="Implements plan — click to reveal plan session" onclick="event.stopPropagation(); revealPlanSession('${escapeHtml(session.planSourceSessionId)}')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span>` : ''}
                 ${session.hasWaitingForUser ? `<span class="agent-badge agent-badge-waiting" title="Waiting for user">${ICON_AGENT_WAITING}</span>` : ''}
+                ${session.hasRunningAgents && !session.hasWaitingForUser ? `<span class="agent-badge agent-badge-active" title="Agents running">${ICON_AGENT_ACTIVE}</span>` : ''}
                 ${isLive || session.hasRunningAgents ? `<span class="pulse" title="${isLive ? 'Live' : 'Active agents'}"></span>` : ''}
               </span>
               <div class="progress-bar"><div class="progress-fill" style="width: ${percent}%"></div></div>
@@ -5162,6 +5225,11 @@ function setupEventSource() {
             refreshProjectAgents();
           } else if (currentSessionId && pendingAgentSessionIds.has(currentSessionId)) {
             fetchAgents(currentSessionId);
+            // An agent starting/stopping adds its Agent tool_use + completion rows to
+            // the transcript. Refresh the message log on the same signal so they appear
+            // at start, not only when an unrelated metadata/context refresh coincides
+            // with completion.
+            if (!agentLogMode) fetchMessages(currentSessionId);
           }
           pendingAgentSessionIds.clear();
         }, 500);

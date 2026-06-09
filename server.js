@@ -120,6 +120,16 @@ function readAgentJsonl(filePath) {
   return merged;
 }
 
+// Agent-activity record files in a session dir, excluding the `_`-prefixed sidecars
+// (_waiting.json, _name-*). Returns [] if the dir is missing/unreadable.
+function listAgentFiles(agentDir) {
+  try {
+    return readdirSync(agentDir).filter((f) => f.endsWith('.jsonl') && !f.startsWith('_'));
+  } catch (_) {
+    return [];
+  }
+}
+
 function persistAgent(dir, agent) {
   const file = path.join(dir, agent.agentId + '.jsonl');
   fs.appendFile(file, JSON.stringify({ ...agent, event: 'server-update' }) + '\n', 'utf8').catch(() => {});
@@ -1284,7 +1294,7 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
     const isTeam = !!teamConfig;
     const teamMemberNames = isTeam ? new Set(teamConfig.members.map(m => m.name)) : null;
 
-    const files = readdirSync(agentDir).filter(f => f.endsWith('.jsonl') && !f.startsWith('_'));
+    const files = listAgentFiles(agentDir);
     const agents = [];
     for (const file of files) {
       try {
@@ -1738,6 +1748,8 @@ app.get('/api/sessions/:sessionId/messages', (req, res) => {
       if (entry) {
         msg.agentId = entry.agentId;
         if (entry.description) msg.agentDescription = entry.description;
+        if (entry.usageText) msg.agentUsage = entry.usageText;
+        if (entry.usage) msg.agentUsageStats = entry.usage;
         if (entry.prompt && !msg.agentPrompt) msg.agentPrompt = entry.prompt;
         try {
           const agentFile = path.join(agentDir, entry.agentId + '.jsonl');
@@ -1750,6 +1762,33 @@ app.get('/api/sessions/:sessionId/messages', (req, res) => {
             persistAgent(agentDir, agent);
           }
         } catch (_) {}
+      }
+    }
+    // Mid-run fallback: the progressMap only carries agentId once the agent completes
+    // (this build writes no agent_progress lines), so a still-running subagent's launch
+    // row has no agentId yet — leaving its ⇗ link / agent modal inert until completion.
+    // Correlate by PROMPT against the live agent-activity files (which know the agentId
+    // from launch): the activity prompt is the launch prompt plus appended harness
+    // boilerplate, so the tool_use prompt is a prefix. Resolving agentId here makes the
+    // row behave identically while running as it does after it finishes.
+    const unresolved = agentMessages.filter(m => !m.agentId && m.agentPrompt);
+    if (unresolved.length && existsSync(agentDir)) {
+      const activity = listAgentFiles(agentDir)
+        .map((f) => { try { return readAgentJsonl(path.join(agentDir, f)); } catch (_) { return null; } })
+        .filter((a) => a && a.agentId && a.prompt);
+      const usedIds = new Set(agentMessages.map(m => m.agentId).filter(Boolean));
+      for (const msg of unresolved) {
+        const key = msg.agentPrompt.slice(0, 200);
+        const match = activity.find(a =>
+          !usedIds.has(a.agentId) &&
+          (!msg.agentType || a.type === msg.agentType) &&
+          a.prompt.startsWith(key)
+        );
+        if (match) {
+          msg.agentId = match.agentId;
+          usedIds.add(match.agentId);
+          if (match.lastMessage) msg.agentLastMessage = match.lastMessage;
+        }
       }
     }
   }
