@@ -2884,9 +2884,7 @@ body::before {
 .agent-card.selected:hover {
   background: var(--bg-elevated);
   border-color: var(--accent);
-  box-shadow:
-    0 0 0 1px var(--accent-dim),
-    0 0 12px var(--accent-dim);
+  box-shadow: 0 0 0 1px var(--accent-dim);
 }
 .agent-card.fading {
   opacity: 0.4;
@@ -2922,18 +2920,18 @@ body::before {
   gap: 5px;
 }
 .agent-dot {
-  width: 7px;
-  height: 7px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
   flex-shrink: 0;
 }
 .agent-dot.active {
   background: var(--success);
-  box-shadow: 0 0 6px var(--success);
+  box-shadow: 0 0 4px color-mix(in srgb, var(--success) 50%, transparent);
 }
 .agent-dot.idle {
   background: var(--warning);
-  box-shadow: 0 0 6px var(--warning);
+  box-shadow: 0 0 4px color-mix(in srgb, var(--warning) 50%, transparent);
 }
 .agent-dot.stopped {
   background: var(--text-muted);
