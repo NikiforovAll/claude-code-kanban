@@ -5986,6 +5986,69 @@ function loadTheme() {
   updateThemeIcon();
   updateThemeColor(document.body.classList.contains('light'));
   syncHljsTheme();
+  buildThemeMenu();
+  const colorTheme = localStorage.getItem('color-theme');
+  if (colorTheme) document.body.dataset.colorTheme = colorTheme;
+  syncColorThemeSelect(colorTheme || 'ember');
+}
+
+const COLOR_THEMES = [
+  ['ember', 'Ember'],
+  ['gruvbox', 'Gruvbox'],
+  ['catppuccin', 'Catppuccin'],
+  ['tokyo-night', 'Tokyo Night'],
+  ['solarized', 'Solarized'],
+  ['dracula', 'Dracula'],
+  ['nord', 'Nord'],
+  ['rose-pine', 'Rosé Pine'],
+  ['everforest', 'Everforest'],
+  ['kanagawa', 'Kanagawa'],
+  ['one-dark', 'One Dark'],
+  ['night-owl', 'Night Owl'],
+  ['monokai', 'Monokai Pro'],
+  ['github', 'GitHub'],
+  ['ayu', 'Ayu'],
+  ['vitesse', 'Vitesse'],
+  ['synthwave', "Synthwave '84"],
+];
+
+function buildThemeMenu() {
+  const menu = document.getElementById('themeMenu');
+  menu.innerHTML = COLOR_THEMES.map(
+    ([id, label]) =>
+      `<button type="button" class="theme-menu-item" data-theme-id="${id}"
+         onclick="event.stopPropagation(); setColorTheme('${id}'); toggleThemeMenu()">
+         <span class="theme-swatch theme-swatch-${id}"><i class="sw-bg"></i><i class="sw-accent"></i><i class="sw-ink"></i></span>${label}
+       </button>`,
+  ).join('');
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+function toggleThemeMenu(e) {
+  e?.stopPropagation();
+  const menu = document.getElementById('themeMenu');
+  const open = menu.classList.toggle('open');
+  if (open) {
+    document.addEventListener('click', () => menu.classList.remove('open'), { once: true });
+  }
+}
+
+function syncColorThemeSelect(id) {
+  document.querySelectorAll('.theme-menu-item').forEach((el) => {
+    el.classList.toggle('on', el.dataset.themeId === (id || 'ember'));
+  });
+}
+
+// 'ember' (the :root default) has no override block — selecting it clears the attribute.
+function setColorTheme(id) {
+  if (!id || id === 'ember') {
+    delete document.body.dataset.colorTheme;
+    localStorage.removeItem('color-theme');
+  } else {
+    document.body.dataset.colorTheme = id;
+    localStorage.setItem('color-theme', id);
+  }
+  syncColorThemeSelect(id);
 }
 
 //#endregion
@@ -7065,21 +7128,35 @@ window.hubNavigate = function hubNavigate(app, url) {
 
 (function initHubTheme() {
   const getTheme = () => (document.body.classList.contains('light') ? 'light' : 'dark');
+  const getColorTheme = () => document.body.dataset.colorTheme || 'ember';
   const hubOrigin = () => (window.__HUB__?.url ? new URL(window.__HUB__.url).origin : null);
+  // lastTheme/lastColorTheme are updated synchronously when applying a hub
+  // message, so the (async) observer sees no diff and doesn't echo it back.
   let lastTheme = getTheme();
+  let lastColorTheme = getColorTheme();
   window.addEventListener('message', (e) => {
     if (e.source !== window.parent || e.origin !== hubOrigin()) return;
     if (e.data?.type !== 'hub:theme') return;
-    if (getTheme() === e.data.theme) return;
-    window.toggleTheme();
-    lastTheme = getTheme();
+    if (typeof e.data.colorTheme === 'string' && e.data.colorTheme !== getColorTheme()) {
+      setColorTheme(e.data.colorTheme);
+      lastColorTheme = getColorTheme();
+    }
+    if (getTheme() !== e.data.theme) {
+      window.toggleTheme();
+      lastTheme = getTheme();
+    }
   });
   new MutationObserver(() => {
     const t = getTheme();
-    if (t === lastTheme) return;
+    const ct = getColorTheme();
+    if (t === lastTheme && ct === lastColorTheme) return;
     lastTheme = t;
+    lastColorTheme = ct;
     const origin = hubOrigin();
-    if (origin) window.parent.postMessage({ type: 'hub:theme', theme: t }, origin);
-  }).observe(document.body, { attributes: true, attributeFilter: ['class'] });
+    if (origin) window.parent.postMessage({ type: 'hub:theme', theme: t, colorTheme: ct }, origin);
+  }).observe(document.body, {
+    attributes: true,
+    attributeFilter: ['class', 'data-color-theme'],
+  });
 })();
 // #endregion HUB_INTEGRATION
