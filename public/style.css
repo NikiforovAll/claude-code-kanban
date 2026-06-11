@@ -472,6 +472,8 @@ body::before {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  /* reserve room for the absolutely-positioned pin button at top-right */
+  padding-right: 22px;
 }
 
 .session-indicators .pulse {
