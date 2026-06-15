@@ -100,7 +100,6 @@ When modifying a feature, open **both** the JS region and the matching CSS regio
 | KANBAN | Column grid, column headers, empty column state |
 | TASK_CARD | Card layout, status border, badges, description preview |
 | DETAIL_PANEL | Side panel: fields, markdown, dependency chips |
-| NOTE_FORM | Add-note textarea and submit button |
 | TEAM_BADGE · OWNER_BADGE · TEAM_MODAL | Team/owner indicators, team member cards |
 | OWNER_FILTER | Kanban overlay filter bar |
 | MESSAGE_PANEL | Message log: bubbles, roles, tool blocks |

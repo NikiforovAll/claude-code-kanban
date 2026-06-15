@@ -14,7 +14,6 @@ const collapsedProjectGroups = new Set();
 let stableGroupOrder = []; // cached project path order to prevent jumping
 let searchQuery = ''; // Search query for fuzzy search
 let allTasksCache = []; // Cache all tasks for search
-let bulkDeleteSessionId = null; // Track session for bulk delete
 let ownerFilter = '';
 let currentAgents = [];
 let currentWaiting = null;
@@ -226,172 +225,9 @@ function clearSearch() {
   renderSessions();
 }
 
-// biome-ignore lint/correctness/noUnusedVariables: used in HTML
-function deleteAllSessionTasks(sessionId) {
-  const session = sessions.find((s) => s.id === sessionId);
-  if (!session) return;
-
-  // When viewing a single session, currentTasks already contains only that session's tasks
-  // When viewing "All Tasks", tasks have sessionId property, so we filter
-  const sessionTasks =
-    currentSessionId === sessionId ? currentTasks : currentTasks.filter((t) => t.sessionId === sessionId);
-
-  if (sessionTasks.length === 0) {
-    alert('No tasks to delete in this session');
-    return;
-  }
-
-  bulkDeleteSessionId = sessionId;
-
-  const displayName = session.name || sessionId;
-  const message = `Delete all ${sessionTasks.length} task(s) from session "${displayName}"?`;
-
-  document.getElementById('delete-session-tasks-message').textContent = message;
-
-  const modal = document.getElementById('delete-session-tasks-modal');
-  modal.classList.add('visible');
-
-  // Handle ESC key
-  const keyHandler = (e) => {
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      closeDeleteSessionTasksModal();
-      document.removeEventListener('keydown', keyHandler);
-    }
-  };
-  document.addEventListener('keydown', keyHandler);
-}
-
-function closeDeleteSessionTasksModal() {
-  const modal = document.getElementById('delete-session-tasks-modal');
-  modal.classList.remove('visible');
-  bulkDeleteSessionId = null;
-}
-
-// biome-ignore lint/correctness/noUnusedVariables: used in HTML
-async function confirmDeleteSessionTasks() {
-  if (!bulkDeleteSessionId) return;
-
-  const sessionId = bulkDeleteSessionId;
-  closeDeleteSessionTasksModal();
-
-  // Get tasks to delete
-  const sessionTasks =
-    currentSessionId === sessionId ? currentTasks : currentTasks.filter((t) => t.sessionId === sessionId);
-
-  // Sort tasks by dependency order (blocked tasks first, then blockers)
-  const sortedTasks = topologicalSort(sessionTasks);
-
-  let successCount = 0;
-  let failedCount = 0;
-  const failedTasks = [];
-
-  for (const task of sortedTasks) {
-    try {
-      const res = await fetch(`/api/tasks/${sessionId}/${task.id}`, {
-        method: 'DELETE',
-      });
-
-      if (res.ok) {
-        successCount++;
-      } else {
-        failedCount++;
-        const error = await res.json();
-        failedTasks.push({ id: task.id, subject: task.subject, error: error.error });
-        console.error(`Failed to delete task ${task.id}:`, error);
-      }
-    } catch (error) {
-      failedCount++;
-      failedTasks.push({ id: task.id, subject: task.subject, error: 'Network error' });
-      console.error(`Error deleting task ${task.id}:`, error);
-    }
-  }
-
-  // Show result modal
-  showDeleteResultModal(successCount, failedCount, failedTasks);
-
-  // Close detail panel if open
-  closeDetailPanel();
-
-  // Refresh the view
-  await refreshCurrentView();
-}
-
 //#endregion
 
-//#region BULK_DELETE
-// Topological sort for task deletion order
-function topologicalSort(tasks) {
-  const result = [];
-  const visited = new Set();
-  const visiting = new Set();
-  const taskMap = new Map(tasks.map((t) => [t.id, t]));
-
-  function visit(taskId) {
-    if (visited.has(taskId)) return;
-    if (visiting.has(taskId)) return; // Cycle - skip
-
-    visiting.add(taskId);
-    const task = taskMap.get(taskId);
-
-    if (task?.blocks && task.blocks.length > 0) {
-      // Visit all tasks that this task blocks (dependencies first)
-      for (const blockedId of task.blocks) {
-        if (taskMap.has(blockedId)) {
-          visit(blockedId);
-        }
-      }
-    }
-
-    visiting.delete(taskId);
-    visited.add(taskId);
-    if (task) result.push(task);
-  }
-
-  // Visit all tasks
-  for (const task of tasks) {
-    visit(task.id);
-  }
-
-  return result;
-}
-
-function showDeleteResultModal(successCount, failedCount, failedTasks) {
-  const modal = document.getElementById('delete-result-modal');
-  const messageEl = document.getElementById('delete-result-message');
-  const detailsEl = document.getElementById('delete-result-details');
-
-  if (failedCount === 0) {
-    messageEl.textContent = `Successfully deleted all ${successCount} task(s).`;
-    detailsEl.style.display = 'none';
-  } else {
-    messageEl.textContent = `Deleted ${successCount} task(s). Failed to delete ${failedCount} task(s).`;
-
-    const failedList = failedTasks
-      .map((t) => `<li><strong>${escapeHtml(t.subject)}</strong> (#${escapeHtml(t.id)}): ${escapeHtml(t.error)}</li>`)
-      .join('');
-    detailsEl.innerHTML = `<ul style="margin: 8px 0 0 0; padding-left: 20px;">${failedList}</ul>`;
-    detailsEl.style.display = 'block';
-  }
-
-  modal.classList.add('visible');
-
-  // Handle ESC key
-  const keyHandler = (e) => {
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      closeDeleteResultModal();
-      document.removeEventListener('keydown', keyHandler);
-    }
-  };
-  document.addEventListener('keydown', keyHandler);
-}
-
-function closeDeleteResultModal() {
-  const modal = document.getElementById('delete-result-modal');
-  modal.classList.remove('visible');
-}
-
+//#region SEARCH
 function fuzzyMatch(text, query) {
   if (!query) return true;
   if (!text) return false;
@@ -3831,14 +3667,6 @@ async function showTaskDetail(taskId, sessionId = null) {
         </div>`
             : ''
         }
-
-        <div class="detail-section note-section">
-          <label for="note-input" class="detail-label">Add Note</label>
-          <form class="note-form" onsubmit="addNote(event, '${task.id}', '${actualSessionId}')">
-            <textarea id="note-input" class="note-input" placeholder="Add a note for Claude..." rows="3"></textarea>
-            <button type="submit" class="note-submit">Add Note</button>
-          </form>
-        </div>
       `;
 
   // Setup button handlers (read-only in project view)
@@ -3846,9 +3674,6 @@ async function showTaskDetail(taskId, sessionId = null) {
   const isProjectView = viewMode === 'project';
   deleteBtn.style.display = isProjectView ? 'none' : '';
   if (!isProjectView) deleteBtn.onclick = () => deleteTask(task.id, actualSessionId);
-
-  const noteSection = detailContent.querySelector('.note-section');
-  if (noteSection && isProjectView) noteSection.style.display = 'none';
 
   if (!isProjectView) {
     const titleEl = detailContent.querySelector('.detail-title');
@@ -3954,36 +3779,6 @@ async function saveTaskField(taskId, sessionId, field, value) {
     }
   } catch (error) {
     console.error('Failed to update task:', error);
-  }
-}
-
-// biome-ignore lint/correctness/noUnusedVariables: used in HTML
-async function addNote(event, taskId, sessionId) {
-  event.preventDefault();
-  const input = document.getElementById('note-input');
-  const note = input.value.trim();
-  if (!note) return;
-
-  try {
-    const res = await fetch(`/api/tasks/${sessionId}/${taskId}/note`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ note }),
-    });
-
-    if (res.ok) {
-      input.value = '';
-      // Refresh to show updated description
-      if (viewMode === 'all') {
-        const tasksRes = await fetch('/api/tasks/all');
-        currentTasks = await tasksRes.json();
-      } else {
-        await fetchTasks(sessionId);
-      }
-      showTaskDetail(taskId, sessionId);
-    }
-  } catch (error) {
-    console.error('Failed to add note:', error);
   }
 }
 

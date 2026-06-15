@@ -2023,40 +2023,6 @@ app.get('/api/tasks/all', async (req, res) => {
   }
 });
 
-// API: Add note to a task
-app.post('/api/tasks/:sessionId/:taskId/note', async (req, res) => {
-  try {
-    const { sessionId, taskId } = req.params;
-    const { note } = req.body;
-
-    if (!note || !note.trim()) {
-      return res.status(400).json({ error: 'Note cannot be empty' });
-    }
-
-    const sessionDir = getCustomTaskDir(sessionId) || path.join(TASKS_DIR, sessionId);
-    const taskPath = path.join(sessionDir, `${taskId}.json`);
-
-    if (!existsSync(taskPath)) {
-      return res.status(404).json({ error: 'Task not found' });
-    }
-
-    // Read current task
-    const task = JSON.parse(await fs.readFile(taskPath, 'utf8'));
-
-    // Append note to description
-    const noteBlock = `\n\n---\n\n#### [Note added by user]\n\n${note.trim()}`;
-    task.description = (task.description || '') + noteBlock;
-
-    // Write updated task
-    await fs.writeFile(taskPath, JSON.stringify(task, null, 2));
-
-    res.json({ success: true, task });
-  } catch (error) {
-    console.error('Error adding note:', error);
-    res.status(500).json({ error: 'Failed to add note' });
-  }
-});
-
 // API: Update task fields (subject, description)
 app.put('/api/tasks/:sessionId/:taskId', async (req, res) => {
   try {

@@ -472,50 +472,7 @@
       </div>
       <div class="modal-footer">
         <button id="delete-cancel-btn" class="btn btn-secondary" onclick="closeDeleteConfirmModal()">Cancel</button>
-        <button id="delete-confirm-btn" class="btn btn-primary" onclick="confirmDelete()" style="background: #ef4444; border-color: #ef4444;">Delete</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Delete All Session Tasks Confirmation Modal -->
-  <div id="delete-session-tasks-modal" class="modal-overlay" onclick="closeDeleteSessionTasksModal()">
-    <div class="modal" onclick="event.stopPropagation()">
-      <div class="modal-header">
-        <h3 class="modal-title">Delete All Tasks</h3>
-        <button class="modal-close" aria-label="Close dialog" onclick="closeDeleteSessionTasksModal()">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M18 6L6 18M6 6l12 12"/>
-          </svg>
-        </button>
-      </div>
-      <div class="modal-body">
-        <p id="delete-session-tasks-message" style="margin: 0 0 12px 0; color: var(--text-primary);"></p>
-        <p style="margin: 0; font-size: 13px; color: var(--text-secondary);">This action cannot be undone.</p>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-secondary" onclick="closeDeleteSessionTasksModal()">Cancel</button>
-        <button class="btn btn-primary" onclick="confirmDeleteSessionTasks()" style="background: #ef4444; border-color: #ef4444;">Delete All</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Delete Result Modal -->
-  <div id="delete-result-modal" class="modal-overlay" onclick="closeDeleteResultModal()">
-    <div class="modal" onclick="event.stopPropagation()">
-      <div class="modal-header">
-        <h3 class="modal-title">Deletion Result</h3>
-        <button class="modal-close" aria-label="Close dialog" onclick="closeDeleteResultModal()">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M18 6L6 18M6 6l12 12"/>
-          </svg>
-        </button>
-      </div>
-      <div class="modal-body">
-        <p id="delete-result-message" style="margin: 0; color: var(--text-primary);"></p>
-        <div id="delete-result-details" style="margin-top: 12px; font-size: 13px; color: var(--text-secondary);"></div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-primary" onclick="closeDeleteResultModal()">Close</button>
+        <button id="delete-confirm-btn" class="btn btn-danger" onclick="confirmDelete()">Delete</button>
       </div>
     </div>
   </div>

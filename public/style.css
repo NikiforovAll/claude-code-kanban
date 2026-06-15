@@ -1569,61 +1569,6 @@ body::before {
 
 /* #endregion */
 
-/* #region NOTE_FORM */
-.note-section {
-  margin-top: 8px;
-}
-
-.note-form {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.note-input {
-  width: 100%;
-  padding: 10px 12px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text-primary);
-  font-family: var(--mono);
-  font-size: 12px;
-  line-height: 1.5;
-  resize: vertical;
-  min-height: 60px;
-}
-
-.note-input:focus {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-dim);
-}
-
-.note-input::placeholder {
-  color: var(--text-muted);
-}
-
-.note-submit {
-  align-self: flex-end;
-  padding: 8px 16px;
-  background: var(--accent);
-  border: none;
-  border-radius: 5px;
-  color: white;
-  font-family: var(--mono);
-  font-size: 11px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.note-submit:hover {
-  filter: brightness(1.1);
-}
-
-/* #endregion */
-
 /* #region TEAM_BADGE */
 .session-indicators {
   display: flex;
