@@ -221,7 +221,7 @@
       <header class="detail-header">
         <h3>Task Details</h3>
         <div style="display: flex; gap: 8px; align-items: center;">
-          <button id="delete-task-btn" class="icon-btn" title="Delete task (D)" aria-label="Delete task" style="color: #ef4444; border-color: #ef4444; display: none;">
+          <button id="delete-task-btn" class="icon-btn icon-btn-danger" title="Delete task (D)" aria-label="Delete task" style="display: none;">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
             </svg>
@@ -549,7 +549,7 @@
       <div class="modal-footer">
         <button id="session-info-dismiss-btn" class="btn btn-secondary" onclick="toggleDismissSession(_infoModalSessionId); closeTeamModal()">Dismiss</button>
         <button class="btn btn-secondary" onclick="showToolStatsModal(_infoModalSessionId)" title="Tool invocation statistics">Tool Stats</button>
-        <button class="btn btn-primary" onclick="closeTeamModal()">Close</button>
+        <button class="btn btn-secondary" onclick="closeTeamModal()">Close</button>
       </div>
     </div>
   </div>
@@ -567,7 +567,7 @@
       </div>
       <div id="tool-stats-modal-body" class="modal-body" style="overflow-y:auto;flex:1 1 auto;min-height:0;"></div>
       <div class="modal-footer">
-        <button class="btn btn-primary" onclick="closeToolStatsModal()">Close</button>
+        <button class="btn btn-secondary" onclick="closeToolStatsModal()">Close</button>
       </div>
     </div>
   </div>
@@ -596,7 +596,7 @@
       </div>
       <div id="plan-modal-body" class="modal-body detail-desc rendered-md" style="overflow-y: auto; flex: 0 1 auto; min-height: 0;"></div>
       <div class="modal-footer">
-        <button class="btn btn-primary" onclick="closePlanModal()">Close</button>
+        <button class="btn btn-secondary" onclick="closePlanModal()">Close</button>
       </div>
     </div>
   </div>
@@ -606,7 +606,7 @@
     <div class="modal modal-sm" onclick="event.stopPropagation()">
       <div class="modal-header">
         <h3 class="modal-title" style="display: flex; align-items: center; gap: 8px;">
-          <svg viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2" style="width: 20px; height: 20px;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="var(--danger)" stroke-width="2" style="width: 20px; height: 20px;">
             <circle cx="12" cy="12" r="10"/>
             <line x1="15" y1="9" x2="9" y2="15"/>
             <line x1="9" y1="9" x2="15" y2="15"/>
@@ -623,7 +623,7 @@
         <div id="blocked-task-message" style="color: var(--text-primary); line-height: 1.6;"></div>
       </div>
       <div class="modal-footer">
-        <button class="btn btn-primary" onclick="closeBlockedTaskModal()">OK</button>
+        <button class="btn btn-secondary" onclick="closeBlockedTaskModal()">OK</button>
       </div>
     </div>
   </div>
@@ -642,7 +642,7 @@
       </div>
       <div id="loop-modal-body" class="modal-body" style="overflow-y:auto;flex:0 1 auto;min-height:0;"></div>
       <div class="modal-footer">
-        <button class="btn btn-primary" onclick="closeLoopModal()">Close</button>
+        <button class="btn btn-secondary" onclick="closeLoopModal()">Close</button>
       </div>
     </div>
   </div>
@@ -674,7 +674,7 @@
       <div id="agent-modal-body" class="modal-body" style="overflow-y: auto; overflow-x: hidden; flex: 0 1 auto; min-height: 0;"></div>
       <div class="modal-footer">
         <button id="agent-modal-dismiss-btn" class="btn agent-dismiss-btn" style="display:none" onclick="dismissAgent(currentAgentModalId);closeAgentModal()">Dismiss</button>
-        <button class="btn btn-primary" onclick="closeAgentModal()">Close</button>
+        <button class="btn btn-secondary" onclick="closeAgentModal()">Close</button>
       </div>
     </div>
   </div>
@@ -693,7 +693,7 @@
       </div>
       <div class="modal-footer scratchpad-footer">
         <span id="scratchpad-charcount" class="scratchpad-charcount">0 chars</span>
-        <button class="btn btn-primary" onclick="closeScratchpad()">Close</button>
+        <button class="btn btn-secondary" onclick="closeScratchpad()">Close</button>
       </div>
     </div>
   </div>
@@ -717,7 +717,7 @@
       <div class="modal-body" id="storage-modal-body" style="overflow-y:auto;min-height:200px;max-height:60vh;padding-top:16px;padding-right:8px;"></div>
       <div class="modal-footer">
         <button id="storage-cleanup-btn" class="btn btn-secondary" onclick="cleanupOrphanedStorage()">Clean Orphaned</button>
-        <button class="btn btn-primary" onclick="closeStorageManager()">Close</button>
+        <button class="btn btn-secondary" onclick="closeStorageManager()">Close</button>
       </div>
     </div>
   </div>

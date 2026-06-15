@@ -1833,6 +1833,8 @@ function _renderPinToDetail(pin) {
 }
 
 const SESSION_PIN_SVG = PIN_SVG.replace('width="14" height="14"', 'width="12" height="12"');
+const SESSION_STAR_SVG =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><path d="M12 2 L15 9 L22 9 L17 14 L19 22 L12 18 L5 22 L7 14 L2 9 L9 9 Z"/></svg>';
 const LINK_SVG_PATHS =
   '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>';
 const linkSvg = (size) =>
@@ -2993,7 +2995,7 @@ function renderSessions() {
     const tempClass = session.hasRecentLog || session.inProgress || session.hasWaitingForUser ? 'warm' : 'stale';
     return `
           <button onclick="fetchTasks('${session.id}')" data-session-id="${session.id}" class="session-item ${isActive ? 'active' : ''} ${session.hasWaitingForUser ? 'permission-pending' : ''} ${tempClass} ${showCtx ? 'has-context' : ''}" title="${tooltip}">
-            <span class="session-pin-btn${pinClass}" onclick="event.stopPropagation();toggleSessionPin('${escapeHtml(session.id)}')" title="${pinTitle} session">${SESSION_PIN_SVG}</span>
+            <span class="session-pin-btn${pinClass}" onclick="event.stopPropagation();toggleSessionPin('${escapeHtml(session.id)}')" title="${pinTitle} session">${pinState === 'sticky' ? SESSION_STAR_SVG : SESSION_PIN_SVG}</span>
             <div class="session-name">${escapeHtml(primaryName)}</div>
             ${secondaryName ? `<div class="session-secondary">${escapeHtml(secondaryName)}</div>` : ''}
             ${gitBranch ? `<div class="session-branch">${gitBranch}</div>` : ''}
