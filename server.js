@@ -270,6 +270,20 @@ function resolveSessionId(sessionId) {
   return (teamConfig && teamConfig.leadSessionId) ? teamConfig.leadSessionId : sessionId;
 }
 
+// Recent Claude Code releases auto-create a single-member "self-team" for every
+// session: a teams/session-<id>/config.json whose only member is the "team-lead"
+// (the session itself). These are not real multi-agent teams — surfacing them
+// makes every solo session render a team badge, member panel, and (via the empty
+// team-named task dir) a shared-task-list link. Treat them as plain sessions.
+// As soon as a real teammate joins (members.length > 1) it becomes a true team again.
+function isAutoSelfTeam(cfg) {
+  if (!cfg || !Array.isArray(cfg.members)) return false;
+  const namedSession = typeof cfg.name === 'string' && cfg.name.startsWith('session-');
+  const soleLead = cfg.members.length === 0
+    || (cfg.members.length === 1 && cfg.members[0]?.agentType === 'team-lead');
+  return namedSession && soleLead;
+}
+
 // SSE clients for live updates
 const clients = new Set();
 
@@ -930,6 +944,7 @@ app.get('/api/sessions', async (req, res) => {
           if (!dir.isDirectory()) continue;
           const cfg = loadTeamConfig(dir.name);
           if (!cfg?.leadSessionId) continue;
+          if (isAutoSelfTeam(cfg)) continue;
           const leaderId = cfg.leadSessionId;
           // Only remove team-named duplicate when leader is a different session
           if (sessionsMap.has(dir.name) && dir.name !== leaderId) sessionsMap.delete(dir.name);

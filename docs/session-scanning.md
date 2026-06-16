@@ -83,6 +83,12 @@ Pinned IDs (regular pins, sticky pins, revealed-plan, revealed-storage, focused 
 
 Cost: per-candidate work is one `statSync`, one `getTaskCounts` map lookup, one `checkAgentStatus` file check. ~690 candidates → ~5 survivors hit `buildSessionObject`.
 
+### 3c. Team-leader enrichment & auto self-team filtering
+
+After the session map is built, a pass over `TEAMS_DIR` enriches the leader session of each team (`cfg.leadSessionId`) with `isTeam`, `teamName`, `memberCount`, and the team-named task dir, and removes the team-named duplicate entry.
+
+Recent Claude Code releases auto-create a single-member **self-team** per session: `teams/session-<id>/config.json` whose only member is the `team-lead` (the session itself), plus an empty `tasks/session-<id>/` dir. Without filtering, every solo session renders a team badge, member panel, and a shared-task-list link (from the empty task dir). `isAutoSelfTeam(cfg)` skips these in the enrichment loop: a config whose `name` starts with `session-` and whose members are empty or a sole `team-lead`. Genuinely-named teams (e.g. `dev-qa-team`, `code-review`) are unaffected, and a self-team that gains a real teammate (`members.length > 1`) is enriched as a true team again.
+
 ### 4. Periodic timers (cleanup only — not scanning)
 
 | Timer | Interval | Purpose |
