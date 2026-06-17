@@ -944,10 +944,12 @@ app.get('/api/sessions', async (req, res) => {
           if (!dir.isDirectory()) continue;
           const cfg = loadTeamConfig(dir.name);
           if (!cfg?.leadSessionId) continue;
-          if (isAutoSelfTeam(cfg)) continue;
           const leaderId = cfg.leadSessionId;
-          // Only remove team-named duplicate when leader is a different session
+          // Remove the team-named duplicate before bailing on self-teams. Otherwise an
+          // auto-created session-<uuid> self-team dir leaves a duplicate session card whose
+          // id (session-<uuid>) resolves no messages, so switching to it shows a stale log.
           if (sessionsMap.has(dir.name) && dir.name !== leaderId) sessionsMap.delete(dir.name);
+          if (isAutoSelfTeam(cfg)) continue;
           const existing = sessionsMap.get(leaderId);
           if (existing) {
             existing.isTeam = true;
@@ -1185,7 +1187,7 @@ app.get('/api/projects/:encodedPath/tasks', (req, res) => {
 app.get('/api/sessions/:sessionId/plan', async (req, res) => {
   try {
     const metadata = loadSessionMetadata();
-    const meta = metadata[req.params.sessionId];
+    const meta = metadata[req.params.sessionId] || metadata[resolveSessionId(req.params.sessionId)];
     const slug = meta?.slug;
     if (!slug) return res.status(404).json({ error: 'No plan found' });
 
@@ -1203,7 +1205,7 @@ app.get('/api/sessions/:sessionId/plan', async (req, res) => {
 app.get('/api/sessions/:sessionId/loop', (req, res) => {
   try {
     const metadata = loadSessionMetadata();
-    const meta = metadata[req.params.sessionId];
+    const meta = metadata[req.params.sessionId] || metadata[resolveSessionId(req.params.sessionId)];
     if (!meta?.jsonlPath) return res.json({ wakeups: [], crons: [] });
     const state = refreshLoopInfoState(meta.jsonlPath);
     const filtered = filterActiveLoopInfo(buildLoopInfoFromState(state));
@@ -1226,7 +1228,7 @@ function openInEditor(...targets) {
 app.post('/api/sessions/:sessionId/plan/open', (req, res) => {
   try {
     const metadata = loadSessionMetadata();
-    const meta = metadata[req.params.sessionId];
+    const meta = metadata[req.params.sessionId] || metadata[resolveSessionId(req.params.sessionId)];
     const slug = meta?.slug;
     if (!slug) return res.status(404).json({ error: 'No plan found' });
 
@@ -1740,7 +1742,7 @@ app.get('/api/sessions/:sessionId/messages', (req, res) => {
   const limit = Math.min(parseInt(req.query.limit, 10) || 10, 50);
   const before = req.query.before || null;
   const metadata = loadSessionMetadata();
-  const meta = metadata[req.params.sessionId];
+  const meta = metadata[req.params.sessionId] || metadata[resolveSessionId(req.params.sessionId)];
   const jsonlPath = meta?.jsonlPath;
   if (!jsonlPath) return res.json({ messages: [], hasMore: false, sessionId: req.params.sessionId });
   let messages, hasMore;
@@ -1835,7 +1837,7 @@ app.get('/api/sessions/:sessionId/messages', (req, res) => {
 
 app.get('/api/sessions/:sessionId/tool-result/:toolUseId', (req, res) => {
   const metadata = loadSessionMetadata();
-  const meta = metadata[req.params.sessionId];
+  const meta = metadata[req.params.sessionId] || metadata[resolveSessionId(req.params.sessionId)];
   const jsonlPath = meta?.jsonlPath;
   if (!jsonlPath) return res.status(404).json({ error: 'session not found' });
   const content = readFullToolResult(jsonlPath, req.params.toolUseId);
@@ -1942,7 +1944,7 @@ function buildToolStats(jsonlPath) {
 
 app.get('/api/sessions/:sessionId/tool-stats', (req, res) => {
   const metadata = loadSessionMetadata();
-  const meta = metadata[req.params.sessionId];
+  const meta = metadata[req.params.sessionId] || metadata[resolveSessionId(req.params.sessionId)];
   const jsonlPath = meta?.jsonlPath;
   if (!jsonlPath) return res.status(404).json({ error: 'session not found' });
   try {
@@ -1956,7 +1958,7 @@ app.get('/api/sessions/:sessionId/tool-stats', (req, res) => {
 
 app.get('/api/sessions/:sessionId/user-image/:msgUuid/:blockIndex', (req, res) => {
   const metadata = loadSessionMetadata();
-  const meta = metadata[req.params.sessionId];
+  const meta = metadata[req.params.sessionId] || metadata[resolveSessionId(req.params.sessionId)];
   const jsonlPath = meta?.jsonlPath;
   if (!jsonlPath) return res.status(404).end();
   const img = readUserImage(jsonlPath, req.params.msgUuid, req.params.blockIndex);
