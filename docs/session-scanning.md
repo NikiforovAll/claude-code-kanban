@@ -89,6 +89,14 @@ After the session map is built, a pass over `TEAMS_DIR` enriches the leader sess
 
 Recent Claude Code releases auto-create a single-member **self-team** per session: `teams/session-<id>/config.json` whose only member is the `team-lead` (the session itself), plus an empty `tasks/session-<id>/` dir. Without filtering, every solo session renders a team badge, member panel, and a shared-task-list link (from the empty task dir). `isAutoSelfTeam(cfg)` skips these in the enrichment loop: a config whose `name` starts with `session-` and whose members are empty or a sole `team-lead`. The team-named duplicate removal runs **before** this skip — otherwise a `session-<id>` self-team dir leaves a duplicate session card whose `session-<id>` id resolves no messages, so switching to it shows a stale log. Genuinely-named teams (e.g. `dev-qa-team`, `code-review`) are unaffected, and a self-team that gains a real teammate (`members.length > 1`) is enriched as a true team again.
 
+**Orphaned self-team task recovery.** Claude Code 2.1.x stores a session's tasks in its self-team list (`tasks/session-<id>/`), not a UUID-named dir, so when that dir is non-empty the tasks are dropped by the `isAutoSelfTeam` skip. Recovery runs in the enrichment loop, gated on `taskCount > 0` (the empty-self-team noise case stays suppressed), and attaches the tasks to the **owning card** via `attachTeamTasks()`, resolved in order:
+
+1. `cfg.leadSessionId` — usually the session itself, already carded. The common case; an exact id match, no heuristic.
+2. The live session **continuing** it. A resumed/continued session keeps writing to the original team's list under a new session id, so `leadSessionId` becomes a ghost with no card. The bridge is the live-session registry `~/.claude/sessions/<pid>.json` (`{sessionId, cwd, startedAt, kind}`, live processes only): `resolveSelfTeamOwner(cfg)` matches the interactive session sharing the team's cwd whose `startedAt` is within `SELF_TEAM_BOOT_WINDOW_MS` (60s) of the team's `createdAt` — both written at boot, so the window is tight. `loadLiveSessions()` caches the registry for 5s.
+3. Fallback — neither resolves (ended session, no registry entry): a card is built under the lead id, named from `cfg.name`.
+
+`getCustomTaskDir(sessionId)` mirrors steps 1–2 (`cfg.leadSessionId === sessionId || resolveSelfTeamOwner(cfg) === sessionId`) so the per-session task/detail endpoints load the tasks under the live session id too. `attachTeamTasks()` is shared with the true-team leader enrichment (prefer the team task dir over an empty UUID-named dir).
+
 ### 4. Periodic timers (cleanup only — not scanning)
 
 | Timer | Interval | Purpose |

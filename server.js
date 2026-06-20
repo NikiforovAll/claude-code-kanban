@@ -74,6 +74,7 @@ const TASKS_DIR = path.join(CLAUDE_DIR, 'tasks');
 const PROJECTS_DIR = path.join(CLAUDE_DIR, 'projects');
 const TEAMS_DIR = path.join(CLAUDE_DIR, 'teams');
 const PLANS_DIR = path.join(CLAUDE_DIR, 'plans');
+const SESSIONS_DIR = path.join(CLAUDE_DIR, 'sessions');
 const CCK_DIR = path.join(CLAUDE_DIR, '.cck');
 const AGENT_ACTIVITY_DIR = path.join(CCK_DIR, 'agent-activity');
 const CONTEXT_STATUS_DIR = path.join(CCK_DIR, 'context-status');
@@ -284,6 +285,73 @@ function isAutoSelfTeam(cfg) {
   return namedSession && soleLead;
 }
 
+// Claude Code 2.1.x stores a session's tasks in its self-team list (tasks/session-<id>/).
+// Usually `cfg.leadSessionId` is that session and already has a card. But a resumed /
+// continued session keeps writing to the original team's list while running under a new
+// session id, so `leadSessionId` points at the original (often a ghost with no card) and
+// the tasks can't be matched to the live session by id. The on-disk bridge is the
+// live-session registry (~/.claude/sessions/<pid>.json): the team's `createdAt` ≈ the
+// owning session's `startedAt` (both written at boot) and they share a cwd. Match on that.
+const SELF_TEAM_BOOT_WINDOW_MS = 60 * 1000;
+let liveSessionsCache = null;
+let lastLiveSessionsScan = 0;
+const LIVE_SESSIONS_TTL = 5000;
+
+function loadLiveSessions() {
+  const now = Date.now();
+  if (liveSessionsCache && now - lastLiveSessionsScan < LIVE_SESSIONS_TTL) return liveSessionsCache;
+  const sessions = [];
+  if (existsSync(SESSIONS_DIR)) {
+    try {
+      for (const file of readdirSync(SESSIONS_DIR).filter(f => f.endsWith('.json'))) {
+        try {
+          const s = JSON.parse(readFileSync(path.join(SESSIONS_DIR, file), 'utf8'));
+          if (s?.sessionId && s.kind === 'interactive') {
+            sessions.push({ sessionId: s.sessionId, cwd: s.cwd || null, startedAt: s.startedAt || 0 });
+          }
+        } catch (_) { /* skip invalid */ }
+      }
+    } catch (_) { /* ignore */ }
+  }
+  liveSessionsCache = sessions;
+  lastLiveSessionsScan = now;
+  return sessions;
+}
+
+// Given a self-team config, return the live interactive session id that owns it
+// (same cwd, startedAt within the boot window of the team's createdAt), or null.
+function resolveSelfTeamOwner(cfg) {
+  if (!cfg?.createdAt) return null;
+  const teamCwd = cfg.members?.[0]?.cwd;
+  if (!teamCwd) return null;
+  let best = null, bestDelta = Infinity;
+  for (const s of loadLiveSessions()) {
+    if (s.cwd !== teamCwd) continue;
+    const delta = Math.abs(s.startedAt - cfg.createdAt);
+    if (delta <= SELF_TEAM_BOOT_WINDOW_MS && delta < bestDelta) {
+      best = s.sessionId;
+      bestDelta = delta;
+    }
+  }
+  return best;
+}
+
+// Attach a team-named task dir's counts to a session card, preferring it over an empty or
+// smaller task dir (a team session can also have a near-empty UUID-named dir). Caller passes
+// the already-computed counts.
+function attachTeamTasks(card, teamTaskDir, teamName, counts) {
+  if (!card.tasksDir || counts.taskCount > (card.taskCount || 0)) {
+    Object.assign(card, {
+      taskCount: counts.taskCount,
+      completed: counts.completed,
+      inProgress: counts.inProgress,
+      pending: counts.pending,
+      tasksDir: teamTaskDir,
+      sharedTaskList: teamName,
+    });
+  }
+}
+
 // SSE clients for live updates
 const clients = new Set();
 
@@ -381,13 +449,18 @@ function getCustomTaskDir(sessionId) {
     const dir = path.join(TASKS_DIR, taskListName);
     if (existsSync(dir)) return dir;
   }
-  // Check team-named task directory (teams store tasks under ~/.claude/tasks/<teamName>/)
+  // Check team-named task directory (teams store tasks under ~/.claude/tasks/<teamName>/).
+  // Match either the recorded leadSessionId, or — for 2.1.x self-teams whose lead is a
+  // team-lead agent id — the live interactive session that owns the team (see resolveSelfTeamOwner).
   if (existsSync(TEAMS_DIR)) {
     try {
       for (const dir of readdirSync(TEAMS_DIR, { withFileTypes: true })) {
         if (!dir.isDirectory()) continue;
         const cfg = loadTeamConfig(dir.name);
-        if (cfg?.leadSessionId === sessionId) {
+        if (!cfg) continue;
+        const owns = cfg.leadSessionId === sessionId
+          || (isAutoSelfTeam(cfg) && resolveSelfTeamOwner(cfg) === sessionId);
+        if (owns) {
           const teamTaskDir = path.join(TASKS_DIR, dir.name);
           if (existsSync(teamTaskDir)) return teamTaskDir;
         }
@@ -949,7 +1022,42 @@ app.get('/api/sessions', async (req, res) => {
           // auto-created session-<uuid> self-team dir leaves a duplicate session card whose
           // id (session-<uuid>) resolves no messages, so switching to it shows a stale log.
           if (sessionsMap.has(dir.name) && dir.name !== leaderId) sessionsMap.delete(dir.name);
-          if (isAutoSelfTeam(cfg)) continue;
+          if (isAutoSelfTeam(cfg)) {
+            // Self-teams are normally noise with an empty team-named task dir. But 2.1.x stores a
+            // session's tasks in the self-team list (tasks/session-<id>/), so when it's non-empty
+            // the tasks would be silently orphaned. Recover them (gated on taskCount > 0 to keep
+            // the empty-self-team noise case suppressed): attach to the owning card — the recorded
+            // leadSessionId when it has one, else the live session continuing it (resolved from the
+            // session registry), else a freshly-built fallback lead card.
+            const teamTaskDir = path.join(TASKS_DIR, dir.name);
+            if (!existsSync(teamTaskDir)) continue;
+            const counts = getTaskCounts(teamTaskDir);
+            if (counts.taskCount === 0) continue;
+
+            const ownerCard = sessionsMap.get(leaderId) || sessionsMap.get(resolveSelfTeamOwner(cfg));
+            if (ownerCard) {
+              attachTeamTasks(ownerCard, teamTaskDir, dir.name, counts);
+            } else {
+              const meta = metadata[leaderId] || {};
+              const logStat = getSessionLogStat(meta);
+              const logMtime = logStat.mtime;
+              const logAge = logMtime ? Date.now() - logMtime : Infinity;
+              const agentDir = path.join(AGENT_ACTIVITY_DIR, leaderId);
+              const agentStatus = checkAgentStatus(agentDir, logAge > AGENT_STALE_MS, logMtime, false);
+              const taskMtime = counts.newestTaskMtime ? counts.newestTaskMtime.getTime() : 0;
+              const card = buildSessionObject(leaderId, meta, {
+                _logStat: logStat,
+                name: getSessionDisplayName(leaderId, meta) || cfg.name || dir.name,
+                modifiedAt: new Date(Math.max(taskMtime, logMtime || 0)).toISOString(),
+                hasActiveAgents: agentStatus.hasActive,
+                hasRunningAgents: agentStatus.hasRunning,
+                hasWaitingForUser: !!agentStatus.waitingForUser,
+              });
+              attachTeamTasks(card, teamTaskDir, dir.name, counts);
+              sessionsMap.set(leaderId, card);
+            }
+            continue;
+          }
           const existing = sessionsMap.get(leaderId);
           if (existing) {
             existing.isTeam = true;
@@ -963,15 +1071,7 @@ app.get('/api/sessions', async (req, res) => {
             // holding the real tasks, the leader card otherwise shows 0/0.
             const teamTaskDir = path.join(TASKS_DIR, dir.name);
             if (existsSync(teamTaskDir)) {
-              const counts = getTaskCounts(teamTaskDir);
-              if (!existing.tasksDir || counts.taskCount > (existing.taskCount || 0)) {
-                existing.taskCount = counts.taskCount;
-                existing.completed = counts.completed;
-                existing.inProgress = counts.inProgress;
-                existing.pending = counts.pending;
-                existing.tasksDir = teamTaskDir;
-                existing.sharedTaskList = dir.name;
-              }
+              attachTeamTasks(existing, teamTaskDir, dir.name, getTaskCounts(teamTaskDir));
             }
             // Re-check agent status with isTeam=true
             const agentDir = path.join(AGENT_ACTIVITY_DIR, leaderId);
