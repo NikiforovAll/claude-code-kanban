@@ -452,19 +452,29 @@ function getCustomTaskDir(sessionId) {
   // Check team-named task directory (teams store tasks under ~/.claude/tasks/<teamName>/).
   // Match either the recorded leadSessionId, or — for 2.1.x self-teams whose lead is a
   // team-lead agent id — the live interactive session that owns the team (see resolveSelfTeamOwner).
+  // A live session can own several team dirs at once — its own (often empty) self-team plus a
+  // resumed session's dir holding the real tasks — so pick the richest, mirroring attachTeamTasks'
+  // "prefer more tasks" rule. Returning the first match (readdir order) can pick the empty dir,
+  // making the board show 0 tasks while the session card counts the other dir.
   if (existsSync(TEAMS_DIR)) {
     try {
+      let bestDir = null, bestCount = -1;
       for (const dir of readdirSync(TEAMS_DIR, { withFileTypes: true })) {
         if (!dir.isDirectory()) continue;
         const cfg = loadTeamConfig(dir.name);
         if (!cfg) continue;
         const owns = cfg.leadSessionId === sessionId
           || (isAutoSelfTeam(cfg) && resolveSelfTeamOwner(cfg) === sessionId);
-        if (owns) {
-          const teamTaskDir = path.join(TASKS_DIR, dir.name);
-          if (existsSync(teamTaskDir)) return teamTaskDir;
+        if (!owns) continue;
+        const teamTaskDir = path.join(TASKS_DIR, dir.name);
+        if (!existsSync(teamTaskDir)) continue;
+        const count = getTaskCounts(teamTaskDir).taskCount;
+        if (count > bestCount) {
+          bestCount = count;
+          bestDir = teamTaskDir;
         }
       }
+      if (bestDir) return bestDir;
     } catch (_) {}
   }
   return null;
