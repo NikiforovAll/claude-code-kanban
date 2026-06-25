@@ -2337,7 +2337,7 @@ body::before {
   z-index: 1;
   line-height: 0;
 }
-.session-item:hover .session-pin-btn:not(.pinned) {
+.session-item:hover .session-pin-btn:not(.pinned):not(.sticky) {
   opacity: 0.5;
 }
 .session-pin-btn:hover {
@@ -4355,7 +4355,8 @@ pre.mermaid svg {
 }
 .session-item.stale:hover,
 .session-item.stale.active,
-.session-item.stale.kb-selected {
+.session-item.stale.kb-selected,
+.session-item.stale:has(.session-pin-btn.sticky) {
   opacity: 1;
 }
 .session-item.stale .session-time {
