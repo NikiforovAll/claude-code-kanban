@@ -1643,17 +1643,21 @@ function _renderPinToDetail(pin) {
   if (pin.type === 'tool_use') {
     document.getElementById('msg-detail-title').textContent = pin.tool || 'Tool';
     const fullText = pin.fullDetail || pin.detail || '';
-    const pinParamsHtml = renderToolParamsHtml(pin.params);
-    const pinResultHtml = renderToolResultHtml(
-      pin.toolResult,
-      pin.toolResultTruncated,
-      pin.toolResultFull,
-      pin.toolUseId,
-    );
+    const pinFindings = pin.tool === 'ReportFindings';
+    const pinParamsHtml = pinFindings
+      ? renderFindingsReport(pin.params, pin.toolResult)
+      : renderToolParamsHtml(pin.params);
+    const pinResultHtml = pinFindings
+      ? ''
+      : renderToolResultHtml(pin.toolResult, pin.toolResultTruncated, pin.toolResultFull, pin.toolUseId);
     const pinDetailEscaped = escapeHtml(fullText);
     const pinDetailRendered = pin.tool === 'Bash' ? highlightBash(pinDetailEscaped) : pinDetailEscaped;
     body.innerHTML =
-      (fullText ? `<pre class="${TINTED_PRE_CLASS}">${pinDetailRendered}</pre>` : '<em>No details</em>') +
+      (fullText
+        ? `<pre class="${TINTED_PRE_CLASS}">${pinDetailRendered}</pre>`
+        : pinFindings
+          ? ''
+          : '<em>No details</em>') +
       pinParamsHtml +
       pinResultHtml;
   } else if (pin.type === 'agent') {
@@ -1761,11 +1765,15 @@ function showMsgDetail(idx) {
       agentBtn.style.display = 'none';
     }
     const sendProto = m.tool === 'SendMessage' && m.params?.protocol;
-    const toolParamsHtml = renderToolParamsHtml(
-      sendProto ? Object.fromEntries(Object.entries(m.params).filter(([k]) => k !== 'protocol')) : m.params,
-    );
-    const hideResult = m.tool === 'SendMessage' || TASK_TOOLS.has(m.tool);
+    const isFindings = m.tool === 'ReportFindings';
+    const toolParamsHtml = isFindings
+      ? ''
+      : renderToolParamsHtml(
+          sendProto ? Object.fromEntries(Object.entries(m.params).filter(([k]) => k !== 'protocol')) : m.params,
+        );
+    const hideResult = m.tool === 'SendMessage' || TASK_TOOLS.has(m.tool) || isFindings;
     const taskResultHtml = TASK_TOOLS.has(m.tool) ? renderTaskResult(m.toolResult) : '';
+    const findingsHtml = isFindings ? renderFindingsReport(m.params, m.toolResult) : '';
     const toolResultHtml = hideResult
       ? ''
       : renderToolResultHtml(m.toolResult, m.toolResultTruncated, m.toolResultFull, m.toolUseId);
@@ -1777,8 +1785,8 @@ function showMsgDetail(idx) {
       mainHtml = `${descHtml}<div class="markdown-body">${renderMarkdown(fullText)}</div>`;
     } else if (hasAgentTabs) {
       mainHtml = descHtml || '';
-    } else if (taskResultHtml) {
-      mainHtml = '';
+    } else if (taskResultHtml || findingsHtml) {
+      mainHtml = descHtml || '';
     } else if (fullText) {
       const detailEscaped = escapeHtml(fullText);
       const detailRendered = m.tool === 'Bash' ? highlightBash(detailEscaped) : detailEscaped;
@@ -1788,7 +1796,13 @@ function showMsgDetail(idx) {
     }
     const answersHtml = m.answerPayload ? renderAnswerPayloadHtml(m.answerPayload) : '';
     body.innerHTML =
-      mainHtml + toolParamsHtml + answersHtml + taskResultHtml + (hasAgentTabs ? '' : toolResultHtml) + agentExtraHtml;
+      mainHtml +
+      toolParamsHtml +
+      answersHtml +
+      taskResultHtml +
+      findingsHtml +
+      (hasAgentTabs ? '' : toolResultHtml) +
+      agentExtraHtml;
   } else if (m.type === 'teammate') {
     document.getElementById('msg-detail-title').textContent = m.teammateId || 'Teammate';
     document.getElementById('msg-detail-agent-btn').style.display = 'none';
@@ -1978,6 +1992,7 @@ function formatTaskToolDetail(params) {
 }
 function getToolDetail(tool, params, detail) {
   if (TASK_TOOLS.has(tool)) return formatTaskToolDetail(params);
+  if (tool === 'ReportFindings') return formatFindingsToolDetail(params);
   if (!detail) return '';
   let extra = '';
   if (tool === 'Read' && params) {
@@ -2043,6 +2058,66 @@ function renderAnswerPayloadHtml(answerPayload) {
     ${rows}
   </div>`;
 }
+
+//#region FINDINGS
+const FINDING_VERDICT_COLORS = {
+  CONFIRMED: 'var(--danger, #ef5350)',
+  PLAUSIBLE: 'var(--warning, #f0b429)',
+};
+const FINDING_OUTCOME_COLORS = {
+  fixed: 'var(--success, #3ecf8e)',
+  no_change_needed: 'var(--info, #60a5fa)',
+  skipped: 'var(--text-muted)',
+};
+function findingBadge(label, color) {
+  return `<span class="finding-badge" style="color:${color}">${escapeHtml(label)}</span>`;
+}
+function formatFindingsToolDetail(params) {
+  const findings = Array.isArray(params?.findings) ? params.findings : [];
+  const parts = [
+    `<span style="color:var(--text-secondary)">${findings.length} finding${findings.length === 1 ? '' : 's'}</span>`,
+  ];
+  const confirmed = findings.filter((f) => f && f.verdict === 'CONFIRMED').length;
+  const plausible = findings.filter((f) => f && f.verdict === 'PLAUSIBLE').length;
+  if (confirmed) parts.push(`<span style="color:${FINDING_VERDICT_COLORS.CONFIRMED}">${confirmed} confirmed</span>`);
+  if (plausible) parts.push(`<span style="color:${FINDING_VERDICT_COLORS.PLAUSIBLE}">${plausible} plausible</span>`);
+  if (params?.level) parts.push(findingBadge(params.level, 'var(--text-muted)'));
+  return ` ${parts.join(' <span style="color:var(--text-muted)">·</span> ')}`;
+}
+function renderFindingsReport(params, toolResult) {
+  const findings = Array.isArray(params?.findings) ? params.findings : [];
+  let html = '<div class="protocol-detail findings-report">';
+  html += `<span class="protocol-type-badge">${findings.length} finding${findings.length === 1 ? '' : 's'}</span>`;
+  if (params?.level) html += ` ${findingBadge(`level: ${params.level}`, 'var(--text-muted)')}`;
+  if (!findings.length) {
+    html += '<div class="finding-scenario">No findings survived verification.</div>';
+  } else {
+    html += '<div class="findings-list">';
+    findings.forEach((f, i) => {
+      if (!f || typeof f !== 'object') return;
+      const badges = [];
+      if (f.verdict && FINDING_VERDICT_COLORS[f.verdict]) {
+        badges.push(findingBadge(f.verdict, FINDING_VERDICT_COLORS[f.verdict]));
+      }
+      if (f.outcome && FINDING_OUTCOME_COLORS[f.outcome]) {
+        badges.push(findingBadge(f.outcome.replace(/_/g, ' '), FINDING_OUTCOME_COLORS[f.outcome]));
+      }
+      const loc = f.file ? `${f.file}${f.line != null ? `:${f.line}` : ''}` : '';
+      html += `<div class="finding-card">
+          <span class="finding-rank">${i + 1}</span>
+          <div class="finding-main">
+            ${badges.length || loc ? `<div class="finding-badges">${badges.join('')}${loc ? `<span class="finding-file">${escapeHtml(loc)}</span>` : ''}</div>` : ''}
+            ${f.summary ? `<div class="finding-summary">${escapeHtml(f.summary)}</div>` : ''}
+            ${f.failure_scenario ? `<div class="finding-scenario">${escapeHtml(f.failure_scenario)}</div>` : ''}
+          </div>
+        </div>`;
+    });
+    html += '</div>';
+  }
+  if (toolResult) html += `<div class="findings-result-note">${escapeHtml(toolResult.trim())}</div>`;
+  return `${html}</div>`;
+}
+//#endregion
 
 function renderToolParamsHtml(params) {
   if (!params) return '';
