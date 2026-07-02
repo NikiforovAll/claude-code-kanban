@@ -2833,6 +2833,75 @@ body::before {
 
 /* #endregion */
 
+/* #region FINDINGS */
+.findings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+.finding-card {
+  display: flex;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-surface);
+}
+.finding-rank {
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 0.8rem;
+  min-width: 1.6em;
+  text-align: right;
+  line-height: 1.7;
+}
+.finding-main {
+  flex: 1;
+  min-width: 0;
+}
+.finding-badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.finding-badge {
+  display: inline-block;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 3px;
+  border: 1px solid currentColor;
+  white-space: nowrap;
+}
+.finding-file {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  word-break: break-all;
+}
+.finding-summary {
+  font-size: 0.88rem;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+}
+.finding-scenario {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+.findings-result-note {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+/* #endregion */
+
 /* #region AGENT_FOOTER */
 .agent-footer {
   display: none;
