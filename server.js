@@ -232,13 +232,13 @@ function checkAgentStatus(agentDir, stale, logMtime, isTeam) {
     for (const file of readdirSync(agentDir).filter(f => f.endsWith('.jsonl') && !f.startsWith('_'))) {
       try {
         const agent = readAgentJsonl(path.join(agentDir, file));
-        if (isTeam && isAgentLive(agent)) {
+        // Idle agents never mark a session active (an idle teammate lingers and
+        // would pin the filter). Teams skip freshness so long-running teammates stay visible.
+        if (agent.status === 'active' && (isTeam || isAgentFresh(agent))) {
           result.hasActive = true;
-          if (agent.status === 'active') result.hasRunning = true;
-        } else if (isAgentFresh(agent)) {
-          if (agent.status === 'active') { result.hasActive = true; result.hasRunning = true; }
+          result.hasRunning = true;
         }
-        if (result.hasRunning && result.hasActive) break;
+        if (result.hasRunning) break;
       } catch (e) { /* skip invalid */ }
     }
   } catch (e) { /* ignore */ }

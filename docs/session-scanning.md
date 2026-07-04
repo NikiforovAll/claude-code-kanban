@@ -79,6 +79,8 @@ hasMessages && (
 )
 ```
 
+`agentStatus.hasActive` (from `checkAgentStatus`) is set only by agents with `status: 'active'` — `idle` never counts, since an idle teammate can linger for hours after work ends and would pin the session in the active filter. Team sessions skip the freshness (`AGENT_TTL_MS`) check so long-running teammates stay visible; non-team agents must be fresh.
+
 Pinned IDs (regular pins, sticky pins, revealed-plan, revealed-storage, focused `currentSessionId`) bypass the probe and always get full enrichment. The post-filter at the end of the handler stays as a safety net but operates on a now-small map.
 
 Cost: per-candidate work is one `statSync`, one `getTaskCounts` map lookup, one `checkAgentStatus` file check. ~690 candidates → ~5 survivors hit `buildSessionObject`.
