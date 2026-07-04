@@ -22,6 +22,7 @@ const {
   extractModelFromTranscript,
   readFullToolResult,
   readUserImage,
+  readToolResultImage,
   readCachedImage,
   updateLoopInfo,
   buildLoopInfoFromState
@@ -1951,9 +1952,11 @@ app.get('/api/sessions/:sessionId/messages', (req, res) => {
       compactedMsgs[i].compactSummary = compactSummaries[i].summary;
     }
   }
+  // The client keeps needing toolUseId when it builds a follow-up URL from it:
+  // lazy-fetching a truncated tool result, or fetching each tool-result image.
+  const clientNeedsToolUseId = (msg) => msg.toolResultTruncated || msg.toolResultImageCount;
   for (const msg of messages) {
-    // Keep toolUseId on truncated tool results so the client can lazy-fetch the full text
-    if (msg.toolUseId && !msg.toolResultTruncated) delete msg.toolUseId;
+    if (msg.toolUseId && !clientNeedsToolUseId(msg)) delete msg.toolUseId;
     delete msg.promptId;
   }
   res.json({ messages, hasMore, sessionId: req.params.sessionId });
@@ -2086,6 +2089,19 @@ app.get('/api/sessions/:sessionId/user-image/:msgUuid/:blockIndex', (req, res) =
   const jsonlPath = meta?.jsonlPath;
   if (!jsonlPath) return res.status(404).end();
   const img = readUserImage(jsonlPath, req.params.msgUuid, req.params.blockIndex);
+  if (!img) return res.status(404).end();
+  const buf = Buffer.from(img.data, 'base64');
+  res.setHeader('Content-Type', img.mediaType);
+  res.setHeader('Cache-Control', 'no-store');
+  res.end(buf);
+});
+
+app.get('/api/sessions/:sessionId/tool-result-image/:toolUseId/:n', (req, res) => {
+  const metadata = loadSessionMetadata();
+  const meta = metadata[req.params.sessionId] || metadata[resolveSessionId(req.params.sessionId)];
+  const jsonlPath = meta?.jsonlPath;
+  if (!jsonlPath) return res.status(404).end();
+  const img = readToolResultImage(jsonlPath, req.params.toolUseId, req.params.n);
   if (!img) return res.status(404).end();
   const buf = Buffer.from(img.data, 'base64');
   res.setHeader('Content-Type', img.mediaType);

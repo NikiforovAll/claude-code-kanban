@@ -1652,6 +1652,9 @@ function _renderPinToDetail(pin) {
       : renderToolResultHtml(pin.toolResult, pin.toolResultTruncated, pin.toolResultFull, pin.toolUseId);
     const pinDetailEscaped = escapeHtml(fullText);
     const pinDetailRendered = pin.tool === 'Bash' ? highlightBash(pinDetailEscaped) : pinDetailEscaped;
+    // Tool-result images are intentionally omitted here: their URL is built from
+    // the global currentSessionId, but a pin can belong to a different session,
+    // so rendering them would point at the wrong session's image.
     body.innerHTML =
       (fullText
         ? `<pre class="${TINTED_PRE_CLASS}">${pinDetailRendered}</pre>`
@@ -1683,6 +1686,17 @@ const linkSvg = (size) =>
 //#endregion
 
 //#region MODALS
+// Shared markup for an attachment image and the labeled section that holds a grid
+// of them — used by both user-pasted images and agent tool-result images.
+function attachImageTag(url, alt) {
+  return `<img src="${url}" loading="lazy" alt="${alt}" class="user-attach-image" />`;
+}
+function attachImageSection(label, imgsHtml) {
+  return imgsHtml
+    ? `<div class="user-attach-section"><div class="user-attach-label">${label}</div><div class="user-attach-images">${imgsHtml}</div></div>`
+    : '';
+}
+
 function renderUserAttachments(m) {
   const parts = [];
   if (m.images?.length && currentSessionId) {
@@ -1691,20 +1705,17 @@ function renderUserAttachments(m) {
       .map((img) => {
         // Cache-kind images live on disk (image-cache/<sessionId>/<n>.png); base64
         // images are read from the JSONL block and need the message uuid.
-        let url;
-        if (img.kind === 'cache') {
-          url = `/api/sessions/${sid}/cached-image/${img.n}`;
-        } else if (m.uuid) {
-          url = `/api/sessions/${sid}/user-image/${encodeURIComponent(m.uuid)}/${img.blockIndex}`;
-        } else {
-          return '';
-        }
-        return `<img src="${url}" loading="lazy" alt="user image" class="user-attach-image" />`;
+        if (img.kind === 'cache') return attachImageTag(`/api/sessions/${sid}/cached-image/${img.n}`, 'user image');
+        if (m.uuid)
+          return attachImageTag(
+            `/api/sessions/${sid}/user-image/${encodeURIComponent(m.uuid)}/${img.blockIndex}`,
+            'user image',
+          );
+        return '';
       })
       .join('');
-    parts.push(
-      `<div class="user-attach-section"><div class="user-attach-label">Attached images</div><div class="user-attach-images">${imgs}</div></div>`,
-    );
+    const section = attachImageSection('Attached images', imgs);
+    if (section) parts.push(section);
   }
   if (m.toolResultRefs?.length) {
     const refs = m.toolResultRefs
@@ -1795,6 +1806,7 @@ function showMsgDetail(idx) {
       mainHtml = TASK_TOOLS.has(m.tool) ? '' : '<em>No details</em>';
     }
     const answersHtml = m.answerPayload ? renderAnswerPayloadHtml(m.answerPayload) : '';
+    const toolResultImagesHtml = renderToolResultImagesHtml(m.toolResultImageCount, m.toolUseId);
     body.innerHTML =
       mainHtml +
       toolParamsHtml +
@@ -1802,6 +1814,7 @@ function showMsgDetail(idx) {
       taskResultHtml +
       findingsHtml +
       (hasAgentTabs ? '' : toolResultHtml) +
+      toolResultImagesHtml +
       agentExtraHtml;
   } else if (m.type === 'teammate') {
     document.getElementById('msg-detail-title').textContent = m.teammateId || 'Teammate';
@@ -2313,6 +2326,18 @@ function renderToolResultHtml(toolResult, isTruncated, fullResult, toolUseId) {
         <pre class="msg-detail-pre" style="overflow:auto">${escaped}</pre>
         ${fullBlock}
       </div>`;
+}
+
+// Render base64 images returned by a tool (e.g. a Read on a .png) so the user
+// can see what the agent saw, mirroring how user-attached images are shown.
+function renderToolResultImagesHtml(count, toolUseId) {
+  if (!count || !currentSessionId || !toolUseId) return '';
+  const sid = encodeURIComponent(currentSessionId);
+  const tid = encodeURIComponent(toolUseId);
+  const imgs = Array.from({ length: count }, (_, i) =>
+    attachImageTag(`/api/sessions/${sid}/tool-result-image/${tid}/${i}`, 'tool result image'),
+  ).join('');
+  return attachImageSection('Image output', imgs);
 }
 
 async function _toggleToolResultExpand(btn) {

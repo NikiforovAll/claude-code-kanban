@@ -128,7 +128,7 @@ The clock badge on session cards needs to know whether a session contains `Sched
 
 `getLoopInfoSummary(meta)` runs inside `buildSessionObject`, which is invoked **once per session per `/api/sessions` response**. Anything that reads a full JSONL there scales N×file-size per list refresh — unacceptable.
 
-> **Hot-path rule.** Code reachable from `buildSessionObject` MUST NOT do full-JSONL reads. Use incremental / append-only scanning with a per-path state cache warmed by `projectsWatcher`. Full-file readers in `lib/parsers.js` (`readFullToolResult`, `readUserImage`, `readMessagesPage`, `buildSessionDigest`, `readCompactSummaries`) are fine — but they run on dedicated endpoints, never in the list path.
+> **Hot-path rule.** Code reachable from `buildSessionObject` MUST NOT do full-JSONL reads. Use incremental / append-only scanning with a per-path state cache warmed by `projectsWatcher`. Full-file readers in `lib/parsers.js` (`readFullToolResult`, `readUserImage`, `readToolResultImage`, `readMessagesPage`, `buildSessionDigest`, `readCompactSummaries`) are fine — but they run on dedicated endpoints, never in the list path.
 
 ### Design: append-only incremental scan
 
