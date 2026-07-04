@@ -307,7 +307,7 @@ function loadLiveSessions() {
         try {
           const s = JSON.parse(readFileSync(path.join(SESSIONS_DIR, file), 'utf8'));
           if (s?.sessionId && s.kind === 'interactive') {
-            sessions.push({ sessionId: s.sessionId, cwd: s.cwd || null, startedAt: s.startedAt || 0 });
+            sessions.push({ sessionId: s.sessionId, cwd: s.cwd || null, startedAt: s.startedAt || 0, status: s.status || null });
           }
         } catch (_) { /* skip invalid */ }
       }
@@ -316,6 +316,20 @@ function loadLiveSessions() {
   liveSessionsCache = sessions;
   lastLiveSessionsScan = now;
   return sessions;
+}
+
+// An open-but-idle interactive session keeps touching its JSONL (metadata-line
+// rewrites), so mtime alone reads as activity for as long as the terminal stays
+// open. Claude Code's live-session registry knows the real state — trust its
+// 'idle' over the mtime. No registry entry (or any other status) falls back to
+// the mtime rule.
+function isRegistryIdle(sessionId) {
+  const live = loadLiveSessions().find(s => s.sessionId === sessionId);
+  return live?.status === 'idle';
+}
+
+function hasRecentLogActivity(sessionId, logAge) {
+  return logAge <= SESSION_STALE_MS && !isRegistryIdle(sessionId);
 }
 
 // Given a self-team config, return the live interactive session id that owns it
@@ -818,7 +832,7 @@ function buildSessionObject(id, meta, overrides = {}) {
     hasActiveAgents: false,
     hasRunningAgents: false,
     hasWaitingForUser: false,
-    hasRecentLog: logAge <= SESSION_STALE_MS,
+    hasRecentLog: hasRecentLogActivity(id, logAge),
     jsonlPath: meta.jsonlPath || null,
     tasksDir: null,
     projectDir: meta.jsonlPath ? path.dirname(meta.jsonlPath) : null,
@@ -876,7 +890,7 @@ app.get('/api/sessions', async (req, res) => {
           // Cheap-probe: when filter=active, skip expensive enrichment for inactive non-pinned sessions.
           // Mirrors the post-filter predicate using only signals already computed above.
           if (activeFilter && !pinnedIds.has(entry.name)) {
-            const hasRecentLog = logAge <= SESSION_STALE_MS;
+            const hasRecentLog = hasRecentLogActivity(entry.name, logAge);
             const cheaplyActive = logStat.hasMessages && (
               hasRecentLog
               || agentStatus.hasActive
@@ -977,7 +991,7 @@ app.get('/api/sessions', async (req, res) => {
 
         // Cheap-probe: no tasks here (metadata-only), so active = recent log OR live agent.
         if (activeFilter && !pinnedIds.has(sessionId)) {
-          const hasRecentLog = logAge <= SESSION_STALE_MS;
+          const hasRecentLog = hasRecentLogActivity(sessionId, logAge);
           const cheaplyActive = logStat.hasMessages && (
             hasRecentLog || metaAgentStatus.hasActive || !!metaAgentStatus.waitingForUser
           );
