@@ -54,7 +54,7 @@ function getClaudeDir() {
       return dir.startsWith('~') ? dir.replace('~', os.homedir()) : dir;
     }
   }
-  return process.env.CLAUDE_DIR || path.join(os.homedir(), '.claude');
+  return process.env.CLAUDE_CONFIG_DIR || process.env.CLAUDE_DIR || path.join(os.homedir(), '.claude');
 }
 
 function getArgUrl(argName, envName) {
@@ -2110,7 +2110,7 @@ app.get('/api/sessions/:sessionId/tool-result-image/:toolUseId/:n', (req, res) =
 });
 
 app.get('/api/sessions/:sessionId/cached-image/:n', (req, res) => {
-  const img = readCachedImage(req.params.sessionId, req.params.n);
+  const img = readCachedImage(req.params.sessionId, req.params.n, CLAUDE_DIR);
   if (!img) return res.status(404).end();
   res.setHeader('Content-Type', img.mediaType);
   res.setHeader('Cache-Control', 'no-store');
