@@ -9,7 +9,7 @@
   <meta property="og:description" content="Watch Claude Code work, in real time. A live Kanban dashboard for Claude Code tasks and agents.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://nikiforovall.blog/claude-code-kanban/">
-  <meta property="og:image" content="https://raw.githubusercontent.com/NikiforovAll/claude-code-kanban/main/assets/screenshot-dark-v2.png">
+  <meta property="og:image" content="https://raw.githubusercontent.com/NikiforovAll/claude-code-kanban/main/assets/shot-session-log.png">
   <meta name="twitter:card" content="summary_large_image">
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231a1a1a'/%3E%3Crect x='4' y='6' width='7' height='20' rx='2' fill='%23e8927c'/%3E%3Crect x='13' y='6' width='7' height='14' rx='2' fill='%23e8927c'/%3E%3Crect x='22' y='6' width='7' height='8' rx='2' fill='%23e8927c'/%3E%3C/svg%3E">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -287,6 +287,112 @@
       line-height: 1.6;
     }
 
+    /* ── TOUR (feature spotlights) ── */
+    .tour { padding-bottom: calc(var(--section-gap) - 40px); }
+    .spotlight {
+      display: grid;
+      grid-template-columns: 5fr 7fr;
+      gap: 48px;
+      align-items: center;
+      margin-bottom: 80px;
+    }
+    .spotlight:last-child { margin-bottom: 0; }
+    .spotlight.flip .spotlight-text { order: 2; }
+    .spotlight.flip .spotlight-img { order: 1; }
+    .spotlight-text .spotlight-kicker {
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--accent);
+      margin-bottom: 10px;
+    }
+    .spotlight-text h3 {
+      font-family: var(--serif);
+      font-size: 26px;
+      font-weight: 600;
+      color: var(--bg-dark);
+      letter-spacing: -0.02em;
+      margin-bottom: 14px;
+      line-height: 1.25;
+    }
+    .spotlight-text p {
+      font-size: 13px;
+      color: var(--text-secondary);
+      line-height: 1.7;
+    }
+    .spotlight-text p code,
+    .feature-card p code {
+      background: var(--bg-alt);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 1px 6px;
+      font-size: 12px;
+    }
+    .spotlight-img {
+      border-radius: 10px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.08);
+      transition: box-shadow 0.3s, transform 0.3s;
+    }
+    .spotlight-img:hover {
+      box-shadow: 0 12px 40px var(--accent-glow);
+      transform: translateY(-3px);
+    }
+    .spotlight-img img { width: 100%; display: block; }
+
+    /* ── THEMES ── */
+    .themes { padding-bottom: var(--section-gap); }
+    .themes-header {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      margin-bottom: 40px;
+    }
+    .theme-toggle {
+      display: flex;
+      gap: 4px;
+      padding: 4px;
+      background: var(--bg-alt);
+      border-radius: 8px;
+      border: 1px solid var(--border);
+    }
+    .theme-toggle button {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 6px;
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      background: transparent;
+      color: var(--text-muted);
+      transition: all 0.2s;
+    }
+    .theme-toggle button.active {
+      background: var(--bg);
+      color: var(--text);
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+    }
+    .screenshot-frame {
+      border-radius: 12px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      box-shadow: 0 8px 40px rgba(0,0,0,0.08);
+    }
+    .screenshot-frame img {
+      width: 100%;
+      display: block;
+    }
+    .screenshot-frame img.hidden { display: none; }
+    .themes-note {
+      margin-top: 20px;
+      font-size: 13px;
+      color: var(--text-muted);
+      text-align: center;
+    }
+
     /* ── HOW IT WORKS ── */
     .how-it-works {
       padding-bottom: var(--section-gap);
@@ -356,53 +462,6 @@
       margin: 0 auto;
       line-height: 1.6;
     }
-
-    /* ── SCREENSHOTS ── */
-    .screenshots {
-      padding-bottom: var(--section-gap);
-    }
-    .screenshots-header {
-      display: flex;
-      align-items: flex-end;
-      justify-content: space-between;
-      margin-bottom: 40px;
-    }
-    .theme-toggle {
-      display: flex;
-      gap: 4px;
-      padding: 4px;
-      background: var(--bg-alt);
-      border-radius: 8px;
-      border: 1px solid var(--border);
-    }
-    .theme-toggle button {
-      padding: 8px 16px;
-      border: none;
-      border-radius: 6px;
-      font-family: var(--mono);
-      font-size: 12px;
-      font-weight: 500;
-      cursor: pointer;
-      background: transparent;
-      color: var(--text-muted);
-      transition: all 0.2s;
-    }
-    .theme-toggle button.active {
-      background: var(--bg);
-      color: var(--text);
-      box-shadow: 0 1px 4px rgba(0,0,0,0.08);
-    }
-    .screenshot-frame {
-      border-radius: 12px;
-      overflow: hidden;
-      border: 1px solid var(--border);
-      box-shadow: 0 8px 40px rgba(0,0,0,0.08);
-    }
-    .screenshot-frame img {
-      width: 100%;
-      display: block;
-    }
-    .screenshot-frame img.hidden { display: none; }
 
     /* ── FAQ ── */
     .faq { padding-bottom: var(--section-gap); }
@@ -513,16 +572,68 @@
       .steps { grid-template-columns: 1fr; gap: 40px; }
       .steps::before { display: none; }
       .nav-links a:not(.nav-gh) { display: none; }
-      .screenshots-header { flex-direction: column; align-items: flex-start; gap: 16px; }
+      .themes-header { flex-direction: column; align-items: flex-start; gap: 16px; }
       .hero-screenshot { transform: none; }
       .hero-screenshot:hover { transform: none; }
       .install-block code { font-size: 12px; padding: 12px 14px; }
       footer .container { flex-direction: column; gap: 16px; text-align: center; }
+      .spotlight { grid-template-columns: 1fr; gap: 20px; margin-bottom: 56px; }
+      .spotlight.flip .spotlight-text { order: 1; }
+      .spotlight.flip .spotlight-img { order: 2; }
     }
 
     @media (min-width: 769px) and (max-width: 1024px) {
       .features-grid { grid-template-columns: repeat(2, 1fr); }
     }
+
+    @media (min-width: 1600px) {
+      :root { --max-w: 1440px; }
+      body { font-size: 16px; }
+      .hero-screenshot { max-width: 1240px; }
+      .feature-card p, .spotlight-text p, .step p, .faq-a p { font-size: 14px; }
+      .spotlight-text h3 { font-size: 30px; }
+    }
+
+    @media (min-width: 2200px) {
+      :root { --max-w: 1720px; }
+      .hero-screenshot { max-width: 1480px; }
+    }
+
+    /* ── LIGHTBOX ── */
+    .spotlight-img img,
+    .screenshot-frame img,
+    .hero-screenshot img { cursor: zoom-in; }
+    .lightbox {
+      position: fixed;
+      inset: 0;
+      z-index: 1000;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 32px;
+      background: rgba(20, 18, 16, 0.92);
+      cursor: zoom-out;
+    }
+    .lightbox.open { display: flex; }
+    .lightbox img {
+      max-width: 100%;
+      max-height: 100%;
+      border-radius: 8px;
+      box-shadow: 0 16px 64px rgba(0,0,0,0.5);
+    }
+    .lightbox-close {
+      position: absolute;
+      top: 20px;
+      right: 24px;
+      background: none;
+      border: none;
+      color: rgba(255,255,255,0.7);
+      font-size: 28px;
+      line-height: 1;
+      cursor: pointer;
+      font-family: var(--mono);
+    }
+    .lightbox-close:hover { color: #fff; }
   </style>
 </head>
 <body>
@@ -541,6 +652,8 @@
       </a>
       <div class="nav-links">
         <a href="#features">Features</a>
+        <a href="#tour">Tour</a>
+        <a href="#themes">Themes</a>
         <a href="#how-it-works">How it works</a>
         <a href="#faq">FAQ</a>
         <a href="https://github.com/NikiforovAll/claude-code-kanban" class="nav-gh" target="_blank" rel="noopener">
@@ -571,7 +684,7 @@
         </div>
       </div>
       <div class="hero-screenshot fade-in delay-4">
-        <img src="assets/screenshot-light-v2.png" alt="Claude Code Kanban dashboard">
+        <img src="assets/shot-session-log.png" alt="Claude Code Kanban dashboard — live board with session log open">
       </div>
     </div>
   </section>
@@ -591,33 +704,54 @@
         </div>
         <div class="feature-card fade-in delay-1">
           <div class="feature-icon">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 4h14"/><path d="M3 8h10"/><path d="M3 12h14"/><path d="M3 16h8"/></svg>
+          </div>
+          <h3>Session log</h3>
+          <p>The full conversation timeline — user prompts, assistant replies, tool calls, and results — rendered live as Claude works.</p>
+        </div>
+        <div class="feature-card fade-in delay-2">
+          <div class="feature-icon">
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="10" cy="10" r="8"/><path d="M10 6v4l3 3"/></svg>
           </div>
           <h3>Agent log</h3>
           <p>Live subagent tracking with spawn time, duration, prompt preview, and idle detection. See every agent Claude orchestrates.</p>
         </div>
+        <div class="feature-card fade-in">
+          <div class="feature-icon">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="16" height="14" rx="2"/><path d="M12 3v14"/><path d="M14.5 7h1.5"/><path d="M14.5 10h1.5"/></svg>
+          </div>
+          <h3>Task detail panel</h3>
+          <p>Click any card for full description, notes, and blockedBy/blocks dependencies — with inline editing when you need to adjust.</p>
+        </div>
+        <div class="feature-card fade-in delay-1">
+          <div class="feature-icon">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M10 3v9"/><path d="M6 8l4 4 4-4"/><path d="M4 16h12"/></svg>
+          </div>
+          <h3>Follow &amp; pin</h3>
+          <p>Follow the latest message live as it streams in, and pin the messages that matter so they stay one click away.</p>
+        </div>
         <div class="feature-card fade-in delay-2">
           <div class="feature-icon">
-            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M10 2a8 8 0 100 16 8 8 0 000-16z"/><path d="M10 7v3"/><circle cx="10" cy="13" r="0.5" fill="currentColor"/></svg>
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 17V9"/><path d="M8 17V5"/><path d="M13 17v-6"/><path d="M18 17V7"/></svg>
           </div>
-          <h3>Waiting indicators</h3>
-          <p>Amber highlights on sessions that need your permission or input. Never miss a blocked Claude session again.</p>
+          <h3>Tool stats &amp; impact</h3>
+          <p>Per-session tool usage breakdown and file impact: which tools ran, how often, and what changed on disk.</p>
         </div>
-        <div class="feature-card fade-in delay-3">
+        <div class="feature-card fade-in">
+          <div class="feature-icon">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="10" cy="10" r="7"/><path d="M10 3a7 7 0 010 14c-1.5 0-2-1-1-2s.5-2-1-2-2-.5-2-2"/><circle cx="12.5" cy="7.5" r="0.6" fill="currentColor"/><circle cx="9" cy="6" r="0.6" fill="currentColor"/></svg>
+          </div>
+          <h3>17 color themes</h3>
+          <p>Dracula, Nord, Catppuccin, Gruvbox, Tokyo Night, and more — each in light and dark. Pick yours from the theme menu.</p>
+        </div>
+        <div class="feature-card fade-in delay-1">
           <div class="feature-icon">
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="7" cy="8" r="3"/><circle cx="13" cy="8" r="3"/><path d="M2 16c0-2.2 2.2-4 5-4s5 1.8 5 4"/><path d="M12 12c2.8 0 5 1.8 5 4"/></svg>
           </div>
           <h3>Agent teams</h3>
           <p>Color-coded team members, owner filtering, and member count badges. Works with Claude Code's native team orchestration.</p>
         </div>
-        <div class="feature-card fade-in delay-4">
-          <div class="feature-icon">
-            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 10h4"/><path d="M12 10h4"/><circle cx="10" cy="10" r="2"/><path d="M4 5l4 5-4 5"/><path d="M16 5l-4 5 4 5"/></svg>
-          </div>
-          <h3>Task dependencies</h3>
-          <p>See blockedBy/blocks relationships and the critical path. Understand which tasks are gating progress at a glance.</p>
-        </div>
-        <div class="feature-card fade-in delay-5">
+        <div class="feature-card fade-in delay-2">
           <div class="feature-icon">
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="14" height="14" rx="2"/><path d="M7 7h1"/><path d="M12 7h1"/><path d="M7 11h6"/></svg>
           </div>
@@ -625,6 +759,111 @@
           <p>Full keyboard navigation. Press <code>?</code> for shortcuts, <code>Shift+M</code> for live message follow, <code>Shift+L</code> for session log.</p>
         </div>
       </div>
+    </div>
+  </section>
+
+  <!-- TOUR -->
+  <section class="tour" id="tour">
+    <div class="container">
+      <p class="section-label fade-in">Tour</p>
+      <h2 class="section-title fade-in">From board to message,<br>every layer of a session</h2>
+
+      <div class="spotlight fade-in">
+        <div class="spotlight-text">
+          <p class="spotlight-kicker">Session log</p>
+          <h3>Read the whole conversation</h3>
+          <p>Open the session log next to the board to see every user prompt, assistant reply, and tool call in order — with expandable tool params and results. It streams in live over SSE while Claude works.</p>
+        </div>
+        <div class="spotlight-img"><img src="assets/shot-session-log.png" alt="Session log panel showing the full message timeline" loading="lazy"></div>
+      </div>
+
+      <div class="spotlight flip fade-in">
+        <div class="spotlight-text">
+          <p class="spotlight-kicker">Subagents</p>
+          <h3>Peek inside every agent</h3>
+          <p>When Claude spawns subagents, each one shows up in the agent log with its prompt, status, and duration. Click through to preview exactly what an agent was asked to do and what it produced.</p>
+        </div>
+        <div class="spotlight-img"><img src="assets/shot-subagent-preview.png" alt="Subagent preview with prompt and output" loading="lazy"></div>
+      </div>
+
+      <div class="spotlight fade-in">
+        <div class="spotlight-text">
+          <p class="spotlight-kicker">Task detail</p>
+          <h3>Every task, in depth</h3>
+          <p>The detail panel shows the full description, notes, and dependency chips for blockedBy/blocks relationships. Titles, descriptions, and notes are editable inline — the only writes the viewer ever makes.</p>
+        </div>
+        <div class="spotlight-img"><img src="assets/shot-task-preview.png" alt="Task detail panel with description and dependencies" loading="lazy"></div>
+      </div>
+
+      <div class="spotlight flip fade-in">
+        <div class="spotlight-text">
+          <p class="spotlight-kicker">Live follow</p>
+          <h3>Stay on the latest message</h3>
+          <p>Press <code>Shift+M</code> to follow the newest message as it arrives — a heads-up display of what Claude is doing right now, without scrolling or refreshing.</p>
+        </div>
+        <div class="spotlight-img"><img src="assets/shot-follow-last-message.png" alt="Follow mode pinned to the latest message" loading="lazy"></div>
+      </div>
+
+      <div class="spotlight fade-in">
+        <div class="spotlight-text">
+          <p class="spotlight-kicker">Pinning</p>
+          <h3>Keep what matters in view</h3>
+          <p>Pin important messages — a plan, a decision, an error — and they stay anchored above the log while the session keeps moving underneath.</p>
+        </div>
+        <div class="spotlight-img"><img src="assets/shot-pinned-message.png" alt="Pinned message anchored above the session log" loading="lazy"></div>
+      </div>
+
+      <div class="spotlight flip fade-in">
+        <div class="spotlight-text">
+          <p class="spotlight-kicker">Session info</p>
+          <h3>Context at a glance</h3>
+          <p>One modal for session metadata: model, project, git branch, context window usage, team configuration, and the session plan when one exists.</p>
+        </div>
+        <div class="spotlight-img"><img src="assets/shot-session-info.png" alt="Session info modal with metadata and team config" loading="lazy"></div>
+      </div>
+
+      <div class="spotlight fade-in">
+        <div class="spotlight-text">
+          <p class="spotlight-kicker">Tool stats</p>
+          <h3>Measure the session's impact</h3>
+          <p>A per-session breakdown of tool usage and file impact — which tools ran, how many times, and which files were read or modified.</p>
+        </div>
+        <div class="spotlight-img"><img src="assets/shot-tool-stats-impact.png" alt="Tool stats and file impact breakdown" loading="lazy"></div>
+      </div>
+
+      <div class="spotlight flip fade-in">
+        <div class="spotlight-text">
+          <p class="spotlight-kicker">Storage manager</p>
+          <h3>Tidy up old sessions</h3>
+          <p>Inspect how much disk your session history takes and clean up stale sessions and tasks — right from the dashboard, no digging through <code>~/.claude</code>.</p>
+        </div>
+        <div class="spotlight-img"><img src="assets/shot-storage-manager.png" alt="Storage manager for session cleanup" loading="lazy"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- THEMES -->
+  <section class="themes" id="themes">
+    <div class="container">
+      <div class="themes-header">
+        <div>
+          <p class="section-label fade-in">Themes</p>
+          <h2 class="section-title fade-in" style="margin-bottom:0">Make it yours</h2>
+        </div>
+        <div class="theme-toggle fade-in">
+          <button class="active" onclick="showTheme('picker', this)">Picker</button>
+          <button onclick="showTheme('dracula', this)">Dracula</button>
+          <button onclick="showTheme('nord', this)">Nord</button>
+          <button onclick="showTheme('catppuccin', this)">Catppuccin</button>
+        </div>
+      </div>
+      <div class="screenshot-frame fade-in">
+        <img id="theme-picker" src="assets/shot-theme-picker.png" alt="Theme picker menu with 17 color themes">
+        <img id="theme-dracula" src="assets/shot-theme-dracula.png" alt="Dracula theme in dark mode" class="hidden" loading="lazy">
+        <img id="theme-nord" src="assets/shot-theme-nord.png" alt="Nord theme in dark mode" class="hidden" loading="lazy">
+        <img id="theme-catppuccin" src="assets/shot-theme-catppuccin.png" alt="Catppuccin theme in dark mode" class="hidden" loading="lazy">
+      </div>
+      <p class="themes-note fade-in">17 themes — Ember, Gruvbox, Tokyo Night, Solarized, Rosé Pine, Monokai Pro, and more — each with light and dark modes.</p>
     </div>
   </section>
 
@@ -656,26 +895,6 @@
     </div>
   </section>
 
-  <!-- SCREENSHOTS -->
-  <section class="screenshots" id="screenshots">
-    <div class="container">
-      <div class="screenshots-header">
-        <div>
-          <p class="section-label fade-in">Preview</p>
-          <h2 class="section-title fade-in" style="margin-bottom:0">See it in action</h2>
-        </div>
-        <div class="theme-toggle fade-in">
-          <button class="active" onclick="showScreenshot('dark', this)">Dark</button>
-          <button onclick="showScreenshot('light', this)">Light</button>
-        </div>
-      </div>
-      <div class="screenshot-frame fade-in">
-        <img id="ss-dark" src="assets/screenshot-dark-v2.png" alt="Dark mode screenshot">
-        <img id="ss-light" src="assets/screenshot-light-v2.png" alt="Light mode screenshot" class="hidden">
-      </div>
-    </div>
-  </section>
-
   <!-- FAQ -->
   <section class="faq" id="faq">
     <div class="container">
@@ -687,7 +906,7 @@
             Does this control Claude?
             <svg class="faq-chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M5 8l5 5 5-5"/></svg>
           </button>
-          <div class="faq-a"><p>No. The viewer only observes — it never writes to task files or directs Claude's work. It's completely read-only.</p></div>
+          <div class="faq-a"><p>No. The viewer only observes — it never directs Claude's work. The one exception is task editing: you can adjust task titles, descriptions, and notes inline.</p></div>
         </div>
         <div class="faq-item fade-in delay-1">
           <button class="faq-q" onclick="toggleFaq(this)">
@@ -728,6 +947,12 @@
     </div>
   </footer>
 
+  <!-- LIGHTBOX -->
+  <div class="lightbox" id="lightbox" role="dialog" aria-label="Screenshot preview">
+    <button class="lightbox-close" aria-label="Close">&times;</button>
+    <img id="lightbox-img" src="" alt="">
+  </div>
+
   <script>
     // Nav scroll effect
     const nav = document.querySelector('nav');
@@ -759,13 +984,34 @@
       });
     }
 
-    // Screenshot toggle
-    function showScreenshot(theme, btn) {
-      document.getElementById('ss-dark').classList.toggle('hidden', theme !== 'dark');
-      document.getElementById('ss-light').classList.toggle('hidden', theme !== 'light');
+    // Theme showcase toggle
+    const THEME_IDS = ['picker', 'dracula', 'nord', 'catppuccin'];
+    function showTheme(id, btn) {
+      THEME_IDS.forEach(t => document.getElementById('theme-' + t).classList.toggle('hidden', t !== id));
       btn.parentElement.querySelectorAll('button').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
     }
+
+    // Lightbox
+    const lightbox = document.getElementById('lightbox');
+    const lightboxImg = document.getElementById('lightbox-img');
+    document.querySelectorAll('.hero-screenshot img, .spotlight-img img, .screenshot-frame img').forEach(img => {
+      img.addEventListener('click', () => {
+        lightboxImg.src = img.src;
+        lightboxImg.alt = img.alt;
+        lightbox.classList.add('open');
+        document.body.style.overflow = 'hidden';
+      });
+    });
+    function closeLightbox() {
+      lightbox.classList.remove('open');
+      lightboxImg.src = '';
+      document.body.style.overflow = '';
+    }
+    lightbox.addEventListener('click', closeLightbox);
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && lightbox.classList.contains('open')) closeLightbox();
+    });
 
     // FAQ accordion
     function toggleFaq(btn) {
