@@ -2944,6 +2944,7 @@ function renderSessions() {
                 ${isTeam || session.project || showCtx ? `<span class="team-info-btn" onclick="event.stopPropagation(); showSessionInfoModal('${session.id}')" title="View session info"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></span>` : ''}
                 ${session.hasPlan && !session.planSourceSessionId ? `<span class="plan-indicator" onclick="event.stopPropagation(); openPlanForSession('${session.id}')" title="View plan"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></span>` : ''}
                 ${renderLoopBadge(session)}
+                ${renderWorkflowBadge(session)}
                 ${linkedDocsCount > 0 ? `<span class="linked-docs-badge" onclick="event.stopPropagation(); showSessionInfoModal('${session.id}')" title="${linkedDocsCount} linked document${linkedDocsCount > 1 ? 's' : ''}">${linkSvg(10)}${linkedDocsCount}</span>` : ''}
                 ${bookmarksCount > 0 ? `<span class="bookmarks-badge" onclick="event.stopPropagation(); openSessionWithBookmarks('${session.id}')" title="${bookmarksCount} bookmarked message${bookmarksCount > 1 ? 's' : ''}"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>${bookmarksCount}</span>` : ''}
                 ${hasScratchpad ? `<span class="scratchpad-badge" onclick="event.stopPropagation(); openSessionScratchpad('${session.id}')" title="Open scratchpad"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></span>` : ''}
@@ -4589,7 +4590,14 @@ function matchKey(e, ...keys) {
   return keys.some((k) => e.key === k || e.code === k);
 }
 
-const MODAL_ESC_PRIORITY = ['preview-modal', 'msg-detail-modal', 'tool-stats-modal', 'plan-modal', 'loop-modal'];
+const MODAL_ESC_PRIORITY = [
+  'preview-modal',
+  'msg-detail-modal',
+  'tool-stats-modal',
+  'plan-modal',
+  'loop-modal',
+  'workflow-modal',
+];
 const MODAL_CLOSERS = {
   'preview-modal': () => closePreviewModal(),
   'msg-detail-modal': () => {
@@ -4599,6 +4607,7 @@ const MODAL_CLOSERS = {
   'tool-stats-modal': () => closeToolStatsModal(),
   'plan-modal': () => closePlanModal(),
   'loop-modal': () => closeLoopModal(),
+  'workflow-modal': () => closeWorkflowModal(),
   'team-modal': () => closeTeamModal(),
   'agent-modal': () => closeAgentModal(),
   'help-modal': () => closeHelpModal(),
@@ -6475,6 +6484,134 @@ function renderLoopBadge(session) {
 
 function closeLoopModal() {
   document.getElementById('loop-modal').classList.remove('visible');
+}
+
+const WORKFLOW_GEAR_SVG =
+  '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>';
+
+// Standard "open in editor" glyph — matches the message-detail / plan modals.
+const ICON_OPEN_EDITOR =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
+
+function renderWorkflowBadge(session) {
+  if (!session.hasWorkflow) return '';
+  const n = session.workflowCount || 0;
+  const tip = `${n} workflow${n === 1 ? '' : 's'}`;
+  return `<span class="workflow-badge" onclick="event.stopPropagation(); showWorkflowModal('${session.id}')" title="${escapeHtml(tip)}">${WORKFLOW_GEAR_SVG}</span>`;
+}
+
+let _workflowSessionId = null;
+let _workflowHeaderId = null;
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+function showWorkflowModal(sessionId) {
+  _workflowSessionId = sessionId;
+  setWorkflowHeader('Workflows', null);
+  const body = document.getElementById('workflow-modal-body');
+  body.innerHTML = '<div style="padding:16px;color:var(--text-secondary);">Loading…</div>';
+  document.getElementById('workflow-modal').classList.add('visible');
+  fetch(`/api/sessions/${sessionId}/workflows`)
+    .then((r) => (r.ok ? r.json() : { workflows: [] }))
+    .catch(() => ({ workflows: [] }))
+    .then((data) => renderWorkflowList(data.workflows || []));
+}
+
+function setWorkflowHeader(name, wfId) {
+  const titleText = document.getElementById('workflow-modal-title-text');
+  const headerBtn = document.getElementById('workflow-modal-open-btn');
+  _workflowHeaderId = wfId || null;
+  if (titleText) {
+    titleText.textContent = name;
+    titleText.title = wfId ? name : '';
+  }
+  if (headerBtn) headerBtn.style.display = wfId ? '' : 'none';
+}
+
+function renderWorkflowList(workflows) {
+  const body = document.getElementById('workflow-modal-body');
+  if (!workflows.length) {
+    setWorkflowHeader('Workflows', null);
+    body.innerHTML =
+      '<div style="padding:24px;text-align:center;color:var(--text-secondary);">No workflow scripts for this session.</div>';
+    return;
+  }
+  // Single workflow: promote its name to the header and open-button next to the close (X).
+  if (workflows.length === 1) {
+    const w = workflows[0];
+    setWorkflowHeader(w.name || w.id, w.id);
+    const when = w.modifiedAt ? formatDate(w.modifiedAt) : '';
+    body.innerHTML = `<div class="workflow-single">
+      <div class="workflow-row-meta"><code>${escapeHtml(w.id)}</code>${when ? ` · ${escapeHtml(when)}` : ''}</div>
+      <div class="workflow-row-code"></div>
+    </div>`;
+    loadWorkflowCode(w.id, body.querySelector('.workflow-row-code'));
+    return;
+  }
+  // Multiple workflows: generic header, collapsible list with per-row open icons.
+  setWorkflowHeader('Workflows', null);
+  body.innerHTML = workflows
+    .map((w) => {
+      const when = w.modifiedAt ? formatDate(w.modifiedAt) : '';
+      return `<div class="workflow-row" onclick="viewWorkflowScript('${escapeHtml(w.id)}', this)">
+        <div class="workflow-row-head">
+          <span class="workflow-row-name">${escapeHtml(w.name || w.id)}</span>
+          <span class="workflow-row-id"><code>${escapeHtml(w.id)}</code></span>
+          <button class="icon-btn workflow-open-icon" aria-label="Open in editor" title="Open in editor" onclick="event.stopPropagation(); openWorkflowInEditor('${escapeHtml(w.id)}')">${ICON_OPEN_EDITOR}</button>
+        </div>
+        ${when ? `<div class="workflow-row-meta">${escapeHtml(when)}</div>` : ''}
+        <div class="workflow-row-code"></div>
+      </div>`;
+    })
+    .join('');
+}
+
+function loadWorkflowCode(wfId, codeEl) {
+  if (!codeEl) return;
+  codeEl.innerHTML = '<div style="padding:8px 0;color:var(--text-secondary);">Loading…</div>';
+  fetch(`/api/sessions/${_workflowSessionId}/workflows/${encodeURIComponent(wfId)}`)
+    .then((r) => (r.ok ? r.json() : null))
+    .catch(() => null)
+    .then((data) => {
+      if (!data?.content) {
+        codeEl.innerHTML = '<div style="padding:8px 0;color:var(--text-secondary);">Failed to load script.</div>';
+        return;
+      }
+      let highlighted;
+      if (typeof hljs !== 'undefined' && hljs.getLanguage('javascript')) {
+        highlighted = hljs.highlight(data.content, { language: 'javascript' }).value;
+      } else {
+        highlighted = escapeHtml(data.content);
+      }
+      codeEl.innerHTML = `<pre><code class="hljs language-javascript">${highlighted}</code></pre>`;
+    });
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+function viewWorkflowScript(wfId, rowEl) {
+  const codeEl = rowEl.querySelector('.workflow-row-code');
+  if (!codeEl) return;
+  if (rowEl.classList.contains('expanded')) {
+    rowEl.classList.remove('expanded');
+    codeEl.innerHTML = '';
+    return;
+  }
+  rowEl.classList.add('expanded');
+  loadWorkflowCode(wfId, codeEl);
+}
+
+function openWorkflowInEditor(wfId) {
+  postAndToast(`/api/sessions/${_workflowSessionId}/workflows/${encodeURIComponent(wfId)}/open`, {}, 'in editor');
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+function openWorkflowHeaderScript() {
+  if (_workflowHeaderId) openWorkflowInEditor(_workflowHeaderId);
+}
+
+function closeWorkflowModal() {
+  document.getElementById('workflow-modal').classList.remove('visible');
+  _workflowSessionId = null;
+  setWorkflowHeader('Workflows', null);
 }
 
 function openPlanForSession(sid) {

@@ -36,6 +36,7 @@ These run only when an API request is served (no background timer).
 | Task-map scan | `sessionToTaskListCache` | `TASK_MAP_SCAN_TTL = 5000` ms | `server.js:271` |
 | `readRecentMessages()` / session info | `messageCache` (keyed by mtime) | invalidates on file mtime change | `server.js:382` |
 | `updateLoopInfo()` (ScheduleWakeup / Cron* scan) | `loopInfoStateByPath` (per-path incremental state) | warmed by `projectsWatcher` events; request path is O(1) on hit | `lib/parsers.js` + `server.js` |
+| `getWorkflowInfoSummary()` (Workflow-tool script badge) | `workflowIndexCache` (`Map<sessionId, scripts[]>`) | `WORKFLOW_INDEX_TTL_MS = 5000` ms | `server.js` |
 
 > `readRecentMessages()` dispatches transcript lines by `type`. Besides `user`/`assistant`/`teammate`, it surfaces `queue-operation` (`operation: 'enqueue'`) lines as user messages flagged `queued: true`. Queued text lives at the top-level `content`, not under `message.content`, and is never re-emitted as a `type:'user'` line, so without this branch it never renders.
 
@@ -46,6 +47,7 @@ A FS event from the matching watcher updates the metadata pipeline incrementally
 - `projectsWatcher` `change` (jsonl appended) → `dirtyMetadataPaths.add(filePath)`. The next `loadSessionMetadata()` call runs `refreshSessionMetadataPath` on each dirty entry — one `stat` + tail-delta read per file, no directory walk.
 - `projectsWatcher` `add` / `unlink` (jsonl created/removed) → `metadataNeedsFullScan = true`. Reshapes the session set, so the next call does the full directory scan.
 - `plansWatcher` → no metadata invalidation; `getPlanInfo` runs fresh inside `buildSessionObject` every call. The broadcast alone is enough to make clients refetch.
+- Workflow scripts (`projects/<projEnc>/<sessionId>/workflows/scripts/*.js`, written by the Workflow tool) sit at depth 4 — below `projectsWatcher`'s `depth: 2` — so there is no watcher for them. `getWorkflowInfoSummary(id)` reads `workflowIndexCache` inside `buildSessionObject` and self-refreshes on a 5 s TTL. The script's `projEnc` can differ from the session's own JSONL dir (the workflow may run from a different cwd), so the index scans every project dir once per refresh rather than deriving the path from `meta.jsonlPath`. Adds only a `Map` lookup per session on the hot path — no JSONL reads.
 
 `gitBranch` recorded in the JSONL is pinned to the launch-time repo and goes stale as soon as `cwd` shifts (Bash `cd`, submodule, sibling repo). `buildSessionObject` resolves the live branch via `getGitBranch(cwd)` (`git rev-parse --abbrev-ref HEAD`, cached per-cwd) and falls back to the JSONL value when the spawn fails.
 

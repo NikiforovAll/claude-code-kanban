@@ -743,6 +743,72 @@ function loadSessionMetadata() {
   return metadata;
 }
 
+// Workflow (Workflow tool) scripts are persisted at
+//   projects/<projEnc>/<sessionId>/workflows/scripts/<name>-<wf_id>.js
+// The script's projEnc can differ from the session's own JSONL dir (the workflow
+// may run from a different cwd), so we scan every project dir into a TTL-cached
+// index rather than deriving the path from meta.jsonlPath. Isolated from the
+// session-scan hot path: a single Map lookup per buildSessionObject call.
+const WORKFLOW_INDEX_TTL_MS = 5000;
+let workflowIndexCache = null; // Map<sessionId, Array<{id,name,path,mtimeMs}>>
+let workflowIndexBuiltAt = 0;
+
+function buildWorkflowIndex() {
+  const index = new Map();
+  if (!existsSync(PROJECTS_DIR)) return index;
+  let projs;
+  try { projs = readdirSync(PROJECTS_DIR, { withFileTypes: true }); } catch { return index; }
+  for (const proj of projs) {
+    if (!proj.isDirectory()) continue;
+    const projPath = path.join(PROJECTS_DIR, proj.name);
+    let sessDirs;
+    try { sessDirs = readdirSync(projPath, { withFileTypes: true }); } catch { continue; }
+    for (const sess of sessDirs) {
+      if (!sess.isDirectory() || !isUUID(sess.name)) continue;
+      const scriptsDir = path.join(projPath, sess.name, 'workflows', 'scripts');
+      let scripts;
+      try { scripts = readdirSync(scriptsDir); } catch { continue; } // ENOENT for most — skip fast
+      for (const f of scripts) {
+        if (!f.endsWith('.js')) continue;
+        const full = path.join(scriptsDir, f);
+        let mtimeMs = 0;
+        try { mtimeMs = statSync(full).mtimeMs; } catch {}
+        const base = f.slice(0, -3);
+        const m = base.match(/^(.*)-(wf_[a-z0-9-]+)$/i);
+        const entry = { id: m ? m[2] : base, name: m ? m[1] : base, path: full, mtimeMs };
+        if (!index.has(sess.name)) index.set(sess.name, []);
+        index.get(sess.name).push(entry);
+      }
+    }
+  }
+  return index;
+}
+
+function getWorkflowIndex() {
+  const now = Date.now();
+  if (workflowIndexCache && now - workflowIndexBuiltAt < WORKFLOW_INDEX_TTL_MS) return workflowIndexCache;
+  workflowIndexCache = buildWorkflowIndex();
+  workflowIndexBuiltAt = now;
+  return workflowIndexCache;
+}
+
+// Resolve a session's workflow scripts, newest first. Tries the raw id then the
+// team-lead resolution (a team session's scripts live under the lead's dir).
+function getWorkflowScripts(sessionId) {
+  const idx = getWorkflowIndex();
+  let list = idx.get(sessionId);
+  if (!list || !list.length) {
+    const alt = resolveSessionId(sessionId);
+    if (alt && alt !== sessionId) list = idx.get(alt);
+  }
+  return list ? [...list].sort((a, b) => b.mtimeMs - a.mtimeMs) : [];
+}
+
+function getWorkflowInfoSummary(sessionId) {
+  const list = getWorkflowIndex().get(sessionId);
+  return { hasWorkflow: !!(list && list.length), workflowCount: list ? list.length : 0 };
+}
+
 function getPlanInfo(slug) {
   if (!slug) return { hasPlan: false, planTitle: null, planPath: null };
   const planPath = path.join(PLANS_DIR, `${slug}.md`);
@@ -839,6 +905,7 @@ function buildSessionObject(id, meta, overrides = {}) {
     projectDir: meta.jsonlPath ? path.dirname(meta.jsonlPath) : null,
     contextStatus: getContextStatus(id, meta),
     ...getPlanInfo(meta.slug),
+    ...getWorkflowInfoSummary(id),
     loopInfo: getLoopInfoSummary(meta),
     ...overrides,
     // Remove internal-only field
@@ -1344,10 +1411,52 @@ app.get('/api/sessions/:sessionId/loop', (req, res) => {
   }
 });
 
+// API: List workflow scripts for a session
+app.get('/api/sessions/:sessionId/workflows', (req, res) => {
+  try {
+    const workflows = getWorkflowScripts(req.params.sessionId).map((w) => ({
+      id: w.id,
+      name: w.name,
+      modifiedAt: w.mtimeMs ? new Date(w.mtimeMs).toISOString() : null,
+    }));
+    res.json({ workflows });
+  } catch (error) {
+    console.error('Error listing workflows:', error);
+    res.status(500).json({ error: 'Failed to list workflows' });
+  }
+});
+
+// API: Get a single workflow script's source. Looked up by id from the session's
+// own script list (never built from the param), so the id can't traverse paths.
+app.get('/api/sessions/:sessionId/workflows/:wfId', async (req, res) => {
+  try {
+    const wf = getWorkflowScripts(req.params.sessionId).find((w) => w.id === req.params.wfId);
+    if (!wf) return res.status(404).json({ error: 'Workflow script not found' });
+    const content = await fs.readFile(wf.path, 'utf8');
+    res.json({ id: wf.id, name: wf.name, content });
+  } catch (error) {
+    console.error('Error reading workflow script:', error);
+    res.status(500).json({ error: 'Failed to read workflow script' });
+  }
+});
+
 function openInEditor(...targets) {
   const editor = process.env.EDITOR || 'code';
   spawn(editor, ['-n', ...targets], { shell: true, stdio: 'ignore', detached: true }).unref();
 }
+
+// API: Open a workflow script in VS Code
+app.post('/api/sessions/:sessionId/workflows/:wfId/open', (req, res) => {
+  try {
+    const wf = getWorkflowScripts(req.params.sessionId).find((w) => w.id === req.params.wfId);
+    if (!wf) return res.status(404).json({ error: 'Workflow script not found' });
+    openInEditor(wf.path);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error opening workflow script in editor:', error);
+    res.status(500).json({ error: 'Failed to open workflow script' });
+  }
+});
 
 // API: Open session plan in VS Code
 app.post('/api/sessions/:sessionId/plan/open', (req, res) => {
@@ -1526,7 +1635,7 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
         flag: 'promptUnavailable',
         lookup: (a) => {
           if (byAgentId[a.agentId]) return byAgentId[a.agentId];
-          try { return extractPromptFromTranscript(subagentJsonlPath(meta, a.agentId)); } catch (_) { return null; }
+          try { return extractPromptFromTranscript(subagentJsonlForExtraction(meta, a.agentId)); } catch (_) { return null; }
         },
       },
       { field: 'agentName',   flag: 'agentNameUnavailable',   lookup: (a) => nameByAgentId[a.agentId] || null },
@@ -1536,7 +1645,10 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
       for (const { field, flag, lookup } of reconcileFields) {
         for (const agent of agents) {
           if (agent[field]) continue;
-          if (agent[flag] && !isAgentLive(agent)) continue;
+          // Workflow subagents nest their transcript under subagents/workflows/;
+          // pre-fix builds latched *Unavailable using the flat path, so always
+          // re-attempt for them (the extractor resolves the nested path now).
+          if (agent[flag] && !isAgentLive(agent) && agent.type !== 'workflow-subagent') continue;
           const value = lookup(agent);
           if (value) {
             agent[field] = value;
@@ -1556,7 +1668,7 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
     if (agentsNeedingModel.length && meta.jsonlPath) {
       for (const agent of agentsNeedingModel) {
         let model = null;
-        try { model = extractModelFromTranscript(subagentJsonlPath(meta, agent.agentId)); } catch (_) {}
+        try { model = extractModelFromTranscript(subagentJsonlForExtraction(meta, agent.agentId)); } catch (_) {}
         if (model) {
           agent.model = model;
           delete agent.modelUnavailable;
@@ -1651,13 +1763,38 @@ function sanitizeAgentId(raw) {
   return path.basename(raw).replace(/[^a-zA-Z0-9_-]/g, '');
 }
 
+function sessionDirFromMeta(meta) {
+  return path.join(path.dirname(meta.jsonlPath), path.basename(meta.jsonlPath, '.jsonl'));
+}
+
 function subagentJsonlPath(meta, agentId) {
-  return path.join(
-    path.dirname(meta.jsonlPath),
-    path.basename(meta.jsonlPath, '.jsonl'),
-    'subagents',
-    'agent-' + agentId + '.jsonl'
-  );
+  return path.join(sessionDirFromMeta(meta), 'subagents', 'agent-' + agentId + '.jsonl');
+}
+
+// A subagent transcript is normally at <sessionDir>/subagents/agent-<id>.jsonl.
+// Workflow-tool subagents nest one level deeper, under
+// <sessionDir>/subagents/workflows/<wf_id>/agent-<id>.jsonl. Return whichever
+// exists (flat first), else null.
+function subagentJsonlInDir(sessionDir, agentId) {
+  const flat = path.join(sessionDir, 'subagents', 'agent-' + agentId + '.jsonl');
+  if (existsSync(flat)) return flat;
+  const wfRoot = path.join(sessionDir, 'subagents', 'workflows');
+  let wfDirs;
+  try { wfDirs = readdirSync(wfRoot, { withFileTypes: true }); } catch { return null; }
+  for (const wf of wfDirs) {
+    if (!wf.isDirectory()) continue;
+    const nested = path.join(wfRoot, wf.name, 'agent-' + agentId + '.jsonl');
+    if (existsSync(nested)) return nested;
+  }
+  return null;
+}
+
+// Path for prompt/model extraction in agent enrichment: prefer the nested
+// workflow-subagent transcript when the flat path is absent. Falls back to the
+// flat path (which extract* handle gracefully when missing).
+function subagentJsonlForExtraction(meta, agentId) {
+  const resolved = meta.jsonlPath ? subagentJsonlInDir(sessionDirFromMeta(meta), agentId) : null;
+  return resolved || subagentJsonlPath(meta, agentId);
 }
 
 // Claude Code can scatter a session's records across multiple project dirs
@@ -1666,20 +1803,21 @@ function subagentJsonlPath(meta, agentId) {
 // parent sessionId. Fall back to scanning when the derived path is missing.
 const subagentPathCache = new Map();
 function findSubagentJsonlInProject(projPath, sessionId, agentId) {
-  const sameSid = path.join(projPath, sessionId, 'subagents', 'agent-' + agentId + '.jsonl');
-  if (existsSync(sameSid)) return sameSid;
+  const sameSid = subagentJsonlInDir(path.join(projPath, sessionId), agentId);
+  if (sameSid) return sameSid;
   let sessions;
   try { sessions = readdirSync(projPath, { withFileTypes: true }); } catch { return null; }
   for (const sess of sessions) {
     if (!sess.isDirectory() || sess.name === sessionId) continue;
-    const candidate = path.join(projPath, sess.name, 'subagents', 'agent-' + agentId + '.jsonl');
-    if (existsSync(candidate)) return candidate;
+    const candidate = subagentJsonlInDir(path.join(projPath, sess.name), agentId);
+    if (candidate) return candidate;
   }
   return null;
 }
 function resolveSubagentJsonl(meta, sessionId, agentId) {
-  const primary = subagentJsonlPath(meta, agentId);
-  if (existsSync(primary)) return primary;
+  // Same session dir: flat path or nested under subagents/workflows/ (both checked here).
+  const local = meta.jsonlPath ? subagentJsonlInDir(sessionDirFromMeta(meta), agentId) : null;
+  if (local) return local;
   const key = sessionId + '/' + agentId;
   const cached = subagentPathCache.get(key);
   if (cached) return cached;
@@ -1687,8 +1825,8 @@ function resolveSubagentJsonl(meta, sessionId, agentId) {
   const parent = lookupParentSession(sessionId);
   if (parent.parentSessionId && parent.parentJsonlPath) {
     const projDir = path.dirname(parent.parentJsonlPath);
-    const candidate = path.join(projDir, parent.parentSessionId, 'subagents', 'agent-' + agentId + '.jsonl');
-    if (existsSync(candidate)) found = candidate;
+    const candidate = subagentJsonlInDir(path.join(projDir, parent.parentSessionId), agentId);
+    if (candidate) found = candidate;
   }
   if (!found) {
     try {
@@ -1700,7 +1838,7 @@ function resolveSubagentJsonl(meta, sessionId, agentId) {
     } catch (_) { /* projects dir missing */ }
   }
   if (found) subagentPathCache.set(key, found);
-  return found || primary;
+  return found || subagentJsonlPath(meta, agentId);
 }
 
 // Claude Code creates child sessions in two ways:

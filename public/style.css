@@ -1573,7 +1573,7 @@ body::before {
 .session-indicators {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 2px;
   flex-shrink: 0;
 }
 
@@ -1640,25 +1640,115 @@ body::before {
   border-color: var(--plan);
 }
 
+/* Match .team-info-btn so the wakeups clock blends with the other session-card icons. */
 .loop-badge {
   width: 24px;
   height: 24px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: var(--bg-deep);
+  background: transparent;
   border: 1px solid transparent;
   border-radius: 4px;
-  color: var(--text-secondary);
+  color: var(--text-muted);
   cursor: pointer;
   flex-shrink: 0;
   transition: all 0.15s ease;
 }
 
 .loop-badge:hover {
-  border-color: var(--accent, var(--plan));
-  color: var(--accent, var(--plan));
+  background: var(--bg-hover);
+  border-color: var(--border);
+  color: var(--text-secondary);
 }
+
+/* #region WORKFLOW */
+/* Match .team-info-btn so the gear blends with the other session-card icons. */
+.workflow-badge {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+}
+
+.workflow-badge:hover {
+  background: var(--bg-hover);
+  border-color: var(--border);
+  color: var(--text-secondary);
+}
+
+.workflow-row {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+
+.workflow-row:hover {
+  border-color: var(--accent, var(--plan));
+}
+
+.workflow-row.expanded {
+  cursor: default;
+}
+
+.workflow-row-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.workflow-open-icon {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.workflow-row-name {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.workflow-row-id code {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.workflow-row-meta {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.workflow-single .workflow-row-meta {
+  margin: 0 0 10px;
+}
+
+.workflow-row-code:not(:empty) {
+  margin-top: 10px;
+}
+
+.workflow-single .workflow-row-code:not(:empty) {
+  margin-top: 0;
+}
+
+.workflow-row-code pre {
+  margin: 0;
+  max-height: 60vh;
+  overflow: auto;
+  border-radius: 6px;
+}
+
+/* #endregion */
 
 .loop-section-title {
   margin: 14px 0 8px;
