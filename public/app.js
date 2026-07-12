@@ -2634,7 +2634,7 @@ function showAgentModal(agentId) {
   const modalNameLabel = agent.agentName ? ` · ${escapeHtml(agent.agentName)}` : '';
   title.innerHTML = `${statusDot} ${escapeHtml(agent.type || 'unknown')}${modalNameLabel}`;
 
-  const shortModel = agent.model ? agent.model.replace(/^claude-/, '').replace(/-\d{8}$/, '') : null;
+  const shortModel = shortModelName(agent.model);
   const shortId = agent.agentId ? agent.agentId.slice(0, 8) : '';
   const chip = (label, value, opts = {}) => {
     const cls = opts.cls ? ` ${opts.cls}` : '';
@@ -2648,7 +2648,7 @@ function showAgentModal(agentId) {
   // toolUseResult), not on the agent-activity record — so read them from there.
   const agentMsg = currentMessages.find((m) => m.tool === 'Agent' && m.agentId === agentId);
   const usageStats = agentMsg?.agentUsageStats || null;
-  const fmtTok = (t) => (t >= 1000 ? `${(t / 1000).toFixed(1).replace(/\.0$/, '')}k` : `${t}`);
+  const fmtTok = fmtTokens;
 
   const chips = [];
   if (agent.agentId) chips.push(chip('id', escapeHtml(shortId), { cls: 'agent-chip-mono', title: agent.agentId }));
@@ -6502,6 +6502,7 @@ function renderWorkflowBadge(session) {
 
 let _workflowSessionId = null;
 let _workflowHeaderId = null;
+let _workflowList = [];
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
 function showWorkflowModal(sessionId) {
@@ -6513,7 +6514,18 @@ function showWorkflowModal(sessionId) {
   fetch(`/api/sessions/${sessionId}/workflows`)
     .then((r) => (r.ok ? r.json() : { workflows: [] }))
     .catch(() => ({ workflows: [] }))
-    .then((data) => renderWorkflowList(data.workflows || []));
+    .then((data) => {
+      _workflowList = data.workflows || [];
+      if (!_workflowList.length) {
+        setWorkflowHeader('Workflows', null);
+        body.innerHTML =
+          '<div style="padding:24px;text-align:center;color:var(--text-secondary);">No workflow scripts for this session.</div>';
+      } else if (_workflowList.length === 1) {
+        showWorkflowRun(_workflowList[0].id);
+      } else {
+        renderWorkflowPicker(_workflowList);
+      }
+    });
 }
 
 function setWorkflowHeader(name, wfId) {
@@ -6527,42 +6539,116 @@ function setWorkflowHeader(name, wfId) {
   if (headerBtn) headerBtn.style.display = wfId ? '' : 'none';
 }
 
-function renderWorkflowList(workflows) {
-  const body = document.getElementById('workflow-modal-body');
-  if (!workflows.length) {
-    setWorkflowHeader('Workflows', null);
-    body.innerHTML =
-      '<div style="padding:24px;text-align:center;color:var(--text-secondary);">No workflow scripts for this session.</div>';
-    return;
-  }
-  // Single workflow: promote its name to the header and open-button next to the close (X).
-  if (workflows.length === 1) {
-    const w = workflows[0];
-    setWorkflowHeader(w.name || w.id, w.id);
-    const when = w.modifiedAt ? formatDate(w.modifiedAt) : '';
-    body.innerHTML = `<div class="workflow-single">
-      <div class="workflow-row-meta"><code>${escapeHtml(w.id)}</code>${when ? ` · ${escapeHtml(when)}` : ''}</div>
-      <div class="workflow-row-code"></div>
-    </div>`;
-    loadWorkflowCode(w.id, body.querySelector('.workflow-row-code'));
-    return;
-  }
-  // Multiple workflows: generic header, collapsible list with per-row open icons.
+// Multiple workflows: pick one to drill into (we show a single run at a time).
+function renderWorkflowPicker(workflows) {
   setWorkflowHeader('Workflows', null);
+  const body = document.getElementById('workflow-modal-body');
   body.innerHTML = workflows
     .map((w) => {
       const when = w.modifiedAt ? formatDate(w.modifiedAt) : '';
-      return `<div class="workflow-row" onclick="viewWorkflowScript('${escapeHtml(w.id)}', this)">
+      return `<div class="workflow-row" onclick="showWorkflowRun('${escapeHtml(w.id)}')">
         <div class="workflow-row-head">
           <span class="workflow-row-name">${escapeHtml(w.name || w.id)}</span>
           <span class="workflow-row-id"><code>${escapeHtml(w.id)}</code></span>
           <button class="icon-btn workflow-open-icon" aria-label="Open in editor" title="Open in editor" onclick="event.stopPropagation(); openWorkflowInEditor('${escapeHtml(w.id)}')">${ICON_OPEN_EDITOR}</button>
         </div>
+        ${w.description ? `<div class="workflow-row-desc">${escapeHtml(w.description)}</div>` : ''}
         ${when ? `<div class="workflow-row-meta">${escapeHtml(when)}</div>` : ''}
-        <div class="workflow-row-code"></div>
       </div>`;
     })
     .join('');
+}
+
+function showWorkflowRun(wfId) {
+  const name = _workflowList.find((w) => w.id === wfId)?.name || wfId;
+  setWorkflowHeader(name, wfId);
+  const body = document.getElementById('workflow-modal-body');
+  body.innerHTML = '<div style="padding:16px;color:var(--text-secondary);">Loading…</div>';
+  fetch(`/api/sessions/${_workflowSessionId}/workflows/${encodeURIComponent(wfId)}/run`)
+    .then((r) => (r.ok ? r.json() : null))
+    .catch(() => null)
+    .then((run) => {
+      if (!run) {
+        body.innerHTML = '<div style="padding:16px;color:var(--text-secondary);">Failed to load run state.</div>';
+        return;
+      }
+      renderWorkflowRun(run);
+    });
+}
+
+function fmtTokens(t) {
+  return t >= 1000 ? `${(t / 1000).toFixed(1).replace(/\.0$/, '')}k` : `${t}`;
+}
+
+function shortModelName(model) {
+  return model ? model.replace(/^claude-/, '').replace(/-\d{8}$/, '') : '';
+}
+
+function renderWorkflowRun(run) {
+  const body = document.getElementById('workflow-modal-body');
+  const allDone = run.startedCount > 0 && run.doneCount >= run.startedCount;
+  const wall =
+    run.startedAt && run.stoppedAt ? formatDuration(new Date(run.stoppedAt) - new Date(run.startedAt)) : null;
+
+  const back =
+    _workflowList.length > 1
+      ? `<div class="wf-back" onclick="renderWorkflowPicker(_workflowList)">‹ All workflows</div>`
+      : '';
+
+  const stats = [`${run.doneCount}/${run.startedCount} agents`, wall ? escapeHtml(wall) : null]
+    .filter(Boolean)
+    .join(' · ');
+
+  const desc = run.description ? `<div class="wf-run-desc">${escapeHtml(run.description)}</div>` : '';
+
+  const phases = (run.phases || [])
+    .map(
+      (p) => `<div class="wf-phase">
+        <span class="wf-phase-mark${allDone ? ' done' : ''}">${allDone ? '✓' : ''}</span>
+        <span class="wf-phase-title">${escapeHtml(p.title)}</span>
+        ${p.detail ? `<span class="wf-phase-detail">${escapeHtml(p.detail)}</span>` : ''}
+      </div>`,
+    )
+    .join('');
+  const phasesBlock = phases ? `<div class="wf-section-title">Phases</div><div class="wf-phases">${phases}</div>` : '';
+
+  const agents = (run.agents || [])
+    .map((a) => {
+      const dur = a.durationMs != null ? formatDuration(a.durationMs) : '';
+      const running = a.status !== 'done';
+      return `<div class="wf-agent" onclick="showAgentModal('${escapeHtml(a.agentId)}')" title="${escapeHtml(a.agentId)}">
+        <span class="wf-agent-type">${escapeHtml(a.type || 'agent')}</span>
+        <span class="wf-agent-model">${escapeHtml(shortModelName(a.model))}</span>
+        <span class="wf-agent-tok">${a.outputTokens ? `${fmtTokens(a.outputTokens)} tok` : ''}</span>
+        <span class="wf-agent-dur">${escapeHtml(dur)}</span>
+        <span class="wf-agent-status ${running ? 'running' : 'done'}">${running ? '●' : '✓'}</span>
+      </div>`;
+    })
+    .join('');
+  const agentsBlock = run.agents?.length
+    ? `<div class="wf-section-title">Agents · ${run.agents.length}</div><div class="wf-agents">${agents}</div>`
+    : '<div class="wf-section-title">Agents</div><div class="wf-empty">No agent runs recorded yet.</div>';
+
+  body.innerHTML = `<div class="workflow-run">
+    ${back}
+    ${desc}
+    <div class="wf-run-stats">${stats} · <code>${escapeHtml(run.id)}</code></div>
+    ${phasesBlock}
+    ${agentsBlock}
+    <details class="wf-source">
+      <summary>Source</summary>
+      <div class="workflow-row-code"></div>
+    </details>
+  </div>`;
+
+  const details = body.querySelector('.wf-source');
+  details.addEventListener(
+    'toggle',
+    () => {
+      if (details.open) loadWorkflowCode(run.id, details.querySelector('.workflow-row-code'));
+    },
+    { once: true },
+  );
 }
 
 function loadWorkflowCode(wfId, codeEl) {
@@ -6586,19 +6672,6 @@ function loadWorkflowCode(wfId, codeEl) {
     });
 }
 
-// biome-ignore lint/correctness/noUnusedVariables: used in HTML
-function viewWorkflowScript(wfId, rowEl) {
-  const codeEl = rowEl.querySelector('.workflow-row-code');
-  if (!codeEl) return;
-  if (rowEl.classList.contains('expanded')) {
-    rowEl.classList.remove('expanded');
-    codeEl.innerHTML = '';
-    return;
-  }
-  rowEl.classList.add('expanded');
-  loadWorkflowCode(wfId, codeEl);
-}
-
 function openWorkflowInEditor(wfId) {
   postAndToast(`/api/sessions/${_workflowSessionId}/workflows/${encodeURIComponent(wfId)}/open`, {}, 'in editor');
 }
@@ -6611,6 +6684,7 @@ function openWorkflowHeaderScript() {
 function closeWorkflowModal() {
   document.getElementById('workflow-modal').classList.remove('visible');
   _workflowSessionId = null;
+  _workflowList = [];
   setWorkflowHeader('Workflows', null);
 }
 

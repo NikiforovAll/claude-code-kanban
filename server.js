@@ -20,6 +20,8 @@ const {
   findTerminatedTeammates,
   extractPromptFromTranscript,
   extractModelFromTranscript,
+  extractStructuredResultFromTranscript,
+  extractTranscriptStats,
   readFullToolResult,
   readUserImage,
   readToolResultImage,
@@ -1411,14 +1413,23 @@ app.get('/api/sessions/:sessionId/loop', (req, res) => {
   }
 });
 
-// API: List workflow scripts for a session
-app.get('/api/sessions/:sessionId/workflows', (req, res) => {
+// API: List workflow scripts for a session. Parses each script's meta for the
+// canonical name + description (cold path — only when the workflow modal opens).
+app.get('/api/sessions/:sessionId/workflows', async (req, res) => {
   try {
-    const workflows = getWorkflowScripts(req.params.sessionId).map((w) => ({
-      id: w.id,
-      name: w.name,
-      modifiedAt: w.mtimeMs ? new Date(w.mtimeMs).toISOString() : null,
-    }));
+    const scripts = getWorkflowScripts(req.params.sessionId);
+    const workflows = await Promise.all(
+      scripts.map(async (w) => {
+        let meta = {};
+        try { meta = parseWorkflowMeta(await fs.readFile(w.path, 'utf8')); } catch (_) {}
+        return {
+          id: w.id,
+          name: meta.name || w.name,
+          description: meta.description || null,
+          modifiedAt: w.mtimeMs ? new Date(w.mtimeMs).toISOString() : null,
+        };
+      }),
+    );
     res.json({ workflows });
   } catch (error) {
     console.error('Error listing workflows:', error);
@@ -1437,6 +1448,159 @@ app.get('/api/sessions/:sessionId/workflows/:wfId', async (req, res) => {
   } catch (error) {
     console.error('Error reading workflow script:', error);
     res.status(500).json({ error: 'Failed to read workflow script' });
+  }
+});
+
+// meta.phases and meta.name/description are pure literals per the Workflow tool
+// contract, so pull them by regex rather than executing the untrusted script.
+// name/description take the first match (the meta block is at the top of the file).
+// Pull a quoted string value for `key` out of `src` (matches ', ", or `).
+function matchStr(src, key) {
+  const m = src.match(new RegExp(`${key}\\s*:\\s*(['"\`])([\\s\\S]*?)\\1`));
+  return m ? m[2] : null;
+}
+
+function parseWorkflowMeta(source) {
+  const meta = { name: matchStr(source, 'name'), description: matchStr(source, 'description'), phases: [] };
+  const phasesM = source.match(/phases\s*:\s*\[([\s\S]*?)\]/);
+  if (phasesM) {
+    const re = /\{[\s\S]*?\}/g;
+    let m;
+    while ((m = re.exec(phasesM[1]))) {
+      const title = matchStr(m[0], 'title');
+      if (title) meta.phases.push({ title, detail: matchStr(m[0], 'detail') });
+    }
+  }
+  return meta;
+}
+
+// journal.jsonl records {type:'started',agentId} then {type:'result',agentId,...}
+// per workflow agent. Map agentId → {started, done}; done count matches the
+// "N/M agents" ratio the /workflows viewer shows.
+function readWorkflowJournal(runDir) {
+  const status = new Map();
+  let content;
+  try { content = readFileSync(path.join(runDir, 'journal.jsonl'), 'utf8'); } catch { return status; }
+  for (const line of content.split('\n')) {
+    if (!line.trim()) continue;
+    let o;
+    try { o = JSON.parse(line); } catch { continue; }
+    if (!o.agentId) continue;
+    const e = status.get(o.agentId) || { started: false, done: false };
+    if (o.type === 'started') e.started = true;
+    else if (o.type === 'result') e.done = true;
+    status.set(o.agentId, e);
+  }
+  return status;
+}
+
+// A workflow's run artifacts (journal + agent transcripts) live at
+// <sessionDir>/subagents/workflows/<wfId>/. The script itself sits under
+// <sessionDir>/workflows/scripts/, so the run dir is derivable from the script
+// path with no I/O — try that first. Fall back to the session dir from metadata,
+// then to scanning every project/session (the session dir can sit under a
+// different projEnc than the script when a workflow runs from another cwd). wfId
+// comes from the trusted script index (validated filename), so it can't
+// traverse. Cold path only.
+function resolveWorkflowRunDir(meta, wfId, scriptPath) {
+  const rel = path.join('subagents', 'workflows', wfId);
+  if (scriptPath) {
+    const sessionDir = path.dirname(path.dirname(path.dirname(scriptPath)));
+    const fromScript = path.join(sessionDir, rel);
+    if (existsSync(fromScript)) return fromScript;
+  }
+  if (meta.jsonlPath) {
+    const local = path.join(sessionDirFromMeta(meta), rel);
+    if (existsSync(local)) return local;
+  }
+  try {
+    for (const proj of readdirSync(PROJECTS_DIR, { withFileTypes: true })) {
+      if (!proj.isDirectory()) continue;
+      const projPath = path.join(PROJECTS_DIR, proj.name);
+      let sessDirs;
+      try { sessDirs = readdirSync(projPath, { withFileTypes: true }); } catch { continue; }
+      for (const s of sessDirs) {
+        if (!s.isDirectory()) continue;
+        const cand = path.join(projPath, s.name, rel);
+        if (existsSync(cand)) return cand;
+      }
+    }
+  } catch {}
+  return null;
+}
+
+// API: Workflow run state — declared phases (from the script) plus the agent
+// roster (type/model/output-tokens/duration/status) reconstructed from the run
+// dir's journal + transcripts. Phase↔agent mapping and per-agent labels are
+// runtime-only and never persisted, so the roster is flat by design.
+app.get('/api/sessions/:sessionId/workflows/:wfId/run', async (req, res) => {
+  try {
+    const wf = getWorkflowScripts(req.params.sessionId).find((w) => w.id === req.params.wfId);
+    if (!wf) return res.status(404).json({ error: 'Workflow not found' });
+    let source = '';
+    try { source = await fs.readFile(wf.path, 'utf8'); } catch (_) {}
+    const parsed = parseWorkflowMeta(source);
+
+    const sessionId = resolveSessionId(req.params.sessionId);
+    const meta = loadSessionMetadata()[sessionId] || {};
+    const runDir = resolveWorkflowRunDir(meta, wf.id, wf.path);
+    const journal = runDir ? readWorkflowJournal(runDir) : new Map();
+
+    const agents = [];
+    let stoppedAt = null;
+    if (runDir) {
+      let files = [];
+      try { files = readdirSync(runDir).filter((f) => /^agent-.+\.jsonl$/.test(f)); } catch (_) {}
+      for (const f of files) {
+        const agentId = f.slice('agent-'.length, -'.jsonl'.length);
+        const stats = extractTranscriptStats(path.join(runDir, f)) || {};
+        let type = null;
+        try {
+          type = JSON.parse(readFileSync(path.join(runDir, `agent-${agentId}.meta.json`), 'utf8')).agentType || null;
+        } catch (_) {}
+        const done = journal.get(agentId)?.done;
+        const durationMs = stats.firstTs && stats.lastTs ? new Date(stats.lastTs) - new Date(stats.firstTs) : null;
+        if (stats.lastTs && (!stoppedAt || stats.lastTs > stoppedAt)) stoppedAt = stats.lastTs;
+        agents.push({
+          agentId,
+          type,
+          model: stats.model || null,
+          outputTokens: stats.outputTokens || 0,
+          durationMs,
+          startedAt: stats.firstTs || null,
+          status: done ? 'done' : 'running',
+        });
+      }
+      agents.sort((a, b) => (a.startedAt || '').localeCompare(b.startedAt || ''));
+    }
+    // Roster is start-ordered, so the earliest start is simply the first agent.
+    const startedAt = agents[0]?.startedAt || null;
+
+    let startedCount = 0;
+    let doneCount = 0;
+    for (const e of journal.values()) {
+      if (e.started) startedCount++;
+      if (e.done) doneCount++;
+    }
+    if (!startedCount) {
+      startedCount = agents.length;
+      doneCount = agents.filter((a) => a.status === 'done').length;
+    }
+
+    res.json({
+      id: wf.id,
+      name: parsed.name || wf.name,
+      description: parsed.description,
+      phases: parsed.phases,
+      agents,
+      startedCount,
+      doneCount,
+      startedAt,
+      stoppedAt,
+    });
+  } catch (error) {
+    console.error('Error building workflow run view:', error);
+    res.status(500).json({ error: 'Failed to build workflow run view' });
   }
 });
 
@@ -1677,6 +1841,27 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
           agent.modelUnavailable = true;
           dirty.add(agent);
         }
+      }
+    }
+
+    // Workflow-spawned subagents given a schema end on a forced StructuredOutput
+    // tool call and never emit a text lastMessage — surface that structured result
+    // as the agent's response. Only stopped agents (complete transcript); latch
+    // resultUnavailable so we tail-read at most once per agent. Workflow subagents
+    // are exempt from the latch: the poll that flips them to "stopped" can beat the
+    // transcript's final StructuredOutput line to disk, latching resultUnavailable
+    // against an incomplete transcript — so always re-attempt for them, mirroring
+    // the prompt/name/description reconcile above.
+    const agentsNeedingResult = agents.filter(
+      (a) => !a.lastMessage && !isAgentLive(a) && (!a.resultUnavailable || a.type === 'workflow-subagent'),
+    );
+    if (agentsNeedingResult.length && meta.jsonlPath) {
+      for (const agent of agentsNeedingResult) {
+        let result = null;
+        try { result = extractStructuredResultFromTranscript(subagentJsonlForExtraction(meta, agent.agentId)); } catch (_) {}
+        if (result) agent.lastMessage = result;
+        else agent.resultUnavailable = true;
+        dirty.add(agent);
       }
     }
 
