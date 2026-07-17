@@ -5707,8 +5707,12 @@ function filterBySessions(value) {
   sessionFilter = value;
   if (value !== 'active') activityFilter.clear();
   updateUrl();
+  // Instant feedback from cached data, then refetch — the cached list was fetched
+  // with the previous filter's server params (e.g. filter=active), so "All Sessions"
+  // needs a server round-trip to actually include inactive sessions.
   renderSessions();
   renderActivityChip();
+  fetchSessions(false);
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
@@ -7185,6 +7189,9 @@ window.addEventListener('popstate', () => {
   ownerFilter = s.owner || '';
   searchQuery = s.search || '';
   loadPreferences();
+  // fetchSessions derives query params from the globals set above — refetch so
+  // back/forward across a filter change doesn't render a stale server-filtered list.
+  fetchSessions(false);
   if (s.projectView) {
     try {
       fetchProjectView(atob(s.projectView));
