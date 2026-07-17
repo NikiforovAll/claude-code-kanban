@@ -108,6 +108,10 @@ const PERMISSION_TTL_MS = 30 * 60 * 1000;
 const AGENT_TTL_MS = 60 * 60 * 1000;
 const AGENT_STALE_MS = 30 * 60 * 1000; // safety net for crashed sessions
 const SESSION_STALE_MS = 5 * 60 * 1000;
+// Keep an idle session in the active list this long after its last log write, so it
+// doesn't vanish the instant a turn ends. Ungated by registry-idle — visibility only,
+// never the "active" status (which stays accurate via hasRecentLog).
+const SESSION_GRACE_MS = 2 * 60 * 1000;
 const WAITING_RESOLVE_GRACE_MS = 15 * 1000;
 const CTX_CLEANUP_MAX_AGE_MS = 2 * 60 * 60 * 1000;
 const CLEANUP_MAX_AGE_MS = 2 * 24 * 60 * 60 * 1000;
@@ -333,6 +337,13 @@ function isRegistryIdle(sessionId) {
 
 function hasRecentLogActivity(sessionId, logAge) {
   return logAge <= SESSION_STALE_MS && !isRegistryIdle(sessionId);
+}
+
+// Visibility-only recency: hasRecentLogActivity widened by the post-turn grace
+// window (ungated by registry-idle). Drives whether a session appears in the
+// active list — never the "active" status badges, which stay on hasRecentLog.
+function hasVisibleLogActivity(sessionId, logAge) {
+  return logAge <= SESSION_GRACE_MS || hasRecentLogActivity(sessionId, logAge);
 }
 
 // Given a self-team config, return the live interactive session id that owns it
@@ -902,6 +913,7 @@ function buildSessionObject(id, meta, overrides = {}) {
     hasRunningAgents: false,
     hasWaitingForUser: false,
     hasRecentLog: hasRecentLogActivity(id, logAge),
+    hasRecentActivity: hasVisibleLogActivity(id, logAge),
     jsonlPath: meta.jsonlPath || null,
     tasksDir: null,
     projectDir: meta.jsonlPath ? path.dirname(meta.jsonlPath) : null,
@@ -960,9 +972,8 @@ app.get('/api/sessions', async (req, res) => {
           // Cheap-probe: when filter=active, skip expensive enrichment for inactive non-pinned sessions.
           // Mirrors the post-filter predicate using only signals already computed above.
           if (activeFilter && !pinnedIds.has(entry.name)) {
-            const hasRecentLog = hasRecentLogActivity(entry.name, logAge);
             const cheaplyActive = logStat.hasMessages && (
-              hasRecentLog
+              hasVisibleLogActivity(entry.name, logAge)
               || agentStatus.hasActive
               || !!agentStatus.waitingForUser
               || (pending > 0 || inProgress > 0)
@@ -1061,9 +1072,8 @@ app.get('/api/sessions', async (req, res) => {
 
         // Cheap-probe: no tasks here (metadata-only), so active = recent log OR live agent.
         if (activeFilter && !pinnedIds.has(sessionId)) {
-          const hasRecentLog = hasRecentLogActivity(sessionId, logAge);
           const cheaplyActive = logStat.hasMessages && (
-            hasRecentLog || metaAgentStatus.hasActive || !!metaAgentStatus.waitingForUser
+            hasVisibleLogActivity(sessionId, logAge) || metaAgentStatus.hasActive || !!metaAgentStatus.waitingForUser
           );
           if (!cheaplyActive) continue;
         }
@@ -1248,7 +1258,7 @@ app.get('/api/sessions', async (req, res) => {
           (!s.sharedTaskList && (s.pending > 0 || s.inProgress > 0))
           || s.hasActiveAgents
           || s.hasWaitingForUser
-          || s.hasRecentLog
+          || s.hasRecentActivity
         );
       for (const [id, s] of sessionsMap) {
         if (pinnedIds.has(id)) continue;

@@ -2796,7 +2796,7 @@ function renderSessions() {
         ((!s.sharedTaskList && (s.pending > 0 || s.inProgress > 0)) ||
           s.hasActiveAgents ||
           s.hasWaitingForUser ||
-          s.hasRecentLog);
+          s.hasRecentActivity);
       if (isActive) activeSessionIds.add(s.id);
       return isActive;
     });

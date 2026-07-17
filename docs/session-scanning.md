@@ -74,16 +74,18 @@ In `/api/sessions`, when `req.query.filter === 'active'`, each candidate session
 
 ```
 hasMessages && (
-  logAge <= SESSION_STALE_MS        // hasRecentLog
+  hasVisibleLogActivity(id, logAge)  // grace window OR hasRecentLog, see below
   || agentStatus.hasActive
   || agentStatus.waitingForUser
-  || pending > 0 || inProgress > 0  // pass 1 only (tasks dir exists)
+  || pending > 0 || inProgress > 0   // pass 1 only (tasks dir exists)
 )
 ```
 
 `agentStatus.hasActive` (from `checkAgentStatus`) is set only by agents with `status: 'active'` — `idle` never counts, since an idle teammate can linger for hours after work ends and would pin the session in the active filter. Team sessions skip the freshness (`AGENT_TTL_MS`) check so long-running teammates stay visible; non-team agents must be fresh.
 
 `hasRecentLog` is `hasRecentLogActivity(sessionId, logAge)`, not raw mtime recency: an open-but-idle interactive session keeps touching its JSONL (metadata-line rewrites), so mtime alone would read as activity for as long as the terminal stays open. The live-session registry (`~/.claude/sessions/<pid>.json`, already cached 5 s by `loadLiveSessions()`) carries the session's real `status`; a registry `status: 'idle'` suppresses the recent-log signal. No registry entry (process exited) or any other status falls back to the mtime rule.
+
+`hasVisibleLogActivity(sessionId, logAge)` widens `hasRecentLogActivity` with a `SESSION_GRACE_MS` (2 min) raw-mtime window, deliberately ungated by registry-idle, so a session doesn't vanish from the active list the instant a turn ends. It is exposed as `hasRecentActivity` on the session object and drives **visibility only** — the probe, the post-filter, and the client's active-list predicate — never the "active" status badges, which stay on `hasRecentLog`. Trade-off: an open idle terminal's metadata rewrites keep re-arming the window, so each open terminal stays a probe survivor while it's open.
 
 Pinned IDs (regular pins, sticky pins, revealed-plan, revealed-storage, focused `currentSessionId`) bypass the probe and always get full enrichment. The post-filter at the end of the handler stays as a safety net but operates on a now-small map.
 
