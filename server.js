@@ -364,11 +364,20 @@ function resolveSelfTeamOwner(cfg) {
   return best;
 }
 
-// Attach a team-named task dir's counts to a session card, preferring it over an empty or
-// smaller task dir (a team session can also have a near-empty UUID-named dir). Caller passes
-// the already-computed counts.
+// Attach a team-named task dir's counts to a session card, preferring the most recently written
+// dir (see taskDirBeats — "latest wins"). A resumed session owns several team dirs: a stale
+// prior-boot dir plus the current run's dir; the older "most tasks wins" rule attached the stale
+// dir when it had more tasks than the live one. The incumbent's mtime comes from the path-cached
+// counts (every card.tasksDir was already passed through getTaskCounts by the caller, so this is a
+// cache hit, not disk I/O). Caller passes the already-computed candidate counts.
 function attachTeamTasks(card, teamTaskDir, teamName, counts) {
-  if (!card.tasksDir || counts.taskCount > (card.taskCount || 0)) {
+  let curMtime = -1, curCount = -1;
+  if (card.tasksDir) {
+    const cur = getTaskCounts(card.tasksDir);
+    curMtime = taskDirMtime(cur);
+    curCount = cur.taskCount;
+  }
+  if (taskDirBeats(taskDirMtime(counts), counts.taskCount, curMtime, curCount)) {
     Object.assign(card, {
       taskCount: counts.taskCount,
       completed: counts.completed,
@@ -480,13 +489,14 @@ function getCustomTaskDir(sessionId) {
   // Check team-named task directory (teams store tasks under ~/.claude/tasks/<teamName>/).
   // Match either the recorded leadSessionId, or — for 2.1.x self-teams whose lead is a
   // team-lead agent id — the live interactive session that owns the team (see resolveSelfTeamOwner).
-  // A live session can own several team dirs at once — its own (often empty) self-team plus a
-  // resumed session's dir holding the real tasks — so pick the richest, mirroring attachTeamTasks'
-  // "prefer more tasks" rule. Returning the first match (readdir order) can pick the empty dir,
-  // making the board show 0 tasks while the session card counts the other dir.
+  // A live session can own several team dirs at once: a stale dir from a prior boot of the same
+  // session id, plus the current run's dir (a resume creates a fresh self-team). Pick the most
+  // recently written dir ("latest wins") — the old "most tasks wins" rule picked the stale dir
+  // whenever a completed prior run had accumulated more tasks than the live one. taskCount breaks
+  // ties; empty dirs (no task mtime) lose, so a real dir still beats an empty self-team.
   if (existsSync(TEAMS_DIR)) {
     try {
-      let bestDir = null, bestCount = -1;
+      let bestDir = null, bestMtime = -1, bestCount = -1;
       for (const dir of readdirSync(TEAMS_DIR, { withFileTypes: true })) {
         if (!dir.isDirectory()) continue;
         const cfg = loadTeamConfig(dir.name);
@@ -496,9 +506,11 @@ function getCustomTaskDir(sessionId) {
         if (!owns) continue;
         const teamTaskDir = path.join(TASKS_DIR, dir.name);
         if (!existsSync(teamTaskDir)) continue;
-        const count = getTaskCounts(teamTaskDir).taskCount;
-        if (count > bestCount) {
-          bestCount = count;
+        const counts = getTaskCounts(teamTaskDir);
+        const mtime = taskDirMtime(counts);
+        if (taskDirBeats(mtime, counts.taskCount, bestMtime, bestCount)) {
+          bestMtime = mtime;
+          bestCount = counts.taskCount;
           bestDir = teamTaskDir;
         }
       }
@@ -534,6 +546,18 @@ function getTaskCounts(sessionPath) {
   const result = { taskCount, completed, inProgress, pending, newestTaskMtime };
   taskCountsCache.set(sessionPath, result);
   return result;
+}
+
+// Newest task-file mtime of a getTaskCounts() result, in ms; 0 for an empty dir (no files).
+function taskDirMtime(counts) {
+  return counts.newestTaskMtime ? counts.newestTaskMtime.getTime() : 0;
+}
+
+// "Latest wins" ranking for two owned task dirs of the same session: more recently written wins,
+// taskCount breaks ties. Empty dirs (mtime 0) lose to any real dir. Callers seed the incumbent
+// with mtime/count -1 so the first candidate always wins.
+function taskDirBeats(candMtime, candCount, curMtime, curCount) {
+  return candMtime > curMtime || (candMtime === curMtime && candCount > curCount);
 }
 
 function cachedByMtime(cache, cacheKey, filePath, loadFn, fallback) {
@@ -1148,7 +1172,7 @@ app.get('/api/sessions', async (req, res) => {
               const logAge = logMtime ? Date.now() - logMtime : Infinity;
               const agentDir = path.join(AGENT_ACTIVITY_DIR, leaderId);
               const agentStatus = checkAgentStatus(agentDir, logAge > AGENT_STALE_MS, logMtime, false);
-              const taskMtime = counts.newestTaskMtime ? counts.newestTaskMtime.getTime() : 0;
+              const taskMtime = taskDirMtime(counts);
               const card = buildSessionObject(leaderId, meta, {
                 _logStat: logStat,
                 name: getSessionDisplayName(leaderId, meta) || cfg.name || dir.name,
