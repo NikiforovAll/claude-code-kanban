@@ -526,6 +526,11 @@ function getTaskCounts(sessionPath) {
 
   const taskFiles = readdirSync(sessionPath).filter(f => f.endsWith('.json'));
   let completed = 0, inProgress = 0, pending = 0, newestTaskMtime = null;
+  // Directory mtime bumps when task files are added/removed, so it stays fresh even for an
+  // emptied dir (task list closed) that has no files left to date. Task-file mtime alone would
+  // report 0 for such a dir and lose "latest wins" to a stale prior-boot dir.
+  let dirMtime = 0;
+  try { dirMtime = statSync(sessionPath).mtimeMs; } catch (_) {}
 
   for (const file of taskFiles) {
     try {
@@ -543,19 +548,23 @@ function getTaskCounts(sessionPath) {
   }
 
   const taskCount = completed + inProgress + pending;
-  const result = { taskCount, completed, inProgress, pending, newestTaskMtime };
+  const result = { taskCount, completed, inProgress, pending, newestTaskMtime, dirMtime };
   taskCountsCache.set(sessionPath, result);
   return result;
 }
 
-// Newest task-file mtime of a getTaskCounts() result, in ms; 0 for an empty dir (no files).
+// Last-write recency of a getTaskCounts() result, in ms: the newer of the directory mtime (bumps
+// on add/remove, so it survives an emptied dir) and the newest task-file mtime (bumps on in-place
+// status edits, which don't touch the dir). An emptied current dir thus still ranks by when it was
+// cleared, letting it win "latest wins" over a stale prior-boot dir instead of reporting 0.
 function taskDirMtime(counts) {
-  return counts.newestTaskMtime ? counts.newestTaskMtime.getTime() : 0;
+  const fileMtime = counts.newestTaskMtime ? counts.newestTaskMtime.getTime() : 0;
+  return Math.max(counts.dirMtime || 0, fileMtime);
 }
 
 // "Latest wins" ranking for two owned task dirs of the same session: more recently written wins,
-// taskCount breaks ties. Empty dirs (mtime 0) lose to any real dir. Callers seed the incumbent
-// with mtime/count -1 so the first candidate always wins.
+// taskCount breaks ties. Callers seed the incumbent with mtime/count -1 so the first candidate
+// always wins.
 function taskDirBeats(candMtime, candCount, curMtime, curCount) {
   return candMtime > curMtime || (candMtime === curMtime && candCount > curCount);
 }
@@ -1153,19 +1162,23 @@ app.get('/api/sessions', async (req, res) => {
           if (isAutoSelfTeam(cfg)) {
             // Self-teams are normally noise with an empty team-named task dir. But 2.1.x stores a
             // session's tasks in the self-team list (tasks/session-<id>/), so when it's non-empty
-            // the tasks would be silently orphaned. Recover them (gated on taskCount > 0 to keep
-            // the empty-self-team noise case suppressed): attach to the owning card — the recorded
-            // leadSessionId when it has one, else the live session continuing it (resolved from the
-            // session registry), else a freshly-built fallback lead card.
+            // the tasks would be silently orphaned. Recover them: attach to the owning card — the
+            // recorded leadSessionId when it has one, else the live session continuing it (resolved
+            // from the session registry), else a freshly-built fallback lead card.
             const teamTaskDir = path.join(TASKS_DIR, dir.name);
             if (!existsSync(teamTaskDir)) continue;
             const counts = getTaskCounts(teamTaskDir);
-            if (counts.taskCount === 0) continue;
 
             const ownerCard = sessionsMap.get(leaderId) || sessionsMap.get(resolveSelfTeamOwner(cfg));
             if (ownerCard) {
+              // Attach even when empty: a resumed session's freshly-emptied current dir (task list
+              // closed) must be allowed to win "latest wins" and suppress its stale prior-boot dir,
+              // otherwise the card resurfaces the previous tasks. attachTeamTasks ranks by recency.
               attachTeamTasks(ownerCard, teamTaskDir, dir.name, counts);
             } else {
+              // No owner card to attach to — don't fabricate one for an empty stale self-team
+              // (that is the original noise case the skip suppressed).
+              if (counts.taskCount === 0) continue;
               const meta = metadata[leaderId] || {};
               const logStat = getSessionLogStat(meta);
               const logMtime = logStat.mtime;
