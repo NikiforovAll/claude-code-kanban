@@ -148,7 +148,8 @@ function printTopHelp() {
   console.log('  --port <n>            Port to listen on (default 3541)');
   console.log('  --dir <path>          Override Claude config dir (default ~/.claude)');
   console.log('  --open                Open browser on start');
-  console.log('  --install, --uninstall    Install or remove the agent-spy hook');
+  console.log('  --install, --uninstall    Install or remove the plugin, context spy, and statusline');
+  console.log('  --plugin-only         With --install: refresh only the plugin, skip context spy and statusline');
 }
 
 function printNounHelp(noun) {

@@ -49,6 +49,19 @@ function copyScript(src, dest) {
   try { fs.chmodSync(dest, 0o755); } catch {}
 }
 
+// Deletes files but never directories: on Windows the running Claude Code process holds
+// handles on the registered marketplace dirs, so removing one fails EPERM mid-clean and
+// leaves the install gutted. Clearing files alone still drops anything stale, and the
+// leftover empty dirs are harmless — copyDirSync writes straight back into them.
+function clearFilesRecursive(dir) {
+  if (!fs.existsSync(dir)) return;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const target = path.join(dir, entry.name);
+    if (entry.isDirectory()) clearFilesRecursive(target);
+    else fs.rmSync(target, { force: true });
+  }
+}
+
 function copyDirSync(src, dest) {
   fs.mkdirSync(dest, { recursive: true });
   for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
@@ -63,8 +76,9 @@ function copyDirSync(src, dest) {
   }
 }
 
-async function runInstall() {
-  console.log(`\n  ${bold('claude-code-kanban')} — Plugin & StatusLine installer\n`);
+async function runInstall({ pluginOnly = false } = {}) {
+  console.log(`\n  ${bold('claude-code-kanban')} — ${pluginOnly ? 'Plugin installer' : 'Plugin & StatusLine installer'}\n`);
+  let failed = false;
 
   // 1. Check prerequisites
   process.stdout.write('  Checking claude CLI... ');
@@ -87,14 +101,15 @@ async function runInstall() {
 
   // 2. Copy plugin to stable location & register marketplace
   console.log(`\n  Plugin: ${dim(PLUGIN_DEST)}`);
-  if (await prompt(`    Install claude-code-kanban plugin? [Y/n] `)) {
+  if (pluginOnly || await prompt(`    Install claude-code-kanban plugin? [Y/n] `)) {
     process.stdout.write('    Copying plugin to ~/.claude/.cck/plugin... ');
     try {
-      if (fs.existsSync(PLUGIN_DEST)) fs.rmSync(PLUGIN_DEST, { recursive: true, force: true });
+      clearFilesRecursive(PLUGIN_DEST);
       copyDirSync(PLUGIN_SRC, PLUGIN_DEST);
       console.log(green('✓'));
     } catch (e) {
       console.log(red(`✗ ${e.message}`));
+      failed = true;
     }
 
     process.stdout.write('    Registering marketplace... ');
@@ -105,14 +120,25 @@ async function runInstall() {
       console.log(yellow(`⚠ ${mkt.error}`));
     }
 
+    // Claude caches the marketplace manifest, so a re-copied plugin stays invisible until refreshed
+    const upd = runCLI('claude plugin marketplace update claude-code-kanban');
+    if (!upd.ok) console.log(`    ${yellow('⚠')} Marketplace refresh failed: ${upd.error}`);
+
     const inst = runCLI('claude plugin install claude-code-kanban@claude-code-kanban', ['already installed', 'already exists']);
     if (inst.ok) {
       console.log(`    ${green('✓')} ${inst.idempotent ? 'Already installed' : 'Plugin installed'}`);
     } else {
       console.log(`    ${red('✗')} Plugin install failed: ${inst.error}`);
+      failed = true;
     }
   } else {
     console.log(`    ${dim('Skipped')}`);
+  }
+
+  if (pluginOnly) {
+    console.log(`\n  ${dim('Context spy and statusline skipped (--plugin-only).')}`);
+    printSummary(failed);
+    return;
   }
 
   // 3. StatusLine setup (context-status.sh must be copied globally since statusLine is not plugin-scoped)
@@ -148,7 +174,7 @@ async function runInstall() {
         : {};
     } catch {
       console.log(`    ${red('✗')} Malformed JSON in settings.json — skipping statusline config`);
-      printSummary();
+      printSummary(true);
       return;
     }
 
@@ -179,10 +205,14 @@ async function runInstall() {
     }
   }
 
-  printSummary();
+  printSummary(failed);
 }
 
-function printSummary() {
+function printSummary(failed = false) {
+  if (failed) {
+    console.log(`\n  ${red('Setup incomplete — see the errors above.')}\n`);
+    return;
+  }
   console.log(`\n  ${green('Setup complete. Agent activity will appear in the Kanban dashboard.')}\n`);
 }
 

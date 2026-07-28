@@ -32,7 +32,8 @@ const {
 
 if (process.argv.includes("--install") || process.argv.includes("--uninstall")) {
   const { runInstall, runUninstall } = require("./install");
-  (process.argv.includes("--install") ? runInstall() : runUninstall())
+  const pluginOnly = process.argv.includes("--plugin-only");
+  (process.argv.includes("--install") ? runInstall({ pluginOnly }) : runUninstall())
     .then(() => process.exit(0))
     .catch(e => { console.error(e.message); process.exit(1); });
   return;
