@@ -7,7 +7,7 @@
     {
       "name": "claude-code-kanban",
       "source": "./plugins/claude-code-kanban",
-      "description": "Agent activity tracking for claude-code-kanban dashboard"
+      "description": "claude-code-kanban dashboard integration: agent activity tracking, context statusline, and a skill to drive the board from a session"
     }
   ]
 }
