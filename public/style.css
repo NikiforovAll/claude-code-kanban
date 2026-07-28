@@ -31,6 +31,10 @@
   --plan-dim: rgba(134, 168, 134, 0.18);
   --mono: 'IBM Plex Mono', monospace;
   --serif: 'Playfair Display', serif;
+  --card-gap: 7px;
+  /* the name's supporting lines read as one unit with it, so they sit tighter
+     than the gap separating the card's independent rows */
+  --card-gap-tight: 3px;
   /* aliases: many rules reference --font-mono/--font-serif; keep them on-brand */
   --font-mono: var(--mono);
   --font-serif: var(--serif);
@@ -89,7 +93,7 @@ body::before {
 
 /* #region SIDEBAR */
 .sidebar {
-  width: var(--sidebar-width, 300px);
+  width: var(--sidebar-width, 310px);
   background: var(--bg-surface);
   border-right: 1px solid color-mix(in srgb, var(--border) 35%, transparent);
   box-shadow: 1px 0 12px rgba(0, 0, 0, 0.04);
@@ -451,11 +455,11 @@ body::before {
 .session-item {
   display: block;
   width: 100%;
-  padding: 12px 14px;
-  margin-bottom: 4px;
+  padding: 13px 15px;
+  margin-bottom: 6px;
   background: transparent;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 9px;
   text-align: left;
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
@@ -467,7 +471,7 @@ body::before {
 }
 
 .session-name {
-  font-size: 14px;
+  font-size: 13px;
   color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
@@ -501,7 +505,7 @@ body::before {
   font-size: 12px;
   font-weight: 450;
   color: var(--text-tertiary);
-  margin-top: 2px;
+  margin-top: var(--card-gap-tight);
   white-space: nowrap;
   overflow: hidden;
 }
@@ -509,7 +513,7 @@ body::before {
 .session-branch {
   font-size: 10px;
   color: var(--text-secondary);
-  margin-top: 2px;
+  margin-top: var(--card-gap-tight);
   display: block;
   font-family: var(--mono);
   white-space: nowrap;
@@ -520,7 +524,7 @@ body::before {
 .session-plan {
   font-size: 10px;
   color: var(--plan);
-  margin-top: 2px;
+  margin-top: var(--card-gap-tight);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -528,7 +532,7 @@ body::before {
 
 .session-goal {
   font-size: 10px;
-  margin-top: 2px;
+  margin-top: var(--card-gap-tight);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -552,8 +556,9 @@ body::before {
 .session-progress {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-top: 8px;
+  gap: 9px;
+  margin-top: var(--card-gap);
+  line-height: 1;
 }
 
 .progress-bar {
@@ -579,7 +584,7 @@ body::before {
 
 .context-bar {
   display: none;
-  margin-top: 6px;
+  margin-top: var(--card-gap);
 }
 .has-context .context-bar {
   display: block;
@@ -682,7 +687,7 @@ body::before {
   font-size: 11px;
   font-weight: 450;
   color: var(--text-tertiary);
-  margin-top: 6px;
+  margin-top: var(--card-gap);
 }
 
 .session-latest-msg {
@@ -1573,7 +1578,7 @@ body::before {
 .session-indicators {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 5px;
   flex-shrink: 0;
 }
 
@@ -1598,75 +1603,15 @@ body::before {
   flex-shrink: 0;
 }
 
-.team-info-btn {
-  width: 24px;
-  height: 24px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 11px;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 4px;
-  color: var(--text-muted);
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: all 0.15s ease;
-}
-
-.team-info-btn:hover {
-  background: var(--bg-hover);
-  border-color: var(--border);
-  color: var(--text-secondary);
-}
-
-.plan-indicator {
-  width: 24px;
-  height: 24px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--plan-dim);
-  border: 1px solid transparent;
-  border-radius: 4px;
-  color: var(--plan);
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: all 0.15s ease;
-}
-
-.plan-indicator:hover {
-  background: var(--plan-dim);
-  border-color: var(--plan);
-}
-
-/* Match .team-info-btn so the wakeups clock blends with the other session-card icons. */
-.loop-badge {
-  width: 24px;
-  height: 24px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 4px;
-  color: var(--text-muted);
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: all 0.15s ease;
-}
-
-.loop-badge:hover {
-  background: var(--bg-hover);
-  border-color: var(--border);
-  color: var(--text-secondary);
-}
-
-/* #region WORKFLOW */
-/* Match .team-info-btn so the gear blends with the other session-card icons. */
+/* Every clickable session-card icon shares one box so they blend into a single row;
+   resizing the row means editing this rule, not four. Per-icon rules below override
+   only what actually differs (color, glyph size). */
+.team-info-btn,
+.plan-indicator,
+.loop-badge,
 .workflow-badge {
-  width: 24px;
-  height: 24px;
+  width: 18px;
+  height: 18px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1679,11 +1624,39 @@ body::before {
   transition: all 0.15s ease;
 }
 
+.team-info-btn:hover,
+.loop-badge:hover,
 .workflow-badge:hover {
   background: var(--bg-hover);
   border-color: var(--border);
   color: var(--text-secondary);
 }
+
+/* The boxes are wider than their 12px glyphs, so the leading icon would sit inset
+   from the card text above it. Cancel that inset — but only when a boxed icon leads;
+   the pill badges and .team-badge have a different inset and must not be shifted. */
+.session-indicators > .team-info-btn:first-child,
+.session-indicators > .plan-indicator:first-child,
+.session-indicators > .loop-badge:first-child,
+.session-indicators > .workflow-badge:first-child {
+  margin-left: -3px;
+}
+
+.team-info-btn {
+  font-size: 11px;
+}
+
+.plan-indicator {
+  background: var(--plan-dim);
+  color: var(--plan);
+}
+
+.plan-indicator:hover {
+  border-color: var(--plan);
+}
+
+/* #region WORKFLOW */
+/* .workflow-badge's box is defined with the other session-card icons in TEAM_BADGE. */
 
 .workflow-row {
   border: 1px solid var(--border);
