@@ -2613,21 +2613,50 @@ app.delete('/api/tasks/:sessionId/:taskId', async (req, res) => {
   }
 });
 
-// API: Markdown preview — read file and broadcast to clients
-async function readMarkdownFile(absPath) {
-  const ext = path.extname(absPath).toLowerCase();
-  if (ext !== '.md' && ext !== '.markdown') {
-    const err = new Error('Only .md/.markdown files are allowed');
-    err.status = 400;
-    throw err;
-  }
+// API: File preview — read file and broadcast to clients
+const PREVIEW_KINDS = { '.md': 'markdown', '.markdown': 'markdown', '.html': 'html', '.htm': 'html' };
+// Whole files are pushed into a modal, so anything huge freezes the tab regardless of kind.
+const PREVIEW_MAX_BYTES = 8 * 1024 * 1024;
+
+function previewError(status, message) {
+  const err = new Error(message);
+  err.status = status;
+  return err;
+}
+
+// Existence + kind of a file target, with the HTTP status codes both the preview and
+// the link-a-file endpoints report. `kind` is null for anything the previewer can't
+// render — the caller decides whether that disqualifies the path.
+async function statFileTarget(absPath) {
   try {
-    return await fs.readFile(absPath, 'utf8');
+    const stats = await fs.stat(absPath);
+    if (!stats.isFile()) throw previewError(400, 'Not a file');
+    return { size: stats.size, kind: PREVIEW_KINDS[path.extname(absPath).toLowerCase()] || null };
   } catch (e) {
-    if (e.code === 'ENOENT') { const err = new Error('File not found'); err.status = 404; throw err; }
-    if (e.code === 'EISDIR') { const err = new Error('Not a file'); err.status = 400; throw err; }
+    if (e.status) throw e;
+    if (e.code === 'ENOENT') throw previewError(404, 'File not found');
+    if (e.code === 'EISDIR') throw previewError(400, 'Not a file');
     throw e;
   }
+}
+
+// Checks the file is previewable without reading it — the broadcast path needs the
+// validation (and its status codes) but never the content.
+async function validatePreviewFile(absPath) {
+  const { kind, size } = await statFileTarget(absPath);
+  if (!kind) throw previewError(400, 'Only .md/.markdown/.html/.htm files are allowed');
+  if (size > PREVIEW_MAX_BYTES) {
+    throw previewError(
+      400,
+      `Preview too large (${Math.round(size / 1048576)}MB, max ${PREVIEW_MAX_BYTES / 1048576}MB)`
+    );
+  }
+  return { kind, size };
+}
+
+async function readPreviewFile(absPath) {
+  const { kind } = await validatePreviewFile(absPath);
+  return { content: await fs.readFile(absPath, 'utf8'), kind };
 }
 
 function resolvePreviewPath(filePath, base) {
@@ -2651,8 +2680,10 @@ app.post('/api/preview', async (req, res) => {
     const { path: filePath, sessionId, base } = req.body || {};
     const abs = resolvePreviewPath(filePath, base);
     if (!abs) return res.status(400).json({ error: 'path is required' });
-    const content = await readMarkdownFile(abs);
-    broadcast({ type: 'preview:open', path: abs, content, sessionId: sessionId || null });
+    // Validate here so the CLI still gets 400/404, but broadcast the path only —
+    // each tab fetches the document itself instead of it being fanned out over SSE.
+    await validatePreviewFile(abs);
+    broadcast({ type: 'preview:open', path: abs, sessionId: sessionId || null });
     res.json({ success: true });
   } catch (error) {
     console.error('Error in /api/preview:', error);
@@ -2732,11 +2763,26 @@ app.get('/api/preview', async (req, res) => {
   try {
     const abs = resolvePreviewPath(req.query.path, req.query.base);
     if (!abs) return res.status(400).json({ error: 'path is required' });
-    const content = await readMarkdownFile(abs);
-    res.json({ path: abs, content });
+    const { content, kind } = await readPreviewFile(abs);
+    res.json({ path: abs, content, kind });
   } catch (error) {
     console.error('Error in GET /api/preview:', error);
     res.status(error.status || 500).json({ error: error.message || 'Preview failed' });
+  }
+});
+
+// API: Resolve a hand-typed path to an absolute one that exists. Deliberately not
+// extension-restricted — a linked file the previewer can't render (kind: null) is
+// still linkable, the client just opens it in the editor instead.
+app.get('/api/file/resolve', async (req, res) => {
+  try {
+    const abs = resolvePreviewPath(req.query.path, req.query.base);
+    if (!abs) return res.status(400).json({ error: 'path is required' });
+    // No size cap here — an unpreviewable file of any size is still linkable.
+    res.json({ path: abs, ...(await statFileTarget(abs)) });
+  } catch (error) {
+    console.error('Error in GET /api/file/resolve:', error);
+    res.status(error.status || 500).json({ error: error.message || 'Failed to resolve file' });
   }
 });
 

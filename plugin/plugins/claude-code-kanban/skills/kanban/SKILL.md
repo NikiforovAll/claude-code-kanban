@@ -1,6 +1,6 @@
 ---
 name: kanban
-description: Drive the claude-code-kanban dashboard from this session — focus the current session in the browser, pin/unpin it in the sidebar, preview a markdown file, or inspect session stats and messages. Use when the user mentions kanban or cck.
+description: Drive the claude-code-kanban dashboard from this session — focus the current session in the browser, pin/unpin it in the sidebar, preview a markdown or HTML file, or inspect session stats and messages. Use when the user mentions kanban or cck.
 argument-hint: '[open|pin|unpin|pins|preview|list|view|peek] [target]'
 ---
 
@@ -39,10 +39,10 @@ claude-code-kanban session pins --sticky     # sticky only
 
 ## Preview a file in kanban
 
-Opens a markdown file in the preview modal. Relative paths are fine — the server resolves to absolute.
+Opens a markdown or standalone HTML file in the preview modal (HTML renders live in a sandboxed iframe, so sibling assets like `./style.css` do not load). Relative paths are fine — the server resolves to absolute.
 
 ```bash
-claude-code-kanban preview <path-to-file.md> --session ${CLAUDE_SESSION_ID}
+claude-code-kanban preview <path-to-file.md|.html> --session ${CLAUDE_SESSION_ID}
 ```
 
 ## Inspect sessions (read-only)

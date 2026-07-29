@@ -291,7 +291,7 @@
     </div>
   </div>
 
-  <!-- Markdown Preview Modal -->
+  <!-- File Preview Modal (markdown rendered inline, HTML in a sandboxed iframe) -->
   <div id="preview-modal" class="modal-overlay" style="z-index:10002;" onclick="closePreviewModal()">
     <div class="modal preview-modal-dialog" onclick="event.stopPropagation()">
       <div class="modal-header">
@@ -311,9 +311,9 @@
           </button>
         </div>
       </div>
-      <div class="modal-body" style="flex: 0 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden;">
-        <div id="preview-modal-body" class="rendered-md" style="word-break: break-word; font-size: 13px; line-height: 1.6; overflow-y: auto; flex: 0 1 auto; min-height: 0; padding-right: 8px;"></div>
-        <div id="preview-modal-meta" style="margin-top: 12px; font-size: 11px; color: var(--text-muted); flex-shrink: 0;"></div>
+      <div class="modal-body">
+        <div id="preview-modal-body" class="rendered-md"></div>
+        <div id="preview-modal-meta"></div>
       </div>
     </div>
   </div>

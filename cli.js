@@ -3,8 +3,8 @@ const path = require('path');
 // Help is auto-generated from this table — keep flags/usage in sync with `run` behavior.
 const COMMANDS = {
   preview: {
-    summary: 'Open a markdown file in the preview modal on connected browser tabs',
-    usage: 'claude-code-kanban preview <file.md> [--session <id>]',
+    summary: 'Open a markdown or HTML file in the preview modal on connected browser tabs',
+    usage: 'claude-code-kanban preview <file.md|file.html> [--session <id>]',
     flags: {
       '--session <id>': 'Switch focused session in the browser (does not link the file)',
     },

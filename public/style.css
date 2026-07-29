@@ -952,8 +952,11 @@ body::before {
   background: var(--bg-hover);
   color: var(--text-primary);
 }
+/* Highlighted with the row's *own* theme accent rather than the active theme's, so the selected
+   row previews the theme it names. --sw-accent comes from the theme-swatch-<id> class on the row. */
 .theme-menu-item.on {
-  color: var(--accent-text);
+  color: var(--sw-accent, var(--accent-text));
+  background: color-mix(in srgb, var(--sw-accent, var(--accent-text)) 16%, transparent);
 }
 /* 3-dot palette preview: surface, accent, ink (colors from themes.css vars) */
 .theme-swatch {
@@ -3345,6 +3348,113 @@ body::before {
   min-width: 0;
 }
 
+/* margin-left:auto pins every × to the same right edge, so they read as a column
+   however long the names in between are. */
+.linked-doc-remove {
+  margin-left: auto;
+  align-self: center;
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 3px;
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.45;
+  transition: all 0.15s ease;
+}
+
+.linked-doc-item:hover .linked-doc-remove {
+  opacity: 1;
+}
+
+.linked-doc-remove:hover {
+  background: var(--danger-dim);
+  color: var(--danger);
+}
+
+/* A linked file the previewer can't render opens in the editor — the dashed
+   underline keeps that different destination visible before the click. */
+.linked-doc-item.is-editor .linked-doc-link {
+  color: var(--text-secondary);
+  text-decoration-style: dashed;
+}
+
+.linked-docs-empty {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-style: italic;
+}
+
+.linked-docs-add-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  line-height: 1;
+  flex-shrink: 0;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.linked-docs-add-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+.linked-doc-editor-slot:not(:empty) {
+  margin-bottom: 8px;
+}
+
+.linked-doc-input {
+  width: 100%;
+  padding: 6px 8px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-family: var(--mono);
+  font-size: 12px;
+  box-shadow: 0 0 0 2px var(--accent-dim);
+  outline: none;
+}
+
+.linked-doc-hint {
+  color: var(--text-muted);
+  font-size: 10px;
+  margin-top: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Present but empty until a path fails to resolve. */
+.linked-doc-error:empty {
+  display: none;
+}
+
+.linked-doc-error {
+  color: var(--danger);
+  font-size: 11px;
+  margin-top: 4px;
+}
+
 /* #endregion */
 
 /* #region PERMISSION_PENDING */
@@ -3563,6 +3673,62 @@ body.light .msg-assistant .msg-text {
   max-width: 90vw;
   height: 90vh;
   max-height: 90vh;
+}
+
+.preview-modal-dialog .modal-body {
+  flex: 0 1 auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+#preview-modal-body {
+  word-break: break-word;
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-y: auto;
+  flex: 0 1 auto;
+  min-height: 0;
+  padding-right: 8px;
+}
+
+#preview-modal-meta {
+  margin-top: 12px;
+  font-size: 11px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+/* Rendered HTML pages need far more room than a markdown doc. */
+.modal.preview-modal-dialog.preview-html {
+  width: 96vw;
+  max-width: 96vw;
+  height: 92vh;
+  max-height: 92vh;
+}
+
+/* Keeps the fullscreen button meaningful — the generic .fullscreen rule is smaller than this. */
+.modal.preview-modal-dialog.preview-html.fullscreen {
+  width: 98vw;
+  max-width: 98vw;
+  height: 98vh;
+  max-height: 98vh;
+}
+
+.preview-html .modal-body,
+.preview-html #preview-modal-body {
+  flex: 1 1 auto;
+  overflow: hidden;
+  padding-right: 0;
+}
+
+.preview-html-frame {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 6px;
+  /* Pages authored for a light page default would be unreadable on the dark theme. */
+  background: #fff;
 }
 
 .preview-fm {

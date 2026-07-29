@@ -4206,8 +4206,8 @@ function showStorageManager() {
   document.querySelectorAll('.storage-tab').forEach((t) => {
     t.classList.toggle('active', t.dataset.tab === 'sessions');
   });
-  _renderStorageTab();
   document.getElementById('storage-modal').classList.add('visible');
+  _renderStorageTab();
 }
 
 function closeStorageManager() {
@@ -4223,6 +4223,8 @@ function switchStorageTab(tab) {
 }
 
 function _renderStorageTab() {
+  const modal = document.getElementById('storage-modal');
+  if (!modal?.classList.contains('visible')) return;
   const body = document.getElementById('storage-modal-body');
   const tab = document.querySelector('.storage-tab.active')?.dataset.tab || 'sessions';
   if (tab === 'sessions') body.innerHTML = _renderStorageSessions();
@@ -4516,18 +4518,12 @@ function _storagePreviewLinkedDoc(path) {
 
 function _storageUnlinkDoc(sessionId, path) {
   removeSessionPreviewPath(sessionId, path);
-  if (sessionId === _infoModalSessionId) refreshInfoModalLinkedDocs();
-  renderSessions();
-  _renderStorageTab();
-  _updateStorageTotal();
+  afterLinkedDocsChanged(sessionId);
 }
 
 function _storageClearLinkedDocs(sessionId) {
   localStorage.removeItem(PREVIEW_STORAGE_PREFIX + sessionId);
-  if (sessionId === _infoModalSessionId) refreshInfoModalLinkedDocs();
-  renderSessions();
-  _renderStorageTab();
-  _updateStorageTotal();
+  afterLinkedDocsChanged(sessionId);
 }
 
 function _findOrphanedKeys() {
@@ -4948,6 +4944,17 @@ function removeSessionPreviewPath(sessionId, filePath) {
   else localStorage.removeItem(PREVIEW_STORAGE_PREFIX + sessionId);
 }
 
+// Every surface that shows linked docs — info modal, session card badge, preview
+// toolbar toggle, storage manager — refreshes from one place, so a new mutator
+// can never forget one of them.
+function afterLinkedDocsChanged(sessionId) {
+  if (_infoModalSessionId === sessionId) refreshInfoModalLinkedDocs();
+  renderSessions();
+  updatePreviewLinkBtn();
+  _renderStorageTab();
+  _updateStorageTotal();
+}
+
 function splitFrontmatter(text) {
   const m = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
   if (!m) return { fm: null, body: text };
@@ -4969,27 +4976,50 @@ function renderFrontmatterBlock(fm) {
   return `<details class="preview-fm" open><summary>frontmatter</summary><div class="fm-grid">${rows}</div></details>`;
 }
 
-function openPreviewModal(filePath, content) {
+// Previewed HTML is rendered as authored, not sanitized: the sandbox without
+// allow-same-origin puts it on an opaque origin, so it cannot touch this app's
+// storage, DOM or API. Sibling local assets don't load — srcdoc has no base URL.
+function renderHtmlPreview(bodyEl, content) {
+  bodyEl.innerHTML = '';
+  const frame = document.createElement('iframe');
+  frame.className = 'preview-html-frame';
+  frame.setAttribute('sandbox', 'allow-scripts allow-popups');
+  frame.setAttribute('referrerpolicy', 'no-referrer');
+  frame.srcdoc = content;
+  bodyEl.appendChild(frame);
+}
+
+function bindPreviewRelativeLinks(bodyEl) {
+  if (bodyEl.dataset.relLinkBound) return;
+  bodyEl.addEventListener('click', (e) => {
+    const a = e.target.closest('a[href]');
+    if (!a) return;
+    const href = a.getAttribute('href');
+    if (!href || href.startsWith('#')) return;
+    const isAbsoluteUrl = /^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith('//');
+    const isAbsolutePath = href.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(href);
+    if (isAbsoluteUrl) return;
+    const cleanHref = href.replace(/#.*$/, '');
+    if (!isPreviewablePath(cleanHref)) return;
+    e.preventDefault();
+    openPreviewByPath(cleanHref, isAbsolutePath ? undefined : currentPreviewPath);
+  });
+  bodyEl.dataset.relLinkBound = '1';
+}
+
+// `kind` comes from the server, which is the only place that decides what is previewable.
+function openPreviewModal(filePath, content, kind) {
   currentPreviewPath = filePath;
   document.getElementById('preview-modal-title').textContent = filePath.split(/[\\/]/).pop();
-  const { fm, body } = /\.(md|markdown)$/i.test(filePath) ? splitFrontmatter(content) : { fm: null, body: content };
   const bodyEl = document.getElementById('preview-modal-body');
-  bodyEl.innerHTML = (fm ? renderFrontmatterBlock(fm) : '') + renderMarkdown(body);
-  if (!bodyEl.dataset.relLinkBound) {
-    bodyEl.addEventListener('click', (e) => {
-      const a = e.target.closest('a[href]');
-      if (!a) return;
-      const href = a.getAttribute('href');
-      if (!href || href.startsWith('#')) return;
-      const isAbsoluteUrl = /^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith('//');
-      const isAbsolutePath = href.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(href);
-      if (isAbsoluteUrl) return;
-      if (!/\.(md|markdown)(#.*)?$/i.test(href)) return;
-      e.preventDefault();
-      const cleanHref = href.replace(/#.*$/, '');
-      openPreviewByPath(cleanHref, isAbsolutePath ? undefined : currentPreviewPath);
-    });
-    bodyEl.dataset.relLinkBound = '1';
+  const isHtml = kind === 'html';
+  document.querySelector('#preview-modal .modal').classList.toggle('preview-html', isHtml);
+  bindPreviewRelativeLinks(bodyEl);
+  if (isHtml) {
+    renderHtmlPreview(bodyEl, content);
+  } else {
+    const { fm, body } = splitFrontmatter(content);
+    bodyEl.innerHTML = (fm ? renderFrontmatterBlock(fm) : '') + renderMarkdown(body);
   }
   document.getElementById('preview-modal-meta').textContent = filePath;
   document.getElementById('preview-modal').classList.add('visible');
@@ -5027,42 +5057,30 @@ function togglePreviewSessionLink() {
     addSessionPreviewPath(currentSessionId, currentPreviewPath);
     showToast('Linked to session');
   }
-  updatePreviewLinkBtn();
-  if (_infoModalSessionId === currentSessionId) {
-    refreshInfoModalLinkedDocs();
-  }
-  renderSessions();
+  afterLinkedDocsChanged(currentSessionId);
 }
 
 function refreshInfoModalLinkedDocs() {
   const bodyEl = document.getElementById('team-modal-body');
   if (!bodyEl) return;
   const existing = bodyEl.querySelector('.linked-docs-section');
-  const html = renderLinkedDocsHtml(_infoModalSessionId);
-  if (!existing) {
-    if (!html) return;
+  const wrap = document.createElement('div');
+  wrap.innerHTML = renderLinkedDocsHtml(_infoModalSessionId);
+  const node = wrap.firstElementChild;
+  if (existing) {
+    existing.replaceWith(node);
+  } else {
     const planCard = bodyEl.querySelector('[data-plan-card]');
-    const wrap = document.createElement('div');
-    wrap.innerHTML = html;
-    const node = wrap.firstElementChild;
     if (planCard?.nextSibling) planCard.parentNode.insertBefore(node, planCard.nextSibling);
     else bodyEl.appendChild(node);
-    bindLinkedDocsHandlers(node, _infoModalSessionId);
-    return;
   }
-  if (!html) {
-    existing.remove();
-    return;
-  }
-  const wrap = document.createElement('div');
-  wrap.innerHTML = html;
-  const node = wrap.firstElementChild;
-  existing.replaceWith(node);
   bindLinkedDocsHandlers(node, _infoModalSessionId);
 }
 
 function closePreviewModal() {
   resetModalFullscreen('preview-modal');
+  // Empty the body so an iframe preview is destroyed and its scripts/timers stop.
+  document.getElementById('preview-modal-body').innerHTML = '';
   currentPreviewPath = null;
 }
 
@@ -5083,7 +5101,7 @@ async function openPreviewByPath(filePath, base) {
       return;
     }
     const data = await r.json();
-    openPreviewModal(data.path, data.content);
+    openPreviewModal(data.path, data.content, data.kind);
   } catch {
     showToast('Failed to load preview');
   }
@@ -5110,7 +5128,7 @@ function handleSessionOpenEvent(data) {
 }
 
 async function handlePreviewOpenEvent(data) {
-  const { path: filePath, content, sessionId } = data;
+  const { path: filePath, sessionId } = data;
   if (sessionId && sessionId !== currentSessionId) {
     if (sessions.find((s) => s.id === sessionId)) {
       await fetchTasks(sessionId);
@@ -5118,7 +5136,8 @@ async function handlePreviewOpenEvent(data) {
       showToast(`Preview received for unknown session ${sessionId.slice(0, 8)}`);
     }
   }
-  openPreviewModal(filePath, content);
+  // The broadcast carries the path only — each tab fetches the document itself.
+  openPreviewByPath(filePath);
 }
 
 function getSessionBaseDir(sessionId) {
@@ -5126,42 +5145,124 @@ function getSessionBaseDir(sessionId) {
   return s?.cwd || s?.project || '';
 }
 
+// Linked paths are stored as bare strings, so previewability is re-derived from the
+// extension on every render instead of being remembered alongside the path.
+function isPreviewablePath(p) {
+  return /\.(md|markdown|html?)$/i.test(p);
+}
+
 function renderLinkedDocsHtml(sessionId) {
   const paths = getSessionPreviewPaths(sessionId);
-  if (!paths.length) return '';
   const baseDir = getSessionBaseDir(sessionId);
   const items = paths
-    .map((p, i) => {
+    .map((p) => {
       const name = p.split(/[\\/]/).pop();
       const rel = baseDir ? toRelativeIfUnder(p, baseDir) : null;
+      const previewable = isPreviewablePath(p);
+      const title = previewable ? p : `${p} — opens in editor`;
       const pathSpan = rel ? `<span class="linked-doc-path" title="${escapeHtml(p)}">${escapeHtml(rel)}</span>` : '';
-      return `<li class="linked-doc-item">
-        <a href="#" class="linked-doc-link" data-idx="${i}" title="${escapeHtml(p)}">${escapeHtml(name)}</a>
-        ${pathSpan}
+      const attr = escapeHtml(p);
+      return `<li class="linked-doc-item${previewable ? '' : ' is-editor'}">
+        <a href="#" class="linked-doc-link" data-path="${attr}" title="${escapeHtml(title)}">${escapeHtml(name)}</a>
+        ${pathSpan}${previewable ? '' : '<span class="linked-doc-path">(editor)</span>'}
+        <button type="button" class="linked-doc-remove" data-path="${attr}" title="Unlink" aria-label="Unlink ${escapeHtml(name)}">&times;</button>
       </li>`;
     })
     .join('');
+  // Rendered even when empty — the add button has to stay reachable.
+  const body = paths.length
+    ? `<ul class="linked-doc-list">${items}</ul>`
+    : '<div class="linked-docs-empty">No linked files yet</div>';
   return `<div class="linked-docs-section" style="margin-bottom:16px;font-size:12px;">
     <div style="font-size:11px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;display:flex;align-items:center;gap:6px;">
       ${linkSvg(12)}
       <span>Linked documents</span>
       <span style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:10px;padding:0 6px;font-size:10px;color:var(--text-secondary);">${paths.length}</span>
+      <button type="button" class="linked-docs-add-btn" title="Link a file" aria-label="Link a file">+</button>
     </div>
-    <ul class="linked-doc-list">${items}</ul>
+    <div class="linked-doc-editor-slot"></div>
+    ${body}
   </div>`;
 }
 
+// One delegated listener per section: the list is re-rendered on every change, so
+// per-row handlers would only be rebound each time anyway.
 function bindLinkedDocsHandlers(container, sessionId) {
   if (!container) return;
-  const links = container.querySelectorAll('.linked-doc-link');
-  if (!links.length) return;
-  const paths = getSessionPreviewPaths(sessionId);
-  const base = getSessionBaseDir(sessionId);
-  for (const link of links) {
-    link.addEventListener('click', (e) => {
+  container.addEventListener('click', (e) => {
+    const hit = e.target.closest('.linked-doc-link, .linked-doc-remove, .linked-docs-add-btn');
+    if (!hit) return;
+    e.preventDefault();
+    if (hit.classList.contains('linked-docs-add-btn')) {
+      startLinkedDocInput(container, sessionId);
+    } else if (hit.classList.contains('linked-doc-remove')) {
+      removeSessionPreviewPath(sessionId, hit.dataset.path);
+      afterLinkedDocsChanged(sessionId);
+    } else if (isPreviewablePath(hit.dataset.path)) {
+      openPreviewByPath(hit.dataset.path, getSessionBaseDir(sessionId));
+    } else {
+      postAndToast('/api/open-in-editor', { file: hit.dataset.path }, 'in editor');
+    }
+  });
+}
+
+function startLinkedDocInput(container, sessionId) {
+  const slot = container.querySelector('.linked-doc-editor-slot');
+  if (!slot) return;
+  slot.innerHTML = `<input class="linked-doc-input" type="text" spellcheck="false" placeholder="Absolute path, or relative to the session cwd">
+    <div class="linked-doc-hint">${escapeHtml(getSessionBaseDir(sessionId) || 'no session cwd — absolute paths only')}</div>
+    <div class="linked-doc-error"></div>
+    <div class="edit-actions">
+      <button type="button" class="edit-cancel">Cancel</button>
+      <button type="button" class="edit-save">Link</button>
+    </div>`;
+  const input = slot.querySelector('.linked-doc-input');
+  const save = () => linkFileByPath(sessionId, input.value, slot);
+  const cancel = () => {
+    slot.innerHTML = '';
+  };
+  slot.querySelector('.edit-save').addEventListener('click', save);
+  slot.querySelector('.edit-cancel').addEventListener('click', cancel);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
       e.preventDefault();
-      openPreviewByPath(paths[+link.dataset.idx], base);
-    });
+      save();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      cancel();
+    }
+  });
+  input.focus();
+}
+
+async function linkFileByPath(sessionId, raw, slot) {
+  // Paths pasted from Explorer or a shell often arrive quoted.
+  const value = (raw || '').trim().replace(/^["']|["']$/g, '');
+  // Reported inline so the input stays open and the path can be corrected in place.
+  const fail = (msg) => {
+    const err = slot?.querySelector('.linked-doc-error');
+    if (err) err.textContent = msg;
+    else showToast(msg, 'error');
+  };
+  if (!value) {
+    fail('Enter a file path');
+    return;
+  }
+  try {
+    const qs = new URLSearchParams({ path: value });
+    const base = getSessionBaseDir(sessionId);
+    if (base) qs.set('base', base);
+    const r = await fetch(`/api/file/resolve?${qs}`);
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      fail(data.error || 'File not found');
+      return;
+    }
+    addSessionPreviewPath(sessionId, data.path);
+    showToast('Linked to session', 'success');
+    afterLinkedDocsChanged(sessionId);
+  } catch {
+    fail('Failed to resolve file');
   }
 }
 //#endregion
@@ -5934,7 +6035,7 @@ function buildThemeMenu() {
   const menu = document.getElementById('themeMenu');
   menu.innerHTML = COLOR_THEMES.map(
     ([id, label]) =>
-      `<button type="button" class="theme-menu-item" data-theme-id="${id}"
+      `<button type="button" class="theme-menu-item theme-swatch-${id}" data-theme-id="${id}"
          onclick="event.stopPropagation(); setColorTheme('${id}'); toggleThemeMenu()">
          <span class="theme-swatch theme-swatch-${id}"><i class="sw-bg"></i><i class="sw-accent"></i><i class="sw-ink"></i></span>${label}
        </button>`,
@@ -6324,6 +6425,8 @@ function showInfoModal(session, teamConfig, tasks, planContent, parentInfo) {
 
   const keyHandler = (e) => {
     if (e.key === 'Escape') {
+      // An inline editor inside the modal owns Escape first — it reverts itself.
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
       if (document.getElementById('plan-modal').classList.contains('visible')) return;
       if (document.getElementById('tool-stats-modal').classList.contains('visible')) return;
       e.preventDefault();
