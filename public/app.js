@@ -5848,6 +5848,31 @@ function matchesProjectFilter(project) {
 //#endregion
 
 //#region EVENT_DELEGATION
+// Selecting text inside a dialog and releasing past its edge puts the mouseup on the
+// backdrop, so the synthesized click targets the overlay and the `onclick="close…()"`
+// on every .modal-overlay would dismiss it. Only a press that *started* on the
+// backdrop counts as a dismissal.
+let _overlayPressTarget = null;
+document.addEventListener(
+  'mousedown',
+  (e) => {
+    // Only an overlay is ever compared below, so don't hold a reference to any other node —
+    // that would keep the last-pressed element (and a detached subtree, after a re-render)
+    // alive until the next mousedown anywhere.
+    _overlayPressTarget = e.target.classList?.contains('modal-overlay') ? e.target : null;
+  },
+  true,
+);
+document.addEventListener(
+  'click',
+  (e) => {
+    if (!e.target.classList?.contains('modal-overlay')) return;
+    if (_overlayPressTarget === e.target) return;
+    e.stopPropagation();
+  },
+  true,
+);
+
 document.addEventListener('click', (e) => {
   const pathToggle = e.target.closest('[data-group-action="toggle-path"]');
   if (pathToggle) {
