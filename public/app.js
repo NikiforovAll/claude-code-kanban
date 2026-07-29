@@ -4992,7 +4992,8 @@ function renderFrontmatterBlock(fm) {
 
 // Previewed HTML is rendered as authored, not sanitized: the sandbox without
 // allow-same-origin puts it on an opaque origin, so it cannot touch this app's
-// storage, DOM or API. Sibling local assets don't load — srcdoc has no base URL.
+// storage, DOM or API. srcdoc has no base URL, so the server has already embedded
+// the document's local assets (lib/inline-assets.js); remote refs load normally.
 function renderHtmlPreview(bodyEl, content) {
   bodyEl.innerHTML = '';
   const frame = document.createElement('iframe');

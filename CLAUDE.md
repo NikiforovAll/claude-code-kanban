@@ -38,7 +38,7 @@ public/app.js       All JS (~3520 lines)
 
 - **Read-only observer** — Claude Code owns task state, dashboard only reads
 - **Parser changes → update `docs/session-scanning.md`** — any change to `lib/parsers.js` or to the session-list hot path (`buildSessionObject`, `loadSessionMetadata`, the watchers, or any cache feeding them) must keep that doc current. It tracks the hot-path rule ("no full-JSONL reads in `buildSessionObject`"), per-function cache strategies, and watcher wiring. If you add, remove, or change a parser entry-point or its cache, update the doc in the same change.
-- **XSS safety** — `escapeHtml()` for user data, `DOMPurify.sanitize(marked.parse(...))` for markdown. The one exception is the HTML file preview: it is rendered as authored inside an `<iframe sandbox="allow-scripts allow-popups">` (no `allow-same-origin`), so it stays on an opaque origin instead of being sanitized
+- **XSS safety** — `escapeHtml()` for user data, `DOMPurify.sanitize(marked.parse(...))` for markdown. The one exception is the HTML file preview: it is rendered as authored inside an `<iframe sandbox="allow-scripts allow-popups">` (no `allow-same-origin`), so it stays on an opaque origin instead of being sanitized. `srcdoc` has no base URL, so `lib/inline-assets.js` embeds the document's local stylesheets, scripts and images server-side before it is sent (`readPreviewFile`); remote refs are left to resolve on their own
 - **No framework** — multi-file vanilla JS, CSS variables for dark/light theming
 - **`#region` markers** — VS Code foldable `#region`/`#endregion` blocks in `app.js` and `style.css`
 

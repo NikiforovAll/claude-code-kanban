@@ -29,6 +29,7 @@ const {
   updateLoopInfo,
   buildLoopInfoFromState
 } = require('./lib/parsers');
+const { inlineHtmlAssets } = require('./lib/inline-assets');
 
 if (process.argv.includes("--install") || process.argv.includes("--uninstall")) {
   const { runInstall, runUninstall } = require("./install");
@@ -2656,7 +2657,21 @@ async function validatePreviewFile(absPath) {
 
 async function readPreviewFile(absPath) {
   const { kind } = await validatePreviewFile(absPath);
-  return { content: await fs.readFile(absPath, 'utf8'), kind };
+  const raw = await fs.readFile(absPath, 'utf8');
+  if (kind !== 'html') return { content: raw, kind };
+  // The client renders HTML into a `srcdoc` iframe, which has no base URL — sibling
+  // assets have to travel inside the document or they never load.
+  try {
+    const { html, skipped } = await inlineHtmlAssets(raw, absPath);
+    for (const s of skipped) {
+      console.warn(`Preview: skipped inlining ${s.path} (${s.reason}, ${s.size} bytes)`);
+    }
+    return { content: html, kind };
+  } catch (e) {
+    // Inlining is an enhancement: a failure here must not cost the user the preview.
+    console.error('Preview: asset inlining failed, serving as authored:', e.message);
+    return { content: raw, kind };
+  }
 }
 
 // Paths copied out of a browser or a slide deck carry a URL fragment
