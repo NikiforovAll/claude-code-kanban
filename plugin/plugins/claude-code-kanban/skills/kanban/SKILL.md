@@ -1,14 +1,14 @@
 ---
 name: kanban
-description: Drive the claude-code-kanban dashboard from this session — focus the current session in the browser, pin/unpin it in the sidebar, preview a markdown or HTML file, or inspect session stats and messages. Use when the user mentions kanban or cck.
-argument-hint: '[open|pin|unpin|pins|preview|list|view|peek] [target]'
+description: Drive the claude-code-kanban dashboard from this session — focus the current session in the browser, pin/unpin it in the sidebar, preview a markdown or HTML file, link a document to the session, or inspect session stats and messages. Use when the user mentions kanban or cck.
+argument-hint: '[open|pin|unpin|preview|link] [target]'
 ---
 
 # Kanban Skill
 
 The current Claude session id is `${CLAUDE_SESSION_ID}` (substituted when this skill loads), so the user never needs to look it up.
 
-When the user passes arguments, map them to the matching command below (`open` → `session open`, `pin`/`unpin`/`pins` → `session pin`/`--unpin`/`session pins`, `list`/`view`/`peek` → the read-only verbs); with no arguments, open the current session.
+When the user passes arguments, map them to the matching command below (`open` → `session open`, `pin`/`unpin`/`pins` → `session pin`/`--unpin`/`session pins`, `preview` → `preview-doc`, `link` → `link-doc`, `list`/`view`/`peek` → the read-only verbs); with no arguments, open the current session.
 
 Prefer the bare `claude-code-kanban` binary; fall back to `npx claude-code-kanban` when it is not on PATH, or when the user asks for npx explicitly.
 
@@ -42,7 +42,16 @@ claude-code-kanban session pins --sticky     # sticky only
 Opens a markdown or standalone HTML file in the preview modal (HTML renders live in a sandboxed iframe, so sibling assets like `./style.css` do not load). Relative paths are fine — the server resolves to absolute.
 
 ```bash
-claude-code-kanban preview <path-to-file.md|.html> --session ${CLAUDE_SESSION_ID}
+claude-code-kanban preview-doc <path-to-file.md|.html> --session ${CLAUDE_SESSION_ID}
+```
+
+## Link a document to the session (no modal)
+
+Same idea as `preview-doc`, but it only attaches the file to the session's linked docs in the sidebar — nothing pops up, so it is the safe choice while the user is working. Any extension is linkable.
+
+```bash
+claude-code-kanban link-doc <path-to-file> --session ${CLAUDE_SESSION_ID}            # link
+claude-code-kanban link-doc <path-to-file> --session ${CLAUDE_SESSION_ID} --unlink   # remove
 ```
 
 ## Inspect sessions (read-only)

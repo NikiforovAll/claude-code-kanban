@@ -2,13 +2,22 @@ const path = require('path');
 
 // Help is auto-generated from this table — keep flags/usage in sync with `run` behavior.
 const COMMANDS = {
-  preview: {
+  'preview-doc': {
     summary: 'Open a markdown or HTML file in the preview modal on connected browser tabs',
-    usage: 'claude-code-kanban preview <file.md|file.html> [--session <id>]',
+    usage: 'claude-code-kanban preview-doc <file.md|file.html> [--session <id>]',
     flags: {
       '--session <id>': 'Switch focused session in the browser (does not link the file)',
     },
     run: runPreviewCli,
+  },
+  'link-doc': {
+    summary: 'Link a file to a session in the sidebar without opening the preview modal',
+    usage: 'claude-code-kanban link-doc <file> --session <id> [--unlink]',
+    flags: {
+      '--session <id>': 'Session to link the file to (required unless $PREVIEW_SESSION is set)',
+      '--unlink': 'Remove the link instead of adding it',
+    },
+    run: runLinkDocCli,
   },
   session: {
     summary: 'List or open Claude Code sessions',
@@ -202,6 +211,19 @@ async function cliFetch(urlPath, init) {
   }
 }
 
+// Every write verb posts JSON and reports failure the same way; `label` names the verb
+// in the error line. Returns false when the server refused, so callers just return 1.
+async function cliPostJson(urlPath, body, label) {
+  const res = await cliFetch(urlPath, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  if (res.ok) return true;
+  console.error(`${label} failed (${res.status}): ${await res.text()}`);
+  return false;
+}
+
 function reportCliError(e) {
   console.error(e.code === 'unreachable' ? e.message : (e.message || String(e)));
 }
@@ -209,22 +231,37 @@ function reportCliError(e) {
 async function runPreviewCli(args) {
   const filePathArg = args.find(a => !a.startsWith('--'));
   if (!filePathArg) {
-    printLeafHelp('preview', COMMANDS.preview);
+    printLeafHelp('preview-doc', COMMANDS['preview-doc']);
     return 1;
   }
   const sessionId = getArgValue(args, 'session') || process.env.PREVIEW_SESSION || null;
   const abs = path.resolve(filePathArg);
   try {
-    const res = await cliFetch('/api/preview', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path: abs, sessionId })
-    });
-    if (!res.ok) {
-      console.error(`Preview failed (${res.status}): ${await res.text()}`);
-      return 1;
-    }
+    if (!await cliPostJson('/api/preview', { path: abs, sessionId }, 'Preview')) return 1;
     console.log(`Preview opened: ${abs}${sessionId ? ` (session ${sessionId})` : ''}`);
+    return 0;
+  } catch (e) { reportCliError(e); return 1; }
+}
+
+async function runLinkDocCli(args) {
+  const filePathArg = args.find(a => !a.startsWith('--'));
+  const sessionArg = getArgValue(args, 'session') || process.env.PREVIEW_SESSION || null;
+  if (!filePathArg) {
+    printLeafHelp('link-doc', COMMANDS['link-doc']);
+    return 1;
+  }
+  if (!sessionArg) {
+    console.error('--session is required: linked docs are stored per session.');
+    return 1;
+  }
+  const unlink = args.includes('--unlink');
+  // Resolved here because the browser keys linked docs by full id, so a prefix won't match.
+  const resolved = await resolveSessionByIdOrPrefix(sessionArg);
+  if (!resolved) return 1;
+  const abs = path.resolve(filePathArg);
+  try {
+    if (!await cliPostJson('/api/document/link', { path: abs, sessionId: resolved.id, unlink }, 'Link')) return 1;
+    console.log(`Document ${unlink ? 'unlinked from' : 'linked to'} session ${resolved.id.slice(0, 8)}: ${abs}`);
     return 0;
   } catch (e) { reportCliError(e); return 1; }
 }
@@ -391,15 +428,7 @@ async function runSessionOpenCli(args) {
   const resolved = await resolveSessionByIdOrPrefix(idArg);
   if (!resolved) return 1;
   try {
-    const res = await cliFetch('/api/session/open', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: resolved.id })
-    });
-    if (!res.ok) {
-      console.error(`Open failed (${res.status}): ${await res.text()}`);
-      return 1;
-    }
+    if (!await cliPostJson('/api/session/open', { id: resolved.id }, 'Open')) return 1;
     console.log(`Session opened: ${resolved.id}${resolved.customTitle ? ` (${resolved.customTitle})` : ''}`);
     return 0;
   } catch (e) { reportCliError(e); return 1; }
@@ -415,15 +444,7 @@ async function runSessionPinCli(args) {
   const resolved = await resolveSessionByIdOrPrefix(idArg);
   if (!resolved) return 1;
   try {
-    const res = await cliFetch('/api/session/pin', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: resolved.id, state })
-    });
-    if (!res.ok) {
-      console.error(`Pin failed (${res.status}): ${await res.text()}`);
-      return 1;
-    }
+    if (!await cliPostJson('/api/session/pin', { id: resolved.id, state }, 'Pin')) return 1;
     const label = state === 'none' ? 'unpinned' : state;
     console.log(`Session ${label}: ${resolved.id}${resolved.customTitle ? ` (${resolved.customTitle})` : ''}`);
     return 0;

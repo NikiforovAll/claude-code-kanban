@@ -4517,8 +4517,7 @@ function _storagePreviewLinkedDoc(path) {
 }
 
 function _storageUnlinkDoc(sessionId, path) {
-  removeSessionPreviewPath(sessionId, path);
-  afterLinkedDocsChanged(sessionId);
+  setSessionDocLink(sessionId, path, true);
 }
 
 function _storageClearLinkedDocs(sessionId) {
@@ -4947,6 +4946,14 @@ function removeSessionPreviewPath(sessionId, filePath) {
 // Every surface that shows linked docs — info modal, session card badge, preview
 // toolbar toggle, storage manager — refreshes from one place, so a new mutator
 // can never forget one of them.
+// The one mutator: link/unlink plus the refresh, so no caller can do half of it.
+function setSessionDocLink(sessionId, filePath, unlink) {
+  if (!sessionId || !filePath) return;
+  if (unlink) removeSessionPreviewPath(sessionId, filePath);
+  else addSessionPreviewPath(sessionId, filePath);
+  afterLinkedDocsChanged(sessionId);
+}
+
 function afterLinkedDocsChanged(sessionId) {
   if (_infoModalSessionId === sessionId) refreshInfoModalLinkedDocs();
   renderSessions();
@@ -5050,14 +5057,9 @@ function togglePreviewSessionLink() {
     showToast('Select a session first');
     return;
   }
-  if (isPreviewLinkedToCurrentSession()) {
-    removeSessionPreviewPath(currentSessionId, currentPreviewPath);
-    showToast('Unlinked from session');
-  } else {
-    addSessionPreviewPath(currentSessionId, currentPreviewPath);
-    showToast('Linked to session');
-  }
-  afterLinkedDocsChanged(currentSessionId);
+  const unlink = isPreviewLinkedToCurrentSession();
+  setSessionDocLink(currentSessionId, currentPreviewPath, unlink);
+  showToast(unlink ? 'Unlinked from session' : 'Linked to session');
 }
 
 function refreshInfoModalLinkedDocs() {
@@ -5138,6 +5140,15 @@ async function handlePreviewOpenEvent(data) {
   }
   // The broadcast carries the path only — each tab fetches the document itself.
   openPreviewByPath(filePath);
+}
+
+// Linked docs live in localStorage, so the CLI can only reach them through a tab:
+// the server broadcasts the resolved path and every tab applies it idempotently.
+function handleDocumentLinkEvent(data) {
+  const { path: filePath, sessionId, unlink } = data;
+  if (!filePath || !sessionId) return;
+  setSessionDocLink(sessionId, filePath, unlink);
+  showToast(`${unlink ? 'Unlinked' : 'Linked'} ${filePath.split(/[\\/]/).pop()}`);
 }
 
 function getSessionBaseDir(sessionId) {
@@ -5258,9 +5269,8 @@ async function linkFileByPath(sessionId, raw, slot) {
       fail(data.error || 'File not found');
       return;
     }
-    addSessionPreviewPath(sessionId, data.path);
+    setSessionDocLink(sessionId, data.path, false);
     showToast('Linked to session', 'success');
-    afterLinkedDocsChanged(sessionId);
   } catch {
     fail('Failed to resolve file');
   }
@@ -5382,6 +5392,10 @@ function setupEventSource() {
 
       if (data.type === 'preview:open') {
         handlePreviewOpenEvent(data);
+      }
+
+      if (data.type === 'document:link') {
+        handleDocumentLinkEvent(data);
       }
 
       if (data.type === 'session:open') {

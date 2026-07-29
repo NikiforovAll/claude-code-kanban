@@ -2691,6 +2691,24 @@ app.post('/api/preview', async (req, res) => {
   }
 });
 
+// API: Link a file to a session's sidebar docs without opening the preview modal.
+// Not extension-restricted, matching /api/file/resolve — an unpreviewable link just
+// opens in the editor. Unlinking skips the stat so a deleted file can still be removed.
+app.post('/api/document/link', async (req, res) => {
+  try {
+    const { path: filePath, sessionId, unlink } = req.body || {};
+    if (typeof sessionId !== 'string' || !sessionId) return res.status(400).json({ error: 'sessionId is required' });
+    const abs = resolvePreviewPath(filePath);
+    if (!abs) return res.status(400).json({ error: 'path is required' });
+    if (!unlink) await statFileTarget(abs);
+    broadcast({ type: 'document:link', path: abs, sessionId, unlink: !!unlink });
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error in /api/document/link:', error);
+    res.status(error.status || 500).json({ error: error.message || 'Link failed' });
+  }
+});
+
 app.get('/api/session/resolve', (req, res) => {
   try {
     const idArg = (req.query.id || '').toString();
