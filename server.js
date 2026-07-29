@@ -2659,9 +2659,19 @@ async function readPreviewFile(absPath) {
   return { content: await fs.readFile(absPath, 'utf8'), kind };
 }
 
+// Paths copied out of a browser or a slide deck carry a URL fragment
+// ("deck.html#10"). Dropped only when the literal path is missing and the trimmed one
+// exists, so a filename that genuinely contains '#' still resolves to itself.
+function dropUrlFragment(abs) {
+  const i = abs.lastIndexOf('#');
+  if (i <= 0 || existsSync(abs)) return abs;
+  const trimmed = abs.slice(0, i);
+  return existsSync(trimmed) ? trimmed : abs;
+}
+
 function resolvePreviewPath(filePath, base) {
   if (!filePath || typeof filePath !== 'string') return null;
-  if (path.isAbsolute(filePath)) return filePath;
+  if (path.isAbsolute(filePath)) return dropUrlFragment(filePath);
   if (base && typeof base === 'string' && path.isAbsolute(base)) {
     let baseDir = base;
     try {
@@ -2670,9 +2680,9 @@ function resolvePreviewPath(filePath, base) {
       // base doesn't exist — fall back to dirname if it looks like a file
       if (path.extname(base)) baseDir = path.dirname(base);
     }
-    return path.resolve(baseDir, filePath);
+    return dropUrlFragment(path.resolve(baseDir, filePath));
   }
-  return path.resolve(filePath);
+  return dropUrlFragment(path.resolve(filePath));
 }
 
 app.post('/api/preview', async (req, res) => {
