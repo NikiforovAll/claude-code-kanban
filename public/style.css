@@ -353,10 +353,11 @@ body::before {
 }
 
 .section-header {
+  position: relative;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 14px 20px 10px;
+  gap: 8px;
+  padding: 14px 16px 10px 20px;
   font-size: 11px;
   font-weight: 500;
   text-transform: uppercase;
@@ -364,16 +365,95 @@ body::before {
   color: var(--text-muted);
 }
 
-.filter-row {
-  display: flex;
-  gap: 6px;
-  padding: 0 16px 10px;
+.section-header-label {
+  flex: 0 0 auto;
 }
 
-.reset-btn {
-  flex-shrink: 0;
-  width: 32px;
-  height: 32px;
+/* Non-default filters, spelled out in the header so folding them into the popover
+   never hides *that* the list is filtered. Empty (and invisible) at defaults. */
+.filter-summary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  color: var(--accent-text);
+}
+
+.section-header-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+
+/* Quiet at rest: no box around a header glyph. The hairline arrives on hover.
+   Compounded with .icon-btn because that rule is declared later in this file and would
+   otherwise win on size, border, and colour. */
+.icon-btn.section-btn {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  background: none;
+  border-color: transparent;
+  color: var(--text-muted);
+}
+
+.icon-btn.section-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--border);
+  color: var(--text-primary);
+}
+
+.icon-btn.section-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-dim);
+}
+
+.icon-btn.section-btn svg {
+  width: 15px;
+  height: 15px;
+  stroke-width: 1.75;
+}
+
+/* Ember only while something is actually filtered — at rest the funnel is just chrome. */
+.icon-btn.section-btn.has-filters {
+  color: var(--accent-text);
+}
+
+.filter-menu {
+  display: none;
+  position: absolute;
+  top: calc(100% - 2px);
+  right: 16px;
+  left: 16px;
+  z-index: 100;
+  padding: 8px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow:
+    0 16px 44px rgba(0, 0, 0, 0.38),
+    0 4px 12px rgba(0, 0, 0, 0.2);
+  cursor: default;
+}
+
+.filter-menu.open {
+  display: block;
+}
+
+.filter-row {
+  display: flex;
+  gap: 5px;
+}
+
+.filter-row + .filter-row {
+  margin-top: 5px;
 }
 
 .filter-dropdown {
@@ -397,6 +477,17 @@ body::before {
 
 .filter-dropdown:hover {
   border-color: var(--border);
+}
+
+/* A filter holding a non-default value tints toward the ember, so it reads as "active"
+   before you read the value. Border and text only — the fill never floods. */
+.filter-dropdown.non-default {
+  color: var(--accent-text);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.filter-dropdown.non-default:hover {
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
 }
 
 .filter-dropdown option {

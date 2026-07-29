@@ -56,10 +56,58 @@
       <!-- Tasks -->
       <div class="sidebar-section flex-1">
         <div class="section-header" onclick="toggleSection('sessions-filters', 'sessions-chevron')" style="cursor: pointer;">
-          <span>Sessions</span>
-          <svg id="sessions-chevron" class="collapse-chevron" viewBox="0 0 24 24">
-            <path d="M6 9l6 6 6-6"/>
-          </svg>
+          <span class="section-header-label">Sessions</span>
+          <span id="filter-summary" class="filter-summary" title=""></span>
+          <span class="section-header-actions">
+            <button
+              id="filter-menu-btn"
+              class="icon-btn section-btn"
+              onclick="toggleFilterMenu(event)"
+              title="Filters"
+              aria-label="Filters"
+              aria-haspopup="true"
+              aria-expanded="false"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M20 4H4l6.5 8v6l3 2v-8L20 4z"/>
+              </svg>
+            </button>
+            <button
+              class="icon-btn section-btn"
+              onclick="event.stopPropagation(); resetState()"
+              title="Reset filters and clear selection"
+              aria-label="Reset filters and clear selection"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 2v6h6"/>
+                <path d="M3.51 15a9 9 0 1 0 2.13-9.36L3 8"/>
+              </svg>
+            </button>
+            <svg id="sessions-chevron" class="collapse-chevron" viewBox="0 0 24 24">
+              <path d="M6 9l6 6 6-6"/>
+            </svg>
+          </span>
+          <div id="filter-menu" class="filter-menu" onclick="event.stopPropagation()">
+            <div class="filter-row">
+              <select id="project-filter" class="filter-dropdown" onchange="filterByProject(this.value)" aria-label="Filter by project">
+                <option value="">All Projects</option>
+              </select>
+            </div>
+            <div class="filter-row">
+              <select id="session-filter" class="filter-dropdown" onchange="filterBySessions(this.value)" aria-label="Filter by session status">
+                <option value="all">All Sessions</option>
+                <option value="active">Active Only</option>
+              </select>
+            </div>
+            <div class="filter-row">
+              <select id="session-limit" class="filter-dropdown" onchange="changeSessionLimit(this.value)" aria-label="Number of sessions to show">
+                <option value="10">Show 10</option>
+                <option value="20">Show 20</option>
+                <option value="50">Show 50</option>
+                <option value="all">Show All</option>
+              </select>
+            </div>
+          </div>
         </div>
         <div id="sessions-filters" class="collapsible-section">
           <div class="search-container">
@@ -73,29 +121,6 @@
             <button id="search-clear-btn" class="search-clear" onclick="clearSearch()" title="Clear search" aria-label="Clear search">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M18 6L6 18M6 6l12 12"/>
-              </svg>
-            </button>
-          </div>
-          <div class="filter-row">
-            <select id="project-filter" class="filter-dropdown" onchange="filterByProject(this.value)" aria-label="Filter by project">
-              <option value="">All Projects</option>
-            </select>
-            <select id="session-filter" class="filter-dropdown" onchange="filterBySessions(this.value)" aria-label="Filter by session status">
-              <option value="all">All Sessions</option>
-              <option value="active">Active Only</option>
-            </select>
-          </div>
-          <div class="filter-row">
-            <select id="session-limit" class="filter-dropdown" onchange="changeSessionLimit(this.value)" aria-label="Number of sessions to show">
-              <option value="10">Show 10</option>
-              <option value="20">Show 20</option>
-              <option value="50">Show 50</option>
-              <option value="all">Show All</option>
-            </select>
-            <button class="icon-btn reset-btn" onclick="resetState()" title="Reset all filters" aria-label="Reset all filters">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
-                <path d="M3 12a9 9 0 1 1 9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
-                <path d="M3 22v-6h6"/>
               </svg>
             </button>
           </div>

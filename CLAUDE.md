@@ -78,7 +78,6 @@ When modifying a feature, open **both** the JS region and the matching CSS regio
 | EVENT_DELEGATION | Click handlers for project group collapse/expand |
 | THEME | Dark/light toggle, hljs theme sync, `localStorage` persistence |
 | SIDEBAR_LAYOUT | Collapse/expand sidebar, drag-resize sidebar and panels |
-| PREFERENCES | Load saved filter/limit/project from `localStorage` |
 | SESSION_INFO | Session info modal: metadata grid, team config, plan |
 | PLAN | Plan viewer modal, refresh, open-in-editor |
 | OWNER_FILTER | Per-owner task filter in kanban header |

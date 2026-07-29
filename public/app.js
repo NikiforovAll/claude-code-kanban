@@ -1,13 +1,17 @@
 //#region STATE
+// The baseline "nothing is filtered" state: what resetState() returns to, what updateUrl() omits
+// from the query string, and what decides whether a control tints ember in the header summary.
+const FILTER_DEFAULTS = { project: '__recent__', session: 'active', limit: '20' };
+
 let sessions = [];
 let currentSessionId = null;
 let currentTasks = [];
 let viewMode = 'session';
-let sessionFilter = 'active';
+let sessionFilter = FILTER_DEFAULTS.session;
 // Only meaningful while sessionFilter === 'active' (filterBySessions clears it otherwise)
 const activityFilter = new Set(); // kinds: 'waiting' | 'active'
-let sessionLimit = '20';
-let filterProject = '__recent__'; // null = all, '__recent__' = last 24h, or project path
+let sessionLimit = FILTER_DEFAULTS.limit;
+let filterProject = FILTER_DEFAULTS.project; // null = all, '__recent__' = last 24h, or project path
 let recentProjects = new Set();
 let projectsCacheDirty = true;
 const collapsedProjectGroups = new Set();
@@ -75,9 +79,9 @@ function updateUrl() {
   if (viewMode === 'all') params.set('view', 'all');
   if (viewMode === 'project' && currentProjectPath) params.set('projectView', btoa(currentProjectPath));
   if (currentSessionId) params.set('session', currentSessionId);
-  if (sessionFilter !== 'active') params.set('filter', sessionFilter);
-  if (sessionLimit !== '20') params.set('limit', sessionLimit);
-  if (filterProject && filterProject !== '__recent__') params.set('project', filterProject);
+  if (sessionFilter !== FILTER_DEFAULTS.session) params.set('filter', sessionFilter);
+  if (sessionLimit !== FILTER_DEFAULTS.limit) params.set('limit', sessionLimit);
+  if (filterProject && filterProject !== FILTER_DEFAULTS.project) params.set('project', filterProject);
   if (ownerFilter) params.set('owner', ownerFilter);
   if (searchQuery) params.set('search', searchQuery);
   if (messagePanelOpen) params.set('messages', '1');
@@ -94,6 +98,9 @@ function persistLastView() {
       view: viewMode,
       session: currentSessionId,
       projectPath: viewMode === 'project' ? currentProjectPath : null,
+      // The project filter also lives in the URL, but the hub recreates each iframe at the app's
+      // base URL on reload, so the query string alone doesn't survive a hub refresh.
+      project: filterProject,
     };
     localStorage.setItem(LAST_VIEW_KEY, JSON.stringify(data));
   } catch (_) {}
@@ -112,9 +119,9 @@ function resetState() {
   try {
     localStorage.removeItem(LAST_VIEW_KEY);
   } catch (_) {}
-  sessionFilter = 'active';
-  sessionLimit = '20';
-  filterProject = '__recent__';
+  sessionFilter = FILTER_DEFAULTS.session;
+  sessionLimit = FILTER_DEFAULTS.limit;
+  filterProject = FILTER_DEFAULTS.project;
   ownerFilter = '';
   searchQuery = '';
   viewMode = 'all';
@@ -126,7 +133,7 @@ function resetState() {
   const searchInput = document.getElementById('search-input');
   if (searchInput) searchInput.value = '';
   document.getElementById('search-clear-btn')?.classList.remove('visible');
-  loadPreferences();
+  renderFilterState();
   fetchSessions().then(() => showAllTasks());
 }
 
@@ -5820,9 +5827,94 @@ function getOwnerColor(name) {
 
 //#region FILTERS
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
+function toggleFilterMenu(e) {
+  // Stops the click reaching .section-header (which would collapse the section) *and*
+  // document (which would immediately close the menu we are opening).
+  e?.stopPropagation();
+  if (closeFilterMenu()) return;
+  document.getElementById('filter-menu').classList.add('open');
+  document.getElementById('filter-menu-btn')?.setAttribute('aria-expanded', 'true');
+  renderFilterState();
+  document.addEventListener('click', closeFilterMenu, { once: true });
+  // Capture phase: the global keydown handler bails out on SELECT targets, and every
+  // focusable thing in this popover is a select — Escape would never reach it otherwise.
+  document.addEventListener('keydown', filterMenuKeydown, true);
+  document.getElementById('project-filter')?.focus();
+}
+
+function filterMenuKeydown(e) {
+  if (e.key !== 'Escape') return;
+  e.stopPropagation();
+  if (closeFilterMenu()) document.getElementById('filter-menu-btn')?.focus();
+}
+
+function closeFilterMenu() {
+  const menu = document.getElementById('filter-menu');
+  if (!menu?.classList.contains('open')) return false;
+  menu.classList.remove('open');
+  document.getElementById('filter-menu-btn')?.setAttribute('aria-expanded', 'false');
+  document.removeEventListener('keydown', filterMenuKeydown, true);
+  return true;
+}
+
+// One row per filter control: the select it mirrors, its value, whether it differs from the
+// default, and two label forms — terse tokens for the header strip (which has ~15 characters
+// before the sidebar's width ellipsises it) and long form for its tooltip.
+const FILTERS = [
+  {
+    id: 'project-filter',
+    value: () => filterProject ?? '',
+    active: () => filterProject !== FILTER_DEFAULTS.project,
+    short: () => (filterProject ? filterProject.split(/[/\\]/).pop() : 'all proj'),
+    long: () => (filterProject ? `project ${filterProject}` : 'all projects'),
+  },
+  {
+    id: 'session-filter',
+    value: () => sessionFilter,
+    active: () => sessionFilter !== FILTER_DEFAULTS.session,
+    short: () => 'inactive',
+    long: () => 'including inactive sessions',
+  },
+  {
+    id: 'session-limit',
+    value: () => sessionLimit,
+    active: () => sessionLimit !== FILTER_DEFAULTS.limit,
+    short: () => (sessionLimit === 'all' ? 'n=∞' : `n=${sessionLimit}`),
+    long: () => (sessionLimit === 'all' ? 'no session limit' : `showing ${sessionLimit}`),
+  },
+];
+
+// Keeps the header (summary + funnel tint) and the popover's selects in sync with state.
+// Safe to call on every filter change — it only touches classes, values, and text.
+function renderFilterState() {
+  const short = [];
+  const long = [];
+  for (const f of FILTERS) {
+    const active = f.active();
+    if (active) {
+      short.push(f.short());
+      long.push(f.long());
+    }
+    const el = document.getElementById(f.id);
+    if (!el) continue;
+    const value = String(f.value());
+    if (el.value !== value) el.value = value;
+    el.classList.toggle('non-default', active);
+  }
+
+  const summary = document.getElementById('filter-summary');
+  if (summary) {
+    summary.textContent = short.join(' · ');
+    summary.title = long.length ? `Active filters: ${long.join(', ')}` : '';
+  }
+  document.getElementById('filter-menu-btn')?.classList.toggle('has-filters', short.length > 0);
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
 function filterBySessions(value) {
   sessionFilter = value;
   if (value !== 'active') activityFilter.clear();
+  renderFilterState();
   updateUrl();
   // Instant feedback from cached data, then refetch — the cached list was fetched
   // with the previous filter's server params (e.g. filter=active), so "All Sessions"
@@ -5835,6 +5927,7 @@ function filterBySessions(value) {
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
 function changeSessionLimit(value) {
   sessionLimit = value;
+  renderFilterState();
   updateUrl();
   fetchSessions();
 }
@@ -5928,6 +6021,7 @@ document.addEventListener('click', (e) => {
 // Used in HTML; also called by the hub project shim, so no biome suppression is needed.
 function filterByProject(project) {
   filterProject = project || null;
+  renderFilterState();
   updateUrl();
   fetchSessions(false);
   showAllTasks();
@@ -5989,6 +6083,8 @@ function renderProjectDropdown(dropdown, projects) {
         return `<option value="${escapeHtml(p.path)}"${selected} title="${escapeHtml(p.path)}">${escapeHtml(name)}</option>`;
       })
       .join('');
+  // The option list just changed under the select — re-assert tint and header summary.
+  renderFilterState();
 }
 
 function updateThemeColor(isLight) {
@@ -6208,14 +6304,6 @@ function loadPanelWidths() {
     const w = localStorage.getItem(`${id}-width`);
     if (w) document.getElementById(id).style.setProperty(cssVar, w);
   });
-}
-
-//#endregion
-
-//#region PREFERENCES
-function loadPreferences() {
-  document.getElementById('session-filter').value = sessionFilter;
-  document.getElementById('session-limit').value = sessionLimit;
 }
 
 //#endregion
@@ -7265,13 +7353,16 @@ fetch('/api/version')
   .catch(() => {});
 
 const urlState = getUrlState();
-sessionFilter = urlState.filter || 'active';
-sessionLimit = urlState.limit || '20';
-filterProject = urlState.project || '__recent__';
+const lastView = loadLastView();
+sessionFilter = urlState.filter || FILTER_DEFAULTS.session;
+sessionLimit = urlState.limit || FILTER_DEFAULTS.limit;
+// The URL wins; the persisted view only fills in when it carries a project key, so 'all' (null)
+// restores as 'all' and pre-existing blobs without the key still default to '__recent__'.
+filterProject = urlState.project || (lastView && 'project' in lastView ? lastView.project : FILTER_DEFAULTS.project);
 ownerFilter = urlState.owner || '';
 searchQuery = urlState.search || '';
 
-loadPreferences();
+renderFilterState();
 pinnedSessionIds = loadPinnedSessions();
 stickySessionIds = loadStickySessions();
 setupEventSource();
@@ -7333,12 +7424,12 @@ Promise.all([
 
 window.addEventListener('popstate', () => {
   const s = getUrlState();
-  sessionFilter = s.filter || 'active';
-  sessionLimit = s.limit || '20';
-  filterProject = s.project || '__recent__';
+  sessionFilter = s.filter || FILTER_DEFAULTS.session;
+  sessionLimit = s.limit || FILTER_DEFAULTS.limit;
+  filterProject = s.project || FILTER_DEFAULTS.project;
   ownerFilter = s.owner || '';
   searchQuery = s.search || '';
-  loadPreferences();
+  renderFilterState();
   // fetchSessions derives query params from the globals set above — refetch so
   // back/forward across a filter change doesn't render a stale server-filtered list.
   fetchSessions(false);
