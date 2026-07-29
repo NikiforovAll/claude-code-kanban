@@ -5785,7 +5785,7 @@ document.addEventListener('click', (e) => {
   }
 });
 
-// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+// Used in HTML; also called by the hub project shim, so no biome suppression is needed.
 function filterByProject(project) {
   filterProject = project || null;
   updateUrl();
@@ -5833,10 +5833,16 @@ async function updateProjectDropdown() {
 
 function renderProjectDropdown(dropdown, projects) {
   const recentSelected = filterProject === '__recent__' ? ' selected' : '';
+  // A hub-pushed project with no session history isn't in /api/projects, so synthesize its
+  // option here rather than in the hub shim — this also survives the SSE re-render below.
+  const list =
+    filterProject && filterProject !== '__recent__' && !projects.some((p) => p.path === filterProject)
+      ? [...projects, { path: filterProject, modifiedAt: null }]
+      : projects;
   dropdown.innerHTML =
     '<option value="">All Projects</option>' +
     `<option value="__recent__"${recentSelected}>Recent (24h)</option>` +
-    projects
+    list
       .map((p) => {
         const name = p.path.split(/[/\\]/).pop();
         const selected = p.path === filterProject ? ' selected' : '';
@@ -7209,13 +7215,19 @@ window.addEventListener('popstate', () => {
 // #region HUB_INTEGRATION
 document.addEventListener('keydown', (e) => {
   if (!window.__HUB__?.enabled) return;
-  if (e.ctrlKey && e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+  const fwd = (key) => {
     e.preventDefault();
-    window.parent?.postMessage({ type: 'hub:keydown', key: e.key }, '*');
+    window.parent?.postMessage({ type: 'hub:keydown', key, ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey }, '*');
+  };
+  if (e.ctrlKey && e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+    fwd(e.key);
+  }
+  // Its own branch: the Alt+digit case below requires !ctrlKey.
+  if (e.ctrlKey && e.altKey && !e.shiftKey && !e.metaKey && e.key.toLowerCase() === 'p') {
+    fwd(e.key);
   }
   if (e.altKey && !e.ctrlKey && !e.shiftKey && !e.metaKey && /^[1-9]$/.test(e.key)) {
-    e.preventDefault();
-    window.parent?.postMessage({ type: 'hub:keydown', key: e.key }, '*');
+    fwd(e.key);
   }
 });
 
@@ -7243,10 +7255,12 @@ window.hubNavigate = function hubNavigate(app, url) {
   window.parent?.postMessage({ type: 'hub:navigate', app, url }, '*');
 };
 
+// Hoisted out of initHubTheme so initHubProject can share it.
+const hubOrigin = () => (window.__HUB__?.url ? new URL(window.__HUB__.url).origin : null);
+
 (function initHubTheme() {
   const getTheme = () => (document.body.classList.contains('light') ? 'light' : 'dark');
   const getColorTheme = () => document.body.dataset.colorTheme || 'ember';
-  const hubOrigin = () => (window.__HUB__?.url ? new URL(window.__HUB__.url).origin : null);
   // lastTheme/lastColorTheme are updated synchronously when applying a hub
   // message, so the (async) observer sees no diff and doesn't echo it back.
   let lastTheme = getTheme();
@@ -7274,6 +7288,17 @@ window.hubNavigate = function hubNavigate(app, url) {
   }).observe(document.body, {
     attributes: true,
     attributeFilter: ['class', 'data-color-theme'],
+  });
+})();
+
+(function initHubProject() {
+  window.addEventListener('message', (e) => {
+    if (e.source !== window.parent || e.origin !== hubOrigin()) return;
+    if (e.data?.type !== 'hub:project') return;
+    const dirPath = e.data.project;
+    if (typeof dirPath !== 'string' || !dirPath || dirPath === filterProject) return;
+    filterByProject(dirPath);
+    updateProjectDropdown();
   });
 })();
 // #endregion HUB_INTEGRATION
