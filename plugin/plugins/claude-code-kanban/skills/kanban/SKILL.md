@@ -1,11 +1,14 @@
 ---
 name: kanban
 description: Drive the claude-code-kanban dashboard from this session — focus the current session in the browser, pin/unpin it in the sidebar, preview a markdown file, or inspect session stats and messages. Use when the user mentions kanban or cck.
+argument-hint: '[open|pin|unpin|pins|preview|list|view|peek] [target]'
 ---
 
 # Kanban Skill
 
 The current Claude session id is `${CLAUDE_SESSION_ID}` (substituted when this skill loads), so the user never needs to look it up.
+
+When the user passes arguments, map them to the matching command below (`open` → `session open`, `pin`/`unpin`/`pins` → `session pin`/`--unpin`/`session pins`, `list`/`view`/`peek` → the read-only verbs); with no arguments, open the current session.
 
 Prefer the bare `claude-code-kanban` binary; fall back to `npx claude-code-kanban` when it is not on PATH, or when the user asks for npx explicitly.
 

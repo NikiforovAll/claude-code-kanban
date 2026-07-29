@@ -1,5 +1,5 @@
 {
   "name": "claude-code-kanban",
-  "version": "2.3.0",
+  "version": "2.3.1",
   "description": "claude-code-kanban dashboard integration: agent activity tracking, context statusline, and a skill to drive the board from a session"
 }
