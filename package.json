@@ -4,7 +4,7 @@
   "description": "A web-based Kanban board for viewing Claude Code tasks with agent teams support",
   "main": "server.js",
   "bin": {
-    "claude-code-kanban": "./server.js"
+    "claude-code-kanban": "server.js"
   },
   "scripts": {
     "start": "node server.js",
