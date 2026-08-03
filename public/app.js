@@ -6395,7 +6395,7 @@ function showInfoModal(session, teamConfig, tasks, planContent, parentInfo) {
   infoRows.push(['Session', session.id, { openClaudeDir: true, openFile: session.jsonlPath }]);
   if (parentInfo?.parentSessionId) {
     infoRows.push([
-      'Forked from',
+      parentInfo.relation === 'compact' ? 'Continued from' : 'Forked from',
       parentInfo.parentSessionId,
       { openClaudeDir: true, openFile: parentInfo.parentJsonlPath, openSession: parentInfo.parentSessionId },
     ]);

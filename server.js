@@ -634,6 +634,7 @@ function refreshSessionMetadataPath(jsonlPath) {
   // Direct assign (not guarded) so a /goal clear propagates as null.
   existing.goal = info.goal || null;
   if (info.logicalParentUuid) existing.logicalParentUuid = info.logicalParentUuid;
+  if (info.compactBoundaryUuid) existing.compactBoundaryUuid = info.compactBoundaryUuid;
   return true;
 }
 
@@ -720,7 +721,8 @@ function loadSessionMetadata() {
           customTitle: sessionInfo.customTitle || null,
           goal: sessionInfo.goal || null,
           jsonlPath: jsonlPath,
-          logicalParentUuid: sessionInfo.logicalParentUuid || null
+          logicalParentUuid: sessionInfo.logicalParentUuid || null,
+          compactBoundaryUuid: sessionInfo.compactBoundaryUuid || null
         };
         sessionIds.push(sessionId);
       }
@@ -1250,15 +1252,22 @@ app.get('/api/sessions', async (req, res) => {
 
     // Suppress parent sessions that have a compact continuation — compaction is involuntary
     // (context limit hit), not an intentional fork. Only the continuation is shown.
+    // A fork off an already-compacted transcript looks identical from the metadata alone
+    // (its copied compact_boundary gives the child a logicalParentUuid), so the verdict
+    // comes from lookupParentSession, not from the anchor's presence.
     const compactSuppressed = new Set();
     for (const [sid] of sessionsMap) {
-      const compactAnchor = metadata[sid]?.logicalParentUuid;
-      if (!compactAnchor) continue;
+      // Cheap pre-gate: only a session with a boundary anchor can be a continuation,
+      // and lookupParentSession reads JSONLs on a cold cache.
+      if (!metadata[sid]?.logicalParentUuid) continue;
       const parent = lookupParentSession(sid);
-      if (parent.parentSessionId && sessionsMap.has(parent.parentSessionId)) {
-        compactSuppressed.add(parent.parentSessionId);
-        sessionsMap.get(sid).continuedFromSessionId = parent.parentSessionId;
-      }
+      if (parent.relation !== 'compact' || !sessionsMap.has(parent.parentSessionId)) continue;
+      compactSuppressed.add(parent.parentSessionId);
+      sessionsMap.get(sid).continuedFromSessionId = parent.parentSessionId;
+    }
+    // Invariant: a running process is never a superseded lineage, whatever the heuristics say.
+    if (compactSuppressed.size) {
+      for (const s of loadLiveSessions()) compactSuppressed.delete(s.sessionId);
     }
     for (const sid of compactSuppressed) sessionsMap.delete(sid);
 
@@ -2092,12 +2101,14 @@ function findForkAnchorUuid(jsonlPath) {
   }
   return firstUuid;
 }
-// Fallback when metadata cache lacks logicalParentUuid (older entries, cold cache).
-// Hot path reads from metadata directly; this never runs from the suppression loop.
+// Fallback when the metadata cache lacks the boundary pair (older entries, cold cache).
+// Reached only from lookupParentSession, whose result is memoized for the process life —
+// at most one read per session, never per request.
 // Bounded read (~1 MB) mirrors readSessionInfoFromJsonl's HEAD_MAX — compact_boundary
 // always sits in the preamble before the first user/assistant record.
 const COMPACT_ANCHOR_READ_MAX = 1048576;
-function findCompactAnchorUuid(jsonlPath) {
+// Returns { anchor, boundaryUuid } for the preamble compact_boundary, or null.
+function findCompactBoundary(jsonlPath) {
   let fd;
   try {
     fd = openSync(jsonlPath, 'r');
@@ -2111,17 +2122,23 @@ function findCompactAnchorUuid(jsonlPath) {
       try {
         const d = JSON.parse(l);
         if (d.type === 'user' || d.type === 'assistant') return null;
-        if (d.subtype === 'compact_boundary' && d.logicalParentUuid) return d.logicalParentUuid;
+        if (d.subtype === 'compact_boundary' && d.logicalParentUuid) {
+          return { anchor: d.logicalParentUuid, boundaryUuid: d.uuid || null };
+        }
       } catch { /* skip malformed */ }
     }
     return null;
   } catch { return null; }
   finally { if (fd !== undefined) { try { closeSync(fd); } catch {} } }
 }
-function findSessionContainingUuid(projectDir, targetUuid, excludeJsonlPath, maxBirthtimeMs) {
+// forkProbeUuid (optional): the child's own compact_boundary uuid. It only shows up
+// in the parent when the child copied the record — i.e. a fork off an already-compacted
+// transcript, not a compact continuation. Probed once, on the winner's text, which the
+// scan already read.
+function findSessionContainingUuid(projectDir, targetUuid, excludeJsonlPath, maxBirthtimeMs, forkProbeUuid) {
   let files;
   try { files = readdirSync(projectDir); } catch { return null; }
-  let best = null;
+  let best = null, bestBirthtime = Infinity, bestText = null;
   for (const f of files) {
     if (!f.endsWith('.jsonl')) continue;
     const fp = path.join(projectDir, f);
@@ -2129,7 +2146,7 @@ function findSessionContainingUuid(projectDir, targetUuid, excludeJsonlPath, max
     let birthtime = 0;
     try { birthtime = statSync(fp).birthtimeMs; } catch { continue; }
     if (maxBirthtimeMs != null && birthtime >= maxBirthtimeMs) continue;
-    if (best && birthtime >= best.birthtime) continue;
+    if (birthtime >= bestBirthtime) continue;
     let text;
     try { text = readFileSync(fp, 'utf8'); } catch { continue; }
     if (!text.includes(targetUuid)) continue;
@@ -2138,32 +2155,51 @@ function findSessionContainingUuid(projectDir, targetUuid, excludeJsonlPath, max
       try {
         const d = JSON.parse(l);
         if (d.uuid === targetUuid && d.sessionId) {
-          best = { parentSessionId: d.sessionId, parentJsonlPath: fp, birthtime };
+          best = { parentSessionId: d.sessionId, parentJsonlPath: fp, isFork: false };
+          bestBirthtime = birthtime;
+          bestText = text;
           break;
         }
       } catch { /* skip */ }
     }
   }
   if (!best) return null;
-  return { parentSessionId: best.parentSessionId, parentJsonlPath: best.parentJsonlPath };
+  if (forkProbeUuid) best.isFork = bestText.includes(forkProbeUuid);
+  return best;
 }
 function lookupParentSession(sessionId) {
   if (parentSessionCache.has(sessionId)) return parentSessionCache.get(sessionId);
   const meta = loadSessionMetadata()[sessionId];
-  const result = { parentSessionId: null, parentJsonlPath: null, isCompact: false };
+  // relation is the single verdict: 'none' (no parent found), 'compact' (this session
+  // continues a lineage the parent could not hold) or 'fork' (an intentional branch off
+  // a parent that keeps its own life). isCompact/isFork are derived views of it.
+  const result = { parentSessionId: null, parentJsonlPath: null, relation: 'none', isCompact: false, isFork: false };
   if (meta?.jsonlPath) {
-    const compactAnchor = meta.logicalParentUuid || findCompactAnchorUuid(meta.jsonlPath);
-    result.isCompact = !!compactAnchor;
+    // Metadata entries cached before compactBoundaryUuid existed carry the anchor
+    // without the boundary uuid — re-read rather than lose fork detection.
+    const boundary = (meta.logicalParentUuid && meta.compactBoundaryUuid)
+      ? { anchor: meta.logicalParentUuid, boundaryUuid: meta.compactBoundaryUuid }
+      : findCompactBoundary(meta.jsonlPath);
+    const compactAnchor = boundary?.anchor ?? meta.logicalParentUuid ?? null;
+    // A fork copies the parent's early records verbatim, so its first uuid is the anchor.
     const anchorUuid = compactAnchor ?? findForkAnchorUuid(meta.jsonlPath);
     if (anchorUuid) {
       let selfBirthtime;
       try { selfBirthtime = statSync(meta.jsonlPath).birthtimeMs; } catch { /* ignore */ }
       if (selfBirthtime != null) {
-        const hit = findSessionContainingUuid(path.dirname(meta.jsonlPath), anchorUuid, meta.jsonlPath, selfBirthtime);
-        if (hit) Object.assign(result, hit);
+        const hit = findSessionContainingUuid(path.dirname(meta.jsonlPath), anchorUuid, meta.jsonlPath, selfBirthtime, boundary?.boundaryUuid);
+        if (hit) {
+          // No compact boundary at all → fork by construction; with one, the copied
+          // boundary uuid (hit.isFork) is what separates a fork from a continuation.
+          result.parentSessionId = hit.parentSessionId;
+          result.parentJsonlPath = hit.parentJsonlPath;
+          result.relation = (!compactAnchor || hit.isFork) ? 'fork' : 'compact';
+        }
       }
     }
   }
+  result.isCompact = result.relation === 'compact';
+  result.isFork = result.relation === 'fork';
   parentSessionCache.set(sessionId, result);
   return result;
 }
