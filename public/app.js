@@ -6535,7 +6535,9 @@ function showInfoModal(session, teamConfig, tasks, planContent, parentInfo) {
   }
 
   bodyEl.innerHTML = html;
-  bindLinkedDocsHandlers(bodyEl, session.id);
+  // Bind to the section, not bodyEl: bodyEl outlives the modal, so listeners on it
+  // would stack up once per open and fire the click handler N times.
+  bindLinkedDocsHandlers(bodyEl.querySelector('.linked-docs-section'), session.id);
   const alreadyVisible = modal.classList.contains('visible');
   _infoModalSessionId = session.id;
   updateStickyBtnState();
