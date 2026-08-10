@@ -8,7 +8,10 @@ const readline = require('readline');
 const chokidar = require('chokidar');
 const os = require('os');
 const crypto = require('crypto');
-const { spawn, spawnSync } = require('child_process');
+const { spawnSync } = require('child_process');
+const { assertOpenTarget, openInEditor } = require('./lib/open-editor');
+const { createNetGuard } = require('./lib/net-guard');
+const { isContained } = require('./lib/contain');
 
 const {
   readRecentMessages: _readRecentMessagesUncached,
@@ -44,6 +47,13 @@ if (require("./cli").runCli(process.argv)) return;
 
 const app = express();
 const PORT = process.env.PORT || 3541;
+
+// Mounted before express.json() so a rejected request never buffers a body, and
+// before the /api catch-all so no route escapes the check.
+const net = createNetGuard({ appName: 'Claude Task Kanban' });
+app.use(net.hostGuard);
+app.use(net.frameGuard);
+app.use(net.originGuard);
 
 // Parse --dir flag for custom Claude directory
 function getClaudeDir() {
@@ -198,8 +208,10 @@ function getGitBranch(cwd) {
   if (cached && now - cached.ts < GIT_BRANCH_TTL_MS) return cached.branch;
   let branch = null;
   try {
-    const r = spawnSync('git', ['-C', cwd, 'rev-parse', '--abbrev-ref', 'HEAD'], {
-      encoding: 'utf8', timeout: 500, windowsHide: true
+    // cwd rather than `-C <cwd>`: a path beginning with a dash would otherwise be
+    // read by git as an option.
+    const r = spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+      cwd, encoding: 'utf8', timeout: 500, windowsHide: true
     });
     if (r.status === 0) {
       const out = (r.stdout || '').trim();
@@ -254,8 +266,28 @@ function checkAgentStatus(agentDir, stale, logMtime, isTeam) {
   return result;
 }
 
+// isContained canonicalises both sides with realpath, which costs ~100x a plain
+// path.join. This is called once per session on the /api/sessions hot path, and
+// the verdict for a given name cannot change while TEAMS_DIR is fixed — so the
+// resolved path (or the null rejection) is memoized.
+const teamPathCache = new Map();
+const TEAM_PATH_CACHE_MAX = 1000;
+
+function teamConfigPath(teamName) {
+  if (typeof teamName !== 'string' || !teamName) return null;
+  if (teamPathCache.has(teamName)) return teamPathCache.get(teamName);
+  const candidate = path.join(TEAMS_DIR, teamName, 'config.json');
+  // TEAMS_DIR follows --dir / CLAUDE_CONFIG_DIR, so containment is checked against
+  // the module-level constant rather than a hardcoded ~/.claude/teams.
+  const configPath = isContained(candidate, TEAMS_DIR) ? candidate : null;
+  if (teamPathCache.size >= TEAM_PATH_CACHE_MAX) teamPathCache.clear();
+  teamPathCache.set(teamName, configPath);
+  return configPath;
+}
+
 function isTeamSession(sessionId) {
-  return existsSync(path.join(TEAMS_DIR, sessionId, 'config.json'));
+  const configPath = teamConfigPath(sessionId);
+  return !!configPath && existsSync(configPath);
 }
 
 const teamConfigCache = new Map();
@@ -265,8 +297,8 @@ function loadTeamConfig(teamName) {
   const cached = teamConfigCache.get(teamName);
   if (cached && Date.now() - cached.ts < TEAM_CACHE_TTL) return cached.data;
   try {
-    const configPath = path.join(TEAMS_DIR, teamName, 'config.json');
-    if (!existsSync(configPath)) return null;
+    const configPath = teamConfigPath(teamName);
+    if (!configPath || !existsSync(configPath)) return null;
     const data = JSON.parse(readFileSync(configPath, 'utf8'));
     teamConfigCache.set(teamName, { data, ts: Date.now() });
     return data;
@@ -415,6 +447,12 @@ app.param('sessionId', (req, res, next, val) => {
 });
 app.param('taskId', (req, res, next, val) => {
   if (!isSafeId(val)) return res.status(400).json({ error: 'Invalid task ID' });
+  next();
+});
+// Team names are directory names under TEAMS_DIR, so /api/teams/:name was a
+// straight traversal before this.
+app.param('name', (req, res, next, val) => {
+  if (!isSafeId(val)) return res.status(400).json({ error: 'Invalid team name' });
   next();
 });
 
@@ -1662,17 +1700,12 @@ app.get('/api/sessions/:sessionId/workflows/:wfId/run', async (req, res) => {
   }
 });
 
-function openInEditor(...targets) {
-  const editor = process.env.EDITOR || 'code';
-  spawn(editor, ['-n', ...targets], { shell: true, stdio: 'ignore', detached: true }).unref();
-}
-
 // API: Open a workflow script in VS Code
 app.post('/api/sessions/:sessionId/workflows/:wfId/open', (req, res) => {
   try {
     const wf = getWorkflowScripts(req.params.sessionId).find((w) => w.id === req.params.wfId);
     if (!wf) return res.status(404).json({ error: 'Workflow script not found' });
-    openInEditor(wf.path);
+    openInEditor([wf.path]);
     res.json({ success: true });
   } catch (error) {
     console.error('Error opening workflow script in editor:', error);
@@ -1691,7 +1724,7 @@ app.post('/api/sessions/:sessionId/plan/open', (req, res) => {
     const planPath = path.join(PLANS_DIR, `${slug}.md`);
     if (!existsSync(planPath)) return res.status(404).json({ error: 'No plan found' });
 
-    openInEditor(planPath);
+    openInEditor([planPath]);
     res.json({ success: true });
   } catch (error) {
     console.error('Error opening plan in editor:', error);
@@ -1703,10 +1736,12 @@ app.post('/api/sessions/:sessionId/plan/open', (req, res) => {
 app.post('/api/open-folder', (req, res) => {
   try {
     const { folder, file } = req.body;
-    const target = folder || CLAUDE_DIR;
-    openInEditor(target, ...(file ? [file] : []));
+    const targets = [folder ? assertOpenTarget(folder, 'folder') : CLAUDE_DIR];
+    if (file) targets.push(assertOpenTarget(file, 'file'));
+    openInEditor(targets);
     res.json({ success: true });
   } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
     console.error('Error opening folder:', error);
     res.status(500).json({ error: 'Failed to open folder' });
   }
@@ -1717,8 +1752,9 @@ app.post('/api/open-in-editor', (req, res) => {
   try {
     const { content, title, file } = req.body;
     if (file) {
-      openInEditor(file);
-      return res.json({ success: true, path: file });
+      const resolved = assertOpenTarget(file, 'file');
+      openInEditor([resolved]);
+      return res.json({ success: true, path: resolved });
     }
     if (!content) return res.status(400).json({ error: 'No content provided' });
 
@@ -1727,9 +1763,10 @@ app.post('/api/open-in-editor', (req, res) => {
     const tmpFile = path.join(os.tmpdir(), `claude-kanban-${safeName}-${hash}.md`);
     require('fs').writeFileSync(tmpFile, content, 'utf8');
 
-    openInEditor(tmpFile);
+    openInEditor([tmpFile]);
     res.json({ success: true, path: tmpFile });
   } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
     console.error('Error opening in editor:', error);
     res.status(500).json({ error: 'Failed to open in editor' });
   }
@@ -3163,28 +3200,23 @@ async function prewarmCaches() {
   }
 }
 
-  const server = app.listen(PORT, () => {
-    const actualPort = server.address().port;
+  const onReady = (actualPort) => {
     console.log(`Claude Task Kanban running at http://localhost:${actualPort}`);
+    const warning = net.exposureWarning();
+    if (warning) console.log(warning);
 
     if (process.argv.includes('--open')) {
       import('open').then(open => open.default(`http://localhost:${actualPort}`));
     }
     setImmediate(prewarmCaches);
-  });
+  };
+
+  const server = net.listenLoopback(app, PORT, onReady);
 
   server.on('error', (err) => {
     if (err.code === 'EADDRINUSE') {
       console.log(`Port ${PORT} in use, trying random port...`);
-      const fallback = app.listen(0, () => {
-        const actualPort = fallback.address().port;
-        console.log(`Claude Task Kanban running at http://localhost:${actualPort}`);
-
-        if (process.argv.includes('--open')) {
-          import('open').then(open => open.default(`http://localhost:${actualPort}`));
-        }
-        setImmediate(prewarmCaches);
-      });
+      net.listenLoopback(app, 0, onReady);
     } else {
       throw err;
     }

@@ -332,7 +332,7 @@ function renderActivityChip() {
       return `
         <button type="button"
           class="${classes}"
-          onclick="setActivityFilter('${c.kind}')"
+          onclick="setActivityFilter('${escAttrJs(c.kind)}')"
           aria-pressed="${isOn ? 'true' : 'false'}"
           title="${escapeHtml(c.title + hint)}">
           <span class="activity-dot"></span>
@@ -991,7 +991,7 @@ function renderToolItem(m, i, compact) {
   // click all light up DURING the run, identical to post-completion.
   const agentLink =
     m.tool === 'Agent' && m.agentId
-      ? ` <span class="msg-agent-link" title="View agent" onclick="event.stopPropagation();showAgentModal('${escapeHtml(m.agentId)}')">⇗</span>`
+      ? ` <span class="msg-agent-link" title="View agent" onclick="event.stopPropagation();showAgentModal('${escAttrJs(m.agentId)}')">⇗</span>`
       : '';
   // Usage chip (tokens · tools · duration) on completed Agent rows — same stats a
   // background agent shows, sourced here from the foreground toolUseResult.
@@ -1376,7 +1376,7 @@ function getToolIcon(toolName) {
 const AGENT_LOG_ICON =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>';
 function agentLogButton(agentId) {
-  return `<button class="msg-agent-log-btn" onclick="event.stopPropagation();viewAgentLog('${escapeHtml(agentId)}')" title="View agent log">${AGENT_LOG_ICON}</button>`;
+  return `<button class="msg-agent-log-btn" onclick="event.stopPropagation();viewAgentLog('${escAttrJs(agentId)}')" title="View agent log">${AGENT_LOG_ICON}</button>`;
 }
 
 function getPinId(m) {
@@ -1698,7 +1698,7 @@ const linkSvg = (size) =>
 // Shared markup for an attachment image and the labeled section that holds a grid
 // of them — used by both user-pasted images and agent tool-result images.
 function attachImageTag(url, alt) {
-  return `<img src="${url}" loading="lazy" alt="${alt}" class="user-attach-image" />`;
+  return `<img src="${escapeHtml(url)}" loading="lazy" alt="${escapeHtml(alt)}" class="user-attach-image" />`;
 }
 function attachImageSection(label, imgsHtml) {
   return imgsHtml
@@ -1736,7 +1736,7 @@ function renderUserAttachments(m) {
         return `<details class="user-attach-toolresult">
           <summary>Tool result <code>${escapeHtml(shortId)}</code></summary>
           <pre class="${TINTED_PRE_CLASS}" id="${expandId}">${preview}</pre>
-          <button type="button" class="tool-result-expand-btn" data-expand-id="${expandId}" data-tool-use-id="${safeId}" onclick="_toggleToolResultExpand(this)">Show full</button>
+          <button type="button" class="tool-result-expand-btn" data-expand-id="${expandId}" data-tool-use-id="${escapeHtml(safeId)}" onclick="_toggleToolResultExpand(this)">Show full</button>
         </details>`;
       })
       .join('');
@@ -2583,7 +2583,7 @@ function renderAgentFooter() {
         const agentColor = resolveNamedColor(a.color);
         const colorStyle = agentColor ? ` style="border-left:3px solid ${agentColor.color}"` : '';
         const selectedClass = a.agentId === currentAgentModalId ? ' selected' : '';
-        return `<div class="agent-card${selectedClass}" data-agent-id="${escapeHtml(a.agentId)}"${colorStyle} onclick="showAgentModal('${a.agentId}')">
+        return `<div class="agent-card${selectedClass}" data-agent-id="${escapeHtml(a.agentId)}"${colorStyle} onclick="showAgentModal('${escAttrJs(a.agentId)}')">
           <div class="agent-type-row">${typeNs ? `<span class="agent-type-ns">${escapeHtml(typeNs)}</span>` : ''}<span class="agent-type-name">${escapeHtml(typeName)}</span>${nameBadgeHtml}</div>
           <div class="agent-status-row"><span class="agent-dot ${a.status}"></span><span class="agent-status">${statusText}</span></div>
           ${msgHtml}
@@ -2759,7 +2759,7 @@ function highlightSelectedAgent() {
   if (!content) return;
   for (const el of content.querySelectorAll('.agent-card.selected')) el.classList.remove('selected');
   if (currentAgentModalId == null) return;
-  const el = content.querySelector(`.agent-card[data-agent-id="${currentAgentModalId}"]`);
+  const el = content.querySelector(`.agent-card[data-agent-id="${escSel(currentAgentModalId)}"]`);
   if (el) el.classList.add('selected');
 }
 
@@ -2983,9 +2983,10 @@ function renderSessions() {
     const bookmarksCount = loadPins(session.id).length;
     const hasScratchpad = !!(localStorage.getItem(_sessionScratchpadKey(session.id)) || '').trim();
     const tempClass = session.hasRecentLog || session.inProgress || session.hasWaitingForUser ? 'warm' : 'stale';
+    const sid = escAttrJs(session.id);
     return `
-          <button onclick="fetchTasks('${session.id}')" data-session-id="${session.id}" class="session-item ${isActive ? 'active' : ''} ${session.hasWaitingForUser ? 'permission-pending' : ''} ${tempClass} ${showCtx ? 'has-context' : ''}" title="${tooltip}">
-            <span class="session-pin-btn${pinClass}" onclick="event.stopPropagation();toggleSessionPin('${escapeHtml(session.id)}')" title="${pinTitle} session">${pinState === 'sticky' ? SESSION_STAR_SVG : SESSION_PIN_SVG}</span>
+          <button onclick="fetchTasks('${sid}')" data-session-id="${escapeHtml(session.id)}" class="session-item ${isActive ? 'active' : ''} ${session.hasWaitingForUser ? 'permission-pending' : ''} ${tempClass} ${showCtx ? 'has-context' : ''}" title="${escapeHtml(tooltip)}">
+            <span class="session-pin-btn${pinClass}" onclick="event.stopPropagation();toggleSessionPin('${sid}')" title="${pinTitle} session">${pinState === 'sticky' ? SESSION_STAR_SVG : SESSION_PIN_SVG}</span>
             <div class="session-name">${escapeHtml(primaryName)}</div>
             ${secondaryName ? `<div class="session-secondary">${escapeHtml(secondaryName)}</div>` : ''}
             ${gitBranch ? `<div class="session-branch">${gitBranch}</div>` : ''}
@@ -2994,14 +2995,14 @@ function renderSessions() {
             <div class="session-progress">
               <span class="session-indicators">
                 ${isTeam ? `<span class="team-badge" title="${memberCount} team members"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>${memberCount}</span>` : ''}
-                ${isTeam || session.project || showCtx ? `<span class="team-info-btn" onclick="event.stopPropagation(); showSessionInfoModal('${session.id}')" title="View session info"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></span>` : ''}
+                ${isTeam || session.project || showCtx ? `<span class="team-info-btn" onclick="event.stopPropagation(); showSessionInfoModal('${sid}')" title="View session info"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></span>` : ''}
                 ${renderWorkflowBadge(session)}
                 ${renderLoopBadge(session)}
-                ${hasScratchpad ? `<span class="scratchpad-badge" onclick="event.stopPropagation(); openSessionScratchpad('${session.id}')" title="Open scratchpad"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></span>` : ''}
-                ${bookmarksCount > 0 ? `<span class="bookmarks-badge" onclick="event.stopPropagation(); openSessionWithBookmarks('${session.id}')" title="${bookmarksCount} bookmarked message${bookmarksCount > 1 ? 's' : ''}"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>${bookmarksCount}</span>` : ''}
-                ${linkedDocsCount > 0 ? `<span class="linked-docs-badge" onclick="event.stopPropagation(); showSessionInfoModal('${session.id}')" title="${linkedDocsCount} linked document${linkedDocsCount > 1 ? 's' : ''}">${linkSvg(10)}${linkedDocsCount}</span>` : ''}
-                ${session.hasPlan && !session.planSourceSessionId ? `<span class="plan-indicator" onclick="event.stopPropagation(); openPlanForSession('${session.id}')" title="View plan">${ICON_PLAN}</span>` : ''}
-                ${session.planSourceSessionId ? `<span class="plan-indicator" title="Implements plan — click to reveal plan session" onclick="event.stopPropagation(); revealPlanSession('${escapeHtml(session.planSourceSessionId)}')">${ICON_PLAN}</span>` : ''}
+                ${hasScratchpad ? `<span class="scratchpad-badge" onclick="event.stopPropagation(); openSessionScratchpad('${sid}')" title="Open scratchpad"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></span>` : ''}
+                ${bookmarksCount > 0 ? `<span class="bookmarks-badge" onclick="event.stopPropagation(); openSessionWithBookmarks('${sid}')" title="${bookmarksCount} bookmarked message${bookmarksCount > 1 ? 's' : ''}"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>${bookmarksCount}</span>` : ''}
+                ${linkedDocsCount > 0 ? `<span class="linked-docs-badge" onclick="event.stopPropagation(); showSessionInfoModal('${sid}')" title="${linkedDocsCount} linked document${linkedDocsCount > 1 ? 's' : ''}">${linkSvg(10)}${linkedDocsCount}</span>` : ''}
+                ${session.hasPlan && !session.planSourceSessionId ? `<span class="plan-indicator" onclick="event.stopPropagation(); openPlanForSession('${sid}')" title="View plan">${ICON_PLAN}</span>` : ''}
+                ${session.planSourceSessionId ? `<span class="plan-indicator" title="Implements plan — click to reveal plan session" onclick="event.stopPropagation(); revealPlanSession('${escAttrJs(session.planSourceSessionId)}')">${ICON_PLAN}</span>` : ''}
                 ${session.sharedTaskList ? `<span class="shared-tasklist-badge" title="Shared task list: ${escapeHtml(session.sharedTaskList)}">${linkSvg(12)}</span>` : ''}
                 ${session.hasWaitingForUser ? `<span class="agent-badge agent-badge-waiting" title="Waiting for user">${ICON_AGENT_WAITING}</span>` : ''}
                 ${session.hasRunningAgents && !session.hasWaitingForUser ? `<span class="agent-badge agent-badge-active" title="Agents running">${ICON_AGENT_ACTIVE}</span>` : ''}
@@ -3250,9 +3251,9 @@ function renderTaskCard(task) {
         <div
           role="listitem"
           tabindex="0"
-          data-task-id="${task.id}"
-          data-session-id="${actualSessionId}"
-          onclick="showTaskDetail('${task.id}', '${actualSessionId}')"
+          data-task-id="${escapeHtml(task.id)}"
+          data-session-id="${escapeHtml(actualSessionId)}"
+          onclick="showTaskDetail('${escAttrJs(task.id)}', '${escAttrJs(actualSessionId)}')"
           draggable="true"
           ondragstart="onCardDragStart(event)"
           ondragend="onCardDragEnd(event)"
@@ -3316,8 +3317,9 @@ function renderKanban() {
 
   if (selectedTaskId) {
     const card =
-      document.querySelector(`.task-card[data-task-id="${selectedTaskId}"][data-session-id="${selectedSessionId}"]`) ||
-      document.querySelector(`.task-card[data-task-id="${selectedTaskId}"]`);
+      document.querySelector(
+        `.task-card[data-task-id="${escSel(selectedTaskId)}"][data-session-id="${escSel(selectedSessionId)}"]`,
+      ) || document.querySelector(`.task-card[data-task-id="${escSel(selectedTaskId)}"]`);
     if (card) {
       if (focusZone === 'board' && !taskHighlightDimmed) card.classList.add('selected');
     } else {
@@ -3409,8 +3411,8 @@ function selectTask(taskId, sessionId) {
   taskHighlightDimmed = false;
   if (!taskId) return;
   const card =
-    document.querySelector(`.task-card[data-task-id="${taskId}"][data-session-id="${sessionId}"]`) ||
-    document.querySelector(`.task-card[data-task-id="${taskId}"]`);
+    document.querySelector(`.task-card[data-task-id="${escSel(taskId)}"][data-session-id="${escSel(sessionId)}"]`) ||
+    document.querySelector(`.task-card[data-task-id="${escSel(taskId)}"]`);
   if (card) {
     card.classList.add('selected');
     card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
@@ -3686,7 +3688,7 @@ function setFocusZone(zone) {
     }
     if (selectedTaskId) {
       const card = document.querySelector(
-        `.task-card[data-task-id="${selectedTaskId}"][data-session-id="${selectedSessionId}"]`,
+        `.task-card[data-task-id="${escSel(selectedTaskId)}"][data-session-id="${escSel(selectedSessionId)}"]`,
       );
       if (card) card.classList.add('selected');
     } else {
@@ -3710,7 +3712,7 @@ function getAvailableTasksOptions(currentTaskId = null) {
   if (pending.length > 0) {
     options += '<optgroup label="Pending">';
     pending.forEach((t, _idx) => {
-      options += `<option value="${t.id}">#${t.id} - ${escapeHtml(t.subject)}</option>`;
+      options += `<option value="${escapeHtml(t.id)}">#${t.id} - ${escapeHtml(t.subject)}</option>`;
     });
     options += '</optgroup>';
   }
@@ -3718,7 +3720,7 @@ function getAvailableTasksOptions(currentTaskId = null) {
   if (inProgress.length > 0) {
     options += '<optgroup label="In Progress">';
     inProgress.forEach((t, _idx) => {
-      options += `<option value="${t.id}">#${t.id} - ${escapeHtml(t.subject)}</option>`;
+      options += `<option value="${escapeHtml(t.id)}">#${t.id} - ${escapeHtml(t.subject)}</option>`;
     });
     options += '</optgroup>';
   }
@@ -3726,7 +3728,7 @@ function getAvailableTasksOptions(currentTaskId = null) {
   if (completed.length > 0) {
     options += '<optgroup label="Completed">';
     completed.forEach((t, _idx) => {
-      options += `<option value="${t.id}">#${t.id} - ${escapeHtml(t.subject)}</option>`;
+      options += `<option value="${escapeHtml(t.id)}">#${t.id} - ${escapeHtml(t.subject)}</option>`;
     });
     options += '</optgroup>';
   }
@@ -4233,11 +4235,6 @@ function _projectLabel(project) {
   return project.split(/[/\\]/).pop() || project;
 }
 
-function _escapeForJsAttr(str) {
-  const jsEscaped = str.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n').replace(/\r/g, '\\r');
-  return escapeHtml(jsEscaped);
-}
-
 function _renderProjectGroup(label, meta, innerHtml) {
   return `<div class="storage-project-group">
     <div class="storage-project-header">
@@ -4305,7 +4302,7 @@ function _renderStorageSessions() {
   function renderMessageItems(id) {
     const g = msgMap.get(id);
     if (!g) return '';
-    const eid = escapeHtml(id);
+    const eid = escAttrJs(id);
     const header = `<div class="storage-group-header" style="padding-left:12px;">
       <span>${g.pins.length} pinned message${g.pins.length > 1 ? 's' : ''}</span>
       <div class="storage-item-actions">
@@ -4316,8 +4313,8 @@ function _renderStorageSessions() {
       .map((p) => {
         const type = escapeHtml(p.type || '?');
         const text = escapeHtml((p.text || p.tool || p.agentType || '').slice(0, 60));
-        const pinId = _escapeForJsAttr(p.id || '');
-        const sid = _escapeForJsAttr(id);
+        const pinId = escAttrJs(p.id || '');
+        const sid = escAttrJs(id);
         return `<div class="storage-item storage-item-clickable" style="padding-left:24px;" onclick="_storagePreviewPin('${sid}','${pinId}')">
         <span class="storage-item-badge">${type}</span>
         <span class="storage-item-id">${text}</span>
@@ -4334,7 +4331,7 @@ function _renderStorageSessions() {
 
   function renderSessionItem({ id, session }) {
     const isPinned = isAnyPinned(id);
-    const eid = escapeHtml(id);
+    const eid = escAttrJs(id);
     const actions = isPinned
       ? `<button onclick="_storageViewSession('${eid}')">View</button>
          <button class="danger" onclick="_storageUnpinSession('${eid}')">Unpin</button>`
@@ -4434,7 +4431,7 @@ function _renderStorageScratchpads() {
     const typeBadge = item.isProject
       ? '<span class="storage-item-badge">project</span>'
       : '<span class="storage-item-badge">session</span>';
-    const jsKey = _escapeForJsAttr(item.key);
+    const jsKey = escAttrJs(item.key);
     const label = item.isProject ? escapeHtml(_projectLabel(item.id)) : _sessionLabel(session, item.id);
     return `<div class="storage-item">
       <span class="storage-item-id" title="${escapeHtml(item.id)}">${label}</span>
@@ -4523,8 +4520,8 @@ function _renderStorageLinkedDocs() {
 
   function renderDocRow(sessionId, p) {
     const name = p.split(/[\\/]/).pop();
-    const sid = _escapeForJsAttr(sessionId);
-    const jsPath = _escapeForJsAttr(p);
+    const sid = escAttrJs(sessionId);
+    const jsPath = escAttrJs(p);
     return `<div class="storage-item" style="padding-left:24px;">
       <span class="storage-item-id" title="${escapeHtml(p)}">${escapeHtml(name)}</span>
       <div class="storage-item-actions">
@@ -4537,7 +4534,7 @@ function _renderStorageLinkedDocs() {
   function renderSessionItem({ id, session }) {
     const entry = byId.get(id);
     if (!entry) return '';
-    const eid = escapeHtml(id);
+    const eid = escAttrJs(id);
     const count = entry.paths.length;
     const header = `<div class="storage-group-header">
       <span>${_sessionLabel(session, id)} <span class="storage-item-badge">${count} doc${count > 1 ? 's' : ''}</span></span>
@@ -5721,10 +5718,36 @@ function stripTeammateWrapper(text) {
   return match ? match[1].trim() : text;
 }
 
+// The div.textContent -> innerHTML trick escapes only & < > : innerHTML serializes
+// for *text* context, where quotes are correctly left raw. That made every
+// attribute interpolation breakable with a bare " . It cannot be patched, so the
+// escaping is explicit here.
+const HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '`': '&#96;' };
+
 function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
+  if (text == null) return '';
+  return String(text).replace(/[&<>"'`]/g, (c) => HTML_ESCAPES[c]);
+}
+
+// For a value landing inside a quoted JS string inside an HTML attribute —
+// onclick="fn('${escAttrJs(x)}')". The browser HTML-decodes the attribute before
+// the JS parser sees it, so the JS escape must happen first and be escaped in turn.
+function escAttrJs(value) {
+  const js = String(value == null ? '' : value)
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/\r/g, '\\r')
+    .replace(/\n/g, '\\n');
+  return escapeHtml(js);
+}
+
+// For a value inside a double-quoted CSS attribute selector: [data-x="${escSel(v)}"].
+// escapeHtml is wrong here — the DOM holds the decoded value, so &quot; in the
+// selector matches nothing, and a bare " would end the selector string.
+function escSel(value) {
+  return String(value == null ? '' : value)
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"');
 }
 
 function toRelativeIfUnder(filePath, baseDir) {
@@ -5802,7 +5825,7 @@ function renderAgentTabs(promptHtml, responseHtml, promptText, responseText) {
   const panelsHtml = panels
     .map(
       (p) =>
-        `<div class="agent-tab-panel${p.key === defaultTab ? ' active' : ''}" data-tab-group="${id}" data-tab-key="${p.key}"><div class="detail-desc rendered-md" style="font-size:13px;">${p.html}</div></div>`,
+        `<div class="agent-tab-panel${p.key === defaultTab ? ' active' : ''}" data-tab-group="${id}" data-tab-key="${p.key}"><div class="detail-desc rendered-md">${p.html}</div></div>`,
     )
     .join('');
   return `<div class="agent-tabs">${tabsHtml}${copyBtnHtml}</div>${panelsHtml}`;
@@ -6490,20 +6513,17 @@ function showInfoModal(session, teamConfig, tasks, planContent, parentInfo) {
     'font-family: var(--mono); font-size: 12px; color: var(--text-primary); user-select: all; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;';
   html += `<div class="team-modal-meta info-grid">`;
   infoRows.forEach(([label, value, opts]) => {
-    const copyVal = escapeHtml(value).replace(/"/g, '&quot;');
     html += `<span style="font-weight: 500; color: var(--text-secondary); font-size: 12px; white-space: nowrap;">${label}</span>`;
     if (opts?.openSession) {
-      const sid = _escapeForJsAttr(escapeHtml(opts.openSession).replace(/"/g, '&quot;'));
-      html += `<span onclick="openSessionFromInfo('${sid}')" style="${clickableStyle}" title="Open session in app">${escapeHtml(value)}</span>`;
+      html += `<span onclick="openSessionFromInfo('${escAttrJs(opts.openSession)}')" style="${clickableStyle}" title="Open session in app">${escapeHtml(value)}</span>`;
     } else {
-      html += `<span style="${plainStyle}" title="${copyVal}">${escapeHtml(value)}</span>`;
+      html += `<span style="${plainStyle}" title="${escapeHtml(value)}">${escapeHtml(value)}</span>`;
     }
-    const jsCopyVal = _escapeForJsAttr(copyVal);
-    const copyBtn = `<button onclick="copyWithFeedback('${jsCopyVal}', this)" title="Copy">${ICON_COPY}</button>`;
+    const copyBtn = `<button onclick="copyWithFeedback('${escAttrJs(value)}', this)" title="Copy">${ICON_COPY}</button>`;
     let openBtn = '';
     if (opts?.openClaudeDir || opts?.openPath) {
-      const folder = opts.openClaudeDir ? '' : escapeHtml(opts.openPath).replace(/"/g, '&quot;');
-      const file = opts.openFile ? escapeHtml(opts.openFile).replace(/"/g, '&quot;') : '';
+      const folder = opts.openClaudeDir ? '' : escapeHtml(opts.openPath);
+      const file = opts.openFile ? escapeHtml(opts.openFile) : '';
       openBtn = `<button data-folder="${folder}" data-file="${file}" data-claude-dir="${opts.openClaudeDir ? '1' : ''}" onclick="openFolderInEditor(this.dataset.claudeDir ? undefined : this.dataset.folder, this.dataset.file || undefined)" title="Open in editor">${ICON_OPEN_EXTERNAL}</button>`;
     }
     html += `<span class="info-row-actions">${copyBtn}${openBtn}</span>`;
@@ -6769,7 +6789,7 @@ function renderGoalSubtitle(session) {
   // Only active (unmet) goals reach here — a met goal auto-clears. Clicking
   // opens the info modal (full text); stopPropagation so it doesn't also
   // trigger the card's fetchTasks.
-  return `<div class="session-goal" onclick="event.stopPropagation(); showSessionInfoModal('${session.id}')" title="${escapeHtml(g.condition)}"><span class="session-goal-icon">◎</span>${escapeHtml(short)}</div>`;
+  return `<div class="session-goal" onclick="event.stopPropagation(); showSessionInfoModal('${escAttrJs(session.id)}')" title="${escapeHtml(g.condition)}"><span class="session-goal-icon">◎</span>${escapeHtml(short)}</div>`;
 }
 
 function renderLoopBadge(session) {
@@ -6781,7 +6801,7 @@ function renderLoopBadge(session) {
     const f = fmtLoopFireTime(li.latest.timestamp, li.latest.delaySeconds);
     if (f.abs) tip += ` — latest ${f.status === 'pending' ? 'fires' : 'fired'} ${f.rel} (${f.abs})`;
   }
-  return `<span class="loop-badge" onclick="event.stopPropagation(); showLoopModal('${session.id}')" title="${escapeHtml(tip)}"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></span>`;
+  return `<span class="loop-badge" onclick="event.stopPropagation(); showLoopModal('${escAttrJs(session.id)}')" title="${escapeHtml(tip)}"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></span>`;
 }
 
 function closeLoopModal() {
@@ -6799,7 +6819,7 @@ function renderWorkflowBadge(session) {
   if (!session.hasWorkflow) return '';
   const n = session.workflowCount || 0;
   const tip = `${n} workflow${n === 1 ? '' : 's'}`;
-  return `<span class="workflow-badge" onclick="event.stopPropagation(); showWorkflowModal('${session.id}')" title="${escapeHtml(tip)}">${WORKFLOW_GEAR_SVG}</span>`;
+  return `<span class="workflow-badge" onclick="event.stopPropagation(); showWorkflowModal('${escAttrJs(session.id)}')" title="${escapeHtml(tip)}">${WORKFLOW_GEAR_SVG}</span>`;
 }
 
 let _workflowSessionId = null;
@@ -6848,11 +6868,11 @@ function renderWorkflowPicker(workflows) {
   body.innerHTML = workflows
     .map((w) => {
       const when = w.modifiedAt ? formatDate(w.modifiedAt) : '';
-      return `<div class="workflow-row" onclick="showWorkflowRun('${escapeHtml(w.id)}')">
+      return `<div class="workflow-row" onclick="showWorkflowRun('${escAttrJs(w.id)}')">
         <div class="workflow-row-head">
           <span class="workflow-row-name">${escapeHtml(w.name || w.id)}</span>
           <span class="workflow-row-id"><code>${escapeHtml(w.id)}</code></span>
-          <button class="icon-btn workflow-open-icon" aria-label="Open in editor" title="Open in editor" onclick="event.stopPropagation(); openWorkflowInEditor('${escapeHtml(w.id)}')">${ICON_OPEN_EDITOR}</button>
+          <button class="icon-btn workflow-open-icon" aria-label="Open in editor" title="Open in editor" onclick="event.stopPropagation(); openWorkflowInEditor('${escAttrJs(w.id)}')">${ICON_OPEN_EDITOR}</button>
         </div>
         ${w.description ? `<div class="workflow-row-desc">${escapeHtml(w.description)}</div>` : ''}
         ${when ? `<div class="workflow-row-meta">${escapeHtml(when)}</div>` : ''}
@@ -6918,7 +6938,7 @@ function renderWorkflowRun(run) {
     .map((a) => {
       const dur = a.durationMs != null ? formatDuration(a.durationMs) : '';
       const running = a.status !== 'done';
-      return `<div class="wf-agent" onclick="showAgentModal('${escapeHtml(a.agentId)}')" title="${escapeHtml(a.agentId)}">
+      return `<div class="wf-agent" onclick="showAgentModal('${escAttrJs(a.agentId)}')" title="${escapeHtml(a.agentId)}">
         <span class="wf-agent-type">${escapeHtml(a.type || 'agent')}</span>
         <span class="wf-agent-model">${escapeHtml(shortModelName(a.model))}</span>
         <span class="wf-agent-tok">${a.outputTokens ? `${fmtTokens(a.outputTokens)} tok` : ''}</span>
@@ -7512,7 +7532,7 @@ document.addEventListener('keydown', (e) => {
   if (!window.__HUB__?.enabled) return;
   const fwd = (key) => {
     e.preventDefault();
-    window.parent?.postMessage({ type: 'hub:keydown', key, ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey }, '*');
+    hubPost({ type: 'hub:keydown', key, ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey });
   };
   if (e.ctrlKey && e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
     fwd(e.key);
@@ -7542,16 +7562,23 @@ document.addEventListener('click', (e) => {
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return;
   e.preventDefault();
   e.stopPropagation();
-  window.parent?.postMessage({ type: 'hub:openExternal', url: url.href }, '*');
+  hubPost({ type: 'hub:openExternal', url: url.href });
 });
 
 window.hubNavigate = function hubNavigate(app, url) {
   if (!window.__HUB__?.enabled) return;
-  window.parent?.postMessage({ type: 'hub:navigate', app, url }, '*');
+  hubPost({ type: 'hub:navigate', app, url });
 };
 
 // Hoisted out of initHubTheme so initHubProject can share it.
 const hubOrigin = () => (window.__HUB__?.url ? new URL(window.__HUB__.url).origin : null);
+
+// Every send is addressed to the hub explicitly. With targetOrigin '*' any page that
+// framed this app also received the forwarded keystrokes and navigation intents.
+function hubPost(message) {
+  const origin = hubOrigin();
+  if (origin) window.parent?.postMessage(message, origin);
+}
 
 (function initHubTheme() {
   const getTheme = () => (document.body.classList.contains('light') ? 'light' : 'dark');
@@ -7578,8 +7605,7 @@ const hubOrigin = () => (window.__HUB__?.url ? new URL(window.__HUB__.url).origi
     if (t === lastTheme && ct === lastColorTheme) return;
     lastTheme = t;
     lastColorTheme = ct;
-    const origin = hubOrigin();
-    if (origin) window.parent.postMessage({ type: 'hub:theme', theme: t, colorTheme: ct }, origin);
+    hubPost({ type: 'hub:theme', theme: t, colorTheme: ct });
   }).observe(document.body, {
     attributes: true,
     attributeFilter: ['class', 'data-color-theme'],
