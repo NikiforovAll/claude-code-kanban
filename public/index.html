@@ -301,7 +301,7 @@
           <button class="icon-btn" aria-label="Open in editor" title="Open in editor" onclick="openMsgInEditor()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
           </button>
-          <button id="msg-detail-fullscreen-btn" class="icon-btn" aria-label="Toggle fullscreen" title="Toggle fullscreen" onclick="toggleModalFullscreen('msg-detail-modal')">
+          <button id="msg-detail-modal-fullscreen-btn" class="icon-btn" aria-label="Toggle fullscreen" title="Toggle fullscreen" onclick="toggleModalFullscreen('msg-detail-modal')">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
           </button>
           <button class="modal-close" aria-label="Close" onclick="closeMsgDetailModal()">
@@ -310,7 +310,7 @@
         </div>
       </div>
       <div class="modal-body" style="flex: 0 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden;">
-        <div id="msg-detail-body" class="rendered-md" style="word-break: break-word; font-size: 13px; line-height: 1.6; overflow-y: auto; flex: 0 1 auto; min-height: 0; padding-right: 8px;"></div>
+        <div id="msg-detail-body" class="rendered-md modal-zoomable"></div>
         <div id="msg-detail-meta" style="margin-top: 12px; font-size: 11px; color: var(--text-muted); flex-shrink: 0;"></div>
       </div>
     </div>
@@ -337,7 +337,7 @@
         </div>
       </div>
       <div class="modal-body">
-        <div id="preview-modal-body" class="rendered-md"></div>
+        <div id="preview-modal-body" class="rendered-md modal-zoomable"></div>
         <div id="preview-modal-meta"></div>
       </div>
     </div>
@@ -354,7 +354,7 @@
           </svg>
         </button>
       </div>
-      <div class="modal-body">
+      <div class="modal-body modal-zoomable">
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 24px;">
           <div style="display: grid; gap: 16px; align-content: start;">
             <div>
@@ -460,6 +460,14 @@
                 <td style="padding: 4px 0; color: var(--text-primary);">Open last message detail</td>
               </tr>
               <tr>
+                <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">Ctrl++</kbd> / <kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">Ctrl+-</kbd></td>
+                <td style="padding: 4px 0; color: var(--text-primary);">Modal text size</td>
+              </tr>
+              <tr>
+                <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">Ctrl+0</kbd></td>
+                <td style="padding: 4px 0; color: var(--text-primary);">Reset text size</td>
+              </tr>
+              <tr>
                 <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">Shift+S</kbd></td>
                 <td style="padding: 4px 0; color: var(--text-primary);">Storage manager</td>
               </tr>
@@ -527,7 +535,7 @@
           </button>
         </div>
       </div>
-      <div id="team-modal-body" class="modal-body"></div>
+      <div id="team-modal-body" class="modal-body modal-zoomable"></div>
       <div class="modal-footer">
         <button id="session-info-dismiss-btn" class="btn btn-secondary" onclick="toggleDismissSession(_infoModalSessionId); closeTeamModal()">Dismiss</button>
         <button class="btn btn-secondary" onclick="showToolStatsModal(_infoModalSessionId)" title="Tool invocation statistics">Tool Stats</button>
@@ -547,7 +555,7 @@
           </svg>
         </button>
       </div>
-      <div id="tool-stats-modal-body" class="modal-body" style="overflow-y:auto;flex:1 1 auto;min-height:0;"></div>
+      <div id="tool-stats-modal-body" class="modal-body modal-zoomable" style="overflow-y:auto;flex:1 1 auto;min-height:0;"></div>
       <div class="modal-footer">
         <button class="btn btn-secondary" onclick="closeToolStatsModal()">Close</button>
       </div>
@@ -576,7 +584,7 @@
           </button>
         </div>
       </div>
-      <div id="plan-modal-body" class="modal-body detail-desc rendered-md" style="overflow-y: auto; flex: 0 1 auto; min-height: 0;"></div>
+      <div id="plan-modal-body" class="modal-body detail-desc rendered-md modal-zoomable"></div>
       <div class="modal-footer">
         <button class="btn btn-secondary" onclick="closePlanModal()">Close</button>
       </div>
@@ -622,7 +630,7 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
         </button>
       </div>
-      <div id="loop-modal-body" class="modal-body" style="overflow-y:auto;flex:0 1 auto;min-height:0;"></div>
+      <div id="loop-modal-body" class="modal-body modal-zoomable" style="overflow-y:auto;flex:0 1 auto;min-height:0;"></div>
       <div class="modal-footer">
         <button class="btn btn-secondary" onclick="closeLoopModal()">Close</button>
       </div>
@@ -646,7 +654,7 @@
           </button>
         </div>
       </div>
-      <div id="workflow-modal-body" class="modal-body" style="overflow-y:auto;flex:1 1 auto;min-height:0;"></div>
+      <div id="workflow-modal-body" class="modal-body modal-zoomable" style="overflow-y:auto;flex:1 1 auto;min-height:0;"></div>
       <div class="modal-footer">
         <button class="btn btn-secondary" onclick="closeWorkflowModal()">Close</button>
       </div>
@@ -677,7 +685,7 @@
           </button>
         </div>
       </div>
-      <div id="agent-modal-body" class="modal-body" style="overflow-y: auto; overflow-x: hidden; flex: 0 1 auto; min-height: 0;"></div>
+      <div id="agent-modal-body" class="modal-body modal-zoomable" style="overflow-y: auto; overflow-x: hidden; flex: 0 1 auto; min-height: 0;"></div>
       <div class="modal-footer">
         <button id="agent-modal-dismiss-btn" class="btn agent-dismiss-btn" style="display:none" onclick="dismissAgent(currentAgentModalId);closeAgentModal()">Dismiss</button>
         <button class="btn btn-secondary" onclick="closeAgentModal()">Close</button>
@@ -720,7 +728,7 @@
         <button class="storage-tab" data-tab="scratchpads" onclick="switchStorageTab('scratchpads')">Scratchpads</button>
         <button class="storage-tab" data-tab="linked-docs" onclick="switchStorageTab('linked-docs')">Linked Docs</button>
       </div>
-      <div class="modal-body" id="storage-modal-body" style="overflow-y:auto;min-height:200px;max-height:60vh;padding-top:16px;padding-right:8px;"></div>
+      <div class="modal-body modal-zoomable" id="storage-modal-body"></div>
       <div class="modal-footer">
         <button id="storage-cleanup-btn" class="btn btn-secondary" onclick="cleanupOrphanedStorage()">Clean Orphaned</button>
         <button class="btn btn-secondary" onclick="closeStorageManager()">Close</button>

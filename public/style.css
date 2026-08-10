@@ -38,6 +38,8 @@
   /* aliases: many rules reference --font-mono/--font-serif; keep them on-brand */
   --font-mono: var(--mono);
   --font-serif: var(--serif);
+  /* reading-surface scale for the message-detail and preview modals (Ctrl +/-/0) */
+  --modal-zoom: 1;
 }
 
 * {
@@ -3729,10 +3731,12 @@ body.light .msg-assistant .msg-text {
   overflow-y: auto;
 }
 
+/* Height is a cap, not a floor — a two-line message should not sit in a 92vh box.
+   The HTML preview keeps its explicit height below: its iframe is `height: 100%`
+   and needs a resolvable parent height. */
 .modal.fullscreen {
   width: 80vw;
   max-width: 80vw;
-  height: 92vh;
   max-height: 92vh;
 }
 
@@ -3773,13 +3777,39 @@ body.light .msg-assistant .msg-text {
   overflow: hidden;
 }
 
-#preview-modal-body {
+#msg-detail-body,
+#preview-modal-body,
+#plan-modal-body {
   word-break: break-word;
   font-size: 13px;
   line-height: 1.6;
   overflow-y: auto;
   flex: 0 1 auto;
   min-height: 0;
+  padding-right: 8px;
+}
+
+/* Same reading size as the other modal bodies — `.detail-desc` is really the
+   task-panel inline editor's style, and its 14px/1.7 is wrong here. */
+.agent-tab-panel .detail-desc {
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* One reading scale for every modal (Ctrl +/-/0). `zoom` rather than font-size
+   because the bodies mix px, rem, inline sizes from tool rendering and an iframe.
+   It hangs on the inner scrolling body — never on `.modal`, whose own vw/vh
+   sizing would scale with it and push the dialog off-screen. */
+.modal-zoomable {
+  zoom: var(--modal-zoom, 1);
+}
+
+/* Height is left to the flex column under `.storage-modal`'s 85vh cap — a `vh`
+   cap here would be multiplied by the zoom above. */
+#storage-modal-body {
+  overflow-y: auto;
+  min-height: 200px;
+  padding-top: 16px;
   padding-right: 8px;
 }
 

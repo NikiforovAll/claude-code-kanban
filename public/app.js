@@ -1876,7 +1876,7 @@ function showMsgDetail(idx) {
 }
 
 function closeMsgDetailModal() {
-  resetModalFullscreen('msg-detail-modal');
+  hideModalOverlay('msg-detail-modal');
   msgDetailFollowLatest = false;
   // Drop the message highlight on close, mirroring task-card behavior.
   msgHighlightDimmed = true;
@@ -1900,19 +1900,32 @@ function _setModalWidth(modal, slot, on, maxWidth, width) {
   }
 }
 
-// biome-ignore lint/correctness/noUnusedVariables: used in HTML
-function toggleModalFullscreen(modalId) {
+function _applyModalFullscreen(modalId, on) {
   const modal = document.querySelector(`#${modalId} .modal`);
-  const isFs = modal.classList.toggle('fullscreen');
-  _setModalWidth(modal, 'Fs', isFs, '', '');
-  updateFullscreenBtnIcon(`${modalId}-fullscreen-btn`, isFs);
+  modal.classList.toggle('fullscreen', on);
+  _setModalWidth(modal, 'Fs', on, '', '');
+  updateFullscreenBtnIcon(`${modalId}-fullscreen-btn`, on);
 }
 
-function resetModalFullscreen(modalId) {
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+function toggleModalFullscreen(modalId) {
+  const on = !document.querySelector(`#${modalId} .modal`).classList.contains('fullscreen');
+  _applyModalFullscreen(modalId, on);
+  localStorage.setItem(`modal-fullscreen-${modalId}`, String(on));
+}
+
+function loadModalFullscreen() {
+  for (const btn of document.querySelectorAll('[id$="-fullscreen-btn"]')) {
+    const modalId = btn.id.replace(/-fullscreen-btn$/, '');
+    if (localStorage.getItem(`modal-fullscreen-${modalId}`) === 'true') _applyModalFullscreen(modalId, true);
+  }
+}
+
+// Hides the overlay only — the fullscreen state stays on the dialog, it is a
+// remembered preference so the next open comes back the way it was left.
+function hideModalOverlay(modalId) {
   const modal = document.getElementById(modalId);
   modal.classList.remove('visible');
-  modal.querySelector('.modal').classList.remove('fullscreen');
-  updateFullscreenBtnIcon(`${modalId}-fullscreen-btn`, false);
   return modal;
 }
 
@@ -1923,6 +1936,38 @@ function updateFullscreenBtnIcon(btnId, isFullscreen) {
     ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></svg>'
     : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>';
 }
+
+const MODAL_ZOOM_KEY = 'modal-zoom';
+const MODAL_ZOOM_MIN = 0.7;
+const MODAL_ZOOM_MAX = 2.0;
+let modalZoom = clampModalZoom(Number.parseFloat(localStorage.getItem(MODAL_ZOOM_KEY)) || 1);
+
+function clampModalZoom(v) {
+  return Math.min(MODAL_ZOOM_MAX, Math.max(MODAL_ZOOM_MIN, v));
+}
+
+function applyModalZoom() {
+  document.documentElement.style.setProperty('--modal-zoom', String(modalZoom));
+}
+
+// delta 0 resets to 100%
+function adjustModalZoom(delta) {
+  const next = delta === 0 ? 1 : clampModalZoom(Math.round((modalZoom + delta) * 10) / 10);
+  if (next === modalZoom && delta !== 0) return;
+  modalZoom = next;
+  localStorage.setItem(MODAL_ZOOM_KEY, String(modalZoom));
+  applyModalZoom();
+  showToast(`Text ${Math.round(modalZoom * 100)}%`);
+}
+
+// The markup decides what scales: `.modal-zoomable` marks a modal's reading
+// surface, and style.css hangs the zoom on that same class. Confirm dialogs
+// carry no such body — nothing there is worth enlarging.
+function isZoomableModalOpen() {
+  return document.querySelector('.modal-overlay.visible .modal-zoomable') !== null;
+}
+
+const ZOOM_KEYS = { '+': 0.1, '=': 0.1, NumpadAdd: 0.1, '-': -0.1, _: -0.1, NumpadSubtract: -0.1, 0: 0, Numpad0: 0 };
 
 let _toastTimer = null;
 let _manualRefreshing = false;
@@ -2704,7 +2749,7 @@ function showAgentModal(agentId) {
 }
 
 function closeAgentModal() {
-  resetModalFullscreen('agent-modal');
+  hideModalOverlay('agent-modal');
   currentAgentModalId = null;
   highlightSelectedAgent();
 }
@@ -4618,6 +4663,18 @@ const MODAL_CLOSERS = {
 };
 
 document.addEventListener('keydown', (e) => {
+  // Scale the open modal's reading surface instead of letting the browser zoom
+  // the whole page. Sits above the text-field guard so it still works with the
+  // caret in a field inside the modal.
+  if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+    const delta = ZOOM_KEYS[e.key] ?? ZOOM_KEYS[e.code];
+    if (delta !== undefined && isZoomableModalOpen()) {
+      e.preventDefault();
+      adjustModalZoom(delta);
+      return;
+    }
+  }
+
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') {
     return;
   }
@@ -5088,7 +5145,7 @@ function refreshInfoModalLinkedDocs() {
 }
 
 function closePreviewModal() {
-  resetModalFullscreen('preview-modal');
+  hideModalOverlay('preview-modal');
   // Empty the body so an iframe preview is destroyed and its scripts/timers stop.
   document.getElementById('preview-modal-body').innerHTML = '';
   currentPreviewPath = null;
@@ -6963,7 +7020,7 @@ function openPlanModal() {
 }
 
 function closePlanModal() {
-  resetModalFullscreen('plan-modal');
+  hideModalOverlay('plan-modal');
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
@@ -7233,6 +7290,8 @@ try {
   af.forEach((k) => activityFilter.add(k));
 } catch (_) {}
 initSidebarResize();
+applyModalZoom();
+loadModalFullscreen();
 loadPanelWidths();
 initPanelResize('detail-panel', 'detail-panel-resize', '--detail-panel-width', 'detail-panel-width');
 initPanelResize('message-panel', 'message-panel-resize', '--message-panel-width', 'message-panel-width');
