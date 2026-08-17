@@ -6453,6 +6453,14 @@ function updateStickyBtnState() {
   if (svg) svg.setAttribute('fill', isSticky ? 'currentColor' : 'none');
 }
 
+// Purely cosmetic: the tmp root is identical for every session and the encoded
+// project segment is already shown in the Path row, so only the last two segments
+// carry information. The full path stays in the tooltip and the copy button.
+function abbreviateScratchpadDir(dir) {
+  const sep = dir.includes('\\') ? '\\' : '/';
+  return ['$tmp', '…', ...dir.split(/[/\\]/).slice(-2)].join(sep);
+}
+
 function showInfoModal(session, teamConfig, tasks, planContent, parentInfo) {
   const modal = document.getElementById('team-modal');
   const titleEl = document.getElementById('team-modal-title');
@@ -6470,7 +6478,8 @@ function showInfoModal(session, teamConfig, tasks, planContent, parentInfo) {
   let html = '';
 
   // Session & project details as compact key-value rows
-  // Each row: [label, displayValue, { openPath?, copyValue? }]
+  // Each row: [label, value, { openPath?, abbrev? }] — `value` is authoritative
+  // (tooltip + copy); `abbrev` only replaces the rendered text.
   const infoRows = [];
   infoRows.push(['Session', session.id, { openClaudeDir: true, openFile: session.jsonlPath }]);
   if (parentInfo?.parentSessionId) {
@@ -6500,6 +6509,13 @@ function showInfoModal(session, teamConfig, tasks, planContent, parentInfo) {
   if (session.tasksDir) {
     infoRows.push(['Tasks Dir', session.tasksDir, { openPath: session.tasksDir }]);
   }
+  if (session.scratchpadDir) {
+    infoRows.push([
+      'Scratchpad',
+      session.scratchpadDir,
+      { openPath: session.scratchpadDir, abbrev: abbreviateScratchpadDir(session.scratchpadDir) },
+    ]);
+  }
   if (session.sharedTaskList) {
     infoRows.push(['Shared Tasks', session.sharedTaskList]);
   }
@@ -6517,7 +6533,7 @@ function showInfoModal(session, teamConfig, tasks, planContent, parentInfo) {
     if (opts?.openSession) {
       html += `<span onclick="openSessionFromInfo('${escAttrJs(opts.openSession)}')" style="${clickableStyle}" title="Open session in app">${escapeHtml(value)}</span>`;
     } else {
-      html += `<span style="${plainStyle}" title="${escapeHtml(value)}">${escapeHtml(value)}</span>`;
+      html += `<span style="${plainStyle}" title="${escapeHtml(value)}">${escapeHtml(opts?.abbrev || value)}</span>`;
     }
     const copyBtn = `<button onclick="copyWithFeedback('${escAttrJs(value)}', this)" title="Copy">${ICON_COPY}</button>`;
     let openBtn = '';

@@ -94,6 +94,8 @@ const CCK_DIR = path.join(CLAUDE_DIR, '.cck');
 const AGENT_ACTIVITY_DIR = path.join(CCK_DIR, 'agent-activity');
 const CONTEXT_STATUS_DIR = path.join(CCK_DIR, 'context-status');
 const PINS_FILE = path.join(CCK_DIR, 'pins.json');
+// Harness-owned scratchpad root; the per-session dir under it is created lazily.
+const SCRATCHPAD_ROOT = path.join(os.tmpdir(), 'claude');
 
 // Server-side pin mirror (UI authoritative, server stores latest pushed state for CLI queries).
 function readPins() {
@@ -961,6 +963,14 @@ function getSessionDisplayName(sessionId, meta) {
   return null;
 }
 
+// Derived by convention, not looked up: the harness creates the dir lazily, so a
+// stat here would report "missing" for every session that has not written a temp
+// file yet — and it would put IO on the session-list hot path. Pure string join.
+function getScratchpadDir(id, meta) {
+  if (!meta.jsonlPath) return null;
+  return path.join(SCRATCHPAD_ROOT, path.basename(path.dirname(meta.jsonlPath)), id, 'scratchpad');
+}
+
 function buildSessionObject(id, meta, overrides = {}) {
   const logStat = overrides._logStat || getSessionLogStat(meta);
   const logMtime = logStat.mtime;
@@ -992,6 +1002,7 @@ function buildSessionObject(id, meta, overrides = {}) {
     jsonlPath: meta.jsonlPath || null,
     tasksDir: null,
     projectDir: meta.jsonlPath ? path.dirname(meta.jsonlPath) : null,
+    scratchpadDir: getScratchpadDir(id, meta),
     contextStatus: getContextStatus(id, meta),
     ...getPlanInfo(meta.slug),
     ...getWorkflowInfoSummary(id),
