@@ -2805,6 +2805,9 @@ body::before {
 }
 .rendered-md blockquote {
   margin: 0.6em 0;
+  padding-left: 10px;
+  border-left: 2px solid var(--border);
+  color: var(--text-secondary);
 }
 .rendered-md table {
   margin: 0.6em 0;
