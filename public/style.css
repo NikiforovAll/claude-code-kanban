@@ -3721,6 +3721,7 @@ body.light .msg-assistant .msg-text {
 }
 
 .modal {
+  position: relative;
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -3734,6 +3735,16 @@ body.light .msg-assistant .msg-text {
   overflow-y: auto;
 }
 
+/* Before .modal.fullscreen on purpose: at equal specificity the later
+   fullscreen rule must win, same as for every other per-modal size. */
+.modal.msg-detail-dialog {
+  width: 90vw;
+  max-width: 860px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+}
+
 /* Height is a cap, not a floor — a two-line message should not sit in a 92vh box.
    The HTML preview keeps its explicit height below: its iframe is `height: 100%`
    and needs a resolvable parent height. */
@@ -3741,6 +3752,39 @@ body.light .msg-assistant .msg-text {
   width: 80vw;
   max-width: 80vw;
   max-height: 92vh;
+}
+
+.modal-resize-handle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 18px;
+  height: 18px;
+  cursor: nwse-resize;
+  z-index: 1;
+  color: var(--text-muted);
+  opacity: 0.55;
+  border-bottom-right-radius: 11px;
+  background: linear-gradient(
+    135deg,
+    transparent 0 50%,
+    currentColor 50% 56%,
+    transparent 56% 64%,
+    currentColor 64% 70%,
+    transparent 70% 78%,
+    currentColor 78% 84%,
+    transparent 84%
+  );
+}
+
+.modal-resize-handle:hover,
+.modal-resize-handle.dragging {
+  opacity: 1;
+  color: var(--accent);
+}
+
+.modal.fullscreen .modal-resize-handle {
+  display: none;
 }
 
 .modal.plan-modal {
@@ -3837,6 +3881,19 @@ body.light .msg-assistant .msg-text {
   max-width: 98vw;
   height: 98vh;
   max-height: 98vh;
+}
+
+/* User-dragged size (bottom-right grip, app.js initModalResize). Last of the
+   modal sizing rules on purpose: at equal specificity, source order lets it
+   beat every per-modal size above; fullscreen still wins via :not() while
+   active, and JS keeps inline sizing off user-sized modals (autoSizeModal and
+   "Show more" skip them, the drag clears leftovers). Height is a cap, not a
+   floor (same rule as .fullscreen) — short content still collapses. min()
+   keeps a size saved on a large screen inside the current viewport. */
+.modal.user-sized:not(.fullscreen) {
+  width: min(var(--user-modal-w), 98vw);
+  max-width: min(var(--user-modal-w), 98vw);
+  max-height: min(var(--user-modal-h), 95vh);
 }
 
 .preview-html .modal-body,

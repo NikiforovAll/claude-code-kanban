@@ -1900,8 +1900,22 @@ function _setModalWidth(modal, slot, on, maxWidth, width) {
   }
 }
 
+function _modalEl(modalId) {
+  return document.querySelector(`#${modalId} .modal`);
+}
+
+// The opt-in marker for fullscreen and drag-resize alike: the presence of a
+// `<modalId>-fullscreen-btn` button in the markup.
+function _forEachFullscreenModal(cb) {
+  for (const btn of document.querySelectorAll('[id$="-fullscreen-btn"]')) {
+    const modalId = btn.id.replace(/-fullscreen-btn$/, '');
+    const modal = _modalEl(modalId);
+    if (modal) cb(modalId, modal);
+  }
+}
+
 function _applyModalFullscreen(modalId, on) {
-  const modal = document.querySelector(`#${modalId} .modal`);
+  const modal = _modalEl(modalId);
   modal.classList.toggle('fullscreen', on);
   _setModalWidth(modal, 'Fs', on, '', '');
   updateFullscreenBtnIcon(`${modalId}-fullscreen-btn`, on);
@@ -1909,16 +1923,15 @@ function _applyModalFullscreen(modalId, on) {
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
 function toggleModalFullscreen(modalId) {
-  const on = !document.querySelector(`#${modalId} .modal`).classList.contains('fullscreen');
+  const on = !_modalEl(modalId).classList.contains('fullscreen');
   _applyModalFullscreen(modalId, on);
   localStorage.setItem(`modal-fullscreen-${modalId}`, String(on));
 }
 
 function loadModalFullscreen() {
-  for (const btn of document.querySelectorAll('[id$="-fullscreen-btn"]')) {
-    const modalId = btn.id.replace(/-fullscreen-btn$/, '');
+  _forEachFullscreenModal((modalId) => {
     if (localStorage.getItem(`modal-fullscreen-${modalId}`) === 'true') _applyModalFullscreen(modalId, true);
-  }
+  });
 }
 
 // Hides the overlay only — the fullscreen state stays on the dialog, it is a
@@ -1935,6 +1948,72 @@ function updateFullscreenBtnIcon(btnId, isFullscreen) {
   btn.innerHTML = isFullscreen
     ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></svg>'
     : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>';
+}
+
+// Free-form modal resize: drag the bottom-right grip, double-click it to reset.
+// The size lives in CSS custom properties + `.user-sized` (see style.css) rather
+// than inline width/height, so it never collides with the inline-style stash
+// that fullscreen and "Show more" do via _setModalWidth. The viewport cap lives
+// only in the CSS min(); JS clamps just the minimums.
+const MODAL_MIN_W = 360;
+const MODAL_MIN_H = 240;
+
+function _setModalUserSize(modal, w, h) {
+  modal.style.setProperty('--user-modal-w', w);
+  modal.style.setProperty('--user-modal-h', h);
+}
+
+function initModalResize() {
+  _forEachFullscreenModal((modalId, modal) => {
+    const wKey = `modal-width-${modalId}`;
+    const hKey = `modal-height-${modalId}`;
+    const savedW = localStorage.getItem(wKey);
+    const savedH = localStorage.getItem(hKey);
+    if (savedW && savedH) {
+      _setModalUserSize(modal, savedW, savedH);
+      modal.classList.add('user-sized');
+    }
+
+    const handle = document.createElement('div');
+    handle.className = 'modal-resize-handle';
+    handle.title = 'Drag to resize · double-click to reset';
+    modal.appendChild(handle);
+
+    let startW, startH, w, h;
+    _initDragResize(handle, {
+      onStart() {
+        startW = modal.offsetWidth;
+        startH = modal.offsetHeight;
+        // autoSizeModal / "Show more" may have widened the dialog inline
+        // before the first drag; inline width beats the .user-sized CSS.
+        modal.style.width = '';
+        modal.style.maxWidth = '';
+        // Vars and class land together, so `.user-sized` never reads an
+        // undefined var.
+        _setModalUserSize(modal, `${startW}px`, `${startH}px`);
+        modal.classList.add('user-sized');
+      },
+      // The overlay centers the modal, so both edges move — double the delta
+      // to keep the grip under the cursor.
+      onMove(dx, dy) {
+        w = Math.max(MODAL_MIN_W, startW + dx * 2);
+        h = Math.max(MODAL_MIN_H, startH + dy * 2);
+        _setModalUserSize(modal, `${w}px`, `${h}px`);
+      },
+      onEnd() {
+        if (w && h) {
+          localStorage.setItem(wKey, `${w}px`);
+          localStorage.setItem(hKey, `${h}px`);
+        }
+      },
+    });
+
+    handle.addEventListener('dblclick', () => {
+      modal.classList.remove('user-sized');
+      localStorage.removeItem(wKey);
+      localStorage.removeItem(hKey);
+    });
+  });
 }
 
 const MODAL_ZOOM_KEY = 'modal-zoom';
@@ -2325,7 +2404,8 @@ function _applyExpandToggle(btn, fullEl) {
   const panel = btn.closest('.message-panel');
   if (panel) panel.classList.toggle('msg-expanded-wide', expand);
   const modal = btn.closest('.modal');
-  if (modal) _setModalWidth(modal, 'Expand', expand, '60vw', '60vw');
+  // A user-dragged size is an explicit choice — don't widen over it.
+  if (modal && !modal.classList.contains('user-sized')) _setModalWidth(modal, 'Expand', expand, '60vw', '60vw');
 }
 function _toggleExpand(btn) {
   const f = document.getElementById(btn.dataset.expandId);
@@ -2343,7 +2423,7 @@ function makeExpandToggle(_truncatedHtml, fullHtml, opts = {}) {
 }
 
 function autoSizeModal(modal, body) {
-  if (modal.classList.contains('fullscreen')) return;
+  if (modal.classList.contains('fullscreen') || modal.classList.contains('user-sized')) return;
   modal.style.maxWidth = '';
   modal.classList.remove('has-mermaid');
   const hasMermaid = body.querySelector('pre.mermaid') !== null;
@@ -6313,68 +6393,79 @@ function loadSidebarState() {
   }
 }
 
-function initSidebarResize() {
-  const sidebar = document.querySelector('.sidebar');
-  const handle = document.getElementById('sidebar-resize');
-  let startX, startWidth;
+// Shared drag-session lifecycle for every resize grip (sidebar, panels, modal):
+// the `.dragging` class, text-selection suppression, and document-level
+// listener add/remove live here once. Callers keep only their geometry.
+// onStart may return false to veto the drag.
+function _initDragResize(handle, { onStart, onMove, onEnd }) {
+  let startX, startY;
 
   handle.addEventListener('mousedown', (e) => {
-    if (sidebar.classList.contains('collapsed')) return;
+    if (onStart && onStart() === false) return;
     startX = e.clientX;
-    startWidth = sidebar.offsetWidth;
-    sidebar.classList.add('resizing');
+    startY = e.clientY;
     handle.classList.add('dragging');
     document.body.style.userSelect = 'none';
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
+    document.addEventListener('mousemove', move);
+    document.addEventListener('mouseup', up);
     e.preventDefault();
   });
 
-  function onMove(e) {
-    const w = Math.min(600, Math.max(200, startWidth + e.clientX - startX));
-    sidebar.style.setProperty('--sidebar-width', `${w}px`);
-    sidebar.style.width = `${w}px`;
+  function move(e) {
+    onMove(e.clientX - startX, e.clientY - startY);
   }
 
-  function onUp() {
-    sidebar.classList.remove('resizing');
+  function up() {
     handle.classList.remove('dragging');
     document.body.style.userSelect = '';
-    document.removeEventListener('mousemove', onMove);
-    document.removeEventListener('mouseup', onUp);
-    localStorage.setItem('sidebar-width', sidebar.style.getPropertyValue('--sidebar-width'));
+    document.removeEventListener('mousemove', move);
+    document.removeEventListener('mouseup', up);
+    onEnd();
   }
+}
+
+function initSidebarResize() {
+  const sidebar = document.querySelector('.sidebar');
+  const handle = document.getElementById('sidebar-resize');
+  let startWidth;
+
+  _initDragResize(handle, {
+    onStart() {
+      if (sidebar.classList.contains('collapsed')) return false;
+      startWidth = sidebar.offsetWidth;
+      sidebar.classList.add('resizing');
+    },
+    onMove(dx) {
+      const w = Math.min(600, Math.max(200, startWidth + dx));
+      sidebar.style.setProperty('--sidebar-width', `${w}px`);
+      sidebar.style.width = `${w}px`;
+    },
+    onEnd() {
+      sidebar.classList.remove('resizing');
+      localStorage.setItem('sidebar-width', sidebar.style.getPropertyValue('--sidebar-width'));
+    },
+  });
 }
 
 function initPanelResize(panelId, handleId, cssVar, storageKey) {
   const panel = document.getElementById(panelId);
   const handle = document.getElementById(handleId);
-  let startX, startWidth;
+  let startWidth;
 
-  handle.addEventListener('mousedown', (e) => {
-    startX = e.clientX;
-    startWidth = panel.offsetWidth;
-    panel.classList.add('resizing');
-    handle.classList.add('dragging');
-    document.body.style.userSelect = 'none';
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-    e.preventDefault();
+  _initDragResize(handle, {
+    onStart() {
+      startWidth = panel.offsetWidth;
+      panel.classList.add('resizing');
+    },
+    onMove(dx) {
+      const w = Math.max(200, startWidth - dx);
+      panel.style.setProperty(cssVar, `${w}px`);
+    },
+    onEnd() {
+      panel.classList.remove('resizing');
+      localStorage.setItem(storageKey, panel.style.getPropertyValue(cssVar));
+    },
   });
-
-  function onMove(e) {
-    const w = Math.max(200, startWidth - (e.clientX - startX));
-    panel.style.setProperty(cssVar, `${w}px`);
-  }
-
-  function onUp() {
-    panel.classList.remove('resizing');
-    handle.classList.remove('dragging');
-    document.body.style.userSelect = '';
-    document.removeEventListener('mousemove', onMove);
-    document.removeEventListener('mouseup', onUp);
-    localStorage.setItem(storageKey, panel.style.getPropertyValue(cssVar));
-  }
 }
 
 function loadPanelWidths() {
@@ -7328,6 +7419,7 @@ try {
 initSidebarResize();
 applyModalZoom();
 loadModalFullscreen();
+initModalResize();
 loadPanelWidths();
 initPanelResize('detail-panel', 'detail-panel-resize', '--detail-panel-width', 'detail-panel-width');
 initPanelResize('message-panel', 'message-panel-resize', '--message-panel-width', 'message-panel-width');
