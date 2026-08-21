@@ -94,6 +94,7 @@ const CCK_DIR = path.join(CLAUDE_DIR, '.cck');
 const AGENT_ACTIVITY_DIR = path.join(CCK_DIR, 'agent-activity');
 const CONTEXT_STATUS_DIR = path.join(CCK_DIR, 'context-status');
 const PINS_FILE = path.join(CCK_DIR, 'pins.json');
+const SERVER_INFO_FILE = path.join(CCK_DIR, 'server.json');
 // Harness-owned scratchpad root; the per-session dir under it is created lazily.
 const SCRATCHPAD_ROOT = path.join(os.tmpdir(), 'claude');
 
@@ -106,15 +107,25 @@ function readPins() {
   return {};
 }
 
-function writePins(pins) {
+function writeJsonAtomic(file, obj) {
   try {
     mkdirSync(CCK_DIR, { recursive: true });
-    const tmp = `${PINS_FILE}.${process.pid}.${Date.now()}.tmp`;
-    writeFileSync(tmp, JSON.stringify(pins, null, 2), 'utf8');
-    renameSync(tmp, PINS_FILE);
+    const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
+    writeFileSync(tmp, JSON.stringify(obj, null, 2), 'utf8');
+    renameSync(tmp, file);
   } catch (e) {
-    console.error('Failed to write pins.json:', e.message);
+    console.error(`Failed to write ${path.basename(file)}:`, e.message);
   }
+}
+
+function writePins(pins) {
+  writeJsonAtomic(PINS_FILE, pins);
+}
+
+// Port discovery for out-of-process helpers (the postman monitor). The pid rides along
+// so a reader can tell a live server from a file left behind by a crashed one.
+function writeServerInfo(port) {
+  writeJsonAtomic(SERVER_INFO_FILE, { port, pid: process.pid });
 }
 
 // #region TIMINGS
@@ -2636,6 +2647,9 @@ app.get('/api/tasks/all', async (req, res) => {
   }
 });
 
+const { enqueueSessionEvent, formatTaskMoved, handleSessionEvents } = require('./lib/session-events');
+app.get('/api/sessions/:sessionId/events', handleSessionEvents);
+
 // API: Update task fields (subject, description)
 app.put('/api/tasks/:sessionId/:taskId', async (req, res) => {
   try {
@@ -2650,12 +2664,24 @@ app.put('/api/tasks/:sessionId/:taskId', async (req, res) => {
     }
 
     const task = JSON.parse(await fs.readFile(taskPath, 'utf8'));
+    const prevStatus = task.status;
 
     if (subject !== undefined) task.subject = subject;
     if (description !== undefined) task.description = description;
     if (req.body.status !== undefined) task.status = req.body.status;
 
     await fs.writeFile(taskPath, JSON.stringify(task, null, 2));
+
+    // Ring the session only for a move. The direction has to ride in the line because
+    // the write above destroyed the old status -- nothing downstream can recover it, and
+    // which way a task moved is what decides whether to start work or stop it.
+    if (task.status !== prevStatus) {
+      // The route param is a task *directory*, which for a shared list or team board is
+      // not a session id -- and the postman polls with its own session id, so an unresolved
+      // name would queue the line where nobody drains it.
+      const line = formatTaskMoved(taskId, prevStatus, task);
+      for (const sid of resolveSessionsForTaskDir(sessionId)) enqueueSessionEvent(sid, line);
+    }
 
     res.json({ success: true, task });
   } catch (error) {
@@ -2964,27 +2990,27 @@ watcher.on('all', (event, filePath) => {
 
     taskCountsCache.delete(path.join(TASKS_DIR, dirName));
 
-    if (isUUID(dirName)) {
-      broadcast({ type: 'update', event, sessionId: dirName, file: path.basename(filePath) });
-    } else {
-      broadcastToMappedSessions(dirName, event, filePath);
-    }
+    broadcastToMappedSessions(dirName, event, filePath);
   }
 });
 
-function broadcastToMappedSessions(taskListName, event, filePath) {
+// Which sessions own a task directory. Usually the dir name IS the session id, but a
+// shared list or a team dir is one directory several sessions map onto -- so anything
+// addressing a session from a task path has to fan out the same way. One resolver for
+// both readers of that mapping: the SSE broadcast and the doorbell.
+function resolveSessionsForTaskDir(name) {
+  if (isUUID(name)) return [name];
   const { listToSessions } = loadAllTaskMaps();
-  const map = listToSessions[taskListName];
-  if (map) {
-    for (const sid of Object.keys(map)) {
-      broadcast({ type: 'update', event, sessionId: sid, file: path.basename(filePath) });
-    }
-    return;
-  }
-  // Fallback: check if taskListName is a team name
-  const cfg = loadTeamConfig(taskListName);
-  if (cfg?.leadSessionId) {
-    broadcast({ type: 'update', event, sessionId: cfg.leadSessionId, file: path.basename(filePath) });
+  const map = listToSessions[name];
+  if (map) return Object.keys(map);
+  // Fallback: check if name is a team name
+  const cfg = loadTeamConfig(name);
+  return cfg?.leadSessionId ? [cfg.leadSessionId] : [];
+}
+
+function broadcastToMappedSessions(taskListName, event, filePath) {
+  for (const sid of resolveSessionsForTaskDir(taskListName)) {
+    broadcast({ type: 'update', event, sessionId: sid, file: path.basename(filePath) });
   }
 }
 
@@ -3213,6 +3239,9 @@ async function prewarmCaches() {
 
   const onReady = (actualPort) => {
     console.log(`Claude Task Kanban running at http://localhost:${actualPort}`);
+    // The port is configurable and falls back to a random one when taken, so the postman
+    // monitor cannot assume it -- publish the live one where it can read it.
+    writeServerInfo(actualPort);
     const warning = net.exposureWarning();
     if (warning) console.log(warning);
 

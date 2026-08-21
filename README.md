@@ -30,7 +30,7 @@ npx claude-code-kanban --open
 
 ### 3. Use Claude Code as usual
 
-Tasks, agents, and messages appear on the board automatically — Claude Code writes task files and conversation logs to `~/.claude`, the dashboard watches them and streams updates to the browser via SSE. It never directs Claude's work.
+Tasks, agents, and messages appear on the board automatically — Claude Code writes task files and conversation logs to `~/.claude`, the dashboard watches them and streams updates to the browser via SSE. Moving a card is the one thing that flows the other way: the board notifies the owning session with the card subject and description, so the agent can act on it.
 
 ## Features
 

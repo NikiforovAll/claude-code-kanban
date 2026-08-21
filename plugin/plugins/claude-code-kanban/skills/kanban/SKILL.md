@@ -1,60 +1,53 @@
 ---
 name: kanban
-description: Drive the claude-code-kanban dashboard from this session — focus the current session in the browser, pin/unpin it in the sidebar, preview a markdown or HTML file, link a document to the session, or inspect session stats and messages. Use when the user mentions kanban or cck.
+description: Drive the kanban board — open, pin, preview, link, inspect.
 argument-hint: '[open|pin|unpin|preview|link] [target]'
+disable-model-invocation: true
 ---
 
 # Kanban Skill
 
-The current Claude session id is `${CLAUDE_SESSION_ID}` (substituted when this skill loads), so the user never needs to look it up.
+This session id is `${CLAUDE_SESSION_ID}`, substituted when the skill loads.
 
-When the user passes arguments, map them to the matching command below (`open` → `session open`, `pin`/`unpin`/`pins` → `session pin`/`--unpin`/`session pins`, `preview` → `preview-doc`, `link` → `link-doc`, `list`/`view`/`peek` → the read-only verbs); with no arguments, open the current session.
+An argument names the section below that handles it; with no argument, open the current session. Prefer the bare `claude-code-kanban` binary, falling back to `npx claude-code-kanban` when it is off PATH or the user asks for npx.
 
-Prefer the bare `claude-code-kanban` binary; fall back to `npx claude-code-kanban` when it is not on PATH, or when the user asks for npx explicitly.
+To be driven *by* the board instead — card moves arriving as instructions — the user types `/claude-code-kanban:kanban-follow`.
 
-## Open the current session in kanban
+## `open` — the current session
 
-Primary use case. Pins the active session in the sidebar and switches to the Active tab.
+Pins the session and switches the board to the Active tab.
 
 ```bash
 claude-code-kanban session open ${CLAUDE_SESSION_ID}
 ```
 
-## Pin the current session
-
-Pins the session so it stays visible regardless of filters. Three states: `pinned` (default), `sticky` (always at the top), or cleared with `--unpin`.
+## `pin` — keep the session visible
 
 ```bash
 claude-code-kanban session pin ${CLAUDE_SESSION_ID}            # pin
-claude-code-kanban session pin ${CLAUDE_SESSION_ID} --sticky   # sticky at top
+claude-code-kanban session pin ${CLAUDE_SESSION_ID} --sticky   # always at the top
 claude-code-kanban session pin ${CLAUDE_SESSION_ID} --unpin    # clear
+claude-code-kanban session pins                                # list pinned; --sticky narrows
 ```
 
-## List pinned sessions
+## `preview` — open a file in the modal
+
+Markdown or standalone HTML. HTML renders in a sandboxed iframe, so sibling assets like `./style.css` do not load. Relative paths are fine — the server resolves them.
 
 ```bash
-claude-code-kanban session pins              # all pinned/sticky
-claude-code-kanban session pins --sticky     # sticky only
+claude-code-kanban preview-doc <file.md|.html> --session ${CLAUDE_SESSION_ID}
 ```
 
-## Preview a file in kanban
+## `link` — attach a doc without the modal
 
-Opens a markdown or standalone HTML file in the preview modal (HTML renders live in a sandboxed iframe, so sibling assets like `./style.css` do not load). Relative paths are fine — the server resolves to absolute.
+Adds the file to the session's linked docs in the sidebar. Any extension, and nothing pops up, so it is the safe choice while the user is working.
 
 ```bash
-claude-code-kanban preview-doc <path-to-file.md|.html> --session ${CLAUDE_SESSION_ID}
+claude-code-kanban link-doc <path> --session ${CLAUDE_SESSION_ID}            # link
+claude-code-kanban link-doc <path> --session ${CLAUDE_SESSION_ID} --unlink   # remove
 ```
 
-## Link a document to the session (no modal)
-
-Same idea as `preview-doc`, but it only attaches the file to the session's linked docs in the sidebar — nothing pops up, so it is the safe choice while the user is working. Any extension is linkable.
-
-```bash
-claude-code-kanban link-doc <path-to-file> --session ${CLAUDE_SESSION_ID}            # link
-claude-code-kanban link-doc <path-to-file> --session ${CLAUDE_SESSION_ID} --unlink   # remove
-```
-
-## Inspect sessions (read-only)
+## `list` / `view` / `peek` — read-only
 
 ```bash
 claude-code-kanban session list --active                            # recent active sessions
@@ -64,12 +57,10 @@ claude-code-kanban session view ${CLAUDE_SESSION_ID}                # full stats
 claude-code-kanban session peek ${CLAUDE_SESSION_ID} --limit 20     # last 20 messages (server caps at 50)
 ```
 
-`session list` shows 10 rows by default and always includes pinned sessions, sticky first — `--no-pins` disables both.
-
-Add `--json` to any list-style verb for machine-readable output.
+`session list` shows 10 rows and always includes pinned sessions, sticky first (`--no-pins` disables both). `--json` works on any list-style verb.
 
 ## Troubleshooting
 
-`claude-code-kanban help <command>` prints the authoritative flags for any command — read it instead of guessing.
+`claude-code-kanban help <command>` prints the authoritative flags — read it instead of guessing.
 
 - **"Cannot reach cck server…"** → the error names the port it tried. Ask the user to start the server with `claude-code-kanban`. If they run it elsewhere, set `PORT=<n>` when invoking the CLI.
