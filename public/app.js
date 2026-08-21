@@ -1425,6 +1425,7 @@ function toggleAgentPin(agentId) {
   }
   savePins(currentSessionId, currentPins);
   renderMessages(currentMessages);
+  renderSessions();
   renderAgentFooter();
 }
 
@@ -1476,6 +1477,7 @@ function togglePin(msgIndex) {
   }
   savePins(currentSessionId, currentPins);
   renderMessages(currentMessages);
+  renderSessions();
   updateMsgDetailPinState();
 }
 
@@ -1485,6 +1487,7 @@ function unpinById(pinIdx) {
   currentPins.splice(pinIdx, 1);
   savePins(currentSessionId, currentPins);
   renderMessages(currentMessages);
+  renderSessions();
   if (wasAgent) renderAgentFooter();
   updateMsgDetailPinState();
 }
