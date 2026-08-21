@@ -573,6 +573,13 @@ function getCustomTaskDir(sessionId) {
   return null;
 }
 
+// Where a session's task files live. The custom-list and team lookups can both miss, and
+// the fallback is the plain per-session dir -- every route that touches a task file needs
+// that same resolution, so it lives in one place.
+function taskDirFor(sessionId) {
+  return getCustomTaskDir(sessionId) || path.join(TASKS_DIR, sessionId);
+}
+
 function getTaskCounts(sessionPath) {
   const cached = taskCountsCache.get(sessionPath);
   if (cached) return cached;
@@ -1420,8 +1427,7 @@ app.get('/api/projects', (req, res) => {
 // API: Get tasks for a session
 app.get('/api/sessions/:sessionId', async (req, res) => {
   try {
-    const customDir = getCustomTaskDir(req.params.sessionId);
-    const sessionPath = customDir || path.join(TASKS_DIR, req.params.sessionId);
+    const sessionPath = taskDirFor(req.params.sessionId);
 
     if (!existsSync(sessionPath)) {
       return res.status(404).json({ error: 'Session not found' });
@@ -2650,13 +2656,51 @@ app.get('/api/tasks/all', async (req, res) => {
 const { enqueueSessionEvent, formatTaskMoved, handleSessionEvents } = require('./lib/session-events');
 app.get('/api/sessions/:sessionId/events', handleSessionEvents);
 
+// API: Create a task
+app.post('/api/tasks/:sessionId', async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const subject = (req.body.subject || '').trim();
+    if (!subject) return res.status(400).json({ error: 'Subject is required' });
+
+    const sessionDir = taskDirFor(sessionId);
+    if (!existsSync(sessionDir)) mkdirSync(sessionDir, { recursive: true });
+
+    // Ids are the agent's own numbering scheme, so a hand-made task has to keep counting
+    // from the highest one on disk -- reusing a number would overwrite that task's file.
+    const ids = readdirSync(sessionDir)
+      .filter((f) => f.endsWith('.json'))
+      .map((f) => parseInt(path.basename(f, '.json'), 10))
+      .filter((n) => Number.isInteger(n));
+    const id = String(Math.max(0, ...ids) + 1);
+
+    const task = {
+      id,
+      subject,
+      description: (req.body.description || '').trim(),
+      activeForm: subject,
+      status: 'pending',
+      blocks: [],
+      blockedBy: [],
+    };
+
+    // No doorbell here, unlike a move: the user typed this task, so telling their session
+    // about it would only repeat what they just said. Dragging it to In Progress rings.
+    await fs.writeFile(path.join(sessionDir, `${id}.json`), JSON.stringify(task, null, 2));
+    res.json({ success: true, task });
+  } catch (error) {
+    console.error('Error creating task:', error);
+    res.status(500).json({ error: 'Failed to create task' });
+  }
+});
+
 // API: Update task fields (subject, description)
 app.put('/api/tasks/:sessionId/:taskId', async (req, res) => {
   try {
     const { sessionId, taskId } = req.params;
     const { subject, description } = req.body;
 
-    const sessionDir = getCustomTaskDir(sessionId) || path.join(TASKS_DIR, sessionId);
+    const sessionDir = taskDirFor(sessionId);
     const taskPath = path.join(sessionDir, `${taskId}.json`);
 
     if (!existsSync(taskPath)) {
@@ -2694,7 +2738,7 @@ app.put('/api/tasks/:sessionId/:taskId', async (req, res) => {
 app.delete('/api/tasks/:sessionId/:taskId', async (req, res) => {
   try {
     const { sessionId, taskId } = req.params;
-    const sessionPath = getCustomTaskDir(sessionId) || path.join(TASKS_DIR, sessionId);
+    const sessionPath = taskDirFor(sessionId);
     const taskPath = path.join(sessionPath, `${taskId}.json`);
 
     if (!existsSync(taskPath)) {

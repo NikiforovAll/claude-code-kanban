@@ -32,6 +32,14 @@ npx claude-code-kanban --open
 
 Tasks, agents, and messages appear on the board automatically — Claude Code writes task files and conversation logs to `~/.claude`, the dashboard watches them and streams updates to the browser via SSE. Moving a card is the one thing that flows the other way: the board notifies the owning session with the card subject and description, so the agent can act on it.
 
+> **Empty board?** Claude Code ships the task tools off by default on some models — currently Opus 4 and 4.8, Sonnet 5, Fable 5 — so nothing writes task files and the board stays empty. Turn them on in `~/.claude/settings.json`:
+>
+> ```json
+> { "env": { "CLAUDE_CODE_ENABLE_TODO_TOOLS": "true" } }
+> ```
+>
+> Then restart Claude Code. You can also add a task by hand from the board's Pending column.
+
 ## Features
 
 - **Real-time Kanban board** — Tasks move through Pending → In Progress → Completed as Claude works

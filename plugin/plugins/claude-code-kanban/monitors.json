@@ -1,7 +1,7 @@
 [
   {
     "name": "kanban-doorbell",
-    "description": "Notifies this session when its tasks are moved on the kanban board. Armed by invoking the kanban-follow skill.",
+    "description": "Notifies this session when its tasks are moved on the kanban board.",
     "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/postman.js\"",
     "when": "on-skill-invoke:claude-code-kanban:kanban-follow"
   }

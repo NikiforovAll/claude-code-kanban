@@ -3379,11 +3379,19 @@ function renderKanban() {
   completedCount.textContent = completed.length;
 
   const emptyIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>`;
+  const plusIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 5v14M5 12h14"/></svg>`;
 
-  pendingTasks.innerHTML =
-    pending.length > 0
-      ? pending.map(renderTaskCard).join('')
-      : `<div class="column-empty">${emptyIcon}<div>No pending tasks</div></div>`;
+  // Adding is a live text input inside the column, so a background refresh would blow it
+  // away mid-typing -- leave the column alone until the input is gone.
+  if (!addingTask) {
+    const addTile = canAddTask()
+      ? `<button type="button" class="column-add${pending.length ? '' : ' empty'}" onclick="startAddTask(this)">${plusIcon}<span>Add task</span></button>`
+      : '';
+    pendingTasks.innerHTML =
+      pending.length > 0
+        ? pending.map(renderTaskCard).join('') + addTile
+        : addTile || `<div class="column-empty">${emptyIcon}<div>No pending tasks</div></div>`;
+  }
 
   inProgressTasks.innerHTML =
     inProgress.length > 0
@@ -3412,6 +3420,78 @@ function renderKanban() {
   }
 }
 
+//#endregion
+
+//#region ADD_TASK
+let addingTask = false;
+
+// A task the user types is theirs to place, and the only session it can belong to is the
+// one on screen -- the project and all-sessions views span many task dirs, so there is no
+// single target to write into.
+function canAddTask() {
+  return viewMode === 'session' && !!currentSessionId;
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+function startAddTask(tile) {
+  if (addingTask) return;
+  addingTask = true;
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'form-input column-add-input';
+  input.placeholder = 'Task subject, Enter to add';
+  tile.replaceWith(input);
+  input.focus();
+
+  const reset = () => {
+    addingTask = false;
+    renderKanban();
+  };
+
+  const save = async () => {
+    // Enter and blur both submit, and Enter's own save disables the input -- which blurs
+    // it. Dropping both handlers first is what keeps that from posting the subject twice.
+    input.onkeydown = null;
+    input.onblur = null;
+
+    const subject = input.value.trim();
+    if (!subject) return reset();
+    input.disabled = true;
+    const sessionId = currentSessionId;
+    try {
+      const res = await fetch(`/api/tasks/${sessionId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subject }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      // The response carries the finished task, and the watcher will resend it within the
+      // SSE debounce anyway -- so show it now rather than paying a session refetch for it.
+      const { task } = await res.json();
+      currentTasks.push({ ...task, sessionId });
+      addingTask = false;
+      renderKanban();
+    } catch (error) {
+      console.error('Failed to create task:', error);
+      showToast('Failed to create task', 'error');
+      reset();
+    }
+  };
+
+  input.onkeydown = (e) => {
+    e.stopPropagation();
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      save();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      input.onblur = null;
+      reset();
+    }
+  };
+  input.onblur = () => save();
+}
 //#endregion
 
 //#region DRAG_DROP
