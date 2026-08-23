@@ -567,8 +567,6 @@ async function refreshProjectAgents() {
   renderAgentFooter();
 }
 
-//#endregion
-
 //#region MESSAGE_PANEL
 function toggleMessagePanel() {
   const panel = document.getElementById('message-panel');
