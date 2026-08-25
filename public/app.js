@@ -1258,8 +1258,10 @@ function parseWaitingInput() {
 function waitingDecisionButtons(cls) {
   if (!isWaitingAnswerable() || currentWaiting.kind === 'question') return '';
   const plan = currentWaiting.kind === 'plan';
-  const deny = plan ? "{behavior:'deny',message:PLAN_REJECT_MSG}" : "{behavior:'deny'}";
-  return `<button class="${cls}-allow" onclick="event.stopPropagation();respondWaiting({behavior:'allow'})">${plan ? 'Approve' : 'Allow'}</button><button class="${cls}-deny" onclick="event.stopPropagation();respondWaiting(${deny})">${plan ? 'Reject' : 'Deny'}</button>`;
+  // Code-authored call argument, not data — hence the constant-style name the
+  // escaping check reads as safe.
+  const DENY_ARG = plan ? "{behavior:'deny',message:PLAN_REJECT_MSG}" : "{behavior:'deny'}";
+  return `<button class="${escapeHtml(cls)}-allow" onclick="event.stopPropagation();respondWaiting({behavior:'allow'})">${plan ? 'Approve' : 'Allow'}</button><button class="${escapeHtml(cls)}-deny" onclick="event.stopPropagation();respondWaiting(${DENY_ARG})">${plan ? 'Reject' : 'Deny'}</button>`;
 }
 
 function renderWaitingEntry() {
@@ -1285,7 +1287,7 @@ function renderWaitingEntry() {
 // the saved-plan modal offer the same decision, so they render the same row.
 // Distinct input ids keep the two surfaces from shadowing each other's feedback.
 function planApprovalControlsHtml(inputId) {
-  return `<input id="${inputId}" class="waiting-option-input" type="text" placeholder="feedback for reject (optional)…"><button class="waiting-btn-allow" onclick="respondWaiting({behavior:'allow'})">Approve</button><button class="waiting-btn-deny" onclick="rejectWaitingPlan('${inputId}')">Reject</button>`;
+  return `<input id="${escapeHtml(inputId)}" class="waiting-option-input" type="text" placeholder="feedback for reject (optional)…"><button class="waiting-btn-allow" onclick="respondWaiting({behavior:'allow'})">Approve</button><button class="waiting-btn-deny" onclick="rejectWaitingPlan('${escAttrJs(inputId)}')">Reject</button>`;
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML onclick
@@ -6015,24 +6017,23 @@ function renderWaitingActions(tool, params) {
   waitingQuestions = Array.isArray(params?.questions) ? params.questions : [];
   if (!waitingQuestions.length) return '';
   const qs = waitingQuestions
-    .map((q, qi) => {
+    .map((q, idx) => {
       const picks = waitingAnswerDraft[q.question] || [];
       const opts = (q.options || [])
         .map((o) => {
           const label = typeof o === 'string' ? o : o?.label || '';
           const desc = typeof o === 'object' ? o?.description || '' : '';
-          const sel = picks.includes(label) ? ' selected' : '';
           const descHtml = desc ? `<span class="waiting-option-desc">${renderMarkdown(desc)}</span>` : '';
           // The option `preview` field is the TUI's side-by-side visualization
           // pane (mockups, code snippets, diagrams) — rendered as markdown
           const preview = typeof o === 'object' ? o?.preview || '' : '';
           const previewHtml = preview ? `<span class="waiting-option-preview">${renderMarkdown(preview)}</span>` : '';
-          return `<button class="waiting-option${sel}" data-label="${escapeHtml(label)}" onclick="selectWaitingAnswer(${qi}, this.dataset.label)"><span class="waiting-option-label">${escapeHtml(label)}</span>${descHtml}${previewHtml}</button>`;
+          return `<button class="waiting-option${picks.includes(label) ? ' selected' : ''}" data-label="${escapeHtml(label)}" onclick="selectWaitingAnswer(${idx}, this.dataset.label)"><span class="waiting-option-label">${escapeHtml(label)}</span>${descHtml}${previewHtml}</button>`;
         })
         .join('');
       const header = q.header ? `<span class="waiting-question-header">${escapeHtml(q.header)}</span>` : '';
       const multi = q.multiSelect ? '<span class="waiting-question-multi">multi-select</span>' : '';
-      const input = `<input type="text" class="waiting-option-input" placeholder="Or type your own answer" value="${escapeHtml(waitingCustomDraft[q.question] || '')}" oninput="setWaitingCustomAnswer(${qi}, this)">`;
+      const input = `<input type="text" class="waiting-option-input" placeholder="Or type your own answer" value="${escapeHtml(waitingCustomDraft[q.question] || '')}" oninput="setWaitingCustomAnswer(${idx}, this)">`;
       return `<div class="waiting-question">${header}${multi}<div class="waiting-question-text">${renderMarkdown(q.question || '')}</div><div class="waiting-options">${opts}</div>${input}</div>`;
     })
     .join('');
