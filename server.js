@@ -33,6 +33,7 @@ const {
   buildLoopInfoFromState
 } = require('./lib/parsers');
 const { inlineHtmlAssets } = require('./lib/inline-assets');
+const { buildDecision, decisionFileName, isDecisionFile, waitSecondsFrom, isLapsed } = require('./lib/approvals');
 
 if (process.argv.includes("--install") || process.argv.includes("--uninstall")) {
   const { runInstall, runUninstall } = require("./install");
@@ -168,6 +169,25 @@ function persistAgent(dir, agent) {
   fs.appendFile(file, JSON.stringify({ ...agent, event: 'server-update' }) + '\n', 'utf8').catch(() => {});
 }
 
+// Lapse math lives in lib/approvals (kept in sync with the gate's own parse);
+// this only reads the config, cached so the polled session list doesn't re-read
+// it per hit (marker stays visible for the badge until TTL).
+const APPROVALS_CONFIG_FILE = path.join(CCK_DIR, 'approvals.json');
+let approvalsWaitCache = { ts: 0, ms: 30 * 1000 };
+function approvalsWaitMs() {
+  if (Date.now() - approvalsWaitCache.ts < 10 * 1000) return approvalsWaitCache.ms;
+  let cfg = null;
+  try {
+    cfg = JSON.parse(readFileSync(APPROVALS_CONFIG_FILE, 'utf8'));
+  } catch (e) { /* missing config — gate default */ }
+  approvalsWaitCache = { ts: Date.now(), ms: waitSecondsFrom(cfg) * 1000 };
+  return approvalsWaitCache.ms;
+}
+
+function isWaitingLapsed(data) {
+  return isLapsed(data.timestamp, approvalsWaitMs());
+}
+
 function checkWaitingForUser(agentDir, logMtime) {
   try {
     const data = JSON.parse(readFileSync(path.join(agentDir, '_waiting.json'), 'utf8'));
@@ -177,6 +197,7 @@ function checkWaitingForUser(agentDir, logMtime) {
       if (age >= PERMISSION_TTL_MS) return null;
       // After grace period, check if session resumed activity (user already responded)
       if (logMtime && age >= WAITING_RESOLVE_GRACE_MS && logMtime > waitTime + WAITING_RESOLVE_GRACE_MS) return null;
+      if (isWaitingLapsed(data)) return { ...data, lapsed: true };
       return data;
     }
   } catch (e) { /* skip — missing or invalid */ }
@@ -2049,6 +2070,31 @@ app.post('/api/sessions/:sessionId/waiting/discard', (req, res) => {
   }
 });
 
+// UI-driven approvals: answers the ask approval-gate.sh is blocking on by
+// writing _decision-<id>.json next to the marker. The hook consumes and deletes
+// both files; a write for a hook that already gave up is accepted anyway (D13)
+// and left for cleanupAgentActivity's sweep.
+app.post('/api/sessions/:sessionId/waiting/respond', (req, res) => {
+  const sessionId = resolveSessionId(req.params.sessionId);
+  const dir = path.join(AGENT_ACTIVITY_DIR, sessionId);
+  let marker = null;
+  try { marker = JSON.parse(readFileSync(path.join(dir, '_waiting.json'), 'utf8')); }
+  catch (e) { /* missing or invalid → buildDecision reports 410 */ }
+  // The gate stopped polling after waitSeconds — an orphaned decision file would
+  // sit unconsumed while the card pretends the click worked.
+  if (marker && isWaitingLapsed(marker)) {
+    return res.status(410).json({ error: 'Ask lapsed — answer it in the terminal' });
+  }
+  const result = buildDecision(marker, req.body || {});
+  if (result.error) return res.status(result.status).json({ error: result.error });
+  try {
+    writeJsonAtomic(path.join(dir, decisionFileName(marker.id)), result.decision);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to write decision' });
+  }
+});
+
 app.post('/api/sessions/:sessionId/agents/:agentId/stop', (req, res) => {
   const sessionId = resolveSessionId(req.params.sessionId);
   const agentId = sanitizeAgentId(req.params.agentId);
@@ -3246,6 +3292,18 @@ async function cleanupAgentActivity() {
         const age = now - stat.mtimeMs;
         if ((contents.length === 0 && age > AGENT_STALE_MS) || age > CLEANUP_MAX_AGE_MS) {
           await fs.rm(dirPath, { recursive: true, force: true });
+          continue;
+        }
+        // Orphaned decision files: a terminal deny fires no hook event (D13), so a
+        // board answer for an already-gone gate is never consumed. The gate waits at
+        // most PERMISSION_TTL_MS, so anything older is unclaimable.
+        for (const f of contents) {
+          if (!isDecisionFile(f)) continue;
+          const fp = path.join(dirPath, f);
+          try {
+            const fst = await fs.stat(fp);
+            if (now - fst.mtimeMs > PERMISSION_TTL_MS) await fs.rm(fp, { force: true });
+          } catch (e) { /* ignore per-file errors */ }
         }
       } catch (e) { /* ignore per-folder errors */ }
     }

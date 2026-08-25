@@ -25,8 +25,8 @@ Claude Code spawns subagent
 | `SubagentStart` | Yes | New subprocess spawned (Agent tool or team member) |
 | `SubagentStop` | Yes | Subprocess exits |
 | `TeammateIdle` | Yes | Team member waiting for work |
-| `PermissionRequest` | Yes | Agent needs user permission |
-| `PreToolUse` | Yes | Before tool execution (matched: AskUserQuestion) |
+| `PermissionRequest` | Yes | Agent needs user permission (also `AskUserQuestion` and `ExitPlanMode` asks) |
+| `PreToolUse` | No | Before tool execution (unregistered since v2.10 — questions and plans moved to `PermissionRequest`) |
 | `PostToolUse` | Yes | After tool execution (clears waiting state) |
 | `SessionStart` | No | Session begins |
 | `SessionEnd` | No | Session ends |
@@ -56,7 +56,7 @@ Key discovery: `agent_transcript_path` (subagent's own JSONL path) is only avail
 
 ## Hook: `~/.claude/hooks/agent-spy.sh`
 
-Configured in `~/.claude/settings.json` for six events: `SubagentStart`, `SubagentStop`, `TeammateIdle`, `PermissionRequest`, `PreToolUse`, `PostToolUse`.
+Configured in `~/.claude/settings.json` for four events: `SubagentStart`, `SubagentStop`, `TeammateIdle`, `PostToolUse`. The waiting-marker event — `PermissionRequest` (permissions, `AskUserQuestion`, and `ExitPlanMode` plan approval) — is handled by `approval-gate.sh`, which writes the same `_waiting.json` marker and optionally blocks for a board decision (see [ui-approvals.md](ui-approvals.md)).
 
 **File layout:** `~/.claude/agent-activity/{sessionId}/{agentId}.json` — one file per agent, grouped by session.
 

@@ -3041,6 +3041,249 @@ body::before {
     background: color-mix(in srgb, var(--warning, #f5a623) 16%, transparent);
   }
 }
+.msg-waiting-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 4px;
+}
+.msg-waiting-footer .msg-time {
+  margin-top: 0;
+}
+.msg-waiting-actions {
+  flex-shrink: 0;
+  display: flex;
+  gap: 6px;
+}
+.msg-waiting-actions button {
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  background: none;
+}
+#msg-detail-waiting-footer {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  padding: 10px 20px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+#msg-detail-waiting-footer:empty {
+  display: none;
+}
+#msg-detail-waiting-footer .waiting-option-input,
+#plan-approval-footer .waiting-option-input {
+  flex: 1;
+  margin: 0;
+}
+#plan-approval-footer {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex: 1;
+}
+.waiting-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  margin-top: 14px;
+}
+.waiting-btn-allow,
+.waiting-btn-deny {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 16px;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 500;
+  background: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+/* One quiet color treatment for both button families — the card's compact
+   buttons need the descendant selector to out-rank `.msg-waiting-actions button` */
+.waiting-btn-allow,
+.msg-waiting-actions .msg-waiting-allow {
+  color: var(--success, #2ea043);
+  border-color: color-mix(in srgb, var(--success, #2ea043) 35%, transparent);
+}
+.waiting-btn-allow:hover:not(:disabled),
+.msg-waiting-actions .msg-waiting-allow:hover {
+  background: color-mix(in srgb, var(--success, #2ea043) 10%, transparent);
+}
+.waiting-btn-deny,
+.msg-waiting-actions .msg-waiting-deny {
+  color: var(--danger, #f85149);
+  border-color: color-mix(in srgb, var(--danger, #f85149) 35%, transparent);
+}
+.waiting-btn-deny:hover,
+.msg-waiting-actions .msg-waiting-deny:hover {
+  background: color-mix(in srgb, var(--danger, #f85149) 10%, transparent);
+}
+.waiting-btn-allow:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.waiting-raw-input {
+  margin-bottom: 12px;
+}
+.waiting-raw-input summary {
+  font-size: 11px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+.waiting-question {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px 14px;
+  background: color-mix(in srgb, var(--bg-deep) 40%, transparent);
+}
+.waiting-question-header {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--accent);
+  margin-bottom: 4px;
+}
+.waiting-question-text {
+  font-weight: 600;
+  font-size: 13px;
+  line-height: 1.5;
+  margin-bottom: 10px;
+}
+/* Question text and option descriptions render as markdown (like the TUI),
+   so fenced diagrams, tables, and mermaid keep their shape. */
+.waiting-question-text p,
+.waiting-option-desc p,
+.waiting-option-preview p {
+  margin: 0 0 6px;
+}
+.waiting-question-text p:last-child,
+.waiting-option-desc p:last-child,
+.waiting-option-preview p:last-child {
+  margin-bottom: 0;
+}
+.waiting-question-text pre,
+.waiting-option-desc pre {
+  font-weight: 400;
+  overflow-x: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-primary);
+}
+.waiting-question-text pre.mermaid,
+.waiting-option-desc pre.mermaid {
+  background: none;
+  border: none;
+  text-align: center;
+}
+.waiting-question-text table,
+.waiting-option-desc table {
+  border-collapse: collapse;
+  font-weight: 400;
+}
+.waiting-question-text th,
+.waiting-question-text td,
+.waiting-option-desc th,
+.waiting-option-desc td {
+  border: 1px solid var(--border);
+  padding: 3px 8px;
+}
+.waiting-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.waiting-option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px 12px;
+  font-family: var(--mono);
+  font-size: 12px;
+  background: none;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+.waiting-option:hover {
+  border-color: var(--accent);
+}
+.waiting-option.selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.waiting-option-label {
+  font-weight: 600;
+}
+.waiting-option-desc {
+  display: block;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+.waiting-option-preview {
+  display: block;
+  margin-top: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-primary);
+  font-size: 11px;
+  font-weight: 400;
+  overflow-x: auto;
+}
+.waiting-option-preview pre {
+  margin: 0;
+  overflow-x: auto;
+  background: none;
+}
+.waiting-question-multi {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+.waiting-option-input {
+  width: 100%;
+  margin-top: 6px;
+  border: 1px dashed var(--border);
+  border-radius: 4px;
+  padding: 8px 12px;
+  font-family: var(--mono);
+  font-size: 12px;
+  background: none;
+  color: var(--text-primary);
+  transition: border-color 0.15s ease;
+}
+.waiting-option-input:hover,
+.waiting-option-input:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+.waiting-option-input::placeholder {
+  color: var(--text-secondary);
+}
 .msg-item.msg-idle .msg-icon {
   width: 12px;
   height: 12px;
@@ -3610,10 +3853,16 @@ body::before {
   background: var(--warning-dim);
   border: 1px solid var(--warning);
   border-radius: 8px;
+  font-family: var(--mono);
   font-size: 12px;
   color: var(--warning);
   white-space: nowrap;
+  cursor: pointer;
   animation: permission-pulse 1.5s ease-in-out infinite;
+}
+.permission-badge:hover {
+  background: color-mix(in srgb, var(--warning) 22%, transparent);
+  animation-play-state: paused;
 }
 @keyframes permission-pulse {
   0%,

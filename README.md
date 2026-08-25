@@ -49,6 +49,7 @@ Tasks, agents, and messages appear on the board automatically — Claude Code wr
 - **Follow & pin** — Follow the latest message live (`Shift+M`), pin the messages that matter
 - **Tool stats & impact** — Per-session tool usage breakdown and file impact
 - **Waiting-for-user indicators** — Amber highlight on sessions needing permission or input
+- **UI approvals (opt-in)** — Allow/deny permission asks and answer questions from the board — [docs](docs/ui-approvals.md)
 - **Agent teams** — Color-coded team members, owner filtering, member count badges
 - **17 color themes** — Dracula, Nord, Catppuccin, Gruvbox, Tokyo Night, and more — each in light and dark
 - **Storage manager** — Inspect disk usage and clean up stale sessions and tasks

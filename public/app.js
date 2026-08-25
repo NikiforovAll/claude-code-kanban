@@ -1178,16 +1178,17 @@ function toggleToolGroup(id) {
   if (el) el.classList.toggle('show');
 }
 
-function getWaitingLabel(kind, tool) {
-  if (kind !== 'question') return `Awaiting permission: ${tool}`;
-  if (tool === 'ExitPlanMode') return 'Plan awaiting approval';
-  return 'Question pending';
-}
-
+// Legacy markers (written before the gate minted kind:"plan") carry no kind
+// for plans — the tool name is the durable signal there.
 function getWaitingPill(kind, tool) {
-  if (kind === 'question' && tool === 'ExitPlanMode') return 'Plan awaiting approval';
+  if (kind === 'plan' || tool === 'ExitPlanMode') return 'Plan awaiting approval';
   if (kind === 'question') return 'Question pending';
   return 'Awaiting permission';
+}
+
+function getWaitingLabel(kind, tool) {
+  const pill = getWaitingPill(kind, tool);
+  return pill === 'Awaiting permission' ? `${pill}: ${tool}` : pill;
 }
 
 function deriveWaitingDetail(tool, params) {
@@ -1233,17 +1234,38 @@ function renderWaitingBody(tool, params) {
   return renderToolParamsHtml(params);
 }
 
+const PLAN_REJECT_MSG = 'Plan rejected from the kanban board.';
+
+// Answerable only when the marker carries a request id (written by
+// approval-gate.sh, which is polling for a decision) and the gate hasn't
+// lapsed past its wait window — older or lapsed markers are only answerable
+// in the terminal.
+function isWaitingAnswerable() {
+  return !!(currentWaiting?.id && !currentWaiting.lapsed);
+}
+
+function parseWaitingInput() {
+  try {
+    return JSON.parse(currentWaiting?.toolInput || '');
+  } catch (_) {
+    return null; /* toolInput may be truncated/non-JSON */
+  }
+}
+
+// One source for the decision-button pair on every surface — Approve/Reject
+// for plans, Allow/Deny for permissions; only the css class prefix differs.
+// Questions return '' (answered via the form in the detail modal).
+function waitingDecisionButtons(cls) {
+  if (!isWaitingAnswerable() || currentWaiting.kind === 'question') return '';
+  const plan = currentWaiting.kind === 'plan';
+  const deny = plan ? "{behavior:'deny',message:PLAN_REJECT_MSG}" : "{behavior:'deny'}";
+  return `<button class="${cls}-allow" onclick="event.stopPropagation();respondWaiting({behavior:'allow'})">${plan ? 'Approve' : 'Allow'}</button><button class="${cls}-deny" onclick="event.stopPropagation();respondWaiting(${deny})">${plan ? 'Reject' : 'Deny'}</button>`;
+}
+
 function renderWaitingEntry() {
   if (!isWaitingFresh()) return '';
   const tool = currentWaiting.toolName || 'unknown';
-  let params = null;
-  if (currentWaiting.toolInput) {
-    try {
-      params = JSON.parse(currentWaiting.toolInput);
-    } catch (_) {
-      /* toolInput may be truncated/non-JSON */
-    }
-  }
+  const params = parseWaitingInput();
   const pillText = getWaitingPill(currentWaiting.kind, tool);
   const detail = deriveWaitingDetail(tool, params);
   const detailHtml = detail ? ` <span style="color:var(--text-secondary)">${escapeHtml(detail)}</span>` : '';
@@ -1251,7 +1273,73 @@ function renderWaitingEntry() {
   const bodyWrap = bodyHtml ? `<div class="msg-waiting-body">${bodyHtml}</div>` : '';
   const pill = `<span class="msg-waiting-pill">${escapeHtml(pillText)}</span>`;
   const discardBtn = `<button class="msg-waiting-discard" title="Discard permission prompt" onclick="event.stopPropagation();discardWaiting()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>`;
-  return `<div class="msg-item msg-waiting" onclick="msgDetailFollowLatest=false;showWaitingDetail()">${getToolIcon(tool)}<div class="msg-body"><div class="msg-text">${pill} <span style="font-weight:600">${escapeHtml(tool)}</span>${detailHtml}</div>${bodyWrap}<div class="msg-time">waiting…</div></div>${discardBtn}</div>`;
+  // Questions are answered in the detail modal; plans render there too.
+  const buttons = waitingDecisionButtons('msg-waiting');
+  const actions = buttons ? `<span class="msg-waiting-actions">${buttons}</span>` : '';
+  // Lapsed = gate stopped polling — the ask is only answerable in the terminal
+  const lapsed = !!currentWaiting.lapsed;
+  return `<div class="msg-item msg-waiting" onclick="msgDetailFollowLatest=false;showWaitingDetail()">${getToolIcon(tool)}<div class="msg-body"><div class="msg-text">${pill} <span style="font-weight:600">${escapeHtml(tool)}</span>${detailHtml}</div>${bodyWrap}<div class="msg-waiting-footer"><div class="msg-time">${lapsed ? 'answer in the terminal' : 'waiting…'}</div>${actions}</div></div>${discardBtn}</div>`;
+}
+
+// Shared approval controls for a fresh plan ask — the waiting-detail footer and
+// the saved-plan modal offer the same decision, so they render the same row.
+// Distinct input ids keep the two surfaces from shadowing each other's feedback.
+function planApprovalControlsHtml(inputId) {
+  return `<input id="${inputId}" class="waiting-option-input" type="text" placeholder="feedback for reject (optional)…"><button class="waiting-btn-allow" onclick="respondWaiting({behavior:'allow'})">Approve</button><button class="waiting-btn-deny" onclick="rejectWaitingPlan('${inputId}')">Reject</button>`;
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML onclick
+function rejectWaitingPlan(inputId) {
+  const feedback = document.getElementById(inputId)?.value?.trim();
+  respondWaiting({ behavior: 'deny', message: feedback || PLAN_REJECT_MSG });
+}
+
+// UI-driven approvals: POST the decision the blocking approval-gate.sh hook is
+// polling for. First writer wins (D5) — a 409/410 means the ask was answered in
+// the terminal or superseded, so just drop the card.
+async function respondWaiting(payload) {
+  if (!currentSessionId || !currentWaiting?.id) return;
+  try {
+    const res = await fetch(`/api/sessions/${encodeURIComponent(currentSessionId)}/waiting/respond`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: currentWaiting.id, ...payload }),
+    });
+    if (res.ok || res.status === 409 || res.status === 410) {
+      clearWaitingUi();
+    } else {
+      // Surface a respond failure — a silent console error reads as a dead button
+      const text = await res.text();
+      console.error('[respondWaiting]', res.status, text);
+      let msg = text;
+      try {
+        msg = JSON.parse(text).error || text;
+      } catch (_) {
+        /* plain text */
+      }
+      showToast(msg, 'error');
+    }
+  } catch (e) {
+    console.error('[respondWaiting]', e);
+    showToast(String(e), 'error');
+  }
+}
+
+// Drop the answered/discarded ask from every surface it renders on
+function clearWaitingUi() {
+  currentWaiting = null;
+  waitingAnswerDraft = {};
+  waitingCustomDraft = {};
+  if (currentMsgDetailIdx === MSG_DETAIL_WAITING_IDX) {
+    // In follow mode stay in the modal and swap to the latest message —
+    // closing it would silently drop the user out of following.
+    if (msgDetailFollowLatest && currentMessages.length) showMsgDetail(currentMessages.length - 1);
+    else closeMsgDetailModal();
+  }
+  // The saved-plan modal stays open after a decision — only its approval row goes
+  document.getElementById('plan-approval-footer')?.remove();
+  renderMessages(currentMessages);
+  renderAgentFooter();
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML onclick
@@ -1261,12 +1349,7 @@ async function discardWaiting() {
     const res = await fetch(`/api/sessions/${encodeURIComponent(currentSessionId)}/waiting/discard`, {
       method: 'POST',
     });
-    if (res.ok) {
-      currentWaiting = null;
-      if (currentMsgDetailIdx === MSG_DETAIL_WAITING_IDX) closeMsgDetailModal();
-      renderMessages(currentMessages);
-      renderAgentFooter();
-    }
+    if (res.ok) clearWaitingUi();
   } catch (e) {
     console.error('[discardWaiting]', e);
   }
@@ -1760,6 +1843,7 @@ function highlightSelectedMsg() {
 
 function showMsgDetail(idx) {
   currentMsgDetailIdx = idx;
+  document.getElementById('msg-detail-waiting-footer').innerHTML = '';
   msgHighlightDimmed = false;
   const m = currentMessages[idx];
   if (!m) return;
@@ -2628,7 +2712,7 @@ function renderAgentFooter() {
   document.getElementById('agent-footer-toggle').innerHTML = collapsed ? '&#x25B4;' : '&#x25BE;';
 
   const permHtml = permFresh
-    ? `<div class="permission-badge">${currentWaiting.kind === 'question' ? '❓ Question pending' : `⏳ Awaiting: ${escapeHtml(currentWaiting.toolName || 'unknown')}`}</div>`
+    ? `<button type="button" class="permission-badge" onclick="showWaitingDetail()">${currentWaiting.kind === 'question' ? '❓ Question pending' : currentWaiting.kind === 'plan' ? '📋 Plan pending' : `⏳ Awaiting: ${escapeHtml(currentWaiting.toolName || 'unknown')}`}</button>`
     : '';
 
   content.innerHTML =
@@ -3366,6 +3450,59 @@ function renderTaskCard(task) {
 //#endregion
 
 //#region KANBAN
+// FLIP pass around renderKanban's innerHTML rebuild (#41): the rebuild lands cards at
+// their final spot instantly, so a status change reads as a full-board reload. Recording
+// where each card was and animating from there makes a move glide instead.
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+function cardFlipKey(el) {
+  return `${el.dataset.sessionId}|${el.dataset.taskId}`;
+}
+
+function captureCardRects() {
+  const rects = new Map();
+  for (const el of document.querySelectorAll('.column-tasks .task-card')) {
+    rects.set(cardFlipKey(el), el.getBoundingClientRect());
+  }
+  return rects;
+}
+
+function playCardFlip(before) {
+  // An empty board before the render means a view switch, not a move — nothing to glide.
+  if (reducedMotion.matches || before.size === 0) return;
+  for (const el of document.querySelectorAll('.column-tasks .task-card')) {
+    const prev = before.get(cardFlipKey(el));
+    if (!prev) {
+      el.animate(
+        [
+          { opacity: 0, transform: 'scale(0.97)' },
+          { opacity: 1, transform: 'none' },
+        ],
+        { duration: 150, easing: 'ease-out' },
+      );
+      continue;
+    }
+    const now = el.getBoundingClientRect();
+    const dx = prev.left - now.left;
+    const dy = prev.top - now.top;
+    if (dx || dy) {
+      el.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], {
+        duration: 220,
+        easing: 'cubic-bezier(0.2, 0.7, 0.3, 1)',
+      });
+    }
+  }
+}
+
+// Rewrite a column only when its markup actually changed: SSE ticks fire on any task-file
+// write (updatedAt bumps, agent refreshes), and an unconditional innerHTML rebuild makes
+// the whole board blink for updates with nothing visible in them (#41).
+function setColumnHtml(el, html) {
+  if (el._lastHtml === html) return;
+  el._lastHtml = html;
+  el.innerHTML = html;
+}
+
 function renderKanban() {
   let filtered = currentTasks.filter((t) => !isInternalTask(t));
   if (ownerFilter) {
@@ -3382,27 +3519,41 @@ function renderKanban() {
   const emptyIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>`;
   const plusIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 5v14M5 12h14"/></svg>`;
 
+  const writes = [];
   // Adding is a live text input inside the column, so a background refresh would blow it
   // away mid-typing -- leave the column alone until the input is gone.
   if (!addingTask) {
     const addTile = canAddTask()
       ? `<button type="button" class="column-add${pending.length ? '' : ' empty'}" onclick="startAddTask(this)">${plusIcon}<span>Add task</span></button>`
       : '';
-    pendingTasks.innerHTML =
+    writes.push([
+      pendingTasks,
       pending.length > 0
         ? pending.map(renderTaskCard).join('') + addTile
-        : addTile || `<div class="column-empty">${emptyIcon}<div>No pending tasks</div></div>`;
+        : addTile || `<div class="column-empty">${emptyIcon}<div>No pending tasks</div></div>`,
+    ]);
   }
 
-  inProgressTasks.innerHTML =
+  writes.push([
+    inProgressTasks,
     inProgress.length > 0
       ? inProgress.map(renderTaskCard).join('')
-      : `<div class="column-empty">${emptyIcon}<div>No active tasks</div></div>`;
+      : `<div class="column-empty">${emptyIcon}<div>No active tasks</div></div>`,
+  ]);
 
-  completedTasks.innerHTML =
+  writes.push([
+    completedTasks,
     completed.length > 0
       ? completed.map(renderTaskCard).join('')
-      : `<div class="column-empty">${emptyIcon}<div>No completed tasks</div></div>`;
+      : `<div class="column-empty">${emptyIcon}<div>No completed tasks</div></div>`,
+  ]);
+
+  // Capture rects (a forced layout read per card) only when a column will
+  // actually be rewritten — most SSE ticks change nothing and skip the FLIP.
+  const willChange = writes.some(([el, html]) => el._lastHtml !== html);
+  const flipRects = willChange ? captureCardRects() : null;
+  for (const [el, html] of writes) setColumnHtml(el, html);
+  if (flipRects) playCardFlip(flipRects);
 
   if (selectedTaskId) {
     const card =
@@ -3442,6 +3593,9 @@ function startAddTask(tile) {
   input.type = 'text';
   input.className = 'form-input column-add-input';
   input.placeholder = 'Task subject, Enter to add';
+  // The input mutates the column outside setColumnHtml — drop the cache so the
+  // next render rebuilds instead of skipping on a stale match.
+  pendingTasks._lastHtml = null;
   tile.replaceWith(input);
   input.focus();
 
@@ -5820,25 +5974,180 @@ function isWaitingFresh() {
   return Date.now() - new Date(currentWaiting.timestamp).getTime() < WAITING_TTL_MS;
 }
 
+// Per-question selections for the AskUserQuestion form, keyed by question text
+// (the shape the tool's `answers` input expects). Picks hold arrays of option
+// labels (length <= 1 unless multiSelect); free text lives separately so a
+// multi-select can combine both, the way the TUI's "Other" row does. Reset
+// when the ask changes.
+let waitingAnswerDraft = {};
+let waitingCustomDraft = {};
+let waitingDraftId = null;
+let waitingQuestions = [];
+
+function waitingAnswerFor(q) {
+  const picks = waitingAnswerDraft[q.question] || [];
+  const custom = waitingCustomDraft[q.question] || '';
+  if (q.multiSelect) {
+    const all = custom ? picks.concat(custom) : picks;
+    return all.length ? all : null;
+  }
+  return picks[0] || custom || null;
+}
+
+// The action buttons live in the modal's fixed footer (#msg-detail-waiting-footer),
+// not the scrollable body — long content must not push them out of reach.
+function renderWaitingFooter(tool, params) {
+  if (currentWaiting?.kind === 'plan') {
+    return isWaitingAnswerable() ? planApprovalControlsHtml('plan-reject-feedback') : '';
+  }
+  if (currentWaiting?.kind !== 'question') return waitingDecisionButtons('waiting-btn');
+  if (!isWaitingAnswerable()) return '';
+  if (tool !== 'AskUserQuestion') return '';
+  const questions = Array.isArray(params?.questions) ? params.questions : [];
+  if (!questions.length) return '';
+  const picked = questions.filter((q) => waitingAnswerFor(q)).length;
+  const partial = picked > 0 && picked < questions.length ? ` (${picked}/${questions.length})` : '';
+  return `<button id="waiting-answer-btn" class="waiting-btn-allow" ${picked > 0 ? '' : 'disabled'} onclick="submitWaitingAnswers()">Answer${partial}</button>`;
+}
+
+function renderWaitingActions(tool, params) {
+  if (!isWaitingAnswerable() || currentWaiting.kind !== 'question' || tool !== 'AskUserQuestion') return '';
+  waitingQuestions = Array.isArray(params?.questions) ? params.questions : [];
+  if (!waitingQuestions.length) return '';
+  const qs = waitingQuestions
+    .map((q, qi) => {
+      const picks = waitingAnswerDraft[q.question] || [];
+      const opts = (q.options || [])
+        .map((o) => {
+          const label = typeof o === 'string' ? o : o?.label || '';
+          const desc = typeof o === 'object' ? o?.description || '' : '';
+          const sel = picks.includes(label) ? ' selected' : '';
+          const descHtml = desc ? `<span class="waiting-option-desc">${renderMarkdown(desc)}</span>` : '';
+          // The option `preview` field is the TUI's side-by-side visualization
+          // pane (mockups, code snippets, diagrams) — rendered as markdown
+          const preview = typeof o === 'object' ? o?.preview || '' : '';
+          const previewHtml = preview ? `<span class="waiting-option-preview">${renderMarkdown(preview)}</span>` : '';
+          return `<button class="waiting-option${sel}" data-label="${escapeHtml(label)}" onclick="selectWaitingAnswer(${qi}, this.dataset.label)"><span class="waiting-option-label">${escapeHtml(label)}</span>${descHtml}${previewHtml}</button>`;
+        })
+        .join('');
+      const header = q.header ? `<span class="waiting-question-header">${escapeHtml(q.header)}</span>` : '';
+      const multi = q.multiSelect ? '<span class="waiting-question-multi">multi-select</span>' : '';
+      const input = `<input type="text" class="waiting-option-input" placeholder="Or type your own answer" value="${escapeHtml(waitingCustomDraft[q.question] || '')}" oninput="setWaitingCustomAnswer(${qi}, this)">`;
+      return `<div class="waiting-question">${header}${multi}<div class="waiting-question-text">${renderMarkdown(q.question || '')}</div><div class="waiting-options">${opts}</div>${input}</div>`;
+    })
+    .join('');
+  return `<div class="waiting-actions">${qs}</div>`;
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML onclick
+function selectWaitingAnswer(qi, label) {
+  const q = waitingQuestions[qi];
+  if (!q) return;
+  // Clicking a picked option unpicks it, in both modes
+  const picks = waitingAnswerDraft[q.question] || [];
+  if (q.multiSelect) {
+    waitingAnswerDraft[q.question] = picks.includes(label) ? picks.filter((l) => l !== label) : picks.concat(label);
+  } else if (picks.includes(label)) {
+    delete waitingAnswerDraft[q.question];
+  } else {
+    waitingAnswerDraft[q.question] = [label];
+    delete waitingCustomDraft[q.question];
+  }
+  showWaitingDetail();
+}
+
+// Free-text path — the TUI's "type your own answer". Updates the draft and the
+// Answer button in place: a full re-render here would drop the input's focus
+// on every keystroke.
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML oninput
+function setWaitingCustomAnswer(qi, el) {
+  const q = waitingQuestions[qi];
+  if (!q) return;
+  const v = el.value.trim();
+  if (v) waitingCustomDraft[q.question] = v;
+  else delete waitingCustomDraft[q.question];
+  if (v && !q.multiSelect) {
+    delete waitingAnswerDraft[q.question];
+    for (const b of el.closest('.waiting-question')?.querySelectorAll('.waiting-option.selected') || []) {
+      b.classList.remove('selected');
+    }
+  }
+  const btn = document.getElementById('waiting-answer-btn');
+  if (btn) {
+    const picked = waitingQuestions.filter((qq) => waitingAnswerFor(qq)).length;
+    btn.disabled = picked === 0;
+    btn.textContent =
+      picked > 0 && picked < waitingQuestions.length ? `Answer (${picked}/${waitingQuestions.length})` : 'Answer';
+  }
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML onclick
+function submitWaitingAnswers() {
+  // Partial submits are fine — send only the questions actually answered.
+  // multiSelect answers go as arrays of labels (the shape the TUI validates).
+  const answers = {};
+  for (const q of waitingQuestions) {
+    const a = waitingAnswerFor(q);
+    if (a) answers[q.question] = a;
+  }
+  if (!Object.keys(answers).length) return;
+  respondWaiting({ answers });
+}
+
 function showWaitingDetail() {
   if (!isWaitingFresh()) return;
   currentMsgDetailIdx = MSG_DETAIL_WAITING_IDX;
   msgHighlightDimmed = false;
   highlightSelectedMsg();
+  // Follow-mode poll ticks re-run this whole render — carry any typed reject
+  // feedback across the rebuild, but never onto a different ask.
+  const sameAsk = currentWaiting.id === waitingDraftId;
+  const feedbackDraft = sameAsk ? document.getElementById('plan-reject-feedback')?.value || '' : '';
+  if (!sameAsk) {
+    waitingDraftId = currentWaiting.id || null;
+    waitingAnswerDraft = {};
+    waitingCustomDraft = {};
+  }
   const tool = currentWaiting.toolName || 'unknown';
   const label = getWaitingLabel(currentWaiting.kind, tool);
   const body = document.getElementById('msg-detail-body');
   let inputHtml = '';
+  const params = parseWaitingInput();
   if (currentWaiting.toolInput) {
-    let pretty = currentWaiting.toolInput;
-    try {
-      pretty = JSON.stringify(JSON.parse(currentWaiting.toolInput), null, 2);
-    } catch (_) {
-      /* keep raw */
-    }
+    const pretty = params ? JSON.stringify(params, null, 2) : currentWaiting.toolInput;
     inputHtml = `<pre class="${TINTED_PRE_CLASS}">${escapeHtml(pretty)}</pre>`;
   }
-  body.innerHTML = inputHtml;
+  const actionsHtml = renderWaitingActions(tool, params);
+  const footerHtml = renderWaitingFooter(tool, params);
+  // With actions on screen the form/buttons are the content — tuck the raw
+  // JSON behind a toggle, but keep what the user is approving visible: for a
+  // permission ask surface the command (or description) as a one-line summary
+  if ((actionsHtml || footerHtml) && inputHtml) {
+    let summaryHtml = '';
+    if (currentWaiting.kind === 'plan' && typeof params?.plan === 'string' && params.plan) {
+      // A plan ask IS the plan — render it in full so it can be reviewed and
+      // approved right here (follow mode included) instead of a JSON dump. The
+      // raw tool input is dropped entirely to match the saved-plan modal.
+      inputHtml = `<div class="detail-desc rendered-md">${renderMarkdown(params.plan)}</div>`;
+    } else {
+      if (currentWaiting.kind !== 'question' && params) {
+        const gist =
+          typeof params.command === 'string'
+            ? params.command
+            : typeof params.description === 'string'
+              ? params.description
+              : '';
+        if (gist) summaryHtml = `<pre class="${TINTED_PRE_CLASS}">${escapeHtml(gist)}</pre>`;
+      }
+      inputHtml = `${summaryHtml}<details class="waiting-raw-input"><summary>Raw tool input</summary>${inputHtml}</details>`;
+    }
+  }
+  body.innerHTML = inputHtml + actionsHtml;
+  document.getElementById('msg-detail-waiting-footer').innerHTML = footerHtml;
+  if (feedbackDraft) {
+    const feedbackEl = document.getElementById('plan-reject-feedback');
+    if (feedbackEl) feedbackEl.value = feedbackDraft;
+  }
   document.getElementById('msg-detail-title').textContent = label;
   document.getElementById('msg-detail-agent-btn').style.display = 'none';
   const modal = document.getElementById('msg-detail-modal').querySelector('.modal');
@@ -7215,6 +7524,15 @@ function openPlanModal() {
   if (!_pendingPlanContent) return;
   const body = document.getElementById('plan-modal-body');
   body.innerHTML = renderMarkdown(_pendingPlanContent);
+  // A saved plan opened while its approval ask is still pending (sidebar
+  // click, 'p') is the same review moment — offer Approve/Reject here too.
+  document.getElementById('plan-approval-footer')?.remove();
+  if (currentWaiting?.kind === 'plan' && isWaitingAnswerable() && _planSessionId === currentSessionId) {
+    const controls = document.createElement('div');
+    controls.id = 'plan-approval-footer';
+    controls.innerHTML = planApprovalControlsHtml('plan-modal-reject-feedback');
+    document.querySelector('#plan-modal .modal-footer').prepend(controls);
+  }
   document.getElementById('plan-modal').classList.add('visible');
   const keyHandler = (e) => {
     if (e.key === 'Escape') {

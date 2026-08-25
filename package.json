@@ -10,7 +10,7 @@
     "start": "node server.js",
     "dev": "node --watch server.js",
     "test": "node --test test/*.test.js",
-    "test:hooks": "bash tests/test-agent-spy.sh",
+    "test:hooks": "bash tests/test-agent-spy.sh && bash tests/test-approval-gate.sh",
     "validate:schemas": "node test/validate-live-schemas.js",
     "prepare": "husky"
   },

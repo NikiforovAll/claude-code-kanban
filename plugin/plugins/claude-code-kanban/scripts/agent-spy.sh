@@ -47,6 +47,15 @@ fi
 # EnterPlanMode has no waiting semantics — skip
 [ "$TOOL_NAME" = "EnterPlanMode" ] && exit 0
 
+# Legacy-config shim: shipped hooks.json routes PermissionRequest to
+# approval-gate.sh (which owns the id-bearing marker) and registers no
+# PreToolUse, so the suppression and writer below only run for configs that
+# still route those events here. Suppressing question/plan PermissionRequest
+# keeps such a config from overwriting the gate's marker with an id-less one.
+if [ "$EVENT" = "PermissionRequest" ] && { [ "$TOOL_NAME" = "AskUserQuestion" ] || [ "$TOOL_NAME" = "ExitPlanMode" ]; }; then
+  exit 0
+fi
+
 # Waiting-for-user events → write _waiting.json marker
 if [ "$EVENT" = "PermissionRequest" ] || { [ "$EVENT" = "PreToolUse" ] && { [ "$TOOL_NAME" = "AskUserQuestion" ] || [ "$TOOL_NAME" = "ExitPlanMode" ]; }; }; then
   DIR="$CCK_ACTIVITY/$SESSION_ID"
@@ -103,12 +112,17 @@ if [ "$EVENT" = "SubagentStart" ]; then
   fi
 
 elif [ "$EVENT" = "SubagentStop" ]; then
+  # Omit empty type: the server folds lines last-key-wins, so an empty type
+  # here would clobber the type recorded by the start line
   echo "$INPUT" | jq -c \
     --arg id "$AGENT_ID" --arg type "$AGENT_TYPE_RAW" --arg ts "$TS" \
-    '{agentId: $id, type: $type, event: "stop", status: "stopped",
-      lastMessage: (.last_assistant_message // ""), stoppedAt: $ts, updatedAt: $ts}' \
+    '{agentId: $id, event: "stop", status: "stopped",
+      lastMessage: (.last_assistant_message // ""), stoppedAt: $ts, updatedAt: $ts}
+     + (if $type == "" then {} else {type: $type} end)' \
     >> "$FILE"
 
 elif [ "$EVENT" = "TeammateIdle" ]; then
-  echo "{\"agentId\":\"$AGENT_ID\",\"type\":\"$AGENT_TYPE_RAW\",\"event\":\"idle\",\"status\":\"idle\",\"updatedAt\":\"$TS\"}" >> "$FILE"
+  TYPE_FIELD=""
+  [ -n "$AGENT_TYPE_RAW" ] && TYPE_FIELD="\"type\":\"$AGENT_TYPE_RAW\","
+  echo "{\"agentId\":\"$AGENT_ID\",${TYPE_FIELD}\"event\":\"idle\",\"status\":\"idle\",\"updatedAt\":\"$TS\"}" >> "$FILE"
 fi
