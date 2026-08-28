@@ -623,7 +623,12 @@ body::before {
   text-overflow: ellipsis;
 }
 
+/* inline-flex so only the text takes the click — a full-width row would swallow clicks
+   meant for the card itself */
 .session-goal {
+  display: inline-flex;
+  align-items: baseline;
+  max-width: 100%;
   font-size: 10px;
   margin-top: var(--card-gap-tight);
   white-space: nowrap;
@@ -635,8 +640,13 @@ body::before {
 .session-goal .session-goal-icon {
   margin-right: 3px;
   font-weight: 700;
+  flex-shrink: 0;
 }
-.session-goal:hover {
+.session-goal .session-goal-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.session-goal:hover .session-goal-text {
   text-decoration: underline;
   text-underline-offset: 2px;
 }
@@ -5048,21 +5058,27 @@ pre.mermaid svg {
   border-radius: 4px;
 }
 
-.project-group-header .group-chevron {
+.project-group-header .group-chevron,
+.session-group-header .group-chevron {
   transition: transform 0.15s ease;
   flex-shrink: 0;
   display: block;
 }
 
-.project-group-header.collapsed .group-chevron {
+.project-group-header.collapsed .group-chevron,
+.session-group-header.collapsed .group-chevron {
   transform: rotate(-90deg);
+}
+
+.project-group-header .group-name,
+.session-group-header .group-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .project-group-header .group-name {
   flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .project-view-btn {
@@ -5179,24 +5195,30 @@ pre.mermaid svg {
   letter-spacing: 0.3px;
 }
 
-.pinned-ungroup-btn {
-  margin-left: auto;
-  font-size: 14px;
-  line-height: 1;
+.pinned-ungroup-btn,
+.sg-action {
   color: var(--text-muted);
   cursor: pointer;
-  padding: 0 2px;
+  line-height: 1;
   opacity: 0;
   transition:
     opacity 0.15s,
     color 0.15s;
 }
 
-.pinned-sub-header:hover .pinned-ungroup-btn {
+.pinned-ungroup-btn {
+  margin-left: auto;
+  font-size: 14px;
+  padding: 0 2px;
+}
+
+.pinned-sub-header:hover .pinned-ungroup-btn,
+.session-group-header:hover .sg-action {
   opacity: 1;
 }
 
-.pinned-ungroup-btn:hover {
+.pinned-ungroup-btn:hover,
+.sg-action:hover {
   color: var(--accent);
 }
 
@@ -5292,5 +5314,170 @@ pre.mermaid svg {
 .session-item.stale .session-time::before {
   background: transparent;
   border: 1px solid var(--text-muted);
+}
+/* #endregion */
+
+/* #region SESSION_GROUPS */
+.sg-section-label {
+  padding: 10px 10px 2px;
+  margin-top: 10px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  user-select: none;
+}
+
+.sg-section-label:first-child {
+  margin-top: 0;
+}
+
+.session-group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  margin-top: 2px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-primary);
+  border-radius: 4px;
+  background: transparent;
+}
+
+.session-group-header:hover {
+  background: var(--bg-hover);
+}
+
+.session-group-header.kb-selected {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.sg-sub-label {
+  padding: 8px 10px 2px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  user-select: none;
+}
+
+.sg-name-input {
+  flex: 1;
+  min-width: 0;
+  padding: 1px 4px;
+  font: inherit;
+  color: var(--text-primary);
+  background: var(--bg-deep);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  outline: none;
+}
+
+.sg-action.sg-rename {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+}
+
+.sg-action.sg-delete {
+  font-size: 15px;
+  padding: 0 2px;
+}
+
+.session-group-sessions {
+  display: block;
+  margin-left: 6px;
+}
+
+.session-group-sessions.collapsed {
+  display: none;
+}
+
+.sg-empty {
+  padding: 10px 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+  border: 1px dashed var(--border);
+  border-radius: 4px;
+  margin: 4px 2px;
+  text-align: center;
+}
+
+.project-group-header.sg-nested {
+  margin-top: 4px;
+  padding-top: 4px;
+}
+
+/* Drag feedback */
+.session-item.sg-dragging,
+.project-group-header.sg-dragging,
+.session-group-header.sg-dragging {
+  opacity: 0.45;
+}
+
+.sg-drop-over {
+  outline: 1px dashed var(--accent);
+  outline-offset: -1px;
+  background: var(--accent-dim);
+}
+
+.sessions-list.sg-dragging-active .sg-ungroup-zone {
+  border: 1px dashed var(--accent);
+  border-radius: 4px;
+  color: var(--text-primary);
+}
+
+/* Move-to-group menu (right-click / long-press) */
+.sg-menu {
+  position: fixed;
+  z-index: 3000;
+  min-width: 180px;
+  max-width: 260px;
+  padding: 4px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 35%);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.sg-menu-label {
+  padding: 6px 8px 4px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+}
+
+.sg-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  background: none;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.sg-menu-item:hover {
+  background: var(--bg-hover);
+}
+
+.sg-menu-remove {
+  color: var(--text-secondary);
 }
 /* #endregion */
