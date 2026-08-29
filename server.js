@@ -2791,16 +2791,16 @@ app.delete('/api/tasks/:sessionId/:taskId', async (req, res) => {
       return res.status(404).json({ error: 'Task not found' });
     }
 
-    // Check if this task blocks other tasks
+    // A deleted task can't block anything, so drop the dangling reference instead of
+    // refusing the delete -- a stale blockedBy id would pin the other task as BLOCKED forever.
     const taskFiles = readdirSync(sessionPath).filter(f => f.endsWith('.json'));
 
     for (const file of taskFiles) {
-      const otherTask = JSON.parse(readFileSync(path.join(sessionPath, file), 'utf8'));
-      if (otherTask.blockedBy && otherTask.blockedBy.includes(taskId)) {
-        return res.status(400).json({
-          error: 'Cannot delete task that blocks other tasks',
-          blockedTasks: [otherTask.id]
-        });
+      const otherPath = path.join(sessionPath, file);
+      const otherTask = JSON.parse(readFileSync(otherPath, 'utf8'));
+      if (otherTask.blockedBy?.includes(taskId)) {
+        otherTask.blockedBy = otherTask.blockedBy.filter(id => id !== taskId);
+        await fs.writeFile(otherPath, JSON.stringify(otherTask, null, 2));
       }
     }
 
