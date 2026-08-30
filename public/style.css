@@ -29,6 +29,22 @@
   --team-dim: rgba(96, 165, 250, 0.18);
   --plan: #86a886;
   --plan-dim: rgba(134, 168, 134, 0.18);
+  --ansi-black: var(--text-muted);
+  --ansi-red: #e06c66;
+  --ansi-green: #3ecf8e;
+  --ansi-yellow: #e0b04a;
+  --ansi-blue: #60a5fa;
+  --ansi-magenta: #c98ce0;
+  --ansi-cyan: #4dc9c9;
+  --ansi-white: var(--text-secondary);
+  --ansi-bright-black: var(--text-tertiary);
+  --ansi-bright-red: #ff8a84;
+  --ansi-bright-green: #5ee3a8;
+  --ansi-bright-yellow: #f0c56a;
+  --ansi-bright-blue: #8bbdfb;
+  --ansi-bright-magenta: #e0a8f0;
+  --ansi-bright-cyan: #7ddede;
+  --ansi-bright-white: var(--text-primary);
   --mono: 'IBM Plex Mono', monospace;
   --serif: 'Playfair Display', serif;
   --card-gap: 7px;
@@ -3886,6 +3902,136 @@ body::before {
 
 /* #endregion */
 
+/* #region ANSI */
+
+/* SGR colours from terminal output, consumed by every pane that renders it.
+   The palette itself lives with the other colour tokens in VARIABLES /
+   LIGHT_THEME / MEDIA_QUERIES, so it flips with the theme like everything else. */
+.ansi-fg-black {
+  color: var(--ansi-black);
+}
+.ansi-fg-red {
+  color: var(--ansi-red);
+}
+.ansi-fg-green {
+  color: var(--ansi-green);
+}
+.ansi-fg-yellow {
+  color: var(--ansi-yellow);
+}
+.ansi-fg-blue {
+  color: var(--ansi-blue);
+}
+.ansi-fg-magenta {
+  color: var(--ansi-magenta);
+}
+.ansi-fg-cyan {
+  color: var(--ansi-cyan);
+}
+.ansi-fg-white {
+  color: var(--ansi-white);
+}
+.ansi-fg-bright-black {
+  color: var(--ansi-bright-black);
+}
+.ansi-fg-bright-red {
+  color: var(--ansi-bright-red);
+}
+.ansi-fg-bright-green {
+  color: var(--ansi-bright-green);
+}
+.ansi-fg-bright-yellow {
+  color: var(--ansi-bright-yellow);
+}
+.ansi-fg-bright-blue {
+  color: var(--ansi-bright-blue);
+}
+.ansi-fg-bright-magenta {
+  color: var(--ansi-bright-magenta);
+}
+.ansi-fg-bright-cyan {
+  color: var(--ansi-bright-cyan);
+}
+.ansi-fg-bright-white {
+  color: var(--ansi-bright-white);
+}
+.ansi-bg-black {
+  background: var(--ansi-black);
+}
+.ansi-bg-red {
+  background: var(--ansi-red);
+}
+.ansi-bg-green {
+  background: var(--ansi-green);
+}
+.ansi-bg-yellow {
+  background: var(--ansi-yellow);
+}
+.ansi-bg-blue {
+  background: var(--ansi-blue);
+}
+.ansi-bg-magenta {
+  background: var(--ansi-magenta);
+}
+.ansi-bg-cyan {
+  background: var(--ansi-cyan);
+}
+.ansi-bg-white {
+  background: var(--ansi-white);
+}
+.ansi-bg-bright-black {
+  background: var(--ansi-bright-black);
+}
+.ansi-bg-bright-red {
+  background: var(--ansi-bright-red);
+}
+.ansi-bg-bright-green {
+  background: var(--ansi-bright-green);
+}
+.ansi-bg-bright-yellow {
+  background: var(--ansi-bright-yellow);
+}
+.ansi-bg-bright-blue {
+  background: var(--ansi-bright-blue);
+}
+.ansi-bg-bright-magenta {
+  background: var(--ansi-bright-magenta);
+}
+.ansi-bg-bright-cyan {
+  background: var(--ansi-bright-cyan);
+}
+.ansi-bg-bright-white {
+  background: var(--ansi-bright-white);
+}
+.ansi-bg {
+  padding: 0 1px;
+  border-radius: 2px;
+}
+.ansi-inverse {
+  background: var(--text-primary);
+  color: var(--bg-deep);
+}
+.ansi-bold {
+  font-weight: 700;
+}
+.ansi-dim {
+  opacity: 0.65;
+}
+.ansi-italic {
+  font-style: italic;
+}
+.ansi-underline {
+  text-decoration: underline;
+}
+.ansi-strike {
+  text-decoration: line-through;
+}
+.ansi-underline.ansi-strike {
+  text-decoration: underline line-through;
+}
+
+/* #endregion */
+
 /* #region LIGHT_THEME */
 body.light {
   --bg-deep: #e8e6e3;
@@ -3908,6 +4054,18 @@ body.light {
   --danger: #c0392b;
   --danger-dim: rgba(192, 57, 43, 0.15);
   --plan: #5a7a5a;
+  --ansi-red: #c0392b;
+  --ansi-green: #1a8a5a;
+  --ansi-yellow: #a8791a;
+  --ansi-blue: #2b6cb0;
+  --ansi-magenta: #8e44ad;
+  --ansi-cyan: #1a7a7a;
+  --ansi-bright-red: #e05548;
+  --ansi-bright-green: #25a86f;
+  --ansi-bright-yellow: #c2921f;
+  --ansi-bright-blue: #3b82d6;
+  --ansi-bright-magenta: #a855c9;
+  --ansi-bright-cyan: #2a9a9a;
   --plan-dim: rgba(90, 122, 90, 0.15);
 }
 
@@ -4925,6 +5083,18 @@ select.form-input option:checked {
     --danger: #c0392b;
     --danger-dim: rgba(192, 57, 43, 0.15);
     --plan: #5a7a5a;
+    --ansi-red: #c0392b;
+    --ansi-green: #1a8a5a;
+    --ansi-yellow: #a8791a;
+    --ansi-blue: #2b6cb0;
+    --ansi-magenta: #8e44ad;
+    --ansi-cyan: #1a7a7a;
+    --ansi-bright-red: #e05548;
+    --ansi-bright-green: #25a86f;
+    --ansi-bright-yellow: #c2921f;
+    --ansi-bright-blue: #3b82d6;
+    --ansi-bright-magenta: #a855c9;
+    --ansi-bright-cyan: #2a9a9a;
     --plan-dim: rgba(90, 122, 90, 0.15);
   }
 

@@ -1819,7 +1819,7 @@ function renderUserAttachments(m) {
       .map((ref) => {
         const safeId = escapeHtml(ref.toolUseId);
         const shortId = ref.toolUseId.length > 14 ? `${ref.toolUseId.slice(0, 14)}…` : ref.toolUseId;
-        const preview = ref.preview ? escapeHtml(sanitizeOutput(ref.preview)) : '<em>(no text)</em>';
+        const preview = ref.preview ? sanitizeOutputHtml(ref.preview) : '<em>(no text)</em>';
         const expandId = `user-tr-${ref.toolUseId}`;
         return `<details class="user-attach-toolresult">
           <summary>Tool result <code>${escapeHtml(shortId)}</code></summary>
@@ -2349,7 +2349,7 @@ function renderFindingsReport(params, toolResult) {
     });
     html += '</div>';
   }
-  if (toolResult) html += `<div class="findings-result-note">${escapeHtml(sanitizeOutput(toolResult).trim())}</div>`;
+  if (toolResult) html += `<div class="findings-result-note">${sanitizeOutputHtml(toolResult.trim())}</div>`;
   return `${html}</div>`;
 }
 //#endregion
@@ -2466,9 +2466,14 @@ function stripLineNumbers(text) {
   return text.replace(/^ *\d+[→\t]/gm, '');
 }
 
-// Single entry point for anything that shows raw tool output.
+// The two entry points for raw tool output: plain text (clipboard, field
+// parsing) and HTML (any pane that renders it, where ANSI becomes colour).
 function sanitizeOutput(text) {
   return typeof text === 'string' ? stripAnsi(stripLineNumbers(text)) : text;
+}
+
+function sanitizeOutputHtml(text) {
+  return typeof text === 'string' ? ansiToHtml(stripLineNumbers(text)) : '';
 }
 
 function highlightBash(escaped) {
@@ -2527,19 +2532,20 @@ function autoSizeModal(modal, body) {
   }
   const hasTable = body.querySelector('table') !== null;
   const hasPre = body.querySelector('pre') !== null;
-  const desired = hasTable ? 1100 : body.textContent.length > 2000 || hasPre ? 960 : 860;
+  // hasPre is already computed and short-circuits the textContent walk, which is
+  // no longer cheap now that colourised output puts thousands of spans in there.
+  const desired = hasTable ? 1100 : hasPre || body.textContent.length > 2000 ? 960 : 860;
   const current = parseFloat(getComputedStyle(modal).maxWidth) || 0;
   if (desired > current) modal.style.maxWidth = `${desired}px`;
 }
 
 function renderToolResultHtml(toolResult, isTruncated, fullResult, toolUseId) {
   if (!toolResult) return '';
-  const stripped = sanitizeOutput(toolResult);
-  const escaped = escapeHtml(stripped);
+  const escaped = sanitizeOutputHtml(toolResult);
   let truncLabel = '',
     fullBlock = '';
   if (isTruncated && fullResult) {
-    const toggle = makeExpandToggle(escaped, escapeHtml(sanitizeOutput(fullResult)));
+    const toggle = makeExpandToggle(escaped, sanitizeOutputHtml(fullResult));
     truncLabel = toggle.btn;
     fullBlock = toggle.full;
   } else if (isTruncated && toolUseId) {
@@ -2581,7 +2587,7 @@ async function _toggleToolResultExpand(btn) {
       );
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const { content } = await r.json();
-      f.textContent = sanitizeOutput(content);
+      f.innerHTML = sanitizeOutputHtml(content);
       btn.dataset.loaded = '1';
     } catch (_e) {
       btn.textContent = 'Show more';
@@ -6815,15 +6821,149 @@ function formatDate(dateStr) {
 
 // Terminal output reaches the transcript raw. A CSI-only pattern left OSC
 // sequences, 8-bit CSI and bare control bytes behind, and those render as tofu.
-// biome-ignore lint/suspicious/noControlCharactersInRegex: escape bytes are the target
-const ANSI_RE = /\x1b\][\s\S]*?(?:\x07|\x1b\\|$)|[\x1b\x9b]\[[0-?]*[ -/]*[@-~]|\x1b[@-Z\\-_]/g;
-// Keep \t \n \r; drop the rest of C0 plus DEL.
-// biome-ignore lint/suspicious/noControlCharactersInRegex: control bytes are the target
-const CONTROL_RE = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g;
+// One ordered alternation covers every escape family, so both readers make a
+// single pass: OSC, SGR (the only one worth keeping — capture group 1 holds its
+// parameters), any other CSI, other two-char escapes, then whatever control
+// bytes are left, lone introducers included. \t \n \r are deliberately absent.
+const ANSI_TOKEN_RE =
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: escape and control bytes are the target
+  /\x1b\][\s\S]*?(?:\x07|\x1b\\|$)|[\x1b\x9b]\[([0-9;]*)m|[\x1b\x9b]\[[0-?]*[ -/]*[@-~]|\x1b[@-Z\\-_]|\x1b[ -/]+[0-~]|[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\x9b]/g;
 
 function stripAnsi(text) {
   if (typeof text !== 'string') return text;
-  return text.replace(ANSI_RE, '').replace(CONTROL_RE, '');
+  return text.replace(ANSI_TOKEN_RE, '');
+}
+
+const ANSI_COLOR_NAMES = ['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'];
+const XTERM_CUBE = [0, 95, 135, 175, 215, 255];
+
+// xterm-256 index -> a colour the browser understands. 0-15 stay named so they
+// follow the theme's palette; 16+ are exact and become an inline rgb().
+function ansi256Color(n) {
+  if (n < 8) return { name: ANSI_COLOR_NAMES[n] };
+  if (n < 16) return { name: `bright-${ANSI_COLOR_NAMES[n - 8]}` };
+  if (n < 232) {
+    const i = n - 16;
+    return {
+      rgb: `rgb(${XTERM_CUBE[Math.floor(i / 36) % 6]},${XTERM_CUBE[Math.floor(i / 6) % 6]},${XTERM_CUBE[i % 6]})`,
+    };
+  }
+  const v = 8 + (n - 232) * 10;
+  return { rgb: `rgb(${v},${v},${v})` };
+}
+
+// Attribute codes that only flip a flag: code -> [field, value].
+const SGR_FLAGS = {
+  1: ['bold', true],
+  2: ['dim', true],
+  3: ['italic', true],
+  4: ['underline', true],
+  7: ['inverse', true],
+  9: ['strike', true],
+  23: ['italic', false],
+  24: ['underline', false],
+  27: ['inverse', false],
+  29: ['strike', false],
+};
+
+// Reads one SGR parameter list into `st`. 38/48 consume their own arguments, so
+// the list is walked with an index rather than a for..of.
+function applySgr(params, st) {
+  const codes = params === '' ? [0] : params.split(';').map((p) => (p === '' ? 0 : Number(p)));
+  for (let i = 0; i < codes.length; i++) {
+    const c = codes[i];
+    const flag = SGR_FLAGS[c];
+    // 30-37/90-97 are foreground, 40-47/100-107 background; the low digit is the
+    // colour index and 9 in that slot means "back to the default".
+    const isColor = (c >= 30 && c <= 49) || (c >= 90 && c <= 107);
+    if (c === 0) {
+      st.fg = st.bg = null;
+      st.bold = st.dim = st.italic = st.underline = st.strike = st.inverse = false;
+      st.plain = true;
+    } else if (flag) {
+      st[flag[0]] = flag[1];
+      st.plain = false;
+    } else if (c === 22) {
+      st.bold = st.dim = false;
+    } else if (isColor && c !== 38 && c !== 48) {
+      const key = (c >= 40 && c <= 49) || c >= 100 ? 'bg' : 'fg';
+      const idx = c % 10;
+      st[key] = idx === 9 ? null : { name: c >= 90 ? `bright-${ANSI_COLOR_NAMES[idx]}` : ANSI_COLOR_NAMES[idx] };
+      if (idx !== 9) st.plain = false;
+    } else if (c === 38 || c === 48) {
+      st.plain = false;
+      const key = c === 38 ? 'fg' : 'bg';
+      if (codes[i + 1] === 5) {
+        st[key] = ansi256Color(codes[i + 2] || 0);
+        i += 2;
+      } else if (codes[i + 1] === 2) {
+        st[key] = { rgb: `rgb(${codes[i + 2] || 0},${codes[i + 3] || 0},${codes[i + 4] || 0})` };
+        i += 4;
+      }
+    }
+  }
+}
+
+function wrapAnsiChunk(chunk, st) {
+  const escaped = escapeHtml(chunk);
+  if (st.plain) return escaped;
+  const classes = [];
+  const styles = [];
+  const fg = st.inverse ? st.bg : st.fg;
+  const bg = st.inverse ? st.fg : st.bg;
+  if (fg?.name) classes.push(`ansi-fg-${fg.name}`);
+  else if (fg?.rgb) styles.push(`color:${fg.rgb}`);
+  // `ansi-bg` carries the padding both background forms share; the named form
+  // adds the colour class, the 256/truecolor form an inline background.
+  if (bg?.name) classes.push('ansi-bg', `ansi-bg-${bg.name}`);
+  else if (bg?.rgb) {
+    classes.push('ansi-bg');
+    styles.push(`background:${bg.rgb}`);
+  }
+  if (st.inverse && !fg && !bg) classes.push('ansi-inverse');
+  if (st.bold) classes.push('ansi-bold');
+  if (st.dim) classes.push('ansi-dim');
+  if (st.italic) classes.push('ansi-italic');
+  if (st.underline) classes.push('ansi-underline');
+  if (st.strike) classes.push('ansi-strike');
+  if (!classes.length && !styles.length) return escaped;
+  // Both values are built from fixed tables and digits parsed out of the SGR
+  // parameters, but they land in an attribute, so they go through the escaper.
+  const cls = classes.length ? ` class="${escapeHtml(classes.join(' '))}"` : '';
+  const style = styles.length ? ` style="${escapeHtml(styles.join(';'))}"` : '';
+  return `<span${cls}${style}>${escaped}</span>`;
+}
+
+// Renders terminal output as HTML with its SGR colours intact. One pass over
+// ANSI_TOKEN_RE: SGR tokens (capture group 1) move the state, every other token
+// is noise and is dropped, and the text between them is a chunk. Returns escaped
+// HTML — every chunk goes through escapeHtml before it is wrapped.
+function ansiToHtml(text) {
+  if (typeof text !== 'string') return '';
+  const st = {
+    fg: null,
+    bg: null,
+    bold: false,
+    dim: false,
+    italic: false,
+    underline: false,
+    strike: false,
+    inverse: false,
+    plain: true,
+  };
+  let out = '';
+  let last = 0;
+  ANSI_TOKEN_RE.lastIndex = 0;
+  let m = ANSI_TOKEN_RE.exec(text);
+  while (m) {
+    if (m.index > last) out += wrapAnsiChunk(text.slice(last, m.index), st);
+    if (m[1] !== undefined) applySgr(m[1], st);
+    last = m.index + m[0].length;
+    m = ANSI_TOKEN_RE.exec(text);
+  }
+  if (last === 0) return escapeHtml(text);
+  if (last < text.length) out += wrapAnsiChunk(text.slice(last), st);
+  return out;
 }
 
 function stripTeammateWrapper(text) {
