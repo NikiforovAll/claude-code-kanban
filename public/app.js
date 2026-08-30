@@ -1747,7 +1747,7 @@ function _renderPinToDetail(pin) {
     const pinResultHtml = pinFindings
       ? ''
       : renderToolResultHtml(pin.toolResult, pin.toolResultTruncated, pin.toolResultFull, pin.toolUseId);
-    const pinDetailEscaped = escapeHtml(fullText);
+    const pinDetailEscaped = escapeHtml(stripAnsi(fullText));
     const pinDetailRendered = pin.tool === 'Bash' ? highlightBash(pinDetailEscaped) : pinDetailEscaped;
     // Tool-result images are intentionally omitted here: their URL is built from
     // the global currentSessionId, but a pin can belong to a different session,
@@ -1819,7 +1819,7 @@ function renderUserAttachments(m) {
       .map((ref) => {
         const safeId = escapeHtml(ref.toolUseId);
         const shortId = ref.toolUseId.length > 14 ? `${ref.toolUseId.slice(0, 14)}…` : ref.toolUseId;
-        const preview = ref.preview ? escapeHtml(ref.preview) : '<em>(no text)</em>';
+        const preview = ref.preview ? escapeHtml(sanitizeOutput(ref.preview)) : '<em>(no text)</em>';
         const expandId = `user-tr-${ref.toolUseId}`;
         return `<details class="user-attach-toolresult">
           <summary>Tool result <code>${escapeHtml(shortId)}</code></summary>
@@ -1897,7 +1897,7 @@ function showMsgDetail(idx) {
     } else if (taskResultHtml || findingsHtml) {
       mainHtml = descHtml || '';
     } else if (fullText) {
-      const detailEscaped = escapeHtml(fullText);
+      const detailEscaped = escapeHtml(stripAnsi(fullText));
       const detailRendered = m.tool === 'Bash' ? highlightBash(detailEscaped) : detailEscaped;
       mainHtml = `${descHtml}<pre class="${TINTED_PRE_CLASS}">${detailRendered}</pre>`;
     } else {
@@ -2240,7 +2240,7 @@ function getToolDetail(tool, params, detail) {
 }
 function renderTaskResult(toolResult) {
   if (!toolResult) return '';
-  const lines = toolResult.trim().split('\n');
+  const lines = sanitizeOutput(toolResult).trim().split('\n');
   const fields = [];
   for (const line of lines) {
     const m = line.match(/^([A-Za-z #]+):\s*(.+)$/);
@@ -2349,7 +2349,7 @@ function renderFindingsReport(params, toolResult) {
     });
     html += '</div>';
   }
-  if (toolResult) html += `<div class="findings-result-note">${escapeHtml(toolResult.trim())}</div>`;
+  if (toolResult) html += `<div class="findings-result-note">${escapeHtml(sanitizeOutput(toolResult).trim())}</div>`;
   return `${html}</div>`;
 }
 //#endregion
@@ -2466,6 +2466,11 @@ function stripLineNumbers(text) {
   return text.replace(/^ *\d+[→\t]/gm, '');
 }
 
+// Single entry point for anything that shows raw tool output.
+function sanitizeOutput(text) {
+  return typeof text === 'string' ? stripAnsi(stripLineNumbers(text)) : text;
+}
+
 function highlightBash(escaped) {
   return escaped
     .replace(/^(\s*)(#.*)$/gm, '$1<span style="color:#6a9955">$2</span>')
@@ -2529,12 +2534,12 @@ function autoSizeModal(modal, body) {
 
 function renderToolResultHtml(toolResult, isTruncated, fullResult, toolUseId) {
   if (!toolResult) return '';
-  const stripped = stripLineNumbers(toolResult);
+  const stripped = sanitizeOutput(toolResult);
   const escaped = escapeHtml(stripped);
   let truncLabel = '',
     fullBlock = '';
   if (isTruncated && fullResult) {
-    const toggle = makeExpandToggle(escaped, escapeHtml(stripLineNumbers(fullResult)));
+    const toggle = makeExpandToggle(escaped, escapeHtml(sanitizeOutput(fullResult)));
     truncLabel = toggle.btn;
     fullBlock = toggle.full;
   } else if (isTruncated && toolUseId) {
@@ -2576,7 +2581,7 @@ async function _toggleToolResultExpand(btn) {
       );
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const { content } = await r.json();
-      f.textContent = stripLineNumbers(content);
+      f.textContent = sanitizeOutput(content);
       btn.dataset.loaded = '1';
     } catch (_e) {
       btn.textContent = 'Show more';
@@ -2591,7 +2596,7 @@ async function _toggleToolResultExpand(btn) {
 
 function buildToolContent(m) {
   let content = m.fullDetail || m.detail || '';
-  if (m.toolResult) content += `\n\n--- Output ---\n\n${m.toolResultFull || m.toolResult}`;
+  if (m.toolResult) content += `\n\n--- Output ---\n\n${sanitizeOutput(m.toolResultFull || m.toolResult)}`;
   return content;
 }
 
@@ -6808,9 +6813,17 @@ function formatDate(dateStr) {
   return date.toLocaleDateString();
 }
 
+// Terminal output reaches the transcript raw. A CSI-only pattern left OSC
+// sequences, 8-bit CSI and bare control bytes behind, and those render as tofu.
+// biome-ignore lint/suspicious/noControlCharactersInRegex: escape bytes are the target
+const ANSI_RE = /\x1b\][\s\S]*?(?:\x07|\x1b\\|$)|[\x1b\x9b]\[[0-?]*[ -/]*[@-~]|\x1b[@-Z\\-_]/g;
+// Keep \t \n \r; drop the rest of C0 plus DEL.
+// biome-ignore lint/suspicious/noControlCharactersInRegex: control bytes are the target
+const CONTROL_RE = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g;
+
 function stripAnsi(text) {
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: \x1b is intentional for ANSI escape sequence stripping
-  return typeof text === 'string' ? text.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '') : text;
+  if (typeof text !== 'string') return text;
+  return text.replace(ANSI_RE, '').replace(CONTROL_RE, '');
 }
 
 function stripTeammateWrapper(text) {
