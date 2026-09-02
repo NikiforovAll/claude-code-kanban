@@ -13,6 +13,8 @@ npm run dev          # start + open browser
 
 Also: `npm test` (node test runner over `test/*.test.js`), `npm run test:hooks` (`tests/test-agent-spy.sh`), `npm run validate:schemas`, and Biome for lint (`biome.json`). No build step.
 
+Biome covers `public/app.js`, `public/style.css` and `server.js`. The formatter is disabled for `server.js` (an override) because enabling it rewrites ~3.5k lines for no benefit — lint rules still apply. `biome check server.js` also reports two `parse` errors for the top-level `return` in the CLI bootstrap; that is valid CommonJS which Biome's parser rejects, so it exits non-zero no matter how clean the file is. That is why the pre-commit hook lints `public/` only, and why server.js lint findings have to be checked by eye.
+
 You have an access to gh cli to work on this project: https://github.com/NikiforovAll/claude-code-kanban
 
 To work on pr use `gh pr checkout <pr-number>` and `gh pr view <pr-number>` to see description and files changed.
@@ -20,7 +22,7 @@ To work on pr use `gh pr checkout <pr-number>` and `gh pr view <pr-number>` to s
 ## Architecture
 
 ```
-server.js           Express + chokidar watchers + SSE
+server.js           Express + chokidar watchers + SSE (`#region` blocks)
 public/index.html   HTML structure
 public/style.css    All CSS (`#region` blocks)
 public/app.js       All JS (`#region` blocks)
@@ -42,15 +44,17 @@ lib/session-events.js  Session event doorbell: queue, long-poll handler, line fo
 - **XSS safety** — `escapeHtml()` for user data, `DOMPurify.sanitize(marked.parse(...))` for markdown. The one exception is the HTML file preview: it is rendered as authored inside an `<iframe sandbox="allow-scripts allow-popups">` (no `allow-same-origin`), so it stays on an opaque origin instead of being sanitized. `srcdoc` has no base URL, so `lib/inline-assets.js` embeds the document's local stylesheets, scripts and images server-side before it is sent (`readPreviewFile`); remote refs are left to resolve on their own
 - **Optional external tools** — a linked `scratchpad.json` opens in the `scratch` CLI's viewer (`POST /api/scratchpad/open`). `scratch` is not a package dependency: `whichSync` probes PATH, `/api/config` reports `scratchAvailable`, and the row falls back to the editor when it is missing. Any future external binary should degrade the same way
 - **No framework** — multi-file vanilla JS, CSS variables for dark/light theming
-- **`#region` markers** — VS Code foldable `#region`/`#endregion` blocks in `app.js` and `style.css`
+- **`#region` markers** — VS Code foldable `#region`/`#endregion` blocks in `public/app.js`, `public/style.css` and `server.js`
 
 ### Navigating with regions
 
-Find a region: `rg "#region KANBAN" public/`. Read a full region: find `#region`, read until `#endregion`.
+List every region in a file: `rg "#region" server.js public/app.js public/style.css`. The markers are the map; this doc deliberately does not copy the list, because a copied list drifts.
+
+Find one region: `rg "#region KANBAN" public/`. Read it whole: find `#region`, read until `#endregion`.
 
 When modifying a feature, open **both** the JS region and the matching CSS region (names often match: KANBAN, MESSAGE_PANEL, etc).
 
-List every region in a file: `rg "#region" public/app.js public/style.css`. The markers are the map; this doc deliberately does not copy the list, because a copied list drifts.
+**Regions are a reading order, not a partition.** Measured against feature keywords, only about half of a feature's lines sit in the region named after it — `preview` is 98% inside PREVIEW, but `pin` is spread over 11 regions. So grep for the symbol first; reach for the region list when you don't yet know the symbol, when you need to read a subsystem end to end, or when you are deciding where new code belongs. A region is the right home for new code when its name already describes the change.
 
 ## CLI
 

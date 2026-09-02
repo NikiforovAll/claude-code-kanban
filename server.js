@@ -1,14 +1,15 @@
 #!/usr/bin/env node
 
+// #region SETUP
 const express = require('express');
-const path = require('path');
-const fs = require('fs').promises;
-const { existsSync, readdirSync, readFileSync, writeFileSync, statSync, createReadStream, unlinkSync, mkdirSync, renameSync, openSync, readSync, closeSync } = require('fs');
-const readline = require('readline');
+const path = require('node:path');
+const fs = require('node:fs').promises;
+const { existsSync, readdirSync, readFileSync, writeFileSync, statSync, unlinkSync, mkdirSync, renameSync, openSync, readSync, closeSync } = require('node:fs');
+const _readline = require('node:readline');
 const chokidar = require('chokidar');
-const os = require('os');
-const crypto = require('crypto');
-const { spawnSync, spawn } = require('child_process');
+const os = require('node:os');
+const crypto = require('node:crypto');
+const { spawnSync, spawn } = require('node:child_process');
 const { assertOpenTarget, openInEditor, whichSync, exeBehindShim } = require('./lib/open-editor');
 const { createNetGuard } = require('./lib/net-guard');
 const { isContained } = require('./lib/contain');
@@ -18,10 +19,8 @@ const {
   readRecentMessages: _readRecentMessagesUncached,
   readMessagesPage: _readMessagesPageUncached,
   readSessionInfoFromJsonl,
-  buildAgentProgressMap,
   buildSessionDigest,
   readCompactSummaries,
-  findTerminatedTeammates,
   extractPromptFromTranscript,
   extractModelFromTranscript,
   extractStructuredResultFromTranscript,
@@ -100,6 +99,9 @@ const SERVER_INFO_FILE = path.join(CCK_DIR, 'server.json');
 // Harness-owned scratchpad root; the per-session dir under it is created lazily.
 const SCRATCHPAD_ROOT = path.join(os.tmpdir(), 'claude');
 
+// #endregion
+
+// #region SERVER_STATE
 // Server-side pin mirror (UI authoritative, server stores latest pushed state for CLI queries).
 function readPins() {
   try {
@@ -130,6 +132,8 @@ function writeServerInfo(port) {
   writeJsonAtomic(SERVER_INFO_FILE, { port, pid: process.pid });
 }
 
+// #endregion
+
 // #region TIMINGS
 const PERMISSION_TTL_MS = 30 * 60 * 1000;
 const AGENT_TTL_MS = 60 * 60 * 1000;
@@ -144,6 +148,8 @@ const CTX_CLEANUP_MAX_AGE_MS = 2 * 60 * 60 * 1000;
 const CLEANUP_MAX_AGE_MS = 2 * 24 * 60 * 60 * 1000;
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 // #endregion
+
+// #region AGENT_ACTIVITY
 
 function readAgentJsonl(filePath) {
   const raw = readFileSync(filePath, 'utf8');
@@ -166,8 +172,8 @@ function listAgentFiles(agentDir) {
 }
 
 function persistAgent(dir, agent) {
-  const file = path.join(dir, agent.agentId + '.jsonl');
-  fs.appendFile(file, JSON.stringify({ ...agent, event: 'server-update' }) + '\n', 'utf8').catch(() => {});
+  const file = path.join(dir, `${agent.agentId}.jsonl`);
+  fs.appendFile(file, `${JSON.stringify({ ...agent, event: 'server-update' })}\n`, 'utf8').catch(() => {});
 }
 
 // Lapse math lives in lib/approvals (kept in sync with the gate's own parse);
@@ -180,7 +186,7 @@ function approvalsWaitMs() {
   let cfg = null;
   try {
     cfg = JSON.parse(readFileSync(APPROVALS_CONFIG_FILE, 'utf8'));
-  } catch (e) { /* missing config — gate default */ }
+  } catch { /* missing config — gate default */ }
   approvalsWaitCache = { ts: Date.now(), ms: waitSecondsFrom(cfg) * 1000 };
   return approvalsWaitCache.ms;
 }
@@ -201,7 +207,7 @@ function checkWaitingForUser(agentDir, logMtime) {
       if (isWaitingLapsed(data)) return { ...data, lapsed: true };
       return data;
     }
-  } catch (e) { /* skip — missing or invalid */ }
+  } catch { /* skip — missing or invalid */ }
   return null;
 }
 
@@ -275,7 +281,7 @@ function getSessionLogStat(meta) {
   try {
     const st = statSync(meta.jsonlPath);
     return { mtime: st.mtimeMs, hasMessages: st.size > 1000 };
-  } catch (e) { return { mtime: null, hasMessages: false }; }
+  } catch { return { mtime: null, hasMessages: false }; }
 }
 
 function checkAgentStatus(agentDir, stale, logMtime, isTeam) {
@@ -295,12 +301,15 @@ function checkAgentStatus(agentDir, stale, logMtime, isTeam) {
           result.hasRunning = true;
         }
         if (result.hasRunning) break;
-      } catch (e) { /* skip invalid */ }
+      } catch { /* skip invalid */ }
     }
-  } catch (e) { /* ignore */ }
+  } catch { /* ignore */ }
   return result;
 }
 
+// #endregion
+
+// #region TEAMS
 // isContained canonicalises both sides with realpath, which costs ~100x a plain
 // path.join. This is called once per session on the /api/sessions hot path, and
 // the verdict for a given name cannot change while TEAMS_DIR is fixed — so the
@@ -337,14 +346,14 @@ function loadTeamConfig(teamName) {
     const data = JSON.parse(readFileSync(configPath, 'utf8'));
     teamConfigCache.set(teamName, { data, ts: Date.now() });
     return data;
-  } catch (e) {
+  } catch {
     return null;
   }
 }
 
 function resolveSessionId(sessionId) {
   const teamConfig = loadTeamConfig(sessionId);
-  return (teamConfig && teamConfig.leadSessionId) ? teamConfig.leadSessionId : sessionId;
+  return (teamConfig?.leadSessionId) ? teamConfig.leadSessionId : sessionId;
 }
 
 // Recent Claude Code releases auto-create a single-member "self-team" for every
@@ -458,6 +467,9 @@ function attachTeamTasks(card, teamTaskDir, teamName, counts) {
   }
 }
 
+// #endregion
+
+// #region SHARED_STATE
 // SSE clients for live updates
 const clients = new Set();
 
@@ -471,39 +483,48 @@ const METADATA_CACHE_TTL = 10000; // 10 seconds
 const dirtyMetadataPaths = new Set();
 let metadataNeedsFullScan = true;
 
+// #endregion
+
+// #region REQUEST_GUARDS
 const SAFE_ID_RE = /^[a-zA-Z0-9_-]+$/;
 function isSafeId(id) {
   return typeof id === 'string' && id.length > 0 && id.length <= 128 && SAFE_ID_RE.test(id);
 }
 
-app.param('sessionId', (req, res, next, val) => {
+app.param('sessionId', (_req, res, next, val) => {
   if (!isSafeId(val)) return res.status(400).json({ error: 'Invalid session ID' });
   next();
 });
-app.param('taskId', (req, res, next, val) => {
+app.param('taskId', (_req, res, next, val) => {
   if (!isSafeId(val)) return res.status(400).json({ error: 'Invalid task ID' });
   next();
 });
 // Team names are directory names under TEAMS_DIR, so /api/teams/:name was a
 // straight traversal before this.
-app.param('name', (req, res, next, val) => {
+app.param('name', (_req, res, next, val) => {
   if (!isSafeId(val)) return res.status(400).json({ error: 'Invalid team name' });
   next();
 });
 
 // Parse JSON bodies
 app.use(express.json());
+// #endregion
+
+// #region STATIC
 
 app.get('/hub-config', (_req, res) => {
   res.json({ enabled: !!process.env.CLAUDE_HUB, url: process.env.HUB_URL || null });
 });
 
 // Serve static files
-app.get('/sw.js', (req, res) => {
+app.get('/sw.js', (_req, res) => {
   res.setHeader('Cache-Control', 'no-cache');
   res.sendFile(path.join(__dirname, 'public', 'sw.js'));
 });
 app.use(express.static(path.join(__dirname, 'public')));
+// #endregion
+
+// #region SESSION_LIST
 
 const messageCache = new Map();
 const MESSAGE_CACHE_TTL = 5000;
@@ -546,9 +567,9 @@ function loadAllTaskMaps() {
         for (const sessionId of Object.keys(map)) {
           sessionToList[sessionId] = taskListName;
         }
-      } catch (e) { /* skip invalid */ }
+      } catch { /* skip invalid */ }
     }
-  } catch (e) { /* ignore */ }
+  } catch { /* ignore */ }
   sessionToTaskListCache = { sessionToList, listToSessions };
   lastTaskMapScan = now;
   return sessionToTaskListCache;
@@ -618,7 +639,7 @@ function getTaskCounts(sessionPath) {
     try {
       const taskPath = path.join(sessionPath, file);
       const task = JSON.parse(readFileSync(taskPath, 'utf8'));
-      if (task.metadata && task.metadata._internal) continue;
+      if (task.metadata?._internal) continue;
       if (task.status === 'completed') completed++;
       else if (task.status === 'in_progress') inProgress++;
       else pending++;
@@ -626,7 +647,7 @@ function getTaskCounts(sessionPath) {
       if (!newestTaskMtime || taskStat.mtime > newestTaskMtime) {
         newestTaskMtime = taskStat.mtime;
       }
-    } catch (e) { /* skip invalid */ }
+    } catch { /* skip invalid */ }
   }
 
   const taskCount = completed + inProgress + pending;
@@ -765,7 +786,7 @@ function loadSessionMetadata() {
           for (const entry of indexEntries) {
             if (entry.projectPath) { indexProjectPath = entry.projectPath; break; }
           }
-        } catch (e) {}
+        } catch {}
       }
 
       // First pass: read all JSONL files
@@ -785,7 +806,7 @@ function loadSessionMetadata() {
         // JSONLs that only hold custom-title/agent-name records when a session
         // is continued from a worktree). Don't let a weaker entry (no cwd, no
         // project) overwrite a previously resolved one — just merge scalars.
-        if (existing && existing.project && !candidateProject) {
+        if (existing?.project && !candidateProject) {
           if (!existing.slug && sessionInfo.slug) existing.slug = sessionInfo.slug;
           if (!existing.customTitle && sessionInfo.customTitle) existing.customTitle = sessionInfo.customTitle;
           if (!existing.gitBranch && sessionInfo.gitBranch) existing.gitBranch = sessionInfo.gitBranch;
@@ -927,7 +948,7 @@ function getWorkflowIndex() {
 function getWorkflowScripts(sessionId) {
   const idx = getWorkflowIndex();
   let list = idx.get(sessionId);
-  if (!list || !list.length) {
+  if (!list?.length) {
     const alt = resolveSessionId(sessionId);
     if (alt && alt !== sessionId) list = idx.get(alt);
   }
@@ -936,7 +957,7 @@ function getWorkflowScripts(sessionId) {
 
 function getWorkflowInfoSummary(sessionId) {
   const list = getWorkflowIndex().get(sessionId);
-  return { hasWorkflow: !!(list && list.length), workflowCount: list ? list.length : 0 };
+  return { hasWorkflow: !!(list?.length), workflowCount: list ? list.length : 0 };
 }
 
 function getPlanInfo(slug) {
@@ -947,7 +968,7 @@ function getPlanInfo(slug) {
     const head = readFileSync(planPath, 'utf8').slice(0, 512);
     const match = head.match(/^#\s+(.+)$/m);
     return { hasPlan: true, planTitle: match ? match[1].trim() : null, planPath };
-  } catch (e) {
+  } catch {
     return { hasPlan: true, planTitle: null, planPath };
   }
 }
@@ -957,7 +978,7 @@ function getPlanInfo(slug) {
 const WAKEUP_FIRED_GRACE_MS = 5 * 60 * 1000;
 
 function isWakeupActive(w, now = Date.now()) {
-  if (!w || !w.timestamp || w.delaySeconds == null) return true;
+  if (!w?.timestamp || w.delaySeconds == null) return true;
   const fireMs = new Date(w.timestamp).getTime() + w.delaySeconds * 1000;
   return (now - fireMs) <= WAKEUP_FIRED_GRACE_MS;
 }
@@ -997,7 +1018,7 @@ function getLoopInfoSummary(meta) {
   } catch (_) { return empty; }
 }
 
-function getSessionDisplayName(sessionId, meta) {
+function getSessionDisplayName(_sessionId, meta) {
   if (meta?.customTitle) return meta.customTitle;
   if (meta?.slug) return meta.slug;
   return null;
@@ -1053,6 +1074,9 @@ function buildSessionObject(id, meta, overrides = {}) {
   };
 }
 
+// #endregion
+
+// #region SESSION_ROUTES
 // API: List all sessions
 app.get('/api/sessions', async (req, res) => {
   // Prevent browser caching
@@ -1236,7 +1260,7 @@ app.get('/api/sessions', async (req, res) => {
             hasWaitingForUser: true,
           }));
         }
-      } catch (e) { /* ignore */ }
+      } catch { /* ignore */ }
     }
 
     // Enrich leader sessions with team info and remove team-named duplicates
@@ -1321,13 +1345,13 @@ app.get('/api/sessions', async (req, res) => {
 
     // Correlate plan sessions with their implementation sessions (same slug)
     const slugGroups = new Map();
-    for (const [sid, session] of sessionsMap) {
+    for (const [_sid, session] of sessionsMap) {
       if (session.slug) {
         if (!slugGroups.has(session.slug)) slugGroups.set(session.slug, []);
         slugGroups.get(session.slug).push(session);
       }
     }
-    for (const [slug, group] of slugGroups) {
+    for (const [_slug, group] of slugGroups) {
       if (group.length < 2) continue;
       group.sort((a, b) => new Date(a.modifiedAt) - new Date(b.modifiedAt));
       const planSession = group.find(s => s.hasPlan);
@@ -1429,7 +1453,7 @@ app.get('/api/sessions', async (req, res) => {
 });
 
 // API: Get distinct project paths with last-modified timestamps
-app.get('/api/projects', (req, res) => {
+app.get('/api/projects', (_req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   const metadata = loadSessionMetadata();
   const projectMap = {};
@@ -1468,7 +1492,7 @@ app.get('/api/sessions/:sessionId', async (req, res) => {
     }
 
     // Sort by ID (numeric)
-    tasks.sort((a, b) => parseInt(a.id) - parseInt(b.id));
+    tasks.sort((a, b) => parseInt(a.id, 10) - parseInt(b.id, 10));
 
     res.json(tasks);
   } catch (error) {
@@ -1515,7 +1539,7 @@ app.get('/api/projects/:encodedPath/tasks', (req, res) => {
         } catch (_) {}
       }
     }
-    tasks.sort((a, b) => parseInt(a.id) - parseInt(b.id));
+    tasks.sort((a, b) => parseInt(a.id, 10) - parseInt(b.id, 10));
     res.json(tasks);
   } catch (error) {
     console.error('Error getting project tasks:', error);
@@ -1597,6 +1621,9 @@ app.get('/api/sessions/:sessionId/workflows/:wfId', async (req, res) => {
   }
 });
 
+// #endregion
+
+// #region WORKFLOWS
 // meta.phases and meta.name/description are pure literals per the Workflow tool
 // contract, so pull them by regex rather than executing the untrusted script.
 // name/description take the first match (the meta block is at the top of the file).
@@ -1610,9 +1637,7 @@ function parseWorkflowMeta(source) {
   const meta = { name: matchStr(source, 'name'), description: matchStr(source, 'description'), phases: [] };
   const phasesM = source.match(/phases\s*:\s*\[([\s\S]*?)\]/);
   if (phasesM) {
-    const re = /\{[\s\S]*?\}/g;
-    let m;
-    while ((m = re.exec(phasesM[1]))) {
+    for (const m of phasesM[1].matchAll(/\{[\s\S]*?\}/g)) {
       const title = matchStr(m[0], 'title');
       if (title) meta.phases.push({ title, detail: matchStr(m[0], 'detail') });
     }
@@ -1782,6 +1807,9 @@ app.post('/api/sessions/:sessionId/plan/open', (req, res) => {
   }
 });
 
+// #endregion
+
+// #region OPEN_TARGETS
 // API: Open folder (and optionally a file within it) in editor
 app.post('/api/open-folder', (req, res) => {
   try {
@@ -1811,7 +1839,7 @@ app.post('/api/open-in-editor', (req, res) => {
     const safeName = (title || 'message').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 50);
     const hash = crypto.createHash('md5').update(content).digest('hex').slice(0, 8);
     const tmpFile = path.join(os.tmpdir(), `claude-kanban-${safeName}-${hash}.md`);
-    require('fs').writeFileSync(tmpFile, content, 'utf8');
+    require('node:fs').writeFileSync(tmpFile, content, 'utf8');
 
     openInEditor([tmpFile]);
     res.json({ success: true, path: tmpFile });
@@ -1873,6 +1901,9 @@ app.post('/api/scratchpad/open', (req, res) => {
   }
 });
 
+// #endregion
+
+// #region AGENT_ROUTES
 // API: Get team config
 app.get('/api/teams/:name', (req, res) => {
   const config = loadTeamConfig(req.params.name);
@@ -1924,7 +1955,7 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
           }
         }
         agents.push(agent);
-      } catch (e) { /* skip invalid */ }
+      } catch { /* skip invalid */ }
     }
     const liveAgents = agents.filter(isAgentLive);
     if (liveAgents.length && meta.jsonlPath) {
@@ -2081,7 +2112,7 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
     // Subagents (Explore, general-purpose, etc.) are not in teamMemberNames and bypass
     // dedup entirely, so parallel siblings of the same subagent type remain visible.
     let visibleAgents = agents;
-    if (teamMemberNames && teamMemberNames.size) {
+    if (teamMemberNames?.size) {
       const groups = new Map();
       for (const a of agents) {
         const t = agentDisplayName(a);
@@ -2103,7 +2134,7 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
 
     const waitingForUser = checkWaitingForUser(agentDir, logMtime);
     res.json({ agents: visibleAgents, waitingForUser, teamColors });
-  } catch (e) {
+  } catch {
     res.json({ agents: [], waitingForUser: null });
   }
 });
@@ -2117,7 +2148,7 @@ app.post('/api/sessions/:sessionId/waiting/discard', (req, res) => {
   try {
     clearWaitingFile(resolveSessionId(req.params.sessionId));
     res.json({ ok: true });
-  } catch (e) {
+  } catch {
     res.status(500).json({ error: 'Failed to discard waiting' });
   }
 });
@@ -2131,7 +2162,7 @@ app.post('/api/sessions/:sessionId/waiting/respond', (req, res) => {
   const dir = path.join(AGENT_ACTIVITY_DIR, sessionId);
   let marker = null;
   try { marker = JSON.parse(readFileSync(path.join(dir, '_waiting.json'), 'utf8')); }
-  catch (e) { /* missing or invalid → buildDecision reports 410 */ }
+  catch { /* missing or invalid → buildDecision reports 410 */ }
   // The gate stopped polling after waitSeconds — an orphaned decision file would
   // sit unconsumed while the card pretends the click worked.
   if (marker && isWaitingLapsed(marker)) {
@@ -2142,7 +2173,7 @@ app.post('/api/sessions/:sessionId/waiting/respond', (req, res) => {
   try {
     writeJsonAtomic(path.join(dir, decisionFileName(marker.id)), result.decision);
     res.json({ ok: true });
-  } catch (e) {
+  } catch {
     res.status(500).json({ error: 'Failed to write decision' });
   }
 });
@@ -2150,21 +2181,24 @@ app.post('/api/sessions/:sessionId/waiting/respond', (req, res) => {
 app.post('/api/sessions/:sessionId/agents/:agentId/stop', (req, res) => {
   const sessionId = resolveSessionId(req.params.sessionId);
   const agentId = sanitizeAgentId(req.params.agentId);
-  const agentFile = path.join(AGENT_ACTIVITY_DIR, sessionId, agentId + '.jsonl');
+  const agentFile = path.join(AGENT_ACTIVITY_DIR, sessionId, `${agentId}.jsonl`);
   if (!existsSync(agentFile)) return res.status(404).json({ error: 'Agent not found' });
   try {
     const agent = readAgentJsonl(agentFile);
     agent.status = 'stopped';
     agent.stoppedAt = new Date().toISOString();
     const stopEvt = { agentId, type: agent.type, event: 'user-stop', status: 'stopped', stoppedAt: agent.stoppedAt, updatedAt: agent.stoppedAt };
-    writeFileSync(agentFile, readFileSync(agentFile, 'utf8') + JSON.stringify(stopEvt) + '\n', 'utf8'); // sync — response depends on write
+    writeFileSync(agentFile, `${readFileSync(agentFile, 'utf8') + JSON.stringify(stopEvt)}\n`, 'utf8'); // sync — response depends on write
     clearWaitingFile(sessionId);
     res.json({ ok: true });
-  } catch (e) {
+  } catch {
     res.status(500).json({ error: 'Failed to stop agent' });
   }
 });
 
+// #endregion
+
+// #region SUBAGENT_RESOLUTION
 function sanitizeAgentId(raw) {
   return path.basename(raw).replace(/[^a-zA-Z0-9_-]/g, '');
 }
@@ -2174,7 +2208,7 @@ function sessionDirFromMeta(meta) {
 }
 
 function subagentJsonlPath(meta, agentId) {
-  return path.join(sessionDirFromMeta(meta), 'subagents', 'agent-' + agentId + '.jsonl');
+  return path.join(sessionDirFromMeta(meta), 'subagents', `agent-${agentId}.jsonl`);
 }
 
 // A subagent transcript is normally at <sessionDir>/subagents/agent-<id>.jsonl.
@@ -2182,14 +2216,14 @@ function subagentJsonlPath(meta, agentId) {
 // <sessionDir>/subagents/workflows/<wf_id>/agent-<id>.jsonl. Return whichever
 // exists (flat first), else null.
 function subagentJsonlInDir(sessionDir, agentId) {
-  const flat = path.join(sessionDir, 'subagents', 'agent-' + agentId + '.jsonl');
+  const flat = path.join(sessionDir, 'subagents', `agent-${agentId}.jsonl`);
   if (existsSync(flat)) return flat;
   const wfRoot = path.join(sessionDir, 'subagents', 'workflows');
   let wfDirs;
   try { wfDirs = readdirSync(wfRoot, { withFileTypes: true }); } catch { return null; }
   for (const wf of wfDirs) {
     if (!wf.isDirectory()) continue;
-    const nested = path.join(wfRoot, wf.name, 'agent-' + agentId + '.jsonl');
+    const nested = path.join(wfRoot, wf.name, `agent-${agentId}.jsonl`);
     if (existsSync(nested)) return nested;
   }
   return null;
@@ -2224,7 +2258,7 @@ function resolveSubagentJsonl(meta, sessionId, agentId) {
   // Same session dir: flat path or nested under subagents/workflows/ (both checked here).
   const local = meta.jsonlPath ? subagentJsonlInDir(sessionDirFromMeta(meta), agentId) : null;
   if (local) return local;
-  const key = sessionId + '/' + agentId;
+  const key = `${sessionId}/${agentId}`;
   const cached = subagentPathCache.get(key);
   if (cached) return cached;
   let found = null;
@@ -2314,7 +2348,7 @@ function findSessionContainingUuid(projectDir, targetUuid, excludeJsonlPath, max
     try { text = readFileSync(fp, 'utf8'); } catch { continue; }
     if (!text.includes(targetUuid)) continue;
     for (const l of text.split('\n')) {
-      if (!l || !l.includes(targetUuid)) continue;
+      if (!l?.includes(targetUuid)) continue;
       try {
         const d = JSON.parse(l);
         if (d.uuid === targetUuid && d.sessionId) {
@@ -2366,6 +2400,9 @@ function lookupParentSession(sessionId) {
   parentSessionCache.set(sessionId, result);
   return result;
 }
+// #endregion
+
+// #region MESSAGE_ROUTES
 app.get('/api/sessions/:sessionId/parent', (req, res) => {
   res.json(lookupParentSession(resolveSessionId(req.params.sessionId)));
 });
@@ -2465,7 +2502,7 @@ app.get('/api/sessions/:sessionId/messages', (req, res) => {
         if (entry.usage) msg.agentUsageStats = entry.usage;
         if (entry.prompt && !msg.agentPrompt) msg.agentPrompt = entry.prompt;
         try {
-          const agentFile = path.join(agentDir, entry.agentId + '.jsonl');
+          const agentFile = path.join(agentDir, `${entry.agentId}.jsonl`);
           const agent = readAgentJsonl(agentFile);
           if (agent.lastMessage) msg.agentLastMessage = agent.lastMessage;
           if (agent.prompt && !msg.agentPrompt) msg.agentPrompt = agent.prompt;
@@ -2488,7 +2525,7 @@ app.get('/api/sessions/:sessionId/messages', (req, res) => {
     if (unresolved.length && existsSync(agentDir)) {
       const activity = listAgentFiles(agentDir)
         .map((f) => { try { return readAgentJsonl(path.join(agentDir, f)); } catch (_) { return null; } })
-        .filter((a) => a && a.agentId && a.prompt);
+        .filter((a) => a?.agentId && a.prompt);
       const usedIds = new Set(agentMessages.map(m => m.agentId).filter(Boolean));
       for (const msg of unresolved) {
         const key = msg.agentPrompt.slice(0, 200);
@@ -2688,12 +2725,15 @@ app.get('/api/sessions/:sessionId/cached-image/:n', (req, res) => {
   res.end(img.buffer);
 });
 
-app.get('/api/version', (req, res) => {
+// #endregion
+
+// #region META_ROUTES
+app.get('/api/version', (_req, res) => {
   const pkg = require('./package.json');
   res.json({ version: pkg.version });
 });
 
-app.get('/api/config', (req, res) => {
+app.get('/api/config', (_req, res) => {
   res.json({
     marketplaceUrl: MARKETPLACE_URL,
     costUrl: COST_URL,
@@ -2702,8 +2742,11 @@ app.get('/api/config', (req, res) => {
   });
 });
 
+// #endregion
+
+// #region TASK_ROUTES
 // API: Get all tasks across all sessions
-app.get('/api/tasks/all', async (req, res) => {
+app.get('/api/tasks/all', async (_req, res) => {
   try {
     if (!existsSync(TASKS_DIR)) {
       return res.json([]);
@@ -2743,7 +2786,7 @@ app.get('/api/tasks/all', async (req, res) => {
             sessionName: getSessionDisplayName(sessionDir.name, meta),
             project
           });
-        } catch (e) {
+        } catch {
           // Skip invalid files
         }
       }
@@ -2871,6 +2914,9 @@ app.delete('/api/tasks/:sessionId/:taskId', async (req, res) => {
   }
 });
 
+// #endregion
+
+// #region PREVIEW
 // API: File preview — read file and broadcast to clients
 const PREVIEW_KINDS = { '.md': 'markdown', '.markdown': 'markdown', '.html': 'html', '.htm': 'html' };
 // Whole files are pushed into a modal, so anything huge freezes the tab regardless of kind.
@@ -3050,7 +3096,7 @@ app.post('/api/session/pin', async (req, res) => {
   }
 });
 
-app.get('/api/session/pins', (req, res) => {
+app.get('/api/session/pins', (_req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   try {
     const pins = readPins();
@@ -3089,6 +3135,9 @@ app.get('/api/file/resolve', async (req, res) => {
   }
 });
 
+// #endregion
+
+// #region SSE
 // SSE endpoint for live updates
 app.get('/api/events', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
@@ -3118,11 +3167,11 @@ function broadcast(data) {
   }
 }
 
-app.get('/api/context-status', (req, res) => {
+app.get('/api/context-status', (_req, res) => {
   res.json(Object.fromEntries(contextStatusCache));
 });
 
-app.use('/api', (req, res) => {
+app.use('/api', (_req, res) => {
   res.status(404).json({ error: 'Not found' });
 });
 
@@ -3148,6 +3197,9 @@ watcher.on('all', (event, filePath) => {
 // shared list or a team dir is one directory several sessions map onto -- so anything
 // addressing a session from a task path has to fan out the same way. One resolver for
 // both readers of that mapping: the SSE broadcast and the doorbell.
+// #endregion
+
+// #region DOORBELL
 function resolveSessionsForTaskDir(name) {
   if (isUUID(name)) return [name];
   const { listToSessions } = loadAllTaskMaps();
@@ -3278,7 +3330,7 @@ agentActivityWatcher.on('all', (event, filePath) => {
             fs.unlink(file).catch(() => {});
           }
         }
-      } catch (e) { /* ignore */ }
+      } catch { /* ignore */ }
     }
     broadcast({ type: 'agent-update', sessionId });
     // For team sessions, also broadcast with team name so frontend picks it up
@@ -3292,7 +3344,7 @@ agentActivityWatcher.on('all', (event, filePath) => {
             break;
           }
         }
-      } catch (e) { /* ignore */ }
+      } catch { /* ignore */ }
     }
   }
 });
@@ -3313,7 +3365,7 @@ contextStatusWatcher.on('all', (event, filePath) => {
       try { data._updatedAt = statSync(filePath).mtimeMs; } catch (_) { data._updatedAt = Date.now(); }
       contextStatusCache.set(sessionId, data);
       evictStaleCache(contextStatusCache);
-    } catch (e) { /* ignore malformed */ }
+    } catch { /* ignore malformed */ }
     broadcast({ type: 'context-update', sessionId });
   } else if (event === 'unlink') {
     contextStatusCache.delete(sessionId);
@@ -3321,6 +3373,9 @@ contextStatusWatcher.on('all', (event, filePath) => {
   }
 });
 
+// #endregion
+
+// #region CLEANUP
 async function cleanupContextStatus() {
   try {
     const entries = await fs.readdir(CONTEXT_STATUS_DIR);
@@ -3334,9 +3389,9 @@ async function cleanupContextStatus() {
           await fs.unlink(fp);
           contextStatusCache.delete(path.basename(f, '.json'));
         }
-      } catch (e) { /* ignore */ }
+      } catch { /* ignore */ }
     }
-  } catch (e) { /* dir may not exist */ }
+  } catch { /* dir may not exist */ }
 }
 
 async function cleanupAgentActivity() {
@@ -3363,11 +3418,11 @@ async function cleanupAgentActivity() {
           try {
             const fst = await fs.stat(fp);
             if (now - fst.mtimeMs > PERMISSION_TTL_MS) await fs.rm(fp, { force: true });
-          } catch (e) { /* ignore per-file errors */ }
+          } catch { /* ignore per-file errors */ }
         }
-      } catch (e) { /* ignore per-folder errors */ }
+      } catch { /* ignore per-folder errors */ }
     }
-  } catch (e) { /* agent-activity dir may not exist */ }
+  } catch { /* agent-activity dir may not exist */ }
 }
 
 cleanupAgentActivity();
@@ -3424,3 +3479,5 @@ async function prewarmCaches() {
     }
   });
 
+
+// #endregion

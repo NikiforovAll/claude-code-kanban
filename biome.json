@@ -25,6 +25,20 @@
     }
   },
   "files": {
-    "includes": ["public/app.js", "public/style.css"]
-  }
+    "includes": [
+      "public/app.js",
+      "public/style.css",
+      "server.js"
+    ]
+  },
+  "overrides": [
+    {
+      "includes": [
+        "server.js"
+      ],
+      "formatter": {
+        "enabled": false
+      }
+    }
+  ]
 }
