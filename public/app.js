@@ -35,7 +35,7 @@ let selectedSessionId = null;
 // Task stays selected (keyboard nav) but its white highlight is dimmed once the detail panel closes.
 let taskHighlightDimmed = false;
 let focusZone = 'board'; // 'board' | 'sidebar'
-let appConfig = { marketplaceUrl: null, costUrl: null, memoryUrl: null };
+let appConfig = { marketplaceUrl: null, costUrl: null, memoryUrl: null, scratchAvailable: false };
 let selectedSessionIdx = -1;
 let selectedSessionKbId = null;
 let sessionJustSelected = false;
@@ -5477,7 +5477,7 @@ function _renderStorageLinkedDocs() {
   const { groups, orphans } = _groupByProject(entries.map((e) => e.sessionId));
 
   function renderDocRow(sessionId, p) {
-    const name = p.split(/[\\/]/).pop();
+    const name = linkedDocLabel(p);
     const sid = escAttrJs(sessionId);
     const jsPath = escAttrJs(p);
     return `<div class="storage-item" style="padding-left:24px;">
@@ -5520,7 +5520,7 @@ function _renderStorageLinkedDocs() {
 }
 
 function _storagePreviewLinkedDoc(path) {
-  openPreviewByPath(path);
+  openLinkedDoc(path);
 }
 
 function _storageUnlinkDoc(sessionId, path) {
@@ -6182,20 +6182,70 @@ function isPreviewablePath(p) {
   return /\.(md|markdown|html?)$/i.test(p);
 }
 
+// A scratchpad manifest opens in the external `scratch` viewer, not the editor —
+// the raw JSON is a manifest, not the document the user linked.
+function isScratchpadPath(p) {
+  return /(^|[\\/])scratchpad\.json$/i.test(p);
+}
+
+// `linkedDocOpener` is the only place a linked path is classified; the row's tag,
+// tooltip and action are all read from here, so a new destination is one entry.
+const LINKED_DOC_OPENERS = {
+  preview: { tag: '', hint: '' },
+  scratch: {
+    tag: '(scratchpad)',
+    hint: ' — opens in the scratch viewer',
+    url: '/api/scratchpad/open',
+    body: (p) => ({ path: p }),
+    toast: 'in the scratch viewer',
+  },
+  editor: {
+    tag: '(editor)',
+    hint: ' — opens in editor',
+    url: '/api/open-in-editor',
+    body: (p) => ({ file: p }),
+    toast: 'in editor',
+  },
+};
+
+function linkedDocOpener(p) {
+  if (isPreviewablePath(p)) return 'preview';
+  // Without the CLI there is nothing to launch, so the manifest falls back to the editor.
+  if (isScratchpadPath(p) && appConfig.scratchAvailable) return 'scratch';
+  return 'editor';
+}
+
+// Every manifest is called scratchpad.json, so the pad's folder names it. Kept
+// independent of the opener: the pad is still the pad when the CLI is missing.
+function linkedDocLabel(p) {
+  const parts = p.split(/[\\/]/).filter(Boolean);
+  return isScratchpadPath(p) ? parts[parts.length - 2] || parts[parts.length - 1] : parts[parts.length - 1];
+}
+
+function openLinkedDoc(p, baseDir) {
+  const opener = linkedDocOpener(p);
+  if (opener === 'preview') {
+    openPreviewByPath(p, baseDir);
+    return;
+  }
+  const { url, body, toast } = LINKED_DOC_OPENERS[opener];
+  postAndToast(url, body(p), toast);
+}
+
 function renderLinkedDocsHtml(sessionId) {
   const paths = getSessionPreviewPaths(sessionId);
   const baseDir = getSessionBaseDir(sessionId);
   const items = paths
     .map((p) => {
-      const name = p.split(/[\\/]/).pop();
+      const opener = linkedDocOpener(p);
+      const { tag, hint } = LINKED_DOC_OPENERS[opener];
+      const name = linkedDocLabel(p);
       const rel = baseDir ? toRelativeIfUnder(p, baseDir) : null;
-      const previewable = isPreviewablePath(p);
-      const title = previewable ? p : `${p} — opens in editor`;
       const pathSpan = rel ? `<span class="linked-doc-path" title="${escapeHtml(p)}">${escapeHtml(rel)}</span>` : '';
       const attr = escapeHtml(p);
-      return `<li class="linked-doc-item${previewable ? '' : ' is-editor'}">
-        <a href="#" class="linked-doc-link" data-path="${attr}" title="${escapeHtml(title)}">${escapeHtml(name)}</a>
-        ${pathSpan}${previewable ? '' : '<span class="linked-doc-path">(editor)</span>'}
+      return `<li class="linked-doc-item${opener === 'preview' ? '' : ' is-editor'}">
+        <a href="#" class="linked-doc-link" data-path="${attr}" title="${escapeHtml(p + hint)}">${escapeHtml(name)}</a>
+        ${pathSpan}${tag ? `<span class="linked-doc-path">${tag}</span>` : ''}
         <button type="button" class="linked-doc-remove" data-path="${attr}" title="Unlink" aria-label="Unlink ${escapeHtml(name)}">&times;</button>
       </li>`;
     })
@@ -6229,10 +6279,8 @@ function bindLinkedDocsHandlers(container, sessionId) {
     } else if (hit.classList.contains('linked-doc-remove')) {
       removeSessionPreviewPath(sessionId, hit.dataset.path);
       afterLinkedDocsChanged(sessionId);
-    } else if (isPreviewablePath(hit.dataset.path)) {
-      openPreviewByPath(hit.dataset.path, getSessionBaseDir(sessionId));
     } else {
-      postAndToast('/api/open-in-editor', { file: hit.dataset.path }, 'in editor');
+      openLinkedDoc(hit.dataset.path, getSessionBaseDir(sessionId));
     }
   });
 }

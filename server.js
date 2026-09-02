@@ -8,8 +8,8 @@ const readline = require('readline');
 const chokidar = require('chokidar');
 const os = require('os');
 const crypto = require('crypto');
-const { spawnSync } = require('child_process');
-const { assertOpenTarget, openInEditor } = require('./lib/open-editor');
+const { spawnSync, spawn } = require('child_process');
+const { assertOpenTarget, openInEditor, whichSync, exeBehindShim } = require('./lib/open-editor');
 const { createNetGuard } = require('./lib/net-guard');
 const { isContained } = require('./lib/contain');
 
@@ -1821,6 +1821,57 @@ app.post('/api/open-in-editor', (req, res) => {
   }
 });
 
+// A scratchpad is a folder plus a `scratchpad.json` manifest, rendered by the
+// external `scratch` CLI. cck only recognizes the shape and launches the viewer —
+// it never parses the manifest, so the two stay independently versioned.
+const SCRATCHPAD_MANIFEST = 'scratchpad.json';
+
+// Resolve a linked path to the pad the viewer wants: `<parent>/<name>` where
+// `<name>/scratchpad.json` exists. Accepts either the manifest or its directory.
+function resolveScratchpad(value) {
+  const target = assertOpenTarget(value, 'path');
+  const dir = path.basename(target).toLowerCase() === SCRATCHPAD_MANIFEST ? path.dirname(target) : target;
+  if (!existsSync(path.join(dir, SCRATCHPAD_MANIFEST))) throw previewError(400, 'Not a scratchpad');
+  return { name: path.basename(dir), parent: path.dirname(dir) };
+}
+
+// API: Open a scratchpad in the external `scratch` viewer — the window outlives
+// this request and cck never waits on it.
+app.post('/api/scratchpad/open', (req, res) => {
+  try {
+    const bin = whichSync('scratch');
+    if (!bin) return res.status(501).json({ error: 'scratch CLI not found on PATH' });
+    const { name, parent } = resolveScratchpad(req.body?.path);
+    // .cmd/.bat cannot be spawned without a shell since the CVE-2024-27980 fix;
+    // scratch ships a real .exe, so resolve it rather than reintroducing one.
+    const ext = path.extname(bin).toLowerCase();
+    const file = ext === '.cmd' || ext === '.bat' ? exeBehindShim(bin) : bin;
+    if (!file) return res.status(501).json({ error: 'scratch CLI cannot be launched without a shell' });
+    // `scratch ui` is a foreground supervisor: it reloads the window on edits and
+    // quits on stdin EOF. So stdin must be an open pipe we never write to —
+    // 'ignore' is /dev/null, which reads as EOF and closes the viewer at once.
+    //
+    // And no `detached`: on Windows that means DETACHED_PROCESS, which overrides
+    // the CREATE_NO_WINDOW `windowsHide` asks for, so the bun shim allocates its
+    // own console and a blank terminal window pops up next to the viewer.
+    const child = spawn(file, ['ui', name, '--dir', parent], {
+      stdio: ['pipe', 'ignore', 'ignore'],
+      windowsHide: true,
+    });
+    child.on('error', (e) => console.error('scratch ui failed to start:', e.message));
+    // Nothing is ever written to it, but an unhandled EPIPE when the user closes
+    // the viewer would take the server down with it.
+    child.stdin.on('error', () => {});
+    child.stdin.unref();
+    child.unref();
+    res.json({ success: true, pad: name });
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    console.error('Error opening scratchpad:', error);
+    res.status(500).json({ error: 'Failed to open scratchpad' });
+  }
+});
+
 // API: Get team config
 app.get('/api/teams/:name', (req, res) => {
   const config = loadTeamConfig(req.params.name);
@@ -2642,7 +2693,12 @@ app.get('/api/version', (req, res) => {
 });
 
 app.get('/api/config', (req, res) => {
-  res.json({ marketplaceUrl: MARKETPLACE_URL, costUrl: COST_URL, memoryUrl: MEMORY_URL });
+  res.json({
+    marketplaceUrl: MARKETPLACE_URL,
+    costUrl: COST_URL,
+    memoryUrl: MEMORY_URL,
+    scratchAvailable: !!whichSync('scratch'),
+  });
 });
 
 // API: Get all tasks across all sessions
