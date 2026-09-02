@@ -2325,16 +2325,18 @@ body::before {
   align-items: center;
   margin-bottom: 16px;
 }
-.info-row-actions {
+/* Shared hover-reveal icon-button group, also used by the linked-doc rows. Each host
+   supplies its own reveal trigger — the base only sets the resting opacity. */
+.row-actions {
   display: flex;
   gap: 4px;
   opacity: 0.3;
   transition: opacity 0.15s ease;
 }
-.info-grid:hover .info-row-actions {
+.info-grid:hover .row-actions {
   opacity: 1;
 }
-.info-row-actions button {
+.row-actions button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2351,18 +2353,18 @@ body::before {
     border-color 0.1s ease,
     color 0.1s ease;
 }
-.info-row-actions button:hover {
+.row-actions button:hover {
   background: var(--bg-hover);
   border-color: var(--accent);
   color: var(--accent-text);
 }
-.info-row-actions button svg {
+.row-actions button svg {
   width: 12px;
   height: 12px;
   display: block;
 }
 @media (hover: none) {
-  .info-row-actions {
+  .row-actions {
     opacity: 1;
   }
 }
@@ -3761,36 +3763,29 @@ body::before {
   min-width: 0;
 }
 
-/* margin-left:auto pins every × to the same right edge, so they read as a column
-   however long the names in between are. */
-.linked-doc-remove {
+/* Rides on the shared .row-actions group; only the reveal trigger differs — per row
+   here, per grid in the session info. margin-left:auto pins the group to the same
+   right edge however long the names in between are. */
+.linked-doc-actions {
   margin-left: auto;
   align-self: center;
   flex-shrink: 0;
-  width: 16px;
-  height: 16px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  background: none;
-  border: none;
-  border-radius: 3px;
-  color: var(--text-muted);
-  font-family: var(--mono);
-  font-size: 14px;
-  line-height: 1;
-  cursor: pointer;
-  opacity: 0.45;
-  transition: all 0.15s ease;
 }
 
-.linked-doc-item:hover .linked-doc-remove {
+.linked-doc-item:hover .linked-doc-actions {
   opacity: 1;
 }
 
-.linked-doc-remove:hover {
+/* The × is a glyph, not an svg, so .row-actions button svg does not size it. */
+.linked-doc-remove {
+  font-family: var(--mono);
+  font-size: 15px;
+  line-height: 1;
+}
+
+.linked-doc-actions .linked-doc-remove:hover {
   background: var(--danger-dim);
+  border-color: var(--danger);
   color: var(--danger);
 }
 
@@ -4993,6 +4988,14 @@ select.form-input option:checked {
   cursor: pointer;
   font-family: var(--mono);
   transition: all 0.15s;
+}
+
+/* Icon buttons sit beside text ones here, and copyWithFeedback swaps the glyph for a
+   checkmark, so both svgs need a size or the button jumps on click. */
+.storage-item-actions button svg {
+  width: 12px;
+  height: 12px;
+  display: block;
 }
 
 .storage-item-actions button:hover {

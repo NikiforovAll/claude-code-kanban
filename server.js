@@ -12,6 +12,7 @@ const { spawnSync, spawn } = require('child_process');
 const { assertOpenTarget, openInEditor, whichSync, exeBehindShim } = require('./lib/open-editor');
 const { createNetGuard } = require('./lib/net-guard');
 const { isContained } = require('./lib/contain');
+const { fileUrlToPath } = require('./lib/file-url');
 
 const {
   readRecentMessages: _readRecentMessagesUncached,
@@ -2940,8 +2941,11 @@ function dropUrlFragment(abs) {
   return existsSync(trimmed) ? trimmed : abs;
 }
 
-function resolvePreviewPath(filePath, base) {
-  if (!filePath || typeof filePath !== 'string') return null;
+function resolvePreviewPath(rawPath, base) {
+  if (!rawPath || typeof rawPath !== 'string') return null;
+  // Every path entering the preview/link surface passes through here, so accepting
+  // `file://` once covers /api/preview, /api/document/link and /api/file/resolve.
+  const filePath = fileUrlToPath(rawPath);
   if (path.isAbsolute(filePath)) return dropUrlFragment(filePath);
   if (base && typeof base === 'string' && path.isAbsolute(base)) {
     let baseDir = base;

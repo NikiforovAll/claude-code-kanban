@@ -5484,6 +5484,7 @@ function _renderStorageLinkedDocs() {
       <span class="storage-item-id" title="${escapeHtml(p)}">${escapeHtml(name)}</span>
       <div class="storage-item-actions">
         <button onclick="_storagePreviewLinkedDoc('${jsPath}')">View</button>
+        <button onclick="copyWithFeedback('${jsPath}', this)" title="Copy path" aria-label="Copy path">${ICON_COPY}</button>
         <button class="danger" onclick="_storageUnlinkDoc('${sid}','${jsPath}')">Unlink</button>
       </div>
     </div>`;
@@ -6246,7 +6247,10 @@ function renderLinkedDocsHtml(sessionId) {
       return `<li class="linked-doc-item${opener === 'preview' ? '' : ' is-editor'}">
         <a href="#" class="linked-doc-link" data-path="${attr}" title="${escapeHtml(p + hint)}">${escapeHtml(name)}</a>
         ${pathSpan}${tag ? `<span class="linked-doc-path">${tag}</span>` : ''}
-        <button type="button" class="linked-doc-remove" data-path="${attr}" title="Unlink" aria-label="Unlink ${escapeHtml(name)}">&times;</button>
+        <span class="row-actions linked-doc-actions">
+          <button type="button" class="linked-doc-copy" data-path="${attr}" title="Copy path" aria-label="Copy path of ${escapeHtml(name)}">${ICON_COPY}</button>
+          <button type="button" class="linked-doc-remove" data-path="${attr}" title="Unlink" aria-label="Unlink ${escapeHtml(name)}">&times;</button>
+        </span>
       </li>`;
     })
     .join('');
@@ -6271,11 +6275,13 @@ function renderLinkedDocsHtml(sessionId) {
 function bindLinkedDocsHandlers(container, sessionId) {
   if (!container) return;
   container.addEventListener('click', (e) => {
-    const hit = e.target.closest('.linked-doc-link, .linked-doc-remove, .linked-docs-add-btn');
+    const hit = e.target.closest('.linked-doc-link, .linked-doc-copy, .linked-doc-remove, .linked-docs-add-btn');
     if (!hit) return;
     e.preventDefault();
     if (hit.classList.contains('linked-docs-add-btn')) {
       startLinkedDocInput(container, sessionId);
+    } else if (hit.classList.contains('linked-doc-copy')) {
+      copyWithFeedback(hit.dataset.path, hit);
     } else if (hit.classList.contains('linked-doc-remove')) {
       removeSessionPreviewPath(sessionId, hit.dataset.path);
       afterLinkedDocsChanged(sessionId);
@@ -6288,7 +6294,7 @@ function bindLinkedDocsHandlers(container, sessionId) {
 function startLinkedDocInput(container, sessionId) {
   const slot = container.querySelector('.linked-doc-editor-slot');
   if (!slot) return;
-  slot.innerHTML = `<input class="linked-doc-input" type="text" spellcheck="false" placeholder="Absolute path, or relative to the session cwd">
+  slot.innerHTML = `<input class="linked-doc-input" type="text" spellcheck="false" placeholder="Absolute path, file:// URL, or relative to the session cwd">
     <div class="linked-doc-hint">${escapeHtml(getSessionBaseDir(sessionId) || 'no session cwd — absolute paths only')}</div>
     <div class="linked-doc-error"></div>
     <div class="edit-actions">
@@ -7869,7 +7875,7 @@ function showInfoModal(session, teamConfig, tasks, planContent, parentInfo) {
       const file = opts.openFile ? escapeHtml(opts.openFile) : '';
       openBtn = `<button data-folder="${folder}" data-file="${file}" data-claude-dir="${opts.openClaudeDir ? '1' : ''}" onclick="openFolderInEditor(this.dataset.claudeDir ? undefined : this.dataset.folder, this.dataset.file || undefined)" title="Open in editor">${ICON_OPEN_EXTERNAL}</button>`;
     }
-    html += `<span class="info-row-actions">${copyBtn}${openBtn}</span>`;
+    html += `<span class="row-actions">${copyBtn}${openBtn}</span>`;
   });
   html += `</div>`;
 
