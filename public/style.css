@@ -3662,6 +3662,20 @@ body::before {
   font-size: 11px;
   color: var(--text-tertiary);
 }
+.agent-card-model {
+  margin-left: auto;
+  padding: 1px 6px;
+  font-family: var(--font-mono, monospace);
+  font-size: 9.5px;
+  line-height: 1.4;
+  color: var(--text-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 45%;
+}
 .agent-message {
   font-size: 11px;
   color: var(--text-muted);

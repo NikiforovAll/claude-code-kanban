@@ -2763,9 +2763,13 @@ function renderAgentFooter() {
         const agentColor = resolveNamedColor(a.color);
         const colorStyle = agentColor ? ` style="border-left:3px solid ${agentColor.color}"` : '';
         const selectedClass = a.agentId === currentAgentModalId ? ' selected' : '';
+        const cardModel = shortModelName(a.model);
+        const modelChipHtml = cardModel
+          ? `<span class="agent-card-model" title="${escapeHtml(a.model)}">${escapeHtml(cardModel)}</span>`
+          : '';
         return `<div class="agent-card${selectedClass}" data-agent-id="${escapeHtml(a.agentId)}"${colorStyle} onclick="showAgentModal('${escAttrJs(a.agentId)}')">
           <div class="agent-type-row">${typeNs ? `<span class="agent-type-ns">${escapeHtml(typeNs)}</span>` : ''}<span class="agent-type-name">${escapeHtml(typeName)}</span>${nameBadgeHtml}</div>
-          <div class="agent-status-row"><span class="agent-dot ${a.status}"></span><span class="agent-status">${statusText}</span></div>
+          <div class="agent-status-row"><span class="agent-dot ${a.status}"></span><span class="agent-status">${statusText}</span>${modelChipHtml}</div>
           ${msgHtml}
         </div>`;
       })
