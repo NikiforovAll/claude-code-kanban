@@ -1460,8 +1460,8 @@ function getToolIcon(toolName) {
 }
 const AGENT_LOG_ICON =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>';
-function agentLogButton(agentId) {
-  return `<button class="msg-agent-log-btn" onclick="event.stopPropagation();viewAgentLog('${escAttrJs(agentId)}')" title="View agent log">${AGENT_LOG_ICON}</button>`;
+function agentLogButton(agentId, cls = 'msg-agent-log-btn') {
+  return `<button class="${cls}" onclick="event.stopPropagation();viewAgentLog('${escAttrJs(agentId)}')" title="View agent log">${AGENT_LOG_ICON}</button>`;
 }
 
 function getPinId(m) {
@@ -2768,6 +2768,7 @@ function renderAgentFooter() {
           ? `<span class="agent-card-model" title="${escapeHtml(a.model)}">${escapeHtml(cardModel)}</span>`
           : '';
         return `<div class="agent-card${selectedClass}" data-agent-id="${escapeHtml(a.agentId)}"${colorStyle} onclick="showAgentModal('${escAttrJs(a.agentId)}')">
+          ${agentLogButton(a.agentId, 'agent-card-log-btn')}
           <div class="agent-type-row">${typeNs ? `<span class="agent-type-ns">${escapeHtml(typeNs)}</span>` : ''}<span class="agent-type-name">${escapeHtml(typeName)}</span>${nameBadgeHtml}</div>
           <div class="agent-status-row"><span class="agent-dot ${a.status}"></span><span class="agent-status">${statusText}</span>${modelChipHtml}</div>
           ${msgHtml}

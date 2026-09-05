@@ -3653,6 +3653,25 @@ body::before {
 .agent-card:hover {
   border-color: color-mix(in srgb, var(--accent) 60%, var(--border));
 }
+.agent-card-log-btn {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: flex;
+  padding: 2px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0.45;
+  transition:
+    opacity 0.15s,
+    color 0.15s;
+}
+.agent-card-log-btn:hover {
+  opacity: 1;
+  color: var(--accent);
+}
 .agent-card.selected,
 .agent-card.selected:hover {
   background: var(--bg-elevated);
