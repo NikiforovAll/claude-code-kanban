@@ -1461,7 +1461,7 @@ function getToolIcon(toolName) {
 const AGENT_LOG_ICON =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>';
 function agentLogButton(agentId, cls = 'msg-agent-log-btn') {
-  return `<button class="${cls}" onclick="event.stopPropagation();viewAgentLog('${escAttrJs(agentId)}')" title="View agent log">${AGENT_LOG_ICON}</button>`;
+  return `<button class="${escapeHtml(cls)}" onclick="event.stopPropagation();viewAgentLog('${escAttrJs(agentId)}')" title="View agent log">${AGENT_LOG_ICON}</button>`;
 }
 
 function getPinId(m) {
