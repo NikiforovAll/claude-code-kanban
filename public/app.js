@@ -3141,9 +3141,9 @@ function renderSessions() {
     const total = session.taskCount;
     const percent = total > 0 ? Math.round((session.completed / total) * 100) : 0;
     const isActive = session.id === currentSessionId && viewMode === 'session';
-    const hasInProgress = session.inProgress > 0;
-    const isLive =
-      hasInProgress || (session.modifiedAt && Date.now() - new Date(session.modifiedAt).getTime() <= LIVE_INDICATOR_MS);
+    // hasRecentLog carries the server's registry-idle correction: an open-but-idle
+    // terminal keeps touching its JSONL, so mtime alone is not proof of activity.
+    const isLive = session.hasRecentLog && Date.now() - Date.parse(session.modifiedAt) <= LIVE_INDICATOR_MS;
     const rawName = session.name || session.id;
     const sessionName = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawName)
       ? rawName.slice(0, 8)
@@ -4616,8 +4616,6 @@ function activateSelectedSession(items) {
 
 function setFocusZone(zone) {
   const sidebar = document.querySelector('.sidebar');
-  // Clear all zone visuals
-  sidebar.classList.remove('sidebar-focused');
   clearKbSelection();
   clearTaskSelection();
 
@@ -4627,7 +4625,6 @@ function setFocusZone(zone) {
       sidebar.classList.remove('collapsed');
       localStorage.setItem('sidebar-collapsed', false);
     }
-    sidebar.classList.add('sidebar-focused');
     const items = getNavigableItems();
     if (items.length > 0) {
       const activeIdx = items.findIndex((el) => el.classList.contains('active'));
@@ -5771,7 +5768,6 @@ document.addEventListener('keydown', (e) => {
     }
     if (e.key === 'Escape') {
       // Plain unfocus — drop the keyboard cursor without jumping into the board
-      document.querySelector('.sidebar').classList.remove('sidebar-focused');
       clearKbSelection();
       focusZone = 'board';
       return;
