@@ -2883,10 +2883,8 @@ function showAgentModal(agentId) {
     return `<span class="agent-chip${cls}"${style}${title}>${labelHtml}<span class="agent-chip-val">${value}</span></span>`;
   };
 
-  // Agent cost stats live on the launch row's message (resolved from the completion
-  // toolUseResult), not on the agent-activity record — so read them from there.
   const agentMsg = currentMessages.find((m) => m.tool === 'Agent' && m.agentId === agentId);
-  const usageStats = agentMsg?.agentUsageStats || null;
+  const usageStats = agent.usage || null;
   const fmtTok = fmtTokens;
 
   const chips = [];

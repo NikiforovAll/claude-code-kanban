@@ -2007,16 +2007,16 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
     // (same pattern as agentsNeedingModel below). Each field shares the same resolve flow:
     // look up in progressMap by agentId, fall back to per-field extractor, persist only
     // on actual change.
+    // progressMap is keyed by tool_use_id; re-key by agentId, first value per field wins.
     const byAgentId = {};
-    const nameByAgentId = {};
-    const descByAgentId = {};
     if (meta.jsonlPath) {
       try {
         const progressMap = getProgressMap(meta.jsonlPath);
         for (const entry of Object.values(progressMap)) {
-          if (entry.prompt && !byAgentId[entry.agentId]) byAgentId[entry.agentId] = entry.prompt;
-          if (entry.name && !nameByAgentId[entry.agentId]) nameByAgentId[entry.agentId] = entry.name;
-          if (entry.description && !descByAgentId[entry.agentId]) descByAgentId[entry.agentId] = entry.description;
+          const e = (byAgentId[entry.agentId] ||= {});
+          for (const f of ['prompt', 'name', 'description', 'usage']) {
+            if (entry[f] && !e[f]) e[f] = entry[f];
+          }
         }
       } catch (_) {}
     }
@@ -2025,12 +2025,12 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
         field: 'prompt',
         flag: 'promptUnavailable',
         lookup: (a) => {
-          if (byAgentId[a.agentId]) return byAgentId[a.agentId];
+          if (byAgentId[a.agentId]?.prompt) return byAgentId[a.agentId].prompt;
           try { return extractPromptFromTranscript(subagentJsonlForExtraction(meta, a.agentId)); } catch (_) { return null; }
         },
       },
-      { field: 'agentName',   flag: 'agentNameUnavailable',   lookup: (a) => nameByAgentId[a.agentId] || null },
-      { field: 'description', flag: 'descriptionUnavailable', lookup: (a) => descByAgentId[a.agentId] || null },
+      { field: 'agentName',   flag: 'agentNameUnavailable',   lookup: (a) => byAgentId[a.agentId]?.name || null },
+      { field: 'description', flag: 'descriptionUnavailable', lookup: (a) => byAgentId[a.agentId]?.description || null },
     ];
     if (meta.jsonlPath) {
       for (const { field, flag, lookup } of reconcileFields) {
@@ -2133,6 +2133,11 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
     }
 
     const waitingForUser = checkWaitingForUser(agentDir, logMtime);
+    // Attached after persistAgent so it stays response-only.
+    for (const agent of visibleAgents) {
+      const usage = byAgentId[agent.agentId]?.usage;
+      if (usage) agent.usage = usage;
+    }
     res.json({ agents: visibleAgents, waitingForUser, teamColors });
   } catch {
     res.json({ agents: [], waitingForUser: null });
@@ -2499,7 +2504,6 @@ app.get('/api/sessions/:sessionId/messages', (req, res) => {
         msg.agentId = entry.agentId;
         if (entry.description) msg.agentDescription = entry.description;
         if (entry.usageText) msg.agentUsage = entry.usageText;
-        if (entry.usage) msg.agentUsageStats = entry.usage;
         if (entry.prompt && !msg.agentPrompt) msg.agentPrompt = entry.prompt;
         try {
           const agentFile = path.join(agentDir, `${entry.agentId}.jsonl`);
