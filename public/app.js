@@ -8225,10 +8225,18 @@ function spMatches(session, query) {
   );
 }
 
-function spDotClass(session) {
-  if (isWaitingSession(session)) return 'waiting';
-  if (isSessionLive(session)) return 'live';
-  return isActiveSession(session) ? 'active' : '';
+// Spelled out rather than interpolated so the class never comes from a variable.
+const SP_DOTS = {
+  waiting: '<span class="activity-dot waiting"></span>',
+  live: '<span class="activity-dot live"></span>',
+  active: '<span class="activity-dot active"></span>',
+  idle: '<span class="activity-dot"></span>',
+};
+
+function spDotHtml(session) {
+  if (isWaitingSession(session)) return SP_DOTS.waiting;
+  if (isSessionLive(session)) return SP_DOTS.live;
+  return isActiveSession(session) ? SP_DOTS.active : SP_DOTS.idle;
 }
 
 function renderSessionPicker() {
@@ -8246,7 +8254,7 @@ function renderSessionPicker() {
     .map((s, i) => {
       const project = s.project ? s.project.split(/[/\\]/).pop() : '';
       return `<button class="sp-row${s.id === currentSessionId ? ' current' : ''}" data-idx="${i}" title="${escapeHtml(s.id)}">
-        <span class="activity-dot ${spDotClass(s)}"></span>
+        ${spDotHtml(s)}
         <span class="sp-name">${escapeHtml(sessionDisplayName(s))}</span>
         <span class="sp-project">${escapeHtml(project)}</span>
         ${s.gitBranch ? `<span class="sp-branch">${escapeHtml(s.gitBranch)}</span>` : ''}
