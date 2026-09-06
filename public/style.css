@@ -4264,6 +4264,13 @@ body.light .msg-assistant .msg-text {
   display: flex;
 }
 
+/* For pickers: the dialog sits above the vertical centre so its list grows
+   downward instead of shifting rows under the cursor as it filters. */
+.modal-overlay.top-aligned {
+  align-items: flex-start;
+  padding-top: 12vh;
+}
+
 .plan-modal-overlay {
   z-index: 10001;
   background: rgba(0, 0, 0, 0.6);
@@ -4582,6 +4589,7 @@ body.light .msg-assistant .msg-text {
 }
 
 /* keycap chips: elevated fill + thicker bottom border reads as a key */
+.sp-hint kbd,
 .shortcuts kbd {
   display: inline-flex;
   align-items: center;
@@ -4816,6 +4824,130 @@ select.form-input option:checked {
 .btn:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+/* #endregion */
+
+/* #region SESSION_PICKER */
+.modal.session-picker {
+  max-height: 70vh;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.sp-input {
+  padding: 9px 12px;
+  background: var(--bg-deep);
+  font-size: 13px;
+}
+
+.sp-list {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sp-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: var(--text-secondary);
+  font-family: var(--mono);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sp-row:hover {
+  background: var(--bg-hover);
+}
+
+.sp-row.selected {
+  background: var(--bg-elevated);
+  border-color: var(--accent);
+}
+
+.sp-row .activity-dot.live {
+  background: var(--success);
+}
+
+.sp-row .activity-dot.active {
+  background: var(--accent);
+}
+
+.sp-row .activity-dot.waiting {
+  background: var(--warning);
+}
+
+.sp-name,
+.sp-project,
+.sp-branch {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sp-name {
+  flex: none;
+  max-width: 40%;
+  color: var(--text-primary);
+}
+
+.sp-row.current .sp-name {
+  color: var(--accent-text);
+}
+
+.sp-project {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-muted);
+}
+
+.sp-branch {
+  flex: none;
+  max-width: 25%;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--bg-hover);
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+.sp-count,
+.sp-time {
+  flex: none;
+  color: var(--text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.sp-time {
+  min-width: 62px;
+  text-align: right;
+}
+
+.sp-empty {
+  padding: 20px 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.sp-hint {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: 11px;
 }
 
 /* #endregion */

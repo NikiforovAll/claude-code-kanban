@@ -283,6 +283,11 @@ function isWaitingSession(s) {
 function isActiveSession(s) {
   return !s.hasWaitingForUser && (s.inProgress > 0 || s.hasRecentLog || s.hasRunningAgents);
 }
+// hasRecentLog carries the server's registry-idle correction: an open-but-idle
+// terminal keeps touching its JSONL, so mtime alone is not proof of activity.
+function isSessionLive(s) {
+  return !!s.hasRecentLog && Date.now() - Date.parse(s.modifiedAt) <= LIVE_INDICATOR_MS;
+}
 
 const ACTIVITY_PREDICATES = {
   waiting: isWaitingSession,
@@ -2954,6 +2959,19 @@ function highlightSelectedAgent() {
 //#region RENDERING
 let revealedPlanSessionId = null;
 let revealedStorageSessionId = null;
+
+// Opens a session and scrolls the sidebar to it, refetching first when the id
+// fell outside the session list the current filters asked for.
+async function revealSession(id) {
+  if (!sessions.some((s) => s.id === id)) {
+    lastSessionsHash = '';
+    await fetchSessions();
+  }
+  await fetchTasks(id);
+  const el = document.querySelector(`.session-item[data-session-id="${escSel(id)}"]`);
+  if (el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
 async function revealPlanSession(planSessionId) {
   if (revealedPlanSessionId === planSessionId) {
@@ -2962,13 +2980,7 @@ async function revealPlanSession(planSessionId) {
     return;
   }
   revealedPlanSessionId = planSessionId;
-  if (!sessions.some((s) => s.id === planSessionId)) {
-    lastSessionsHash = '';
-    await fetchSessions();
-  }
-  await fetchTasks(planSessionId);
-  const el = document.querySelector(`.session-item[data-session-id="${CSS.escape(planSessionId)}"]`);
-  if (el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  await revealSession(planSessionId);
 }
 
 async function showAllTasks() {
@@ -3020,15 +3032,10 @@ function renderAllTasks() {
   renderKanban();
 }
 
-function renderSessions() {
-  // Rebuilding the list under the pointer cancels an in-flight drop and would swallow a
-  // half-typed group name, and the SSE path can fire at any moment — defer instead.
-  if (sgDrag || sgIsEditing()) return;
-  // Update project dropdown
-  updateProjectDropdown();
-
-  // Filter pipeline: active filter → force-include revealed/current (non-pinned) sessions →
-  // project filter → search filter → ensure pinned/sticky sessions are always included
+// Filter pipeline: active filter → force-include revealed/current (non-pinned) sessions →
+// project filter → search filter → ensure pinned/sticky sessions are always included.
+// Pure over module state, so the session picker can ask for the same list without a render.
+function getFilteredSessions() {
   let filteredSessions = sessions;
   if (sessionFilter === 'active') {
     const activeSessionIds = new Set();
@@ -3112,6 +3119,18 @@ function renderSessions() {
     if (missingPinned.length) filteredSessions = [...missingPinned, ...filteredSessions];
   }
 
+  return filteredSessions;
+}
+
+function renderSessions() {
+  // Rebuilding the list under the pointer cancels an in-flight drop and would swallow a
+  // half-typed group name, and the SSE path can fire at any moment — defer instead.
+  if (sgDrag || sgIsEditing()) return;
+  // Update project dropdown
+  updateProjectDropdown();
+
+  const filteredSessions = getFilteredSessions();
+
   if (filteredSessions.length === 0) {
     let emptyMsg = 'No sessions found';
     let emptyHint = 'Tasks appear when you use Claude Code';
@@ -3143,13 +3162,8 @@ function renderSessions() {
     const total = session.taskCount;
     const percent = total > 0 ? Math.round((session.completed / total) * 100) : 0;
     const isActive = session.id === currentSessionId && viewMode === 'session';
-    // hasRecentLog carries the server's registry-idle correction: an open-but-idle
-    // terminal keeps touching its JSONL, so mtime alone is not proof of activity.
-    const isLive = session.hasRecentLog && Date.now() - Date.parse(session.modifiedAt) <= LIVE_INDICATOR_MS;
-    const rawName = session.name || session.id;
-    const sessionName = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawName)
-      ? rawName.slice(0, 8)
-      : rawName;
+    const isLive = isSessionLive(session);
+    const sessionName = sessionDisplayName(session);
     const useGrouped = sessionFilter === 'active' && session.project;
     const primaryName = useGrouped ? sessionName : session.project ? session.project.split('/').pop() : sessionName;
     const secondaryName = useGrouped ? null : session.project ? sessionName : null;
@@ -5090,6 +5104,7 @@ const SHORTCUT_PAIRS = [
       title: 'Session',
       rows: [
         { keys: ['P'], label: 'Open plan' },
+        { keys: ['Shift', 'P'], combo: true, label: 'Session picker' },
         { keys: ['I'], label: 'Session info' },
         { keys: ['.'], label: 'Pin / unpin' },
         { keys: ['>'], label: 'Toggle sticky' },
@@ -5459,13 +5474,7 @@ function _renderStorageSessions() {
 async function _storageViewSession(id) {
   closeStorageManager();
   revealedStorageSessionId = id;
-  if (!sessions.some((s) => s.id === id)) {
-    lastSessionsHash = '';
-    await fetchSessions();
-  }
-  await fetchTasks(id);
-  const el = document.querySelector(`.session-item[data-session-id="${CSS.escape(id)}"]`);
-  if (el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  await revealSession(id);
 }
 
 function _storageUnpinSession(id) {
@@ -5757,6 +5766,7 @@ const MODAL_CLOSERS = {
   'team-modal': () => closeTeamModal(),
   'agent-modal': () => closeAgentModal(),
   'help-modal': () => closeHelpModal(),
+  'session-picker-modal': () => closeSessionPicker(),
 };
 
 document.addEventListener('keydown', (e) => {
@@ -5860,6 +5870,12 @@ document.addEventListener('keydown', (e) => {
   if (e.code === 'KeyS' && e.shiftKey) {
     e.preventDefault();
     showStorageManager();
+    return;
+  }
+  // Ctrl+Shift+P is the browser's own; only the bare chord opens the picker.
+  if (e.code === 'KeyP' && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+    e.preventDefault();
+    openSessionPicker();
     return;
   }
   if (e.key === '.' || e.key === '>') {
@@ -7005,6 +7021,13 @@ function showWaitingDetail() {
 
 function isSessionActive(s) {
   return s.hasRecentLog || s.inProgress > 0 || s.hasActiveAgents || s.hasWaitingForUser;
+}
+
+const SESSION_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function sessionDisplayName(session) {
+  const raw = session.name || session.id;
+  return SESSION_UUID_RE.test(raw) ? raw.slice(0, 8) : raw;
 }
 
 function formatDate(dateStr) {
@@ -8173,6 +8196,104 @@ let _planSessionId = null;
 
 //#endregion
 
+//#region SESSION_PICKER
+// Snapshot of what the sidebar is showing, taken once per open: the picker only ever offers
+// sessions already on screen, and the recency order cannot change while it is up.
+let spSource = [];
+let spRows = [];
+let spIdx = 0;
+
+function openSessionPicker() {
+  const input = document.getElementById('session-picker-input');
+  input.value = '';
+  spSource = getFilteredSessions().sort((a, b) => Date.parse(b.modifiedAt) - Date.parse(a.modifiedAt));
+  document.getElementById('session-picker-modal').classList.add('visible');
+  renderSessionPicker();
+  input.focus();
+}
+
+function closeSessionPicker() {
+  hideModalOverlay('session-picker-modal');
+}
+
+function spMatches(session, query) {
+  return (
+    fuzzyMatch(session.name, query) ||
+    fuzzyMatch(session.id, query) ||
+    fuzzyMatch(session.project, query) ||
+    fuzzyMatch(session.gitBranch, query)
+  );
+}
+
+function spDotClass(session) {
+  if (isWaitingSession(session)) return 'waiting';
+  if (isSessionLive(session)) return 'live';
+  return isActiveSession(session) ? 'active' : '';
+}
+
+function renderSessionPicker() {
+  const list = document.getElementById('session-picker-list');
+  const query = document.getElementById('session-picker-input').value.trim();
+  spRows = spSource.filter((s) => spMatches(s, query));
+
+  if (!spRows.length) {
+    spIdx = -1;
+    list.innerHTML = `<div class="sp-empty">${spSource.length ? 'No session matches' : 'No sessions in the current sidebar filter'}</div>`;
+    return;
+  }
+
+  list.innerHTML = spRows
+    .map((s, i) => {
+      const project = s.project ? s.project.split(/[/\\]/).pop() : '';
+      return `<button class="sp-row${s.id === currentSessionId ? ' current' : ''}" data-idx="${i}" title="${escapeHtml(s.id)}">
+        <span class="activity-dot ${spDotClass(s)}"></span>
+        <span class="sp-name">${escapeHtml(sessionDisplayName(s))}</span>
+        <span class="sp-project">${escapeHtml(project)}</span>
+        ${s.gitBranch ? `<span class="sp-branch">${escapeHtml(s.gitBranch)}</span>` : ''}
+        <span class="sp-count">${s.completed}/${s.taskCount}</span>
+        <span class="sp-time">${formatDate(s.modifiedAt)}</span>
+      </button>`;
+    })
+    .join('');
+  spSelect(0);
+}
+
+function spSelect(idx) {
+  const list = document.getElementById('session-picker-list');
+  list.children[spIdx]?.classList.remove('selected');
+  spIdx = Math.min(Math.max(idx, 0), spRows.length - 1);
+  const row = list.children[spIdx];
+  row?.classList.add('selected');
+  row?.scrollIntoView({ block: 'nearest' });
+}
+
+async function spOpen(idx) {
+  const session = spRows[idx];
+  if (!session) return;
+  closeSessionPicker();
+  await revealSession(session.id);
+}
+
+function initSessionPicker() {
+  const input = document.getElementById('session-picker-input');
+  input.addEventListener('input', renderSessionPicker);
+  // Bound on the input: the global handler returns early on INPUT targets.
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeSessionPicker();
+    else if (matchKey(e, 'ArrowDown') || (e.ctrlKey && e.key === 'n')) spSelect(spIdx + 1);
+    else if (matchKey(e, 'ArrowUp') || (e.ctrlKey && e.key === 'p')) spSelect(spIdx - 1);
+    else if (e.key === 'Enter') spOpen(spIdx);
+    else return;
+    e.preventDefault();
+    e.stopPropagation();
+  });
+  document.getElementById('session-picker-list').addEventListener('click', (e) => {
+    const row = e.target.closest('.sp-row');
+    if (row) spOpen(Number(row.dataset.idx));
+  });
+}
+//#endregion
+
 //#region PLAN
 function refreshOpenPlan() {
   if (!_planSessionId || !document.getElementById('plan-modal').classList.contains('visible')) return;
@@ -8809,6 +8930,7 @@ try {
 } catch (_) {}
 loadSessionGroups();
 initSessionGroupsDnd();
+initSessionPicker();
 try {
   const af = JSON.parse(localStorage.getItem('activityFilter') || '[]');
   // biome-ignore lint/suspicious/useIterableCallbackReturn: forEach side-effect
