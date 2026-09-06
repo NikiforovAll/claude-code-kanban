@@ -3218,9 +3218,10 @@ function renderSessions() {
   // `ungroup` marks the label as the drop target for pulling an item out of a named group.
   const sectionHtml = (key, text, ungroup, body) => {
     const collapsed = collapsedProjectGroups.has(key);
+    const escPath = escapeHtml(key);
     const title = ungroup ? 'Click to collapse — drop here to remove from a group' : 'Click to collapse';
-    return `<div class="sg-section-label sg-section-toggle${ungroup ? ' sg-ungroup-zone' : ''}${collapsed ? ' collapsed' : ''}" data-group-path="${key}" title="${title}">${groupChevronSvg(10)}<span>${text}</span></div>
-      <div class="sg-section-body${collapsed ? ' collapsed' : ''}" data-group-path="${key}">${body}</div>`;
+    return `<div class="sg-section-label sg-section-toggle${ungroup ? ' sg-ungroup-zone' : ''}${collapsed ? ' collapsed' : ''}" data-group-path="${escPath}" title="${escapeHtml(title)}">${groupChevronSvg(10)}<span>${text}</span></div>
+      <div class="sg-section-body${collapsed ? ' collapsed' : ''}" data-group-path="${escPath}">${body}</div>`;
   };
 
   const renderGroupSessions = (sessions, pinKey) => {
@@ -4590,7 +4591,7 @@ function expandActiveGroups({ onlyNew = false } = {}) {
 }
 
 function isGroupHeader(el) {
-  return Object.keys(COLLAPSIBLE_BODY_CLASS).some((c) => el.classList.contains(c));
+  return el.matches(COLLAPSIBLE_HEADER_SELECTOR);
 }
 
 function findParentHeader(el) {
@@ -5135,36 +5136,42 @@ const SHORTCUT_PAIRS = [
       title: 'Hub',
       hub: true,
       rows: [
-        { keys: ['M'], hub: true, label: 'Jump to marketplace' },
-        { keys: ['$'], hub: true, label: 'Jump to cost' },
-        { keys: ['Ctrl', 'M'], combo: true, hub: true, label: 'Jump to memory' },
-        { keys: ['Ctrl', 'Alt', '←/→'], combo: true, hub: true, label: 'Previous / next hub app' },
-        { keys: ['Alt', '1…9'], combo: true, hub: true, label: 'Jump to hub app by number' },
-        { keys: ['Ctrl', 'Alt', 'P'], combo: true, hub: true, label: 'Project picker' },
+        { keys: ['M'], label: 'Jump to marketplace' },
+        { keys: ['$'], label: 'Jump to cost' },
+        { keys: ['Ctrl', 'M'], combo: true, label: 'Jump to memory' },
+        { keys: ['Ctrl', 'Alt', '←/→'], combo: true, label: 'Previous / next hub app' },
+        { keys: ['Alt', '1…9'], combo: true, label: 'Jump to hub app by number' },
+        { keys: ['Ctrl', 'Alt', 'P'], combo: true, label: 'Project picker' },
       ],
     },
   ],
 ];
 
+const EMPTY_GROUP = { title: '', rows: [] };
+
 // Interleaves each pair's rows left-then-right so CSS grid auto-placement lands
 // them on shared row tracks (see .shortcuts in style.css).
 function buildHelpShortcuts() {
   const cells = [];
-  SHORTCUT_PAIRS.forEach(([left, right], pair) => {
+  SHORTCUT_PAIRS.forEach(([left, right = EMPTY_GROUP], pair) => {
     const first = pair === 0 ? ' sc-first' : '';
-    const head = (g, side) => `<div class="sc-group ${side}${first}${g.hub ? ' sc-hub' : ''}">${g.title}</div>`;
-    cells.push(head(left, 'sc-l') + head(right, 'sc-r'));
+    const sides = [
+      [left, 'sc-l'],
+      [right, 'sc-r'],
+    ];
+    const head = (g, side) =>
+      g.title ? `<div class="${escapeHtml(`sc-group ${side}${first}${g.hub ? ' sc-hub' : ''}`)}">${g.title}</div>` : '';
+    cells.push(sides.map(([g, side]) => head(g, side)).join(''));
     for (let i = 0; i < Math.max(left.rows.length, right.rows.length); i++) {
-      for (const [group, side] of [
-        [left, 'sc-l'],
-        [right, 'sc-r'],
-      ]) {
+      for (const [group, side] of sides) {
         const row = group.rows[i];
         if (!row) continue;
         const sep = row.combo ? '<span class="sc-plus">+</span>' : '<span class="sc-or">/</span>';
         const keys = row.keys.map((k) => `<kbd>${escapeHtml(k)}</kbd>`).join(sep);
-        const cls = side + (row.hub ? ' sc-hub' : '');
-        cells.push(`<dt class="${cls}">${keys}</dt><dd class="${cls}">${escapeHtml(row.label)}</dd>`);
+        const cls = side + (group.hub ? ' sc-hub' : '');
+        cells.push(
+          `<dt class="${escapeHtml(cls)}">${keys}</dt><dd class="${escapeHtml(cls)}">${escapeHtml(row.label)}</dd>`,
+        );
       }
     }
   });

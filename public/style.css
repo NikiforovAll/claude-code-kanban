@@ -4513,7 +4513,7 @@ body.light .msg-assistant .msg-text {
 }
 
 .modal-help {
-  max-width: 900px;
+  max-width: 960px;
 }
 
 /* One shared grid for both halves (key | label | spacer | key | label): each key
@@ -4565,7 +4565,7 @@ body.light .msg-assistant .msg-text {
 }
 
 /* Section headings carry the column: full-width rule + primary ink, so the eye
-   finds Navigate / Session / Copy before it reads any single row. */
+   finds the group before it reads any single row. */
 .shortcuts .sc-group {
   padding: 18px 0 6px;
   margin-bottom: 6px;
@@ -4593,7 +4593,7 @@ body.light .msg-assistant .msg-text {
   font-family: var(--font-mono, monospace);
   font-size: 11px;
   color: var(--text-primary);
-  background: var(--bg-elevated);
+  background: var(--bg-hover);
   border: 1px solid var(--border);
   border-bottom-width: 2px;
   border-radius: 5px;
