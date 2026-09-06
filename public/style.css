@@ -4512,6 +4512,105 @@ body.light .msg-assistant .msg-text {
   max-width: 440px;
 }
 
+.modal-help {
+  max-width: 900px;
+}
+
+/* One shared grid for both halves (key | label | spacer | key | label): each key
+   gutter is sized by its column's widest combo, and left/right rows share row
+   tracks, so paired groups line up — a shorter group just leaves empty rows.
+   Cells opt into a half via sc-l / sc-r; the markup is generated from
+   SHORTCUT_PAIRS in app.js. */
+.shortcuts {
+  margin: 0;
+  display: grid;
+  grid-template-columns: max-content 1fr 28px max-content 1fr;
+  column-gap: 14px;
+}
+
+.shortcuts dt.sc-l {
+  grid-column: 1;
+}
+.shortcuts dd.sc-l {
+  grid-column: 2;
+}
+.shortcuts dt.sc-r {
+  grid-column: 4;
+}
+.shortcuts dd.sc-r {
+  grid-column: 5;
+}
+.shortcuts .sc-group.sc-l {
+  grid-column: 1 / 3;
+}
+.shortcuts .sc-group.sc-r {
+  grid-column: 4 / 6;
+}
+
+.shortcuts dt {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  align-self: center;
+  gap: 4px;
+  padding: 3px 0;
+}
+
+.shortcuts dd {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+  align-self: center;
+  padding: 3px 0;
+}
+
+/* Section headings carry the column: full-width rule + primary ink, so the eye
+   finds Navigate / Session / Copy before it reads any single row. */
+.shortcuts .sc-group {
+  padding: 18px 0 6px;
+  margin-bottom: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border);
+}
+
+.shortcuts .sc-group.sc-first {
+  padding-top: 2px;
+}
+
+/* keycap chips: elevated fill + thicker bottom border reads as a key */
+.shortcuts kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  box-sizing: border-box;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+}
+
+.shortcuts .sc-plus,
+.shortcuts .sc-or {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+/* Hub jumps are no-ops outside Claude Code Hub, so the standalone board hides
+   that whole column rather than listing keys that do nothing. */
+.shortcuts.sc-standalone .sc-hub {
+  display: none;
+}
+
 @keyframes live-border-pulse {
   0%,
   100% {
@@ -5314,21 +5413,24 @@ pre.mermaid svg {
 }
 
 .project-group-header.kb-selected,
-.pinned-sub-header.kb-selected {
+.pinned-sub-header.kb-selected,
+.sg-section-toggle.kb-selected {
   color: var(--text-primary);
   background: var(--bg-hover);
   border-radius: 4px;
 }
 
 .project-group-header .group-chevron,
-.session-group-header .group-chevron {
+.session-group-header .group-chevron,
+.sg-section-toggle .group-chevron {
   transition: transform 0.15s ease;
   flex-shrink: 0;
   display: block;
 }
 
 .project-group-header.collapsed .group-chevron,
-.session-group-header.collapsed .group-chevron {
+.session-group-header.collapsed .group-chevron,
+.sg-section-toggle.collapsed .group-chevron {
   transform: rotate(-90deg);
 }
 
@@ -5522,6 +5624,18 @@ pre.mermaid svg {
   margin-top: 0;
 }
 
+.sg-section-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-bottom: 4px;
+  cursor: pointer;
+}
+
+.sg-section-toggle:hover {
+  color: var(--text-primary);
+}
+
 .session-group-header {
   display: flex;
   align-items: center;
@@ -5584,7 +5698,8 @@ pre.mermaid svg {
   margin-left: 6px;
 }
 
-.session-group-sessions.collapsed {
+.session-group-sessions.collapsed,
+.sg-section-body.collapsed {
   display: none;
 }
 

@@ -346,7 +346,7 @@
 
   <!-- Help Modal -->
   <div id="help-modal" class="modal-overlay" onclick="closeHelpModal()">
-    <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal modal-help" onclick="event.stopPropagation()">
       <div class="modal-header">
         <h3 class="modal-title">Keyboard Shortcuts</h3>
         <button class="modal-close" aria-label="Close dialog" onclick="closeHelpModal()">
@@ -356,136 +356,7 @@
         </button>
       </div>
       <div class="modal-body modal-zoomable">
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0 24px;">
-          <div style="display: grid; gap: 16px; align-content: start;">
-            <div>
-              <h4 style="margin: 0 0 8px 0; color: var(--text-primary); font-size: 14px; font-weight: 600;">Global</h4>
-              <table style="width: 100%; font-size: 13px;">
-                <tr>
-                  <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">?</kbd></td>
-                  <td style="padding: 4px 0; color: var(--text-primary);">Show keyboard shortcuts</td>
-                </tr>
-                <tr>
-                  <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">Esc</kbd></td>
-                  <td style="padding: 4px 0; color: var(--text-primary);">Close panels or cancel</td>
-                </tr>
-                <tr>
-                  <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">Tab</kbd></td>
-                  <td style="padding: 4px 0; color: var(--text-primary);">Toggle sidebar / board focus</td>
-                </tr>
-                <tr>
-                  <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">[</kbd></td>
-                  <td style="padding: 4px 0; color: var(--text-primary);">Toggle sidebar collapse</td>
-                </tr>
-                <tr>
-                  <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">R</kbd></td>
-                  <td style="padding: 4px 0; color: var(--text-primary);">Reload page</td>
-                </tr>
-              </table>
-            </div>
-            <div>
-              <h4 style="margin: 0 0 8px 0; color: var(--text-primary); font-size: 14px; font-weight: 600;">Navigation</h4>
-              <table style="width: 100%; font-size: 13px;">
-                <tr>
-                  <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">J</kbd> / <kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">&darr;</kbd></td>
-                  <td style="padding: 4px 0; color: var(--text-primary);">Next task in column</td>
-                </tr>
-                <tr>
-                  <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">K</kbd> / <kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">&uarr;</kbd></td>
-                  <td style="padding: 4px 0; color: var(--text-primary);">Previous task in column</td>
-                </tr>
-                <tr>
-                  <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">H</kbd> / <kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">&larr;</kbd></td>
-                  <td style="padding: 4px 0; color: var(--text-primary);">Move to left column</td>
-                </tr>
-                <tr>
-                  <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">L</kbd> / <kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">&rarr;</kbd></td>
-                  <td style="padding: 4px 0; color: var(--text-primary);">Move to right column</td>
-                </tr>
-                <tr>
-                  <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">Enter</kbd></td>
-                  <td style="padding: 4px 0; color: var(--text-primary);">Toggle task detail panel</td>
-                </tr>
-              </table>
-            </div>
-          </div>
-          <div style="align-content: start;">
-            <h4 style="margin: 0 0 8px 0; color: var(--text-primary); font-size: 14px; font-weight: 600;">Actions</h4>
-            <table style="width: 100%; font-size: 13px;">
-              <tr>
-                <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">P</kbd></td>
-                <td style="padding: 4px 0; color: var(--text-primary);">Open session plan</td>
-              </tr>
-              <tr>
-                <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">I</kbd></td>
-                <td style="padding: 4px 0; color: var(--text-primary);">Open session info</td>
-              </tr>
-              <tr>
-                <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">Ctrl+D</kbd></td>
-                <td style="padding: 4px 0; color: var(--text-primary);">Dismiss selected session</td>
-              </tr>
-              <tr>
-                <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">D</kbd></td>
-                <td style="padding: 4px 0; color: var(--text-primary);">Delete selected task</td>
-              </tr>
-              <tr>
-                <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">N</kbd></td>
-                <td style="padding: 4px 0; color: var(--text-primary);">Toggle scratchpad</td>
-              </tr>
-              <tr>
-                <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">.</kbd></td>
-                <td style="padding: 4px 0; color: var(--text-primary);">Pin/unpin selected session</td>
-              </tr>
-              <tr>
-                <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">&gt;</kbd></td>
-                <td style="padding: 4px 0; color: var(--text-primary);">Toggle sticky on selected session</td>
-              </tr>
-              <tr>
-                <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">T</kbd></td>
-                <td style="padding: 4px 0; color: var(--text-primary);">Toggle theme</td>
-              </tr>
-              <tr>
-                <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">M</kbd></td>
-                <td style="padding: 4px 0; color: var(--text-primary);">Jump to marketplace</td>
-              </tr>
-              <tr>
-                <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">$</kbd></td>
-                <td style="padding: 4px 0; color: var(--text-primary);">Jump to cost</td>
-              </tr>
-              <tr>
-                <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">Shift+L</kbd></td>
-                <td style="padding: 4px 0; color: var(--text-primary);">Toggle session log</td>
-              </tr>
-              <tr>
-                <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">Shift+M</kbd></td>
-                <td style="padding: 4px 0; color: var(--text-primary);">Open last message detail</td>
-              </tr>
-              <tr>
-                <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">Ctrl++</kbd> / <kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">Ctrl+-</kbd></td>
-                <td style="padding: 4px 0; color: var(--text-primary);">Modal text size</td>
-              </tr>
-              <tr>
-                <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">Ctrl+0</kbd></td>
-                <td style="padding: 4px 0; color: var(--text-primary);">Reset text size</td>
-              </tr>
-              <tr>
-                <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">Shift+S</kbd></td>
-                <td style="padding: 4px 0; color: var(--text-primary);">Storage manager</td>
-              </tr>
-              <tr>
-                <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">Shift+C</kbd></td>
-                <td style="padding: 4px 0; color: var(--text-primary);">Copy session id</td>
-              </tr>
-              <tr>
-                <td style="padding: 4px 0; color: var(--text-secondary);"><kbd style="background: var(--bg-hover); padding: 2px 6px; border-radius: 4px; font-family: monospace;">J/K</kbd></td>
-                <td style="padding: 4px 0; color: var(--text-primary);">Navigate messages in detail modal</td>
-              </tr>
-            </table>
-          </div>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-primary" onclick="closeHelpModal()">Got it</button>
+        <dl class="shortcuts" id="help-shortcuts"></dl>
       </div>
     </div>
   </div>

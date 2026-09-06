@@ -15,6 +15,9 @@ let filterProject = FILTER_DEFAULTS.project; // null = all, '__recent__' = last 
 let recentProjects = new Set();
 let projectsCacheDirty = true;
 const collapsedProjectGroups = new Set();
+const SECTION_GROUPS = '__section_groups__';
+const SECTION_PROJECTS = '__section_projects__';
+const SECTION_SESSIONS = '__section_sessions__';
 let stableGroupOrder = []; // cached project path order to prevent jumping
 let sessionGroups = []; // user-named groups: [{id, name, color, members:[{type,ref}]}]
 let sgDrag = null; // in-flight sidebar drag: {kind:'session'|'project'|'group', ref}
@@ -3212,6 +3215,14 @@ function renderSessions() {
     const active = arr.reduce((n, s) => n + (isSessionActive(s) ? 1 : 0), 0);
     return `<span class="group-count" title="${active} active / ${arr.length} total">${active > 0 ? `<span class="group-count-active">${active}</span><span class="group-count-sep">/</span>` : ''}${arr.length}</span>`;
   };
+  // `ungroup` marks the label as the drop target for pulling an item out of a named group.
+  const sectionHtml = (key, text, ungroup, body) => {
+    const collapsed = collapsedProjectGroups.has(key);
+    const title = ungroup ? 'Click to collapse — drop here to remove from a group' : 'Click to collapse';
+    return `<div class="sg-section-label sg-section-toggle${ungroup ? ' sg-ungroup-zone' : ''}${collapsed ? ' collapsed' : ''}" data-group-path="${key}" title="${title}">${groupChevronSvg(10)}<span>${text}</span></div>
+      <div class="sg-section-body${collapsed ? ' collapsed' : ''}" data-group-path="${key}">${body}</div>`;
+  };
+
   const renderGroupSessions = (sessions, pinKey) => {
     if (!groupPinned || pinnedSessionIds.size === 0) return sessions.map(renderSessionCard).join('');
     const gPinned = sessions.filter((s) => isPlacedPinned(s.id) && !isPlacedSticky(s.id));
@@ -3298,7 +3309,7 @@ function renderSessions() {
   // flat = the "All sessions" view, which has no project sub-blocks.
   const sgSectionHtml = (flat) => {
     if (sessionGroups.length === 0) return '';
-    let out = '<div class="sg-section-label">Groups</div>';
+    let out = '';
     for (const group of sessionGroups) {
       const bucket = sgBuckets.get(group.id) || [];
       if (bucket.length === 0 && sgFiltering) continue;
@@ -3341,7 +3352,8 @@ function renderSessions() {
       out += sgHeaderHtml(group, countHtml(bucket));
       out += `<div class="session-group-sessions${collapsed ? ' collapsed' : ''}" data-group-id="${escapeHtml(group.id)}">${body}</div>`;
     }
-    return out;
+    if (!out) return '';
+    return sectionHtml(SECTION_GROUPS, 'Groups', false, out);
   };
 
   let html = '';
@@ -3389,17 +3401,19 @@ function renderSessions() {
     stableGroupOrder = [...keptOrder, ...newPaths];
     const sortedGroups = stableGroupOrder.filter((p) => groups.has(p)).map((p) => [p, groups.get(p)]);
 
-    // Rendered even when nothing is left under it: it is the drop target for ungrouping.
-    if (sessionGroups.length > 0) {
-      html += '<div class="sg-section-label sg-ungroup-zone" title="Drop here to remove from a group">Projects</div>';
-    }
-    for (const [projectPath, projectSessions] of sortedGroups) {
-      html += projectBlock(projectPath, projectSessions, false);
-    }
+    // The section header is rendered even when nothing is left under it: it is the drop target
+    // for ungrouping. Its body is skipped while collapsed — nothing would be visible, and this is
+    // the whole project list, re-parsed on every live refresh.
+    const sectioned = sessionGroups.length > 0;
+    let projectsHtml = '';
+    if (!sectioned || !collapsedProjectGroups.has(SECTION_PROJECTS)) {
+      for (const [projectPath, projectSessions] of sortedGroups) {
+        projectsHtml += projectBlock(projectPath, projectSessions, false);
+      }
 
-    if (ungrouped.length > 0 && sortedGroups.length > 0) {
-      const isCollapsed = collapsedProjectGroups.has('__ungrouped__');
-      html += `
+      if (ungrouped.length > 0 && sortedGroups.length > 0) {
+        const isCollapsed = collapsedProjectGroups.has('__ungrouped__');
+        projectsHtml += `
             <div class="project-group-header${isCollapsed ? ' collapsed' : ''}" data-group-path="__ungrouped__">
               ${groupChevronSvg()}
               <span class="group-name">Ungrouped</span>
@@ -3409,17 +3423,20 @@ function renderSessions() {
               ${renderGroupSessions(ungrouped, '__pinned___ungrouped__')}
             </div>
           `;
-    } else {
-      html += ungrouped.map(renderSessionCard).join('');
+      } else {
+        projectsHtml += ungrouped.map(renderSessionCard).join('');
+      }
     }
+
+    html += sectioned ? sectionHtml(SECTION_PROJECTS, 'Projects', true, projectsHtml) : projectsHtml;
 
     sessionsList.innerHTML = html;
   } else {
-    const ungroupZone =
-      sessionGroups.length > 0
-        ? '<div class="sg-section-label sg-ungroup-zone" title="Drop here to remove from a group">Sessions</div>'
-        : '';
-    sessionsList.innerHTML = html + sgSectionHtml(true) + ungroupZone + sgRest.map(renderSessionCard).join('');
+    const sectioned = sessionGroups.length > 0;
+    const restHtml =
+      sectioned && collapsedProjectGroups.has(SECTION_SESSIONS) ? '' : sgRest.map(renderSessionCard).join('');
+    const tail = sectioned ? sectionHtml(SECTION_SESSIONS, 'Sessions', true, restHtml) : restHtml;
+    sessionsList.innerHTML = html + sgSectionHtml(true) + tail;
   }
 
   const navItems = getNavigableItems();
@@ -4414,14 +4431,24 @@ function getKbId(el) {
   return el.dataset.sessionId || el.dataset.groupPath || null;
 }
 
+// Every collapsible header class and the body class it opens. Order matters only in that a
+// header carries exactly one of these.
+const COLLAPSIBLE_BODY_CLASS = {
+  'pinned-sub-header': 'pinned-sub-items',
+  'session-group-header': 'session-group-sessions',
+  'sg-section-toggle': 'sg-section-body',
+  'project-group-header': 'project-group-sessions',
+};
+const COLLAPSIBLE_HEADER_SELECTOR = Object.keys(COLLAPSIBLE_BODY_CLASS)
+  .map((c) => `.${c}`)
+  .join(', ');
+
 function getGroupSessionsContainer(header) {
-  const cls = header.classList.contains('pinned-sub-header')
-    ? 'pinned-sub-items'
-    : header.classList.contains('session-group-header')
-      ? 'session-group-sessions'
-      : 'project-group-sessions';
+  const cls = Object.keys(COLLAPSIBLE_BODY_CLASS).find((c) => header.classList.contains(c));
+  if (!cls) return null;
   let el = header.nextElementSibling;
-  while (el && !el.classList.contains(cls)) el = el.nextElementSibling;
+  const bodyCls = COLLAPSIBLE_BODY_CLASS[cls];
+  while (el && !el.classList.contains(bodyCls)) el = el.nextElementSibling;
   return el;
 }
 
@@ -4448,16 +4475,27 @@ function getNavigableItems() {
       }
     }
   };
-  for (const el of sessionsList.children) {
-    if (el.classList.contains('project-group-header') || el.classList.contains('session-group-header')) {
-      items.push(el);
-      if (!collapsedProjectGroups.has(el.dataset.groupPath)) {
-        walkGroupContainer(getGroupSessionsContainer(el));
+  // A section label sits next to its body div rather than wrapping it, so the top level walks
+  // into the body to reach the blocks inside.
+  const walkTopLevel = (children) => {
+    for (const el of children) {
+      if (
+        el.classList.contains('project-group-header') ||
+        el.classList.contains('session-group-header') ||
+        el.classList.contains('sg-section-toggle')
+      ) {
+        items.push(el);
+        if (!el.classList.contains('sg-section-toggle') && !collapsedProjectGroups.has(el.dataset.groupPath)) {
+          walkGroupContainer(getGroupSessionsContainer(el));
+        }
+      } else if (el.classList.contains('session-item')) {
+        items.push(el);
+      } else if (el.classList.contains('sg-section-body') && !el.classList.contains('collapsed')) {
+        walkTopLevel(el.children);
       }
-    } else if (el.classList.contains('session-item')) {
-      items.push(el);
     }
-  }
+  };
+  walkTopLevel(sessionsList.children);
   return items;
 }
 
@@ -4541,6 +4579,10 @@ function expandActiveGroups({ onlyNew = false } = {}) {
     // A named group wrapping that project (or the session itself) would keep it hidden.
     const group = sgGroupForSession(s);
     if (group && collapsedProjectGroups.delete(sgKey(group.id))) changed = true;
+    // Which section holds it depends on the view, so open every one rather than re-deriving it.
+    for (const key of [SECTION_GROUPS, SECTION_PROJECTS, SECTION_SESSIONS]) {
+      if (collapsedProjectGroups.delete(key)) changed = true;
+    }
   }
   prevActiveSessionIds = activeIds;
   if (changed) persistCollapsedGroups();
@@ -4548,11 +4590,7 @@ function expandActiveGroups({ onlyNew = false } = {}) {
 }
 
 function isGroupHeader(el) {
-  return (
-    el.classList.contains('project-group-header') ||
-    el.classList.contains('pinned-sub-header') ||
-    el.classList.contains('session-group-header')
-  );
+  return Object.keys(COLLAPSIBLE_BODY_CLASS).some((c) => el.classList.contains(c));
 }
 
 function findParentHeader(el) {
@@ -5030,19 +5068,115 @@ async function confirmDelete() {
 //#endregion
 
 //#region HELP
+// Each entry pairs a left and a right group onto the same grid rows, so their
+// headings sit level and the shorter group just leaves empty rows.
+// `combo` joins the keys with a plus (a chord) instead of listing them as
+// alternatives; `hub` marks rows that only work inside Claude Code Hub.
+const SHORTCUT_PAIRS = [
+  [
+    {
+      title: 'Navigate',
+      rows: [
+        { keys: ['J', '↓'], label: 'Next item' },
+        { keys: ['K', '↑'], label: 'Previous item' },
+        { keys: ['H', '←'], label: 'Left column / collapse group' },
+        { keys: ['L', '→'], label: 'Right column / expand group' },
+        { keys: ['Tab'], label: 'Switch sidebar ↔ board' },
+        { keys: ['Enter', 'Space'], label: 'Open selected item' },
+      ],
+    },
+    {
+      title: 'Session',
+      rows: [
+        { keys: ['P'], label: 'Open plan' },
+        { keys: ['I'], label: 'Session info' },
+        { keys: ['.'], label: 'Pin / unpin' },
+        { keys: ['>'], label: 'Toggle sticky' },
+        { keys: ['Ctrl', 'D'], combo: true, label: 'Dismiss session' },
+        { keys: ['Shift', 'L'], combo: true, label: 'Toggle session log' },
+        { keys: ['Shift', 'M'], combo: true, label: 'Open last message' },
+        { keys: ['J', 'K'], label: 'Previous / next message in detail' },
+      ],
+    },
+  ],
+  [
+    {
+      title: 'Board',
+      rows: [
+        { keys: ['Enter'], label: 'Toggle task detail panel' },
+        { keys: ['D'], label: 'Delete selected task' },
+        { keys: ['N'], label: 'Toggle scratchpad' },
+        { keys: ['R'], label: 'Refresh data' },
+        { keys: ['Esc'], label: 'Close panel / clear selection' },
+      ],
+    },
+    {
+      title: 'View',
+      rows: [
+        { keys: ['['], label: 'Toggle sidebar' },
+        { keys: ['T'], label: 'Toggle theme' },
+        { keys: ['Shift', 'S'], combo: true, label: 'Storage manager' },
+        { keys: ['Ctrl', '+'], combo: true, label: 'Larger modal text' },
+        { keys: ['Ctrl', '−'], combo: true, label: 'Smaller modal text' },
+        { keys: ['Ctrl', '0'], combo: true, label: 'Reset modal text size' },
+        { keys: ['?'], label: 'Show this help' },
+      ],
+    },
+  ],
+  [
+    {
+      title: 'Copy',
+      rows: [
+        { keys: ['Shift', 'C'], combo: true, label: 'Session id' },
+        { keys: ['Ctrl', 'Shift', 'C'], combo: true, label: 'Resume command (claude -r <id>)' },
+      ],
+    },
+    {
+      title: 'Hub',
+      hub: true,
+      rows: [
+        { keys: ['M'], hub: true, label: 'Jump to marketplace' },
+        { keys: ['$'], hub: true, label: 'Jump to cost' },
+        { keys: ['Ctrl', 'M'], combo: true, hub: true, label: 'Jump to memory' },
+        { keys: ['Ctrl', 'Alt', '←/→'], combo: true, hub: true, label: 'Previous / next hub app' },
+        { keys: ['Alt', '1…9'], combo: true, hub: true, label: 'Jump to hub app by number' },
+        { keys: ['Ctrl', 'Alt', 'P'], combo: true, hub: true, label: 'Project picker' },
+      ],
+    },
+  ],
+];
+
+// Interleaves each pair's rows left-then-right so CSS grid auto-placement lands
+// them on shared row tracks (see .shortcuts in style.css).
+function buildHelpShortcuts() {
+  const cells = [];
+  SHORTCUT_PAIRS.forEach(([left, right], pair) => {
+    const first = pair === 0 ? ' sc-first' : '';
+    const head = (g, side) => `<div class="sc-group ${side}${first}${g.hub ? ' sc-hub' : ''}">${g.title}</div>`;
+    cells.push(head(left, 'sc-l') + head(right, 'sc-r'));
+    for (let i = 0; i < Math.max(left.rows.length, right.rows.length); i++) {
+      for (const [group, side] of [
+        [left, 'sc-l'],
+        [right, 'sc-r'],
+      ]) {
+        const row = group.rows[i];
+        if (!row) continue;
+        const sep = row.combo ? '<span class="sc-plus">+</span>' : '<span class="sc-or">/</span>';
+        const keys = row.keys.map((k) => `<kbd>${escapeHtml(k)}</kbd>`).join(sep);
+        const cls = side + (row.hub ? ' sc-hub' : '');
+        cells.push(`<dt class="${cls}">${keys}</dt><dd class="${cls}">${escapeHtml(row.label)}</dd>`);
+      }
+    }
+  });
+  return cells.join('');
+}
+
 function showHelpModal() {
   const modal = document.getElementById('help-modal');
+  const list = document.getElementById('help-shortcuts');
+  if (!list.childElementCount) list.innerHTML = buildHelpShortcuts();
+  list.classList.toggle('sc-standalone', !window.__HUB__?.enabled);
   modal.classList.add('visible');
-
-  // Handle keyboard shortcuts
-  const keyHandler = (e) => {
-    if (e.key === 'Escape' || e.key === '?') {
-      e.preventDefault();
-      closeHelpModal();
-      document.removeEventListener('keydown', keyHandler);
-    }
-  };
-  document.addEventListener('keydown', keyHandler);
 }
 
 function closeHelpModal() {
@@ -5649,6 +5783,9 @@ document.addEventListener('keydown', (e) => {
       if (close) close();
       else document.getElementById(topId).classList.remove('visible');
       e.stopImmediatePropagation();
+    } else if (e.key === '?' && document.getElementById('help-modal').classList.contains('visible')) {
+      e.preventDefault();
+      closeHelpModal();
     } else if (
       e.code === 'KeyM' &&
       e.shiftKey &&
@@ -5892,16 +6029,18 @@ document.addEventListener('keydown', (e) => {
     }
     return;
   }
-  if (e.code === 'KeyC' && e.shiftKey) {
+  if (e.code === 'KeyC' && e.shiftKey && !e.altKey && !e.metaKey) {
     e.preventDefault();
     if (!contextSid) {
       showToast('No session selected');
       return;
     }
+    const text = e.ctrlKey ? `claude -r ${contextSid}` : contextSid;
+    const label = e.ctrlKey ? 'resume command' : 'session id';
     navigator.clipboard
-      .writeText(contextSid)
-      .then(() => showToast(`Copied session id: ${contextSid.slice(0, 8)}`, 'success'))
-      .catch(() => showToast('Failed to copy session id'));
+      .writeText(text)
+      .then(() => showToast(`Copied ${label}: ${contextSid.slice(0, 8)}`, 'success'))
+      .catch(() => showToast(`Failed to copy ${label}`));
     return;
   }
   if (matchKey(e, 'KeyR')) {
@@ -7414,7 +7553,7 @@ document.addEventListener('click', (e) => {
     }
   }
 
-  const header = e.target.closest('.session-group-header, .pinned-sub-header, .project-group-header');
+  const header = e.target.closest(COLLAPSIBLE_HEADER_SELECTOR);
   if (header) {
     setGroupCollapsed(header, !collapsedProjectGroups.has(header.dataset.groupPath));
   }
