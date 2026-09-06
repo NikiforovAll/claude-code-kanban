@@ -53,6 +53,7 @@ Tasks, agents, and messages appear on the board automatically — Claude Code wr
 - **Agent teams** — Color-coded team members, owner filtering, member count badges
 - **17 color themes** — Dracula, Nord, Catppuccin, Gruvbox, Tokyo Night, and more — each in light and dark
 - **Storage manager** — Inspect disk usage and clean up stale sessions and tasks
+- **Session picker** — Jump to any session in the sidebar with `Shift+P`, filtering by name, project or branch
 - **Keyboard-first** — Press `?` for the full shortcut reference
 
 ![Session info](assets/shot-session-info.png)
