@@ -88,16 +88,24 @@ describe('isContained', { skip: !contain }, () => {
     }
   });
 
-  it('is case-insensitive on win32 only', () => {
+  it('is case-insensitive on case-insensitive filesystems only', () => {
     const base = tmp();
     try {
       const root = path.join(base, 'Root');
       mkdirSync(root);
       writeFileSync(path.join(root, 'x.md'), 'x');
-      // On win32 the same file reached through differing case is the same file;
-      // on posix ROOT and Root are distinct directories.
+      // On case-insensitive filesystems (win32, macOS APFS by default) ROOT and
+      // Root resolve to the same directory. On case-sensitive POSIX filesystems
+      // (Linux ext4) they are distinct. Detect at runtime rather than assuming.
+      const { realpathSync } = require('fs');
+      let fsIsCaseInsensitive;
+      try {
+        fsIsCaseInsensitive = !!realpathSync.native(path.join(base, 'ROOT'));
+      } catch {
+        fsIsCaseInsensitive = false;
+      }
       const shouted = path.join(base, 'ROOT', 'x.md');
-      assert.equal(isContained(shouted, root), isWin);
+      assert.equal(isContained(shouted, root), fsIsCaseInsensitive);
     } finally {
       rmSync(base, { recursive: true, force: true });
     }

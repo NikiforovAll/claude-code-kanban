@@ -1389,6 +1389,70 @@ body::before {
   gap: 8px;
 }
 
+.new-task-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.new-task-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.new-task-textarea {
+  resize: vertical;
+  min-height: 70px;
+  font-family: inherit;
+  line-height: 1.5;
+}
+
+.task-asana-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  color: var(--text-muted);
+  text-decoration: none;
+  margin-top: 2px;
+}
+
+.task-asana-link:hover {
+  color: var(--accent);
+}
+
+.task-terminal-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity 0.15s ease,
+    background 0.15s ease,
+    color 0.15s ease;
+  flex-shrink: 0;
+}
+
+.task-card:hover .task-terminal-btn {
+  opacity: 1;
+}
+
+.task-terminal-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--border);
+  color: var(--text-primary);
+}
+
 .task-badge {
   font-size: 10px;
   font-weight: 600;

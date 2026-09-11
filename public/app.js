@@ -2662,6 +2662,32 @@ async function postAndToast(url, body, label) {
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
+async function launchClaudeForSession(sessionId) {
+  const sess = sessions.find((s) => s.id === sessionId);
+  await launchClaude(sess?.cwd || null, sessionId);
+}
+
+async function launchClaude(cwd, sessionId, prompt) {
+  try {
+    const res = await fetch('/api/launch-claude', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        cwd: cwd || undefined,
+        sessionId: sessionId || undefined,
+        prompt: prompt || undefined,
+      }),
+    });
+    if (!res.ok) {
+      const { error } = await res.json().catch(() => ({}));
+      showToast(error || 'Failed to open Terminal', 'error');
+    }
+  } catch {
+    showToast('Failed to open Terminal', 'error');
+  }
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
 async function openMsgInEditor() {
   const m = getDetailMsg();
   if (!m) return;
@@ -3218,6 +3244,7 @@ function renderSessions() {
               <span class="session-indicators">
                 ${isTeam ? `<span class="team-badge" title="${memberCount} team members"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>${memberCount}</span>` : ''}
                 ${isTeam || session.project || showCtx ? `<span class="team-info-btn" onclick="event.stopPropagation(); showSessionInfoModal('${sid}')" title="View session info"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></span>` : ''}
+                ${session.cwd ? `<span class="team-info-btn" onclick="event.stopPropagation(); launchClaude(${JSON.stringify(session.cwd)}, '${sid}')" title="Resume in Terminal"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg></span>` : ''}
                 ${renderWorkflowBadge(session)}
                 ${renderLoopBadge(session)}
                 ${hasScratchpad ? `<span class="scratchpad-badge" onclick="event.stopPropagation(); openSessionScratchpad('${sid}')" title="Open scratchpad"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></span>` : ''}
@@ -3598,12 +3625,14 @@ function renderTaskCard(task) {
                   )()
                 : ''
             }
+            <button class="task-terminal-btn" title="Open in Terminal" onclick="event.stopPropagation(); launchClaudeForSession('${escAttrJs(actualSessionId)}')" type="button"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg></button>
           </div>
           <div class="task-title">${escapeHtml(task.subject)}</div>
           ${sessionLabel ? `<div class="task-session">${escapeHtml(sessionLabel)}</div>` : ''}
           ${task.status === 'in_progress' && task.activeForm ? `<div class="task-active">${escapeHtml(task.activeForm)}</div>` : ''}
           ${isBlocked ? `<div class="task-blocked">Waiting on ${task.blockedBy.map((id) => `#${id}`).join(', ')}</div>` : ''}
           ${task.description ? `<div class="task-desc">${escapeHtml(task.description.split('\n')[0])}</div>` : ''}
+          ${task.asanaUrl ? `<a class="task-asana-link" href="${escapeHtml(task.asanaUrl)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Open Asana task"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z"/></svg> Asana</a>` : ''}
         </div>
       `;
 }
@@ -3685,7 +3714,7 @@ function renderKanban() {
   // away mid-typing -- leave the column alone until the input is gone.
   if (!addingTask) {
     const addTile = canAddTask()
-      ? `<button type="button" class="column-add${pending.length ? '' : ' empty'}" onclick="startAddTask(this)">${plusIcon}<span>Add task</span></button>`
+      ? `<button type="button" class="column-add${pending.length ? '' : ' empty'}" onclick="startAddTask()">${plusIcon}<span>Add task</span></button>`
       : '';
     writes.push([
       pendingTasks,
@@ -3736,7 +3765,7 @@ function renderKanban() {
 //#endregion
 
 //#region ADD_TASK
-let addingTask = false;
+const addingTask = false;
 
 // A task the user types is theirs to place, and the only session it can belong to is the
 // one on screen -- the project and all-sessions views span many task dirs, so there is no
@@ -3745,69 +3774,70 @@ function canAddTask() {
   return viewMode === 'session' && !!currentSessionId;
 }
 
+let _newTaskSessionId = null;
+
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
-function startAddTask(tile) {
-  if (addingTask) return;
-  addingTask = true;
-
-  const input = document.createElement('input');
-  input.type = 'text';
-  input.className = 'form-input column-add-input';
-  input.placeholder = 'Task subject, Enter to add';
-  // The input mutates the column outside setColumnHtml — drop the cache so the
-  // next render rebuilds instead of skipping on a stale match.
-  pendingTasks._lastHtml = null;
-  tile.replaceWith(input);
-  input.focus();
-
-  const reset = () => {
-    addingTask = false;
-    renderKanban();
-  };
-
-  const save = async () => {
-    // Enter and blur both submit, and Enter's own save disables the input -- which blurs
-    // it. Dropping both handlers first is what keeps that from posting the subject twice.
-    input.onkeydown = null;
-    input.onblur = null;
-
-    const subject = input.value.trim();
-    if (!subject) return reset();
-    input.disabled = true;
-    const sessionId = currentSessionId;
-    try {
-      const res = await fetch(`/api/tasks/${sessionId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ subject }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      // The response carries the finished task, and the watcher will resend it within the
-      // SSE debounce anyway -- so show it now rather than paying a session refetch for it.
-      const { task } = await res.json();
-      currentTasks.push({ ...task, sessionId });
-      addingTask = false;
-      renderKanban();
-    } catch (error) {
-      console.error('Failed to create task:', error);
-      showToast('Failed to create task', 'error');
-      reset();
-    }
-  };
-
-  input.onkeydown = (e) => {
-    e.stopPropagation();
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      save();
-    } else if (e.key === 'Escape') {
-      e.preventDefault();
-      input.onblur = null;
-      reset();
-    }
-  };
-  input.onblur = () => save();
+function startAddTask() {
+  if (!canAddTask()) return;
+  _newTaskSessionId = currentSessionId;
+  document.getElementById('new-task-title').value = '';
+  document.getElementById('new-task-desc').value = '';
+  document.getElementById('new-task-asana').value = '';
+  const modal = document.getElementById('new-task-modal');
+  modal.classList.add('visible');
+  setTimeout(() => document.getElementById('new-task-title').focus(), 50);
 }
+
+function closeNewTaskModal() {
+  document.getElementById('new-task-modal').classList.remove('visible');
+  _newTaskSessionId = null;
+}
+
+async function submitNewTask() {
+  const subject = document.getElementById('new-task-title').value.trim();
+  if (!subject) {
+    document.getElementById('new-task-title').focus();
+    return;
+  }
+  const description = document.getElementById('new-task-desc').value.trim();
+  const asanaUrl = document.getElementById('new-task-asana').value.trim();
+  const sessionId = _newTaskSessionId;
+  const btn = document.getElementById('new-task-submit');
+  btn.disabled = true;
+  btn.textContent = 'Creating…';
+  try {
+    const res = await fetch(`/api/tasks/${sessionId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subject, description, asanaUrl }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const { task } = await res.json();
+    currentTasks.push({ ...task, sessionId });
+    closeNewTaskModal();
+    renderKanban();
+  } catch (error) {
+    console.error('Failed to create task:', error);
+    showToast('Failed to create task', 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Create & Launch';
+  }
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && document.getElementById('new-task-modal')?.classList.contains('visible')) {
+    closeNewTaskModal();
+  }
+  if (
+    e.key === 'Enter' &&
+    document.getElementById('new-task-modal')?.classList.contains('visible') &&
+    document.activeElement?.id !== 'new-task-desc'
+  ) {
+    e.preventDefault();
+    submitNewTask();
+  }
+});
 //#endregion
 
 //#region DRAG_DROP
@@ -3877,6 +3907,21 @@ async function onColumnDrop(e) {
     if (res.ok) {
       task.status = newStatus;
       renderKanban();
+      if (newStatus === 'in_progress') {
+        const sess = sessions.find((s) => s.id === sessionId);
+        const launchCwd =
+          sess?.cwd ??
+          (await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`)
+            .then((r) => (r.ok ? r.json() : null))
+            .then((d) => d?.cwd ?? null)
+            .catch(() => null));
+        if (launchCwd) {
+          const prompt = task.asanaUrl
+            ? `${task.description ? `${task.description}\n\n` : ''}/assess-issue ${task.asanaUrl}`
+            : task.description || null;
+          launchClaude(launchCwd, null, prompt);
+        }
+      }
     }
   } catch (_) {}
 }
@@ -5087,6 +5132,7 @@ async function confirmDelete() {
     if (res.ok) {
       closeDetailPanel();
       await refreshCurrentView();
+      fetch(`/api/sessions/${encodeURIComponent(sessionId)}/kill-claude`, { method: 'POST' }).catch(() => {});
     } else {
       const error = await res.json();
       alert(`Failed to delete task: ${error.error || 'Unknown error'}`);

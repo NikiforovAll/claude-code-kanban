@@ -9,7 +9,7 @@ const _readline = require('node:readline');
 const chokidar = require('chokidar');
 const os = require('node:os');
 const crypto = require('node:crypto');
-const { spawnSync, spawn } = require('node:child_process');
+const { spawnSync, spawn, execSync } = require('node:child_process');
 const { assertOpenTarget, openInEditor, whichSync, exeBehindShim } = require('./lib/open-editor');
 const { createNetGuard } = require('./lib/net-guard');
 const { isContained } = require('./lib/contain');
@@ -1892,6 +1892,127 @@ app.post('/api/scratchpad/open', (req, res) => {
   }
 });
 
+// API: Launch a new or resumed Claude Code session in macOS Terminal.
+// Opens a new tab in an existing window if one is already open in that directory,
+// otherwise opens a new window.
+app.post('/api/launch-claude', (req, res) => {
+  try {
+    if (process.platform !== 'darwin') {
+      return res.status(400).json({ error: 'Terminal launch only supported on macOS' });
+    }
+    const { cwd, sessionId } = req.body;
+    if (sessionId && !/^[a-zA-Z0-9_-]+$/.test(sessionId)) {
+      return res.status(400).json({ error: 'Invalid session ID' });
+    }
+    const prompt = (req.body.prompt || '').trim();
+    const safePath = cwd ? assertOpenTarget(cwd, 'folder') : null;
+    let claudeCmd = sessionId ? `claude --resume ${sessionId}` : 'claude';
+    if (prompt) {
+      const escapedPrompt = prompt.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+      claudeCmd += ` "${escapedPrompt}"`;
+    }
+    let shellCmd;
+    if (safePath) {
+      const quotedPath = `'${safePath.replace(/'/g, "'\\''")}'`;
+      shellCmd = `cd ${quotedPath} && ${claudeCmd}`;
+    } else {
+      shellCmd = claudeCmd;
+    }
+    const escapedCmd = shellCmd.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+
+    // Find a Terminal tab already sitting in safePath so we can open a new tab
+    // there rather than a new window. Strategy: scan shell process cwds via lsof,
+    // then map a matching PID to its TTY, then let AppleScript match the TTY.
+    let matchedTty = null;
+    if (safePath) {
+      try {
+        const lsofOut = execSync('lsof -c bash -c zsh -c fish -c sh -a -d cwd -Fn 2>/dev/null', {
+          timeout: 3000,
+          encoding: 'utf8',
+        });
+        let currentPid = null;
+        for (const line of lsofOut.split('\n')) {
+          if (line.startsWith('p')) {
+            currentPid = line.slice(1).trim();
+          } else if (line.startsWith('n') && currentPid) {
+            if (line.slice(1).trim() === safePath) {
+              try {
+                const tty = execSync(`ps -p ${currentPid} -o tty= 2>/dev/null`, { encoding: 'utf8' }).trim();
+                if (tty && tty !== '??') matchedTty = `/dev/${tty}`;
+              } catch { /* ignore */ }
+              break;
+            }
+            currentPid = null;
+          }
+        }
+      } catch { /* lsof not available or no matches — fall through to new window */ }
+    }
+
+    let script;
+    if (matchedTty) {
+      const escapedTty = matchedTty.replace(/"/g, '\\"');
+      script = `tell application "Terminal"
+  activate
+  set matchedWindow to missing value
+  repeat with w in windows
+    repeat with t in tabs of w
+      if tty of t is "${escapedTty}" then
+        set matchedWindow to w
+        exit repeat
+      end if
+    end repeat
+    if matchedWindow is not missing value then exit repeat
+  end repeat
+  if matchedWindow is not missing value then
+    tell matchedWindow to do script "${escapedCmd}"
+  else
+    do script "${escapedCmd}"
+  end if
+end tell`;
+    } else {
+      script = `tell application "Terminal"\nactivate\ndo script "${escapedCmd}"\nend tell`;
+    }
+
+    spawn('osascript', ['-e', script], { detached: true, stdio: 'ignore' }).unref();
+    res.json({ success: true });
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    console.error('Error launching Claude:', error);
+    res.status(500).json({ error: 'Failed to launch Claude' });
+  }
+});
+
+// API: Kill the Claude Code process running in a session's directory
+app.post('/api/sessions/:sessionId/kill-claude', (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const meta = sessionMetadataCache[sessionId];
+    const targetCwd = meta?.cwd;
+    if (!targetCwd) return res.status(404).json({ error: 'Session cwd not found' });
+
+    let killed = 0;
+    try {
+      const lsofOut = execSync('lsof -c claude -a -d cwd -Fn 2>/dev/null', { timeout: 3000, encoding: 'utf8' });
+      let currentPid = null;
+      for (const line of lsofOut.split('\n')) {
+        if (line.startsWith('p')) {
+          currentPid = line.slice(1).trim();
+        } else if (line.startsWith('n') && currentPid) {
+          if (line.slice(1).trim() === targetCwd) {
+            try { process.kill(parseInt(currentPid), 'SIGTERM'); killed++; } catch { /* already dead */ }
+          }
+          currentPid = null;
+        }
+      }
+    } catch { /* lsof unavailable or no claude processes */ }
+
+    res.json({ success: true, killed });
+  } catch (error) {
+    console.error('Error killing Claude:', error);
+    res.status(500).json({ error: 'Failed to kill Claude process' });
+  }
+});
+
 // #endregion
 
 // #region AGENT_ROUTES
@@ -2815,10 +2936,12 @@ app.post('/api/tasks/:sessionId', async (req, res) => {
       .filter((n) => Number.isInteger(n));
     const id = String(Math.max(0, ...ids) + 1);
 
+    const asanaUrl = (req.body.asanaUrl || '').trim();
     const task = {
       id,
       subject,
       description: (req.body.description || '').trim(),
+      ...(asanaUrl ? { asanaUrl } : {}),
       activeForm: subject,
       status: 'pending',
       blocks: [],

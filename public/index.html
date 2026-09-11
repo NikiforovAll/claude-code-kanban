@@ -383,6 +383,36 @@
     </div>
   </div>
 
+  <!-- New Task Modal -->
+  <div id="new-task-modal" class="modal-overlay" onclick="closeNewTaskModal()">
+    <div class="modal modal-sm" onclick="event.stopPropagation()" style="width:420px">
+      <div class="modal-header">
+        <h3 class="modal-title">New Task</h3>
+        <button class="modal-close" aria-label="Close" onclick="closeNewTaskModal()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div class="modal-body" style="display:flex;flex-direction:column;gap:12px">
+        <div class="new-task-field">
+          <label class="new-task-label" for="new-task-title">Title <span style="color:var(--accent)">*</span></label>
+          <input id="new-task-title" class="form-input" type="text" placeholder="Task title" autocomplete="off"/>
+        </div>
+        <div class="new-task-field">
+          <label class="new-task-label" for="new-task-desc">Description <span style="color:var(--text-muted);font-weight:400">(acts as Claude prompt)</span></label>
+          <textarea id="new-task-desc" class="form-input new-task-textarea" placeholder="What should Claude work on?" rows="3"></textarea>
+        </div>
+        <div class="new-task-field">
+          <label class="new-task-label" for="new-task-asana">Asana Task URL <span style="color:var(--text-muted);font-weight:400">(optional)</span></label>
+          <input id="new-task-asana" class="form-input" type="url" placeholder="https://app.asana.com/..."/>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeNewTaskModal()">Cancel</button>
+        <button id="new-task-submit" class="btn btn-primary" onclick="submitNewTask()">Create &amp; Launch</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Team Info Modal -->
   <div id="team-modal" class="modal-overlay" onclick="closeTeamModal()">
     <div class="modal" onclick="event.stopPropagation()">
