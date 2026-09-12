@@ -4858,11 +4858,57 @@ select.form-input option:checked {
   font-size: 13px;
 }
 
+.modal.session-picker.peeking {
+  max-width: 1240px;
+}
+
+.sp-body {
+  display: flex;
+  gap: 10px;
+  min-height: 0;
+}
+
+.sp-body > * {
+  min-width: 0;
+}
+
 .sp-list {
+  flex: 1;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+.sp-peek {
+  flex: 0 0 42%;
+  overflow-y: auto;
+  border-left: 1px solid var(--border);
+  padding-left: 10px;
+}
+
+.modal.session-picker:not(.peeking) .sp-peek {
+  display: none;
+}
+
+.sp-peek-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Row clicks open the live panel's detail modal by index, which means nothing
+   for a peeked session. The renderer's readOnly mode already drops the buttons. */
+.sp-peek-items {
+  pointer-events: none;
 }
 
 .sp-row {

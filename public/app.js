@@ -704,11 +704,19 @@ function openLiveLatestMessage() {
   }
 }
 
+const MSG_PAGE_LIMIT = 15;
+
+async function fetchSessionMessagesPage(sessionId, { before } = {}) {
+  const qs = new URLSearchParams({ limit: MSG_PAGE_LIMIT });
+  if (before) qs.set('before', before);
+  const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/messages?${qs}`);
+  return res.ok ? res.json() : null;
+}
+
 async function fetchMessages(sessionId) {
   try {
-    const res = await fetch(`/api/sessions/${sessionId}/messages?limit=15`);
-    if (!res.ok) return;
-    const data = await res.json();
+    const data = await fetchSessionMessagesPage(sessionId);
+    if (!data) return;
     let agentEnriched = false;
     for (const m of data.messages) {
       if (m.agentId && m.agentPrompt) {
@@ -759,10 +767,8 @@ async function loadOlderMessages() {
   loader.textContent = 'Loading...';
   container.prepend(loader);
   try {
-    const before = currentMessages[0].timestamp;
-    const res = await fetch(`/api/sessions/${currentSessionId}/messages?limit=15&before=${encodeURIComponent(before)}`);
-    if (!res.ok) return;
-    const data = await res.json();
+    const data = await fetchSessionMessagesPage(currentSessionId, { before: currentMessages[0].timestamp });
+    if (!data) return;
     msgHasMore = data.hasMore && data.messages.length > 0;
     if (data.messages.length) {
       loader.remove();
@@ -937,7 +943,12 @@ function buildAssistantPreview(text) {
   return { md: out.join('\n').trim(), remainder };
 }
 
+// Set for the duration of a read-only renderMessageList call: the pin, agent-link and
+// agent-log controls act on the live panel's state, so a display-only list omits them.
+let msgRenderReadOnly = false;
+
 function renderMsgPinBtn(m, i) {
+  if (msgRenderReadOnly) return '';
   const pinned = isPinned(m);
   return `<button class="msg-pin-btn${pinned ? ' pinned' : ''}" onclick="event.stopPropagation();togglePin(${i})" title="${pinned ? 'Unpin' : 'Pin'} message">${PIN_SVG}</button>`;
 }
@@ -997,6 +1008,7 @@ function renderPinnedSection() {
 }
 
 function resolveAgentLogBtn(m) {
+  if (msgRenderReadOnly) return '';
   if (m.tool === 'Agent' && m.agentId) return agentLogButton(m.agentId);
   if (m.tool === 'SendMessage' && m.params?.to) {
     const recipient = currentAgents.find((a) => (a.type || a.name) === m.params.to);
@@ -1015,7 +1027,7 @@ function renderToolItem(m, i, compact) {
   // from the live agent-activity files), so the ⇗ link, agent-log button, and modal
   // click all light up DURING the run, identical to post-completion.
   const agentLink =
-    m.tool === 'Agent' && m.agentId
+    m.tool === 'Agent' && m.agentId && !msgRenderReadOnly
       ? ` <span class="msg-agent-link" title="View agent" onclick="event.stopPropagation();showAgentModal('${escAttrJs(m.agentId)}')">⇗</span>`
       : '';
   // Usage chip (tokens · tools · duration) on completed Agent rows — same stats a
@@ -1038,7 +1050,16 @@ function renderToolItem(m, i, compact) {
     </div>`;
 }
 
-function renderMessageList(messages) {
+function renderMessageList(messages, { readOnly = false } = {}) {
+  msgRenderReadOnly = readOnly;
+  try {
+    return renderMessageListBody(messages);
+  } finally {
+    msgRenderReadOnly = false;
+  }
+}
+
+function renderMessageListBody(messages) {
   const parts = [];
   let i = 0;
   while (i < messages.length) {
@@ -8245,18 +8266,78 @@ let _planSessionId = null;
 let spSource = [];
 let spRows = [];
 let spIdx = 0;
+let spPeekTimer = null;
+let spPeekToken = 0;
+let spPeekedId = null;
+// Per-open cache: spSource is frozen while the picker is up, so a fetched log stays valid.
+const spPeekCache = new Map();
 
 function openSessionPicker() {
   const input = document.getElementById('session-picker-input');
   input.value = '';
   spSource = getFilteredSessions().sort((a, b) => Date.parse(b.modifiedAt) - Date.parse(a.modifiedAt));
+  spPeekCache.clear();
   document.getElementById('session-picker-modal').classList.add('visible');
   renderSessionPicker();
   input.focus();
 }
 
 function closeSessionPicker() {
+  spSetPeeking(false);
   hideModalOverlay('session-picker-modal');
+}
+
+function spIsPeeking() {
+  return _modalEl('session-picker-modal').classList.contains('peeking');
+}
+
+function spSetPeeking(on) {
+  clearTimeout(spPeekTimer);
+  spPeekToken++;
+  spPeekedId = null;
+  _modalEl('session-picker-modal').classList.toggle('peeking', on);
+  if (on) spSchedulePeek();
+  else document.getElementById('session-picker-peek').innerHTML = '';
+}
+
+function spSchedulePeek() {
+  if (!spIsPeeking() || spRows[spIdx]?.id === spPeekedId) return;
+  clearTimeout(spPeekTimer);
+  spPeekTimer = setTimeout(spLoadPeek, 120);
+}
+
+function spRenderPeek(session, messages, note) {
+  const pane = document.getElementById('session-picker-peek');
+  const body =
+    messages === null
+      ? ''
+      : messages.length
+        ? `<div class="sp-peek-items">${renderMessageList(messages, { readOnly: true })}</div>`
+        : '<div class="msg-empty">No messages in this session</div>';
+  pane.innerHTML = `<div class="sp-peek-title"><span>${escapeHtml(sessionDisplayName(session))}</span><span>${note}</span></div>${body}`;
+  pane.scrollTop = pane.scrollHeight;
+}
+
+async function spLoadPeek() {
+  const session = spRows[spIdx];
+  if (!session) {
+    document.getElementById('session-picker-peek').innerHTML = '<div class="msg-empty">No session selected</div>';
+    return;
+  }
+  spPeekedId = session.id;
+  let messages = spPeekCache.get(session.id);
+  if (!messages) {
+    const token = ++spPeekToken;
+    spRenderPeek(session, null, 'loading…');
+    try {
+      messages = (await fetchSessionMessagesPage(session.id))?.messages || [];
+    } catch (_) {
+      messages = [];
+    }
+    if (token !== spPeekToken) return;
+    spPeekCache.set(session.id, messages);
+  }
+  spRenderPeek(session, messages, `last ${messages.length} entries`);
 }
 
 function spMatches(session, query) {
@@ -8316,6 +8397,7 @@ function spSelect(idx) {
   const row = list.children[spIdx];
   row?.classList.add('selected');
   row?.scrollIntoView({ block: 'nearest' });
+  spSchedulePeek();
 }
 
 async function spOpen(idx) {
@@ -8334,6 +8416,7 @@ function initSessionPicker() {
     else if (matchKey(e, 'ArrowDown') || (e.ctrlKey && e.key === 'n')) spSelect(spIdx + 1);
     else if (matchKey(e, 'ArrowUp') || (e.ctrlKey && e.key === 'p')) spSelect(spIdx - 1);
     else if (e.key === 'Enter') spOpen(spIdx);
+    else if (e.ctrlKey && e.code === 'Space') spSetPeeking(!spIsPeeking());
     else return;
     e.preventDefault();
     e.stopPropagation();
