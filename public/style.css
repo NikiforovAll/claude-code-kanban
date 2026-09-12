@@ -2264,7 +2264,8 @@ body::before {
   flex-direction: column;
 }
 #team-modal .modal-body,
-#agent-modal .modal-body {
+#agent-modal .modal-body,
+.modal-help .modal-body {
   flex: 1 1 auto;
   overflow-y: auto;
   min-height: 0;
@@ -4519,8 +4520,21 @@ body.light .msg-assistant .msg-text {
   max-width: 440px;
 }
 
+/* Reference card, not reading material: it stays out of the modal zoom, uses the app's
+   small type, and scrolls its body (rule shared with #team-modal) instead of growing past
+   the viewport cap. */
 .modal-help {
-  max-width: 960px;
+  max-width: 900px;
+  padding: 16px 20px 20px;
+  display: flex;
+  flex-direction: column;
+  font-size: 13px;
+}
+.modal-help .modal-header {
+  margin-bottom: 8px;
+}
+.modal-help .modal-title {
+  font-size: 14px;
 }
 
 /* One shared grid for both halves (key | label | spacer | key | label): each key

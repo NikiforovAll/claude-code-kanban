@@ -2980,11 +2980,18 @@ let revealedStorageSessionId = null;
 // Opens a session and scrolls the sidebar to it, refetching first when the id
 // fell outside the session list the current filters asked for.
 async function revealSession(id) {
-  if (!sessions.some((s) => s.id === id)) {
+  let session = sessions.find((s) => s.id === id);
+  if (!session) {
     lastSessionsHash = '';
     await fetchSessions();
+    session = sessions.find((s) => s.id === id);
   }
+  const uncollapsed = session ? uncollapseFor(session) : false;
+  if (uncollapsed) persistCollapsedGroups();
+  expandSidebar();
   await fetchTasks(id);
+  // fetchTasks skips its render when the session and task hash are unchanged.
+  if (uncollapsed) renderSessions();
   const el = document.querySelector(`.session-item[data-session-id="${escSel(id)}"]`);
   if (el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
@@ -3313,7 +3320,7 @@ function renderSessions() {
             </div>
             <div class="project-group-breadcrumb${nestedCls}" data-full-path="${escapedPath}" title="Click to copy path">${breadcrumbHtml}</div>
             <div class="project-group-sessions${isCollapsed ? ' collapsed' : ''}${nestedCls}" data-project-path="${escapedPath}">
-              ${renderGroupSessions(projectSessions, `__pinned_${projectPath}__`)}
+              ${renderGroupSessions(projectSessions, pinKey(projectPath))}
             </div>
           `;
   };
@@ -3452,7 +3459,7 @@ function renderSessions() {
               ${countHtml(ungrouped)}
             </div>
             <div class="project-group-sessions${isCollapsed ? ' collapsed' : ''}">
-              ${renderGroupSessions(ungrouped, '__pinned___ungrouped__')}
+              ${renderGroupSessions(ungrouped, pinKey('__ungrouped__'))}
             </div>
           `;
       } else {
@@ -3900,6 +3907,12 @@ function groupChevronSvg(size = 12) {
 
 function sgKey(id) {
   return `__group_${id}__`;
+}
+
+// Collapse key of a project's pinned sub-section. The ungrouped spelling predates this helper
+// and is kept so saved collapse state still matches.
+function pinKey(projectPath) {
+  return projectPath === '__ungrouped__' ? '__pinned___ungrouped__' : `__pinned_${projectPath}__`;
 }
 
 function loadSessionGroups() {
@@ -4607,18 +4620,33 @@ function expandActiveGroups({ onlyNew = false } = {}) {
     if (!isSessionActive(s)) continue;
     activeIds.add(s.id);
     if (onlyNew && (!primed || prevActiveSessionIds.has(s.id))) continue;
-    if (collapsedProjectGroups.delete(s.project || '__ungrouped__')) changed = true;
-    // A named group wrapping that project (or the session itself) would keep it hidden.
-    const group = sgGroupForSession(s);
-    if (group && collapsedProjectGroups.delete(sgKey(group.id))) changed = true;
-    // Which section holds it depends on the view, so open every one rather than re-deriving it.
-    for (const key of [SECTION_GROUPS, SECTION_PROJECTS, SECTION_SESSIONS]) {
-      if (collapsedProjectGroups.delete(key)) changed = true;
-    }
+    if (uncollapseFor(s)) changed = true;
   }
   prevActiveSessionIds = activeIds;
   if (changed) persistCollapsedGroups();
   // renderSessions() re-renders headers/containers from the updated set
+}
+
+// Drops every collapse key that could hide this session: its project, a named group wrapping
+// the project or the session itself, the pinned sub-sections of both, and — since which section
+// holds it depends on the view — every section header. Returns whether anything changed.
+function uncollapseFor(session) {
+  const project = session.project || '__ungrouped__';
+  const group = sgGroupForSession(session);
+  const keys = [
+    project,
+    pinKey(project),
+    group && sgKey(group.id),
+    group && `__pinned_group_${group.id}__`,
+    SECTION_GROUPS,
+    SECTION_PROJECTS,
+    SECTION_SESSIONS,
+  ];
+  let changed = false;
+  for (const key of keys) {
+    if (key && collapsedProjectGroups.delete(key)) changed = true;
+  }
+  return changed;
 }
 
 function isGroupHeader(el) {
@@ -4684,16 +4712,12 @@ function activateSelectedSession(items) {
 }
 
 function setFocusZone(zone) {
-  const sidebar = document.querySelector('.sidebar');
   clearKbSelection();
   clearTaskSelection();
 
   focusZone = zone;
   if (zone === 'sidebar') {
-    if (sidebar.classList.contains('collapsed')) {
-      sidebar.classList.remove('collapsed');
-      store.setItem('sidebar-collapsed', false);
-    }
+    expandSidebar();
     const items = getNavigableItems();
     if (items.length > 0) {
       const activeIdx = items.findIndex((el) => el.classList.contains('active'));
@@ -7791,6 +7815,13 @@ function setColorTheme(id) {
 //#endregion
 
 //#region SIDEBAR_LAYOUT
+function expandSidebar() {
+  const sidebar = document.querySelector('.sidebar');
+  if (!sidebar.classList.contains('collapsed')) return;
+  sidebar.classList.remove('collapsed');
+  store.setItem('sidebar-collapsed', false);
+}
+
 function toggleSidebar() {
   const sidebar = document.querySelector('.sidebar');
   const collapsed = sidebar.classList.toggle('collapsed');
