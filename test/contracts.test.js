@@ -1,4 +1,4 @@
-const { describe, it } = require('node:test');
+const { describe, it, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync } = require('fs');
 const path = require('path');
@@ -581,6 +581,38 @@ describe('Parser: readSessionInfoFromJsonl', () => {
     assert.equal(info.projectPath, null);
     assert.equal(info.gitBranch, null);
     assert.equal(info.customTitle, null);
+  });
+});
+
+describe('Parser: readSessionInfoFromJsonl goal', () => {
+  const base = { cwd: '/home/user/project', slug: 's', gitBranch: 'main', timestamp: '2026-01-01T00:00:00Z' };
+  const line = (o) => `${JSON.stringify({ ...base, ...o })}\n`;
+  const goalSet = line({ type: 'attachment', attachment: { type: 'goal_status', met: false, condition: 'ship it' } });
+  const goalMet = line({ type: 'attachment', attachment: { type: 'goal_status', met: true, condition: 'ship it' } });
+  const goalClear = line({
+    type: 'system',
+    subtype: 'local_command',
+    content: '<command-name>/goal</command-name>\n<command-message>goal</command-message>\n<command-args>clear</command-args>',
+  });
+  const filler = line({ type: 'assistant', message: { role: 'assistant', content: 'x'.repeat(2000) } });
+  const pastHead = filler.repeat(Math.ceil((1.2 * 1048576) / filler.length));
+
+  let dir;
+  before(() => { dir = mkdtempSync(path.join(os.tmpdir(), 'cck-goal-')); });
+  after(() => rmSync(dir, { recursive: true, force: true }));
+
+  const cases = [
+    ['keeps a goal set in the head when nothing later touches it', goalSet + pastHead, { condition: 'ship it' }],
+    ['drops a goal met between the head and tail windows', goalSet + pastHead + goalMet + pastHead, null],
+    ['drops a goal cleared by a system local_command line in the tail', goalSet + pastHead + goalClear, null],
+    ['keeps a goal re-set after an earlier one was met', goalSet + pastHead + goalMet + pastHead + goalSet + pastHead, { condition: 'ship it' }],
+  ];
+  cases.forEach(([name, body, expected], i) => {
+    it(name, () => {
+      const p = path.join(dir, `${i}.jsonl`);
+      writeFileSync(p, body);
+      assert.deepEqual(readSessionInfoFromJsonl(p).goal, expected);
+    });
   });
 });
 
