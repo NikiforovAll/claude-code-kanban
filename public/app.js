@@ -493,6 +493,7 @@ async function fetchAgents(sessionId) {
       lastWaitingHash = waitHash;
       if (messagePanelOpen && currentMessages.length) renderMessages(currentMessages);
       maybeFollowLatest();
+      maybeAutoOpenWaiting();
     }
   } catch (e) {
     console.error('[fetchAgents]', e);
@@ -2179,6 +2180,10 @@ function adjustModalZoom(delta) {
 // carry no such body — nothing there is worth enlarging.
 function isZoomableModalOpen() {
   return document.querySelector('.modal-overlay.visible .modal-zoomable') !== null;
+}
+
+function isAnyModalOpen() {
+  return document.querySelector('.modal-overlay.visible') !== null;
 }
 
 const ZOOM_KEYS = { '+': 0.1, '=': 0.1, NumpadAdd: 0.1, '-': -0.1, _: -0.1, NumpadSubtract: -0.1, 0: 0, Numpad0: 0 };
@@ -5844,7 +5849,7 @@ document.addEventListener('keydown', (e) => {
   }
 
   // Modal guard — only Escape, Shift+M, and msg-detail J/K navigation pass through
-  if (document.querySelector('.modal-overlay.visible')) {
+  if (isAnyModalOpen()) {
     if (e.key === 'Escape') {
       if (_scratchpadModal.classList.contains('visible')) {
         closeScratchpad();
@@ -6882,6 +6887,19 @@ function maybeFollowLatest() {
   } else if (currentMessages.length) {
     showMsgDetail(currentMessages.length - 1);
   }
+}
+
+// A new answerable ask opens its modal on its own, but only onto an empty
+// screen: an open modal means the user is reading something, so the ask stays
+// on the card and the badge until they get to it. Each ask id is offered once,
+// so closing the modal does not bring it back on the next poll.
+let lastAutoOpenedWaitingId = null;
+function maybeAutoOpenWaiting() {
+  if (!isWaitingAnswerable() || !isWaitingFresh()) return;
+  if (currentWaiting.id === lastAutoOpenedWaitingId || isAnyModalOpen()) return;
+  lastAutoOpenedWaitingId = currentWaiting.id;
+  msgDetailFollowLatest = true;
+  maybeFollowLatest();
 }
 
 function isWaitingFresh() {

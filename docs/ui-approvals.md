@@ -32,6 +32,10 @@ board ──> POST /api/sessions/:sid/waiting/respond ──> _decision-<id>.jso
 hook ──> consumes decision, deletes both files, returns it to Claude Code
 ```
 
+## Auto-open
+
+A new answerable ask in the selected session opens the waiting modal by itself, in follow mode. It does not open when any modal is already visible — you are reading something, so the ask stays on the card and the sidebar badge until you get to it. Each ask opens once: closing the modal does not bring it back on the next poll, and a newer ask (new `id`) opens again.
+
 ## Precedence — first writer wins
 
 The terminal prompt stays fully live while the hook waits. Whichever side answers first wins:
