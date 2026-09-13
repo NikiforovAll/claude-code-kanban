@@ -33,7 +33,7 @@ const {
   buildLoopInfoFromState
 } = require('./lib/parsers');
 const { inlineHtmlAssets } = require('./lib/inline-assets');
-const { buildDecision, decisionFileName, isDecisionFile, waitSecondsFrom, isLapsed } = require('./lib/approvals');
+const { buildDecision, decisionFileName, isDecisionFile, approvalsFrom, boardRefusal } = require('./lib/approvals');
 const { getClaudeDir, getArgValue, storageNamespace } = require('./lib/claude-dir');
 
 if (process.argv.includes("--install") || process.argv.includes("--uninstall")) {
@@ -155,23 +155,30 @@ function persistAgent(dir, agent) {
   fs.appendFile(file, `${JSON.stringify({ ...agent, event: 'server-update' })}\n`, 'utf8').catch(() => {});
 }
 
-// Lapse math lives in lib/approvals (kept in sync with the gate's own parse);
-// this only reads the config, cached so the polled session list doesn't re-read
-// it per hit (marker stays visible for the badge until TTL).
-const APPROVALS_CONFIG_FILE = path.join(CCK_DIR, 'approvals.json');
-let approvalsWaitCache = { ts: 0, ms: 30 * 1000 };
-function approvalsWaitMs() {
-  if (Date.now() - approvalsWaitCache.ts < 10 * 1000) return approvalsWaitCache.ms;
-  let cfg = null;
-  try {
-    cfg = JSON.parse(readFileSync(APPROVALS_CONFIG_FILE, 'utf8'));
-  } catch { /* missing config — gate default */ }
-  approvalsWaitCache = { ts: Date.now(), ms: waitSecondsFrom(cfg) * 1000 };
-  return approvalsWaitCache.ms;
+// <CCK_DIR>/config.json — cck's own settings, per Claude config dir.
+// Normalization lives in lib/approvals (kept in sync with the gate's own parse).
+const CCK_CONFIG_FILE = path.join(CCK_DIR, 'config.json');
+const LEGACY_APPROVALS_FILE = path.join(CCK_DIR, 'approvals.json');
+const cckConfigCache = new Map();
+function approvalsConfig() {
+  return cachedByMtime(cckConfigCache, 'approvals', CCK_CONFIG_FILE,
+    () => approvalsFrom(JSON.parse(readFileSync(CCK_CONFIG_FILE, 'utf8'))), approvalsFrom(null));
 }
 
-function isWaitingLapsed(data) {
-  return isLapsed(data.timestamp, approvalsWaitMs());
+// approvals.json predates config.json (and was opt-in). Fold it into
+// config.json once so an existing opt-in keeps its tuning, then drop it.
+function migrateLegacyApprovalsConfig() {
+  if (!existsSync(LEGACY_APPROVALS_FILE)) return;
+  try {
+    const legacy = JSON.parse(readFileSync(LEGACY_APPROVALS_FILE, 'utf8'));
+    let cfg = {};
+    try { cfg = JSON.parse(readFileSync(CCK_CONFIG_FILE, 'utf8')) || {}; } catch { /* absent */ }
+    if (!cfg.approvals) writeJsonAtomic(CCK_CONFIG_FILE, { ...cfg, approvals: legacy });
+    unlinkSync(LEGACY_APPROVALS_FILE);
+    cckConfigCache.clear();
+  } catch (e) {
+    console.error(`[cck] could not migrate ${LEGACY_APPROVALS_FILE}: ${e.message}`);
+  }
 }
 
 function checkWaitingForUser(agentDir, logMtime) {
@@ -183,7 +190,9 @@ function checkWaitingForUser(agentDir, logMtime) {
       if (age >= PERMISSION_TTL_MS) return null;
       // After grace period, check if session resumed activity (user already responded)
       if (logMtime && age >= WAITING_RESOLVE_GRACE_MS && logMtime > waitTime + WAITING_RESOLVE_GRACE_MS) return null;
-      if (isWaitingLapsed(data)) return { ...data, lapsed: true };
+      // Opted out reads the same as lapsed to the board: the ask is only
+      // answerable in the terminal, so no buttons.
+      if (boardRefusal(data, approvalsConfig())) return { ...data, lapsed: true };
       return data;
     }
   } catch { /* skip — missing or invalid */ }
@@ -2161,9 +2170,8 @@ app.post('/api/sessions/:sessionId/waiting/respond', (req, res) => {
   catch { /* missing or invalid → buildDecision reports 410 */ }
   // The gate stopped polling after waitSeconds — an orphaned decision file would
   // sit unconsumed while the card pretends the click worked.
-  if (marker && isWaitingLapsed(marker)) {
-    return res.status(410).json({ error: 'Ask lapsed — answer it in the terminal' });
-  }
+  const refusal = marker && boardRefusal(marker, approvalsConfig());
+  if (refusal) return res.status(refusal.status).json({ error: refusal.error });
   const result = buildDecision(marker, req.body || {});
   if (result.error) return res.status(result.status).json({ error: result.error });
   try {
@@ -3454,6 +3462,7 @@ async function prewarmCaches() {
     // The port is configurable and falls back to a random one when taken, so the postman
     // monitor cannot assume it -- publish the live one where it can read it.
     writeServerInfo(actualPort);
+    migrateLegacyApprovalsConfig();
     const warning = net.exposureWarning();
     if (warning) console.log(warning);
 

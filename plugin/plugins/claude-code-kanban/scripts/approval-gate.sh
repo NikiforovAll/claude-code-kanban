@@ -1,13 +1,13 @@
 #!/bin/bash
 # Blocking approval gate: lets the cck board answer a permission ask or an
 # AskUserQuestion. Always writes the _waiting.json marker first (badge behavior
-# is unchanged when the feature is off), then — only when explicitly enabled and
-# the board's server is alive — waits for a decision file written by the server.
+# is unchanged when the feature is off), then — unless config.json opts out, and
+# only while the board's server is alive — waits for a decision file written by the server.
 #
 # Contract (_plans/cck-ui-approvals/decisions.md), rooted at <CLAUDE_CONFIG_DIR or ~/.claude>/.cck:
 #   marker    agent-activity/<sid>/_waiting.json            (D8: + id, cwd, permissionSuggestions)
 #   decision  agent-activity/<sid>/_decision-<id>.json      (server writes it, Phase 3)
-#   config    approvals.json {enabled, mode, waitSeconds}   (D2: fail-open when absent)
+#   config    config.json {approvals: {enabled, mode, waitSeconds}}  (on by default; absent = defaults)
 #   liveness  server.json {port, pid}                       (D1: a dead board costs nothing)
 #
 # First writer wins (D5): a terminal answer deletes the marker via PostToolUse
@@ -61,21 +61,26 @@ echo "$INPUT" | jq -c --arg kind "$KIND" --arg ts "$TS" --arg id "$REQ_ID" '{
 # Every exit below leaves the marker in place for the badge; agent-spy.sh's
 # PostToolUse (or the server's TTL) retires it, exactly as before this feature.
 
-CONFIG="$CCK_DIR/approvals.json"
-[ -f "$CONFIG" ] || exit 0
-ENABLED=""
-eval "$(jq -r '
-  @sh "ENABLED=\(.enabled // false)",
-  @sh "MODE=\(.mode // "permission")",
-  @sh "WAIT_SECONDS=\(.waitSeconds // 30)"
-' < "$CONFIG" 2>/dev/null)"
-[ "$ENABLED" = "true" ] || exit 0
+# Defaults mirror lib/approvals.js — keep in sync. A missing or unparseable
+# config.json means defaults, i.e. the gate is on.
+ENABLED="true"
+MODE="permission+question"
+WAIT_SECONDS=""
+CONFIG="$CCK_DIR/config.json"
+if [ -f "$CONFIG" ]; then
+  eval "$(jq -r '
+    @sh "ENABLED=\(if .approvals.enabled == false then "false" else "true" end)",
+    @sh "MODE=\(.approvals.mode // "permission+question")",
+    @sh "WAIT_SECONDS=\(.approvals.waitSeconds // "")"
+  ' < "$CONFIG" 2>/dev/null)"
+fi
+[ "$ENABLED" = "false" ] && exit 0
 
 if [ "$KIND" = "question" ] && [ "$MODE" != "permission+question" ]; then
   exit 0
 fi
 
-case "$WAIT_SECONDS" in *[!0-9]* | "") WAIT_SECONDS=30 ;; esac
+case "$WAIT_SECONDS" in *[!0-9]* | "") WAIT_SECONDS=1800 ;; esac
 # PERMISSION_TTL_MS hides the card at 30 min — waiting longer than the UI can
 # show the ask is strictly worse than giving up (D11)
 [ "$WAIT_SECONDS" -gt 1800 ] && WAIT_SECONDS=1800

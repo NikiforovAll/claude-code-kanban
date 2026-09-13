@@ -8,6 +8,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 HOOK="$SCRIPT_DIR/plugin/plugins/claude-code-kanban/scripts/approval-gate.sh"
 TMPDIR=$(mktemp -d)
 export HOME="$TMPDIR"
+# The gate is on by default, so a leaked CLAUDE_CONFIG_DIR would make it wait
+# on the real board instead of the fixture dir
+unset CLAUDE_CONFIG_DIR
 CCK_DIR="$TMPDIR/.claude/.cck"
 ACTIVITY_DIR="$CCK_DIR/agent-activity"
 
@@ -34,8 +37,8 @@ run_hook_with_decision() {
   wait "$helper" 2>/dev/null || true
 }
 
-enable_approvals() {
-  echo "$1" > "$CCK_DIR/approvals.json"
+write_config() {
+  echo "{\"approvals\":$1}" > "$CCK_DIR/config.json"
 }
 
 # Liveness is a TCP connect to server.json's port — hold a real listener open
@@ -62,11 +65,11 @@ PLAN_INPUT='{"session_id":"SID","agent_id":"","hook_event_name":"PermissionReque
 marker() { echo "$ACTIVITY_DIR/$1/_waiting.json"; }
 reset_session() { rm -rf "$ACTIVITY_DIR/$1"; }
 
-# ─── Fail-open: no config ────────────────────────────────────────
-echo "Fail-open (no config):"
+# ─── Default on: no config, no board ─────────────────────────────
+echo "Default on (no config, no server.json):"
 
 OUT=$(run_hook "${PERM_INPUT/SID/s-noconf}")
-assert_eq "$OUT" "" "no output without config"
+assert_eq "$OUT" "" "no output without a board"
 assert_file "$(marker s-noconf)" "marker still written"
 assert_json "$(marker s-noconf)" ".kind" "permission" "kind=permission"
 assert_json "$(marker s-noconf)" ".toolName" "Bash" "toolName recorded"
@@ -75,25 +78,17 @@ assert_json "$(marker s-noconf)" ".permissionSuggestions[0].behavior" "allow" "p
 ID=$(jq -r '.id' "$(marker s-noconf)")
 [ -n "$ID" ] && [ "$ID" != "null" ] && pass "marker has an id (D8)" || fail "marker id" "got '$ID'"
 
-# ─── Fail-open: disabled config ──────────────────────────────────
-echo "Fail-open (enabled=false):"
+# ─── Corrupt config = defaults, still fail-open without a board ──
+echo "Corrupt config:"
 
-enable_approvals '{"enabled":false}'
-OUT=$(run_hook "${PERM_INPUT/SID/s-off}")
-assert_eq "$OUT" "" "no output when disabled"
-assert_file "$(marker s-off)" "marker still written"
-
-# ─── Fail-open: unreadable config ────────────────────────────────
-echo "Fail-open (corrupt config):"
-
-enable_approvals 'not json {'
+write_config 'not json {'
 OUT=$(run_hook "${PERM_INPUT/SID/s-corrupt}")
-assert_eq "$OUT" "" "no output on corrupt config"
+assert_eq "$OUT" "" "no output on corrupt config without a board"
 
 # ─── Liveness gate ───────────────────────────────────────────────
 echo "Liveness gate (D1):"
 
-enable_approvals '{"enabled":true,"waitSeconds":5}'
+write_config '{"enabled":true,"waitSeconds":5}'
 rm -f "$CCK_DIR/server.json"
 START=$(date +%s)
 OUT=$(run_hook "${PERM_INPUT/SID/s-nosrv}")
@@ -112,7 +107,7 @@ assert_eq "$OUT" "" "no output with dead server port"
 # ─── Approve from the board ──────────────────────────────────────
 echo "Permission allow:"
 
-enable_approvals '{"enabled":true,"waitSeconds":10}'
+write_config '{"enabled":true,"waitSeconds":10}'
 live_server
 OUT=$(run_hook_with_decision "${PERM_INPUT/SID/s-allow}" "$(marker s-allow)" '{"kind":"permission","behavior":"allow"}')
 assert_eq "$(echo "$OUT" | jq -r '.hookSpecificOutput.decision.behavior')" "allow" "emits decision.behavior=allow"
@@ -135,7 +130,7 @@ assert_eq "$(echo "$OUT" | jq -r '.hookSpecificOutput.decision.message')" "not o
 # ─── Question answered from the board ────────────────────────────
 echo "AskUserQuestion (D6):"
 
-enable_approvals '{"enabled":true,"mode":"permission+question","waitSeconds":10}'
+write_config '{"enabled":true,"mode":"permission+question","waitSeconds":10}'
 OUT=$(run_hook_with_decision "${Q_INPUT/SID/s-q}" "$(marker s-q)" '{"kind":"question","answers":{"0":"A"}}')
 assert_eq "$(echo "$OUT" | jq -r '.hookSpecificOutput.decision.behavior')" "allow" "decision.behavior=allow"
 assert_eq "$(echo "$OUT" | jq -r '.hookSpecificOutput.decision.updatedInput.answers["0"]')" "A" "answers injected"
@@ -145,14 +140,14 @@ assert_eq "$(echo "$OUT" | jq -r '.hookSpecificOutput.decision.updatedInput.ques
 echo "Question marker:"
 
 reset_session s-q2
-enable_approvals '{"enabled":false}'
+write_config '{"enabled":false}'
 run_hook "${Q_INPUT/SID/s-q2}" > /dev/null
 assert_json "$(marker s-q2)" ".kind" "question" "kind=question for AskUserQuestion on PermissionRequest"
 
 # ─── mode=permission does not gate questions ─────────────────────
 echo "Mode gating:"
 
-enable_approvals '{"enabled":true,"mode":"permission","waitSeconds":5}'
+write_config '{"enabled":true,"mode":"permission","waitSeconds":5}'
 live_server
 START=$(date +%s)
 OUT=$(run_hook "${Q_INPUT/SID/s-qskip}")
@@ -160,6 +155,32 @@ ELAPSED=$(( $(date +%s) - START ))
 assert_eq "$OUT" "" "question not gated in mode=permission"
 [ "$ELAPSED" -le 2 ] && pass "no wait for ungated question" || fail "no wait" "took ${ELAPSED}s"
 assert_file "$(marker s-qskip)" "marker still written for badge"
+
+# ─── Default on: no config.json gates permissions and questions ──
+echo "Default on (no config.json, live board):"
+
+rm -f "$CCK_DIR/config.json"
+live_server
+OUT=$(run_hook_with_decision "${PERM_INPUT/SID/s-defperm}" "$(marker s-defperm)" '{"behavior":"allow"}')
+assert_eq "$(echo "$OUT" | jq -r '.hookSpecificOutput.decision.behavior')" "allow" "permission gated without config"
+OUT=$(run_hook_with_decision "${Q_INPUT/SID/s-defq}" "$(marker s-defq)" '{"answers":{"0":"A"}}')
+assert_eq "$(echo "$OUT" | jq -r '.hookSpecificOutput.decision.updatedInput.answers["0"]')" "A" "question gated without config (default mode=permission+question)"
+
+# `{}` and a config without an approvals section are the defaults too
+echo '{}' > "$CCK_DIR/config.json"
+OUT=$(run_hook_with_decision "${PERM_INPUT/SID/s-defempty}" "$(marker s-defempty)" '{"behavior":"deny"}')
+assert_eq "$(echo "$OUT" | jq -r '.hookSpecificOutput.decision.behavior')" "deny" "empty config.json = defaults"
+
+# ─── Opt-out with a live board exits at once ─────────────────────
+echo "Opt-out (enabled=false, live board):"
+
+write_config '{"enabled":false}'
+START=$(date +%s)
+OUT=$(run_hook "${PERM_INPUT/SID/s-offlive}")
+ELAPSED=$(( $(date +%s) - START ))
+assert_eq "$OUT" "" "no output when opted out"
+[ "$ELAPSED" -le 2 ] && pass "instant exit when opted out" || fail "instant exit opted out" "took ${ELAPSED}s"
+assert_file "$(marker s-offlive)" "marker still written for badge"
 
 # ─── Double-fire suppression (D9) ────────────────────────────────
 echo "Double-fire suppression:"
@@ -173,7 +194,7 @@ assert_no_file "$(marker s-dbl)" "PreToolUse(ExitPlanMode) suppressed"
 # ─── ExitPlanMode: plan approval on PermissionRequest (#40) ──────
 echo "ExitPlanMode plan approval:"
 
-enable_approvals '{"enabled":true,"mode":"permission","waitSeconds":10}'
+write_config '{"enabled":true,"mode":"permission","waitSeconds":10}'
 live_server
 OUT=$(run_hook_with_decision "${PLAN_INPUT/SID/s-plan}" "$(marker s-plan)" '{"behavior":"allow"}')
 assert_eq "$(echo "$OUT" | jq -r '.hookSpecificOutput.decision.behavior')" "allow" "plan allow emitted"
@@ -188,14 +209,14 @@ assert_eq "$(echo "$OUT" | jq -r '.hookSpecificOutput.decision.message')" "tight
 assert_eq "$(echo "$OUT" | jq -r '.hookSpecificOutput.decision.updatedInput // "absent"')" "absent" "plan deny carries no updatedInput"
 
 reset_session s-plank
-enable_approvals '{"enabled":false}'
+write_config '{"enabled":false}'
 run_hook "${PLAN_INPUT/SID/s-plank}" > /dev/null
 assert_json "$(marker s-plank)" ".kind" "plan" "ExitPlanMode marker kind=plan"
 
 # ─── Terminal answered first: marker delete aborts wait (D5) ─────
 echo "Marker delete aborts (D5):"
 
-enable_approvals '{"enabled":true,"waitSeconds":10}'
+write_config '{"enabled":true,"waitSeconds":10}'
 reset_session s-term
 (
   M="$(marker s-term)"
@@ -238,7 +259,7 @@ assert_eq "$OUT" "" "no output when displaced"
 # ─── waitSeconds lapse ───────────────────────────────────────────
 echo "waitSeconds lapse (D4):"
 
-enable_approvals '{"enabled":true,"waitSeconds":2}'
+write_config '{"enabled":true,"waitSeconds":2}'
 reset_session s-lapse
 START=$(date +%s)
 OUT=$(run_hook "${PERM_INPUT/SID/s-lapse}")
@@ -252,7 +273,7 @@ assert_file "$(marker s-lapse)" "marker left for badge after lapse"
 # ─── Corrupt decision file: fail-open, no output ─────────────────
 echo "Corrupt decision:"
 
-enable_approvals '{"enabled":true,"waitSeconds":10}'
+write_config '{"enabled":true,"waitSeconds":10}'
 OUT=$(run_hook_with_decision "${PERM_INPUT/SID/s-bad}" "$(marker s-bad)" 'not json {')
 assert_eq "$OUT" "" "no output on corrupt decision payload"
 assert_no_file "$(marker s-bad)" "marker cleaned up anyway"

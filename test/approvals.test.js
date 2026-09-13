@@ -1,7 +1,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { sanitizeRequestId, buildDecision, decisionFileName, waitSecondsFrom, isLapsed } = require('../lib/approvals');
+const { sanitizeRequestId, buildDecision, decisionFileName, waitSecondsFrom, approvalsFrom, isKindGated, boardRefusal, isLapsed } = require('../lib/approvals');
 
 const PERM_MARKER = { status: 'waiting', kind: 'permission', id: 'abc-123', toolName: 'Bash', timestamp: '2026-08-25T10:00:00Z' };
 const Q_MARKER = { status: 'waiting', kind: 'question', id: 'q-456', toolName: 'AskUserQuestion', timestamp: '2026-08-25T10:00:00Z' };
@@ -160,16 +160,16 @@ describe('decisionFileName', () => {
   });
 });
 
-// Pins the parity with approval-gate.sh's own parse (default 30, clamp 1800):
+// Pins the parity with approval-gate.sh's own parse (default 1800, clamp 1800):
 // if either side changes alone, the board's lapse gating desyncs from the
 // hook's actual deadline.
 describe('waitSecondsFrom', () => {
-  it('defaults to the gate default of 30', () => {
-    assert.equal(waitSecondsFrom(null), 30);
-    assert.equal(waitSecondsFrom({}), 30);
-    assert.equal(waitSecondsFrom({ waitSeconds: '60' }), 30);
-    assert.equal(waitSecondsFrom({ waitSeconds: -5 }), 30);
-    assert.equal(waitSecondsFrom({ waitSeconds: 1.5 }), 30);
+  it('defaults to the gate default of 1800', () => {
+    assert.equal(waitSecondsFrom(null), 1800);
+    assert.equal(waitSecondsFrom({}), 1800);
+    assert.equal(waitSecondsFrom({ waitSeconds: '60' }), 1800);
+    assert.equal(waitSecondsFrom({ waitSeconds: -5 }), 1800);
+    assert.equal(waitSecondsFrom({ waitSeconds: 1.5 }), 1800);
   });
 
   it('clamps to the gate cap of 1800', () => {
@@ -180,6 +180,71 @@ describe('waitSecondsFrom', () => {
   it('passes valid values through', () => {
     assert.equal(waitSecondsFrom({ waitSeconds: 0 }), 0);
     assert.equal(waitSecondsFrom({ waitSeconds: 600 }), 600);
+  });
+});
+
+// The gate is on unless config.json says `approvals.enabled: false`; the hook
+// parses the same way (jq `== false`, not `//`, so an explicit false sticks).
+describe('approvalsFrom', () => {
+  it('defaults to on, permission+question, 1800 when config is absent or empty', () => {
+    for (const cfg of [null, undefined, {}, { approvals: null }, { approvals: 'x' }]) {
+      assert.deepEqual(approvalsFrom(cfg), { enabled: true, mode: 'permission+question', waitSeconds: 1800 });
+    }
+  });
+
+  it('turns off only on an explicit false', () => {
+    assert.equal(approvalsFrom({ approvals: { enabled: false } }).enabled, false);
+    assert.equal(approvalsFrom({ approvals: { enabled: 'false' } }).enabled, true);
+  });
+
+  it('accepts only known modes', () => {
+    assert.equal(approvalsFrom({ approvals: { mode: 'permission' } }).mode, 'permission');
+    assert.equal(approvalsFrom({ approvals: { mode: 'nope' } }).mode, 'permission+question');
+  });
+
+  it('reads waitSeconds from the approvals section', () => {
+    assert.equal(approvalsFrom({ approvals: { waitSeconds: 60 } }).waitSeconds, 60);
+  });
+});
+
+describe('isKindGated', () => {
+  const on = approvalsFrom(null);
+  const permOnly = approvalsFrom({ approvals: { mode: 'permission' } });
+  const off = approvalsFrom({ approvals: { enabled: false } });
+
+  it('gates every kind by default', () => {
+    for (const kind of ['permission', 'plan', 'question']) assert.equal(isKindGated(kind, on), true);
+  });
+
+  it('leaves questions to the terminal in mode=permission', () => {
+    assert.equal(isKindGated('question', permOnly), false);
+    assert.equal(isKindGated('permission', permOnly), true);
+    assert.equal(isKindGated('plan', permOnly), true);
+  });
+
+  it('gates nothing when opted out', () => {
+    for (const kind of ['permission', 'plan', 'question']) assert.equal(isKindGated(kind, off), false);
+  });
+});
+
+describe('boardRefusal', () => {
+  const T0 = Date.parse('2026-08-25T10:00:00Z');
+  const fresh = { kind: 'permission', timestamp: '2026-08-25T10:00:00Z' };
+  const on = approvalsFrom({ approvals: { waitSeconds: 30 } });
+
+  it('allows a fresh, gated ask', () => {
+    assert.equal(boardRefusal(fresh, on, T0 + 1000), null);
+  });
+
+  it('refuses an ungated ask with 410', () => {
+    const off = approvalsFrom({ approvals: { enabled: false } });
+    assert.equal(boardRefusal(fresh, off, T0 + 1000).status, 410);
+    const permOnly = approvalsFrom({ approvals: { mode: 'permission' } });
+    assert.equal(boardRefusal({ ...fresh, kind: 'question' }, permOnly, T0 + 1000).status, 410);
+  });
+
+  it('refuses a lapsed ask with 410', () => {
+    assert.equal(boardRefusal(fresh, on, T0 + 36 * 1000).status, 410);
   });
 });
 

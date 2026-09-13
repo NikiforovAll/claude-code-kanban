@@ -2,29 +2,33 @@
 
 Answer a Claude Code permission ask or `AskUserQuestion` from the board instead of the terminal. The waiting card grows Allow / Deny buttons (or an answer form for questions); clicking one resolves the prompt in the live session, for any session the board can see — cck does not need to have spawned it.
 
-Off by default. Nothing changes until you opt in.
+On by default. The terminal prompt stays live the whole time, so nothing is lost if you never click.
 
-## Enable
+## Configure
 
-Create `~/.claude/.cck/approvals.json`:
+Settings live in the `approvals` section of `<config-dir>/.cck/config.json`, where `<config-dir>` is `CLAUDE_CONFIG_DIR` (or `~/.claude`). Each Claude config dir has its own file. Create it only to opt out or to tune:
 
 ```json
 {
-  "enabled": true,
-  "mode": "permission",
-  "waitSeconds": 60
+  "approvals": {
+    "enabled": false
+  }
 }
 ```
 
 | Field | Default | Meaning |
 |---|---|---|
-| `enabled` | `false` | Master switch. Absent, `false`, or unparseable config = feature off, today's behavior |
-| `mode` | `"permission"` | `"permission"` gates only permission asks; `"permission+question"` also gates `AskUserQuestion` |
-| `waitSeconds` | `30` | How long the hook holds the ask open for a board decision. Capped at `1800` (30 min, `PERMISSION_TTL_MS` — the board hides the card after that anyway) |
+| `enabled` | `true` | Master switch. Only an explicit `false` turns the feature off; a missing or unparseable file means defaults |
+| `mode` | `"permission+question"` | `"permission+question"` gates permission asks, plans, and `AskUserQuestion`; `"permission"` leaves questions to the terminal |
+| `waitSeconds` | `1800` | How long the hook holds the ask open for a board decision. Capped at `1800` (30 min, `PERMISSION_TTL_MS` — the board hides the card after that anyway) |
+
+When a kind is not gated (opted out, or a question in `"permission"` mode), the board shows the waiting card without buttons and says "answer in the terminal", so a click can never pretend to work.
+
+A pre-existing `approvals.json` (the old opt-in file) is folded into `config.json` and removed the next time the server starts.
 
 ## How it works
 
-The plugin's `approval-gate.sh` runs on `PermissionRequest` — for regular permission asks, `AskUserQuestion`, and `ExitPlanMode` plan approval alike. Questions and plans deliberately ride `PermissionRequest` rather than `PreToolUse`: the TUI question and plan dialogs render while a `PermissionRequest` hook blocks, so both surfaces stay live, whereas a blocking `PreToolUse` hook freezes the dialog for the whole wait. It always writes the `_waiting.json` marker first — the amber badge works exactly as before, enabled or not. Then, only when the config enables it **and** the board's server answers a TCP probe on the port in `~/.claude/.cck/server.json`, the hook waits up to `waitSeconds`, polling for a decision file the server writes when you click Allow / Deny / Answer.
+The plugin's `approval-gate.sh` runs on `PermissionRequest` — for regular permission asks, `AskUserQuestion`, and `ExitPlanMode` plan approval alike. Questions and plans deliberately ride `PermissionRequest` rather than `PreToolUse`: the TUI question and plan dialogs render while a `PermissionRequest` hook blocks, so both surfaces stay live, whereas a blocking `PreToolUse` hook freezes the dialog for the whole wait. It always writes the `_waiting.json` marker first — the amber badge works exactly as before, enabled or not. Then, unless the config opts out, and only while the board's server answers a TCP probe on the port in `<config-dir>/.cck/server.json`, the hook waits up to `waitSeconds`, polling for a decision file the server writes when you click Allow / Deny / Answer.
 
 ```
 hook ──> _waiting.json (marker, id) ──> board shows card with buttons
@@ -50,7 +54,7 @@ A newer ask from the same session displaces the older one (the marker's `id` cha
 
 Every failure path degrades to today's behavior — the hook never blocks a session on a broken board:
 
-- no config / `enabled: false` / corrupt config → no wait
+- `enabled: false`, or a question in `"permission"` mode → no wait
 - no `server.json` / board not listening on its port → no wait
 - corrupt or empty decision file → no wait
 - `waitSeconds` elapsed → no wait
@@ -62,11 +66,11 @@ Every failure path degrades to today's behavior — the hook never blocks a sess
 
 ## Files
 
-All under `~/.claude/.cck/`:
+All under `<config-dir>/.cck/`:
 
 | Path | Writer | Purpose |
 |---|---|---|
-| `approvals.json` | you | opt-in config |
+| `config.json` | you | cck settings; the `approvals` section holds the opt-out and tuning |
 | `server.json` | board server | `{port, pid}` liveness beacon |
 | `agent-activity/<sid>/_waiting.json` | hook | the pending ask (kind, id, tool, input, suggestions) |
 | `agent-activity/<sid>/_decision-<id>.json` | board server | your answer; consumed and deleted by the hook |
