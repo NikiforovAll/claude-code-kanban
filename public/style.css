@@ -9,6 +9,9 @@
   --bg-surface: #16181c;
   --bg-elevated: #1e2025;
   --bg-hover: #282a30;
+  /* Selection reads as a recess against the darker surface here, but light theme's deep tone
+     sits within a shade of the sidebar, so there it has to rise instead. */
+  --session-active-bg: var(--bg-deep);
   --border: #363840;
   --text-primary: #f0f1f3;
   --text-secondary: #c2c4c9;
@@ -576,17 +579,15 @@ body::before {
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* `.active` is the open session, `.kb-selected` the keyboard cursor. The cursor
-   must win when both land on one card, which is why it is ordered second. */
+/* `.active` is the open session, `.kb-selected` the keyboard cursor. They own different
+   properties — fill and border — so the cursor landing on the open session adds to it
+   instead of replacing how it looks. */
 .session-item.active {
-  background: var(--bg-deep);
-  border-color: var(--accent);
+  background: var(--session-active-bg);
 }
 
 .session-item.kb-selected {
-  background: var(--bg-elevated);
   border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent-dim);
 }
 
 .session-item.stale {
@@ -634,7 +635,8 @@ body::before {
 }
 
 .session-name {
-  font-size: 13px;
+  font-size: 14px;
+  font-weight: 500;
   color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
@@ -670,6 +672,26 @@ body::before {
   margin-top: var(--card-gap-tight);
   white-space: nowrap;
   overflow: hidden;
+}
+
+/* inline-block, not inline-flex: a flex box ignores text-overflow, so a long worktree name
+   ran past the card edge instead of truncating. */
+.wt-chip {
+  display: inline-block;
+  max-width: 60%;
+  margin-left: 5px;
+  padding: 0 5px;
+  border: 1px solid var(--accent-dim);
+  border-radius: 999px;
+  background: var(--accent-dim);
+  color: var(--accent-text);
+  font-family: var(--mono);
+  font-size: 9px;
+  line-height: 14px;
+  vertical-align: middle;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .session-branch {
@@ -4149,6 +4171,7 @@ body.light {
   --bg-surface: #efede9;
   --bg-elevated: #fbfaf9;
   --bg-hover: #d2d0cc;
+  --session-active-bg: var(--bg-elevated);
   --border: #cfcbc4;
   --text-primary: #0a0a0a;
   --text-secondary: #444444;
@@ -5477,6 +5500,7 @@ select.form-input option:checked {
     --bg-surface: #efede9;
     --bg-elevated: #fbfaf9;
     --bg-hover: #d2d0cc;
+    --session-active-bg: var(--bg-elevated);
     --border: #cfcbc4;
     --text-primary: #0a0a0a;
     --text-secondary: #444444;

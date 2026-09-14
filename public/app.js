@@ -3235,11 +3235,7 @@ function renderSessions() {
     const isActive = session.id === currentSessionId && viewMode === 'session';
     const isLive = isSessionLive(session);
     const sessionName = sessionDisplayName(session);
-    // The grouped shape drops the project name because a project header carries it. Zen renders
-    // the card bare, so it needs the ungrouped shape that names the project itself.
-    const useGrouped = sessionFilter === 'active' && session.project && !zenMode;
-    const primaryName = useGrouped ? sessionName : session.project ? session.project.split('/').pop() : sessionName;
-    const secondaryName = useGrouped ? null : session.project ? sessionName : null;
+    const projectHtml = renderProjectIdentity(session);
 
     const gitBranch = session.gitBranch ? escapeHtml(session.gitBranch) : null;
     const createdDisplay = session.createdAt ? formatDate(session.createdAt) : '';
@@ -3248,7 +3244,9 @@ function renderSessions() {
       session.createdAt && createdDisplay !== modifiedDisplay
         ? `Created ${createdDisplay} · Modified ${modifiedDisplay}`
         : modifiedDisplay;
-    const tooltip = [session.id, timeDisplay, gitBranch ? `Branch: ${gitBranch}` : ''].filter(Boolean).join(' | ');
+    const tooltip = [session.id, session.project, timeDisplay, gitBranch ? `Branch: ${gitBranch}` : '']
+      .filter(Boolean)
+      .join(' | ');
     const isTeam = session.isTeam;
     const memberCount = session.memberCount || 0;
 
@@ -3266,8 +3264,8 @@ function renderSessions() {
     return `
           <button onclick="fetchTasks('${sid}')" draggable="true" data-session-id="${escapeHtml(session.id)}" class="session-item ${isActive ? 'active' : ''} ${session.hasWaitingForUser ? 'permission-pending' : ''} ${tempClass} ${showCtx ? 'has-context' : ''}" title="${escapeHtml(tooltip)}">
             <span class="session-pin-btn${pinClass}" onclick="event.stopPropagation();toggleSessionPin('${sid}')" title="${pinTitle} session">${pinState === 'sticky' ? SESSION_STAR_SVG : SESSION_PIN_SVG}</span>
-            <div class="session-name">${escapeHtml(primaryName)}</div>
-            ${secondaryName ? `<div class="session-secondary">${escapeHtml(secondaryName)}</div>` : ''}
+            <div class="session-name">${escapeHtml(sessionName)}</div>
+            ${projectHtml ? `<div class="session-secondary">${projectHtml}</div>` : ''}
             ${gitBranch ? `<div class="session-branch">${gitBranch}</div>` : ''}
             ${session.planTitle ? `<div class="session-plan">${escapeHtml(session.planTitle)}</div>` : ''}
             ${renderGoalSubtitle(session)}
@@ -3295,6 +3293,18 @@ function renderSessions() {
           </button>
         `;
   };
+
+  // Zen draws one card and its panel, so it returns before the grouping below — leaving it in
+  // that chain would build the whole list only to discard it.
+  if (zenMode) {
+    sessionsList.innerHTML = `${renderSessionCard(zenSession)}
+      <div class="zen-panel">
+        ${renderContextDetail(zenSession.contextStatus) || '<div class="zen-panel-empty">No context data for this session</div>'}
+        ${renderLinkedDocsHtml(zenSession.id)}
+      </div>`;
+    bindLinkedDocsHandlers(sessionsList.querySelector('.linked-docs-section'), zenSession.id);
+    return;
+  }
 
   const groupPinned = store.getItem('groupPinnedSessions') !== 'false';
   const pinWeight = (s) => (isPlacedSticky(s.id) ? 2 : isPlacedPinned(s.id) && !isSessionActive(s) ? 1 : 0);
@@ -3454,14 +3464,7 @@ function renderSessions() {
   }
 
   // Group active sessions by project
-  if (zenMode) {
-    sessionsList.innerHTML = `${renderSessionCard(zenSession)}
-      <div id="zen-panel" class="zen-panel">
-        ${renderContextDetail(zenSession.contextStatus) || '<div class="zen-panel-empty">No context data for this session</div>'}
-        ${renderLinkedDocsHtml(zenSession.id)}
-      </div>`;
-    bindLinkedDocsHandlers(sessionsList.querySelector('.linked-docs-section'), zenSession.id);
-  } else if (sessionFilter === 'active') {
+  if (sessionFilter === 'active') {
     // Auto-expand a collapsed section when newly-active work lands in it (live refresh).
     expandActiveGroups({ onlyNew: true });
     html += sgSectionHtml(false);
@@ -3581,7 +3584,7 @@ function renderSession() {
   sessionTitle.textContent = displayName;
 
   // Build meta text with project path and description
-  const projectName = session.project ? session.project.split('/').pop() : null;
+  const projectName = session.project ? pathBasename(session.project) : null;
   const metaParts = [`${currentTasks.length} tasks`];
   if (projectName) {
     metaParts.push(projectName);
@@ -5446,7 +5449,7 @@ function _groupByProject(sessionIds) {
 
 function _projectLabel(project) {
   if (project === '(no project)') return '(no project)';
-  return project.split(/[/\\]/).pop() || project;
+  return pathBasename(project);
 }
 
 function _renderProjectGroup(label, meta, innerHtml) {
@@ -7145,6 +7148,24 @@ const SESSION_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-
 function sessionDisplayName(session) {
   const raw = session.name || session.id;
   return SESSION_UUID_RE.test(raw) ? raw.slice(0, 8) : raw;
+}
+
+// Project paths arrive in the OS spelling, so a Windows path is backslash-separated.
+function pathBasename(p) {
+  return p.split(/[/\\]/).filter(Boolean).pop() || p;
+}
+
+// `session.worktree` is resolved server-side from the `.git` pointer file, so it holds for a
+// worktree parked beside its repo as well as one under <repo>/.claude/worktrees/.
+function renderProjectIdentity(session) {
+  if (!session.project) return null;
+  const wt = session.worktree;
+  if (!wt) return escapeHtml(pathBasename(session.project));
+  const repo = pathBasename(wt.repo);
+  // Worktrees beside the repo are conventionally named `<repo>-<branch>`, and repeating the
+  // repo inside a chip that already sits next to it wastes the whole width of the card.
+  const name = wt.name.startsWith(repo) ? wt.name.slice(repo.length).replace(/^[-._]/, '') || wt.name : wt.name;
+  return `${escapeHtml(repo)}<span class="wt-chip" title="Worktree of ${escapeHtml(wt.repo)}">⑂ ${escapeHtml(name)}</span>`;
 }
 
 function formatDate(dateStr) {

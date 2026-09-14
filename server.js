@@ -255,6 +255,34 @@ function getGitBranch(cwd) {
   return branch;
 }
 
+// A linked worktree's `.git` is a file holding `gitdir: <main>/.git/worktrees/<name>`, so the
+// main checkout is readable without spawning git. Path shape alone would not do: only some
+// worktrees live under `<repo>/.claude/worktrees/`, the rest sit beside the repo.
+// Cached without a TTL, misses included: a directory cannot turn from an ordinary checkout into
+// a linked worktree without being recreated, and a recreated path is a new cache key.
+const worktreeCache = new Map();
+const WORKTREE_CACHE_MAX = 500;
+const GITDIR_WORKTREE_RE = /^gitdir:\s*(.*)[/\\]\.git[/\\]worktrees[/\\]([^/\\]+)[/\\]?$/;
+
+function resolveWorktree(dir) {
+  if (!dir) return null;
+  if (worktreeCache.has(dir)) return worktreeCache.get(dir);
+
+  let worktree = null;
+  try {
+    // An ordinary checkout's `.git` is a directory, so the read throws EISDIR — that is the
+    // answer, and it costs one syscall instead of a stat followed by a read.
+    const m = GITDIR_WORKTREE_RE.exec(readFileSync(path.join(dir, '.git'), 'utf8').trim());
+    if (m) worktree = { repo: m[1], name: m[2] };
+  } catch (_) {}
+
+  worktreeCache.set(dir, worktree);
+  if (worktreeCache.size > WORKTREE_CACHE_MAX) {
+    worktreeCache.delete(worktreeCache.keys().next().value);
+  }
+  return worktree;
+}
+
 // Only spawn git when cwd has diverged from the launch project — that's the
 // only case the JSONL value is wrong. Saves N spawns on a typical list build.
 function resolveSessionGitBranch(meta) {
@@ -1044,6 +1072,7 @@ function buildSessionObject(id, meta, overrides = {}) {
     cwd: meta.cwd || null,
     description: meta.description || null,
     gitBranch: resolveSessionGitBranch(meta),
+    worktree: resolveWorktree(meta.project),
     customTitle: meta.customTitle || null,
     goal: meta.goal || null,
     taskCount: 0,
