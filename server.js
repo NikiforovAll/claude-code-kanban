@@ -1052,12 +1052,30 @@ function getSessionDisplayName(_sessionId, meta) {
   return null;
 }
 
+// The harness spells a project path into a temp/log dir name by replacing every
+// non-alphanumeric character with a dash, drive colon and separators included.
+function encodeProjectDirName(p) {
+  return p.replace(/[^a-zA-Z0-9]/g, '-');
+}
+
 // Derived by convention, not looked up: the harness creates the dir lazily, so a
 // stat here would report "missing" for every session that has not written a temp
 // file yet — and it would put IO on the session-list hot path. Pure string join.
 function getScratchpadDir(id, meta) {
   if (!meta.jsonlPath) return null;
-  return path.join(SCRATCHPAD_ROOT, path.basename(path.dirname(meta.jsonlPath)), id, 'scratchpad');
+  const byProject = path.join(SCRATCHPAD_ROOT, path.basename(path.dirname(meta.jsonlPath)), id, 'scratchpad');
+
+  // A session launched with `claude -w` starts in the main checkout and enters the
+  // worktree afterwards, so the harness keys its scratchpad on the repo while the
+  // transcript ends up filed under the worktree. Neither the project nor any `cwd`
+  // in the log records that, so the two candidates are told apart by which one the
+  // harness actually created. Probed only for worktree sessions, and only until one
+  // of them exists — before that there is nothing to disambiguate and `byProject`,
+  // right for a session started inside the worktree, stands.
+  const wt = resolveWorktree(meta.project);
+  if (!wt || existsSync(byProject)) return byProject;
+  const byRepo = path.join(SCRATCHPAD_ROOT, encodeProjectDirName(wt.repo), id, 'scratchpad');
+  return existsSync(byRepo) ? byRepo : byProject;
 }
 
 function buildSessionObject(id, meta, overrides = {}) {

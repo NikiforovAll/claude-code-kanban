@@ -3300,6 +3300,7 @@ function renderSessions() {
     sessionsList.innerHTML = `${renderSessionCard(zenSession)}
       <div class="zen-panel">
         ${renderContextDetail(zenSession.contextStatus) || '<div class="zen-panel-empty">No context data for this session</div>'}
+        ${renderScratchpadRow(zenSession)}
         ${renderLinkedDocsHtml(zenSession.id)}
       </div>`;
     bindLinkedDocsHandlers(sessionsList.querySelector('.linked-docs-section'), zenSession.id);
@@ -8122,7 +8123,20 @@ function updateStickyBtnState() {
 // carry information. The full path stays in the tooltip and the copy button.
 function abbreviateScratchpadDir(dir) {
   const sep = dir.includes('\\') ? '\\' : '/';
-  return ['$tmp', '…', ...dir.split(/[/\\]/).slice(-2)].join(sep);
+  return dir.split(/[/\\]/).slice(-2).join(sep);
+}
+
+function renderScratchpadRow(session) {
+  const dir = session?.scratchpadDir;
+  if (!dir) return '';
+  return `<div class="zen-scratchpad">
+    <span class="zen-scratchpad-label">Scratchpad</span>
+    <span class="zen-scratchpad-path" title="${escapeHtml(dir)}">${escapeHtml(abbreviateScratchpadDir(dir))}</span>
+    <span class="row-actions">
+      <button onclick="copyWithFeedback('${escAttrJs(dir)}', this)" title="Copy">${ICON_COPY}</button>
+      <button data-folder="${escapeHtml(dir)}" onclick="openFolderInEditor(this.dataset.folder)" title="Open in editor">${ICON_OPEN_EXTERNAL}</button>
+    </span>
+  </div>`;
 }
 
 function showInfoModal(session, teamConfig, tasks, planContent, parentInfo) {

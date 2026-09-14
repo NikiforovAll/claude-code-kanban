@@ -906,6 +906,38 @@ body::before {
   border-top: 1px solid var(--border);
 }
 
+.zen-scratchpad {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+}
+
+.zen-scratchpad-label {
+  font-weight: 500;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+
+.zen-scratchpad-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+}
+
+.zen-panel:hover .row-actions {
+  opacity: 1;
+}
+
 .session-time {
   font-size: 11px;
   font-weight: 450;
