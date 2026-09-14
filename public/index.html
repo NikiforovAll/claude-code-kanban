@@ -61,6 +61,20 @@
           <span id="filter-summary" class="filter-summary" title=""></span>
           <span class="section-header-actions">
             <button
+              id="zen-mode-btn"
+              class="icon-btn section-btn"
+              onclick="event.stopPropagation(); toggleZenMode()"
+              title="Zen mode: current session only (Shift+Z)"
+              aria-label="Zen mode: current session only"
+              aria-pressed="false"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="7"/>
+                <circle cx="12" cy="12" r="2"/>
+                <path d="M12 1v3M12 20v3M1 12h3M20 12h3"/>
+              </svg>
+            </button>
+            <button
               id="filter-menu-btn"
               class="icon-btn section-btn"
               onclick="toggleFilterMenu(event)"

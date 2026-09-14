@@ -440,7 +440,8 @@ body::before {
 }
 
 /* Ember only while something is actually filtered — at rest the funnel is just chrome. */
-.icon-btn.section-btn.has-filters {
+.icon-btn.section-btn.has-filters,
+.icon-btn.section-btn.active {
   color: var(--accent-text);
 }
 
@@ -856,6 +857,31 @@ body::before {
   display: flex;
   justify-content: space-between;
   color: var(--text-secondary);
+}
+
+/* Zen view: the sidebar holds one card, so the usage detail that normally lives behind the
+   info modal gets rendered underneath it. */
+.zen-panel {
+  margin-top: 10px;
+  /* No bottom padding: the linked-docs section that always closes the panel carries its own. */
+  padding: 10px 10px 0;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.zen-panel .detail-context {
+  margin-bottom: 0;
+}
+
+.zen-panel .detail-context-stats {
+  gap: 3px 10px;
+}
+
+.zen-panel .linked-docs-section {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
 }
 
 .session-time {
@@ -3885,7 +3911,8 @@ body::before {
   text-decoration-style: dashed;
 }
 
-.linked-docs-empty {
+.linked-docs-empty,
+.zen-panel-empty {
   color: var(--text-muted);
   font-size: 11px;
   font-style: italic;

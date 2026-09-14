@@ -30,6 +30,12 @@ let sessionFilter = FILTER_DEFAULTS.session;
 // Only meaningful while sessionFilter === 'active' (filterBySessions clears it otherwise)
 const activityFilter = new Set(); // kinds: 'waiting' | 'active'
 let sessionLimit = FILTER_DEFAULTS.limit;
+// Narrows the sidebar to the open session only. Kept out of FILTER_DEFAULTS/updateUrl because it
+// is not a filter — it has no select, no summary token, and never reaches the session picker.
+// Persisted in localStorage rather than the URL: the hub recreates each iframe at the app's base
+// URL, so a query string would not survive a hub reload.
+const ZEN_KEY = 'zenMode';
+let zenMode = store.getItem(ZEN_KEY) === 'true';
 let filterProject = FILTER_DEFAULTS.project; // null = all, '__recent__' = last 24h, or project path
 let recentProjects = new Set();
 let projectsCacheDirty = true;
@@ -144,6 +150,9 @@ function resetState() {
   sessionFilter = FILTER_DEFAULTS.session;
   sessionLimit = FILTER_DEFAULTS.limit;
   filterProject = FILTER_DEFAULTS.project;
+  zenMode = false;
+  store.removeItem(ZEN_KEY);
+  renderZenState();
   ownerFilter = '';
   searchQuery = '';
   viewMode = 'all';
@@ -193,7 +202,7 @@ async function fetchSessions(includeTasks = true) {
     if (revealedStorageSessionId) allPinnedIds.add(revealedStorageSessionId);
     // When server filters by activity, the focused session may not be active —
     // include it in pinned so the server still returns it.
-    if (sessionFilter === 'active' && currentSessionId) allPinnedIds.add(currentSessionId);
+    if ((sessionFilter === 'active' || zenMode) && currentSessionId) allPinnedIds.add(currentSessionId);
     const pinnedParam = allPinnedIds.size > 0 ? `&pinned=${[...allPinnedIds].join(',')}` : '';
     const projectParam =
       filterProject && filterProject !== '__recent__' ? `&project=${encodeURIComponent(filterProject)}` : '';
@@ -3172,20 +3181,32 @@ function getFilteredSessions() {
   return filteredSessions;
 }
 
+// A live refresh would replace the zen panel's link-a-file input mid-type, the same way it
+// would swallow a half-typed group name. Off zen there is no panel, so skip the DOM probe.
+function zenPanelIsEditing() {
+  return zenMode && !!sessionsList.querySelector('.linked-doc-input');
+}
+
 function renderSessions() {
   // Rebuilding the list under the pointer cancels an in-flight drop and would swallow a
   // half-typed group name, and the SSE path can fire at any moment — defer instead.
-  if (sgDrag || sgIsEditing()) return;
+  if (sgDrag || sgIsEditing() || zenPanelIsEditing()) return;
   // Update project dropdown
   updateProjectDropdown();
 
-  const filteredSessions = getFilteredSessions();
+  // Zen narrows the rendered list only — the session picker keeps calling getFilteredSessions()
+  // and still offers everything, or there would be no way to switch sessions without leaving zen.
+  const zenSession = zenMode && currentSessionId ? sessions.find((s) => s.id === currentSessionId) : null;
+  const filteredSessions = zenMode ? (zenSession ? [zenSession] : []) : getFilteredSessions();
 
   if (filteredSessions.length === 0) {
     let emptyMsg = 'No sessions found';
     let emptyHint = 'Tasks appear when you use Claude Code';
 
-    if (searchQuery) {
+    if (zenMode) {
+      emptyMsg = 'Zen mode: no session open';
+      emptyHint = 'Press Shift+Z to leave zen mode, then open a session';
+    } else if (searchQuery) {
       emptyMsg = `No results for "${searchQuery}"`;
       emptyHint = 'Try a different search term or clear the search';
     } else if (filterProject && sessionFilter === 'active') {
@@ -3214,7 +3235,9 @@ function renderSessions() {
     const isActive = session.id === currentSessionId && viewMode === 'session';
     const isLive = isSessionLive(session);
     const sessionName = sessionDisplayName(session);
-    const useGrouped = sessionFilter === 'active' && session.project;
+    // The grouped shape drops the project name because a project header carries it. Zen renders
+    // the card bare, so it needs the ungrouped shape that names the project itself.
+    const useGrouped = sessionFilter === 'active' && session.project && !zenMode;
     const primaryName = useGrouped ? sessionName : session.project ? session.project.split('/').pop() : sessionName;
     const secondaryName = useGrouped ? null : session.project ? sessionName : null;
 
@@ -3233,7 +3256,8 @@ function renderSessions() {
     const pinClass = pinState === 'sticky' ? ' sticky' : pinState === 'pinned' ? ' pinned' : '';
     const pinTitle =
       pinState === 'pinned' || pinState === 'sticky' ? 'Unpin session (.)' : 'Pin session (. · > sticky)';
-    const showCtx = !!session.contextStatus;
+    // Zen renders the full context detail below the card, so the compact bar would just repeat it.
+    const showCtx = !!session.contextStatus && !zenMode;
     const linkedDocsCount = getSessionPreviewPaths(session.id).length;
     const bookmarksCount = loadPins(session.id).length;
     const hasScratchpad = !!(store.getItem(_sessionScratchpadKey(session.id)) || '').trim();
@@ -3430,7 +3454,14 @@ function renderSessions() {
   }
 
   // Group active sessions by project
-  if (sessionFilter === 'active') {
+  if (zenMode) {
+    sessionsList.innerHTML = `${renderSessionCard(zenSession)}
+      <div id="zen-panel" class="zen-panel">
+        ${renderContextDetail(zenSession.contextStatus) || '<div class="zen-panel-empty">No context data for this session</div>'}
+        ${renderLinkedDocsHtml(zenSession.id)}
+      </div>`;
+    bindLinkedDocsHandlers(sessionsList.querySelector('.linked-docs-section'), zenSession.id);
+  } else if (sessionFilter === 'active') {
     // Auto-expand a collapsed section when newly-active work lands in it (live refresh).
     expandActiveGroups({ onlyNew: true });
     html += sgSectionHtml(false);
@@ -5201,6 +5232,7 @@ const SHORTCUT_PAIRS = [
         { keys: ['['], label: 'Toggle sidebar' },
         { keys: ['T'], label: 'Toggle theme' },
         { keys: ['Shift', 'S'], combo: true, label: 'Storage manager' },
+        { keys: ['Shift', 'Z'], combo: true, label: 'Zen mode (current session only)' },
         { keys: ['Ctrl', '+'], combo: true, label: 'Larger modal text' },
         { keys: ['Ctrl', '−'], combo: true, label: 'Smaller modal text' },
         { keys: ['Ctrl', '0'], combo: true, label: 'Reset modal text size' },
@@ -5936,6 +5968,11 @@ document.addEventListener('keydown', (e) => {
     showStorageManager();
     return;
   }
+  if (e.code === 'KeyZ' && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+    e.preventDefault();
+    toggleZenMode();
+    return;
+  }
   // Ctrl+Shift+P is the browser's own; only the bare chord opens the picker.
   if (e.code === 'KeyP' && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
     e.preventDefault();
@@ -6568,6 +6605,9 @@ async function linkFileByPath(sessionId, raw, slot) {
       fail(data.error || 'File not found');
       return;
     }
+    // Close the editor before the refresh: a sidebar panel defers its re-render while an
+    // input is open, so leaving it up would hide the file that was just linked.
+    if (slot) slot.innerHTML = '';
     setSessionDocLink(sessionId, data.path, false);
     showToast('Linked to session', 'success');
   } catch {
@@ -7542,6 +7582,24 @@ function renderFilterState() {
     summary.title = long.length ? `Active filters: ${long.join(', ')}` : '';
   }
   document.getElementById('filter-menu-btn')?.classList.toggle('has-filters', short.length > 0);
+}
+
+function toggleZenMode() {
+  zenMode = !zenMode;
+  store.setItem(ZEN_KEY, String(zenMode));
+  renderZenState();
+  if (zenMode) closeFilterMenu();
+  renderSessions();
+  // The open session may be outside the current server page/filter; refetch pins it in.
+  if (zenMode) fetchSessions(false);
+}
+
+function renderZenState() {
+  const btn = document.getElementById('zen-mode-btn');
+  if (!btn) return;
+  btn.classList.toggle('active', zenMode);
+  btn.setAttribute('aria-pressed', String(zenMode));
+  btn.title = zenMode ? 'Zen mode on — show all sessions (Shift+Z)' : 'Zen mode: current session only (Shift+Z)';
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
@@ -9227,6 +9285,7 @@ ownerFilter = urlState.owner || '';
 searchQuery = urlState.search || '';
 
 renderFilterState();
+renderZenState();
 pinnedSessionIds = loadPinnedSessions();
 stickySessionIds = loadStickySessions();
 setupEventSource();
