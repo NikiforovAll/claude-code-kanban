@@ -906,6 +906,11 @@ body::before {
   border-top: 1px solid var(--border);
 }
 
+.zen-panel .artifacts-section {
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
 .zen-scratchpad {
   display: flex;
   align-items: center;
@@ -3898,7 +3903,8 @@ body::before {
   color: var(--text-primary);
 }
 
-.linked-doc-list {
+.linked-doc-list,
+.artifact-list {
   list-style: none;
   padding: 0;
   margin: 0;
@@ -3907,14 +3913,16 @@ body::before {
   gap: 4px;
 }
 
-.linked-doc-item {
+.linked-doc-item,
+.artifact-item {
   display: flex;
   align-items: baseline;
   gap: 8px;
   min-width: 0;
 }
 
-.linked-doc-link {
+.linked-doc-link,
+.artifact-link {
   color: var(--accent-text);
   text-decoration: underline;
   text-decoration-style: dotted;
@@ -3935,13 +3943,15 @@ body::before {
 /* Rides on the shared .row-actions group; only the reveal trigger differs — per row
    here, per grid in the session info. margin-left:auto pins the group to the same
    right edge however long the names in between are. */
-.linked-doc-actions {
+.linked-doc-actions,
+.artifact-actions {
   margin-left: auto;
   align-self: center;
   flex-shrink: 0;
 }
 
-.linked-doc-item:hover .linked-doc-actions {
+.linked-doc-item:hover .linked-doc-actions,
+.artifact-item:hover .artifact-actions {
   opacity: 1;
 }
 
@@ -3963,6 +3973,53 @@ body::before {
 .linked-doc-item.is-editor .linked-doc-link {
   color: var(--text-secondary);
   text-decoration-style: dashed;
+}
+
+/* A section of the session panel: linked documents, artifacts. */
+.panel-section {
+  margin-bottom: 16px;
+  font-size: 12px;
+}
+
+/* Artifacts are read out of the transcript, so the section renders before the
+   list arrives and stays in the DOM as the patch target when there is none. */
+.artifacts-section:empty {
+  display: none;
+}
+
+.panel-section-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.panel-section-header svg {
+  width: 12px;
+  height: 12px;
+}
+
+.panel-section-count {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0 6px;
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+/* The artifact title is a URL away from the reader, so it truncates where a file
+   name, which the linked-doc row shows in full, does not. */
+.artifact-link {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 
 .linked-docs-empty,

@@ -21,6 +21,7 @@ const {
   readSessionInfoFromJsonl,
   buildSessionDigest,
   readCompactSummaries,
+  readArtifactLinks,
   extractPromptFromTranscript,
   extractModelFromTranscript,
   extractStructuredResultFromTranscript,
@@ -105,10 +106,31 @@ function writePins(pins) {
   writeJsonAtomic(PINS_FILE, pins);
 }
 
-// Port discovery for out-of-process helpers (the postman monitor). The pid rides along
-// so a reader can tell a live server from a file left behind by a crashed one.
+// Port discovery for out-of-process helpers (the postman monitor, approval-gate.sh).
+// The pid rides along so a reader can tell a live server from a file left behind by
+// a crashed one.
 function writeServerInfo(port) {
   writeJsonAtomic(SERVER_INFO_FILE, { port, pid: process.pid });
+}
+
+// A beacon that outlives its server disarms UI approvals silently: approval-gate.sh
+// probes the port, finds it closed and never waits. The hub spawns every sub-app on
+// an ephemeral port, so a stale beacon never comes back on its own — drop ours on
+// the way out. Only when the file is still ours: a newer server on the same config
+// dir has already claimed it.
+function removeServerInfo() {
+  try {
+    const info = JSON.parse(readFileSync(SERVER_INFO_FILE, 'utf8'));
+    if (info.pid === process.pid) unlinkSync(SERVER_INFO_FILE);
+  } catch (_) { /* gone, unreadable, or not ours */ }
+}
+
+process.on('exit', removeServerInfo);
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+  process.on(sig, () => {
+    removeServerInfo();
+    process.exit(0);
+  });
 }
 
 // #endregion
@@ -1627,6 +1649,32 @@ app.get('/api/sessions/:sessionId/loop', (req, res) => {
   } catch (error) {
     console.error('Error reading loop info:', error);
     res.status(500).json({ error: 'Failed to read loop info' });
+  }
+});
+
+// Cold path — a full transcript scan, so the result is held until the file grows.
+// The zen panel asks again on every re-render, which then costs one stat.
+const artifactsByPath = new Map();
+
+function getArtifactLinks(jsonlPath) {
+  let stat;
+  try { stat = statSync(jsonlPath); } catch (_) { return []; }
+  const hit = artifactsByPath.get(jsonlPath);
+  if (hit && hit.mtimeMs === stat.mtimeMs && hit.size === stat.size) return hit.artifacts;
+  const artifacts = readArtifactLinks(jsonlPath);
+  artifactsByPath.set(jsonlPath, { mtimeMs: stat.mtimeMs, size: stat.size, artifacts });
+  return artifacts;
+}
+
+app.get('/api/sessions/:sessionId/artifacts', (req, res) => {
+  try {
+    const metadata = loadSessionMetadata();
+    const meta = metadata[req.params.sessionId] || metadata[resolveSessionId(req.params.sessionId)];
+    if (!meta?.jsonlPath) return res.json({ artifacts: [] });
+    res.json({ artifacts: getArtifactLinks(meta.jsonlPath) });
+  } catch (error) {
+    console.error('Error reading artifacts:', error);
+    res.status(500).json({ error: 'Failed to read artifacts' });
   }
 });
 

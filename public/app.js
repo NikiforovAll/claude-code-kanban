@@ -3302,8 +3302,10 @@ function renderSessions() {
         ${renderContextDetail(zenSession.contextStatus) || '<div class="zen-panel-empty">No context data for this session</div>'}
         ${renderScratchpadRow(zenSession)}
         ${renderLinkedDocsHtml(zenSession.id)}
+        ${renderArtifactsHtml(zenSession.id)}
       </div>`;
     bindLinkedDocsHandlers(sessionsList.querySelector('.linked-docs-section'), zenSession.id);
+    ensureSessionArtifacts(zenSession.id);
     return;
   }
 
@@ -6524,16 +6526,73 @@ function renderLinkedDocsHtml(sessionId) {
   const body = paths.length
     ? `<ul class="linked-doc-list">${items}</ul>`
     : '<div class="linked-docs-empty">No linked files yet</div>';
-  return `<div class="linked-docs-section" style="margin-bottom:16px;font-size:12px;">
-    <div style="font-size:11px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;display:flex;align-items:center;gap:6px;">
+  return `<div class="linked-docs-section panel-section">
+    <div class="panel-section-header">
       ${linkSvg(12)}
       <span>Linked documents</span>
-      <span style="background:var(--bg-elevated);border:1px solid var(--border);border-radius:10px;padding:0 6px;font-size:10px;color:var(--text-secondary);">${paths.length}</span>
+      <span class="panel-section-count">${paths.length}</span>
       <button type="button" class="linked-docs-add-btn" title="Link a file" aria-label="Link a file">+</button>
     </div>
     <div class="linked-doc-editor-slot"></div>
     ${body}
   </div>`;
+}
+
+// Artifacts are read out of the transcript rather than stored with the session, so
+// the list arrives after the panel is already on screen and the slot — always
+// rendered, empty or not — is patched in place once it does.
+const artifactsBySession = new Map();
+const artifactsInFlight = new Set();
+
+function artifactLabel(a) {
+  if (a.title) return a.title;
+  return a.path ? pathBasename(a.path).replace(/\.html?$/i, '') : 'Artifact';
+}
+
+function artifactsInnerHtml(sessionId) {
+  const list = artifactsBySession.get(sessionId) || [];
+  if (!list.length) return '';
+  const items = list
+    .map(
+      (a) => `<li class="artifact-item">
+        <a class="artifact-link" href="${escapeHtml(a.url)}" target="_blank" rel="noopener" title="${escapeHtml(a.url)}">${escapeHtml(artifactLabel(a))}</a>
+        <span class="row-actions artifact-actions">
+          <button type="button" onclick="copyWithFeedback('${escAttrJs(a.url)}', this)" title="Copy link" aria-label="Copy artifact link">${ICON_COPY}</button>
+        </span>
+      </li>`,
+    )
+    .join('');
+  return `<div class="panel-section-header">
+      ${ICON_OPEN_EXTERNAL}
+      <span>Artifacts</span>
+      <span class="panel-section-count">${list.length}</span>
+    </div>
+    <ul class="artifact-list">${items}</ul>`;
+}
+
+function renderArtifactsHtml(sessionId) {
+  return `<div class="artifacts-section panel-section" data-artifacts-for="${escapeHtml(sessionId)}">${artifactsInnerHtml(sessionId)}</div>`;
+}
+
+// Always asks: the server holds the scan until the transcript grows, so a repeat
+// costs one stat, and an artifact published while the panel is open still appears.
+async function ensureSessionArtifacts(sessionId) {
+  if (!sessionId || artifactsInFlight.has(sessionId)) return;
+  artifactsInFlight.add(sessionId);
+  try {
+    const res = await fetch(`/api/sessions/${sessionId}/artifacts`);
+    if (!res.ok) return;
+    const data = await res.json();
+    artifactsBySession.set(sessionId, data.artifacts || []);
+  } catch (_) {
+    return;
+  } finally {
+    artifactsInFlight.delete(sessionId);
+  }
+  const html = artifactsInnerHtml(sessionId);
+  for (const slot of document.querySelectorAll(`[data-artifacts-for="${CSS.escape(sessionId)}"]`)) {
+    slot.innerHTML = html;
+  }
 }
 
 // One delegated listener per section: the list is re-rendered on every change, so
@@ -8065,6 +8124,7 @@ async function showSessionInfoModal(sessionId) {
   _planSessionId = sessionId;
   const cachedTasks = currentSessionId === sessionId ? currentTasks : [];
   showInfoModal(session, null, cachedTasks, null, null);
+  ensureSessionArtifacts(sessionId);
 
   const rerender = (teamConfig, tasks, planContent, parentInfo) => {
     if (_planSessionId !== sessionId) return; // user opened a different modal
@@ -8251,6 +8311,7 @@ function showInfoModal(session, teamConfig, tasks, planContent, parentInfo) {
   }
 
   html += renderLinkedDocsHtml(session.id);
+  html += renderArtifactsHtml(session.id);
 
   // Team info section
   if (teamConfig) {
