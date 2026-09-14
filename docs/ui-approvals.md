@@ -55,9 +55,11 @@ A newer ask from the same session displaces the older one (the marker's `id` cha
 Every failure path degrades to today's behavior — the hook never blocks a session on a broken board:
 
 - `enabled: false`, or a question in `"permission"` mode → no wait
-- no `server.json` / board not listening on its port → no wait
+- no `server.json` → no wait
 - corrupt or empty decision file → no wait
 - `waitSeconds` elapsed → no wait
+
+A `server.json` whose port is closed is the one case that is not immediate: the server deletes its own beacon on the way out, so a beacon that outlives its port means the board is restarting — under the hub every sub-app binds an ephemeral port, so it comes back on a different one. The gate re-reads the beacon and re-probes every 5 s and gives up only after 15 s of an unreachable board.
 
 ## Scope
 
@@ -71,7 +73,7 @@ All under `<config-dir>/.cck/`:
 | Path | Writer | Purpose |
 |---|---|---|
 | `config.json` | you | cck settings; the `approvals` section holds the opt-out and tuning |
-| `server.json` | board server | `{port, pid}` liveness beacon |
+| `server.json` | board server | `{port, pid}` liveness beacon; written on start, removed on exit when the pid is still the server's own |
 | `agent-activity/<sid>/_waiting.json` | hook | the pending ask (kind, id, tool, input, suggestions) |
 | `agent-activity/<sid>/_decision-<id>.json` | board server | your answer; consumed and deleted by the hook |
 

@@ -86,17 +86,33 @@ case "$WAIT_SECONDS" in *[!0-9]* | "") WAIT_SECONDS=1800 ;; esac
 [ "$WAIT_SECONDS" -gt 1800 ] && WAIT_SECONDS=1800
 
 SERVER_INFO="$CCK_DIR/server.json"
-[ -f "$SERVER_INFO" ] || exit 0
-SERVER_PORT=$(jq -r '.port // empty' < "$SERVER_INFO" 2>/dev/null)
-[ -n "$SERVER_PORT" ] || exit 0
+
 # A TCP connect beats a pid probe: it proves the board is actually serving, and
 # it works in the stripped environment Claude Code spawns hooks into, where
-# kill -0 cannot see native Windows pids and ps may be missing from PATH
-(: < "/dev/tcp/127.0.0.1/$SERVER_PORT") 2>/dev/null || exit 0
+# kill -0 cannot see native Windows pids and ps may be missing from PATH. The
+# port is re-read on every probe, not cached: under the hub every sub-app binds
+# an ephemeral port, so a board that restarts mid-wait comes back on a new one.
+# $(<file) and =~ keep the probe free of jq and cat spawns (~280 ms each here).
+board_alive() {
+  local raw port
+  raw=$(<"$SERVER_INFO") 2>/dev/null || return 1
+  [[ $raw =~ \"port\"[[:space:]]*:[[:space:]]*([0-9]+) ]] || return 1
+  port=${BASH_REMATCH[1]}
+  (: < "/dev/tcp/127.0.0.1/$port") 2>/dev/null
+}
 
 DECISION="$DIR/_decision-$REQ_ID.json"
 # EPOCHSECONDS (bash 5) keeps the poll loop free of `date` spawns
 DEADLINE=$((EPOCHSECONDS + WAIT_SECONDS))
+# Probing once up front made one unreachable moment disarm the whole ask, so a
+# board restarting on a new port (every hub-spawned sub-app binds an ephemeral
+# one) took the ask with it. Probe on a cadence instead and only give up once
+# the board has been gone for the whole grace. The terminal prompt stays live
+# throughout either way.
+BOARD_PROBE_SECONDS=5
+BOARD_GRACE_SECONDS=15
+NEXT_PROBE=0
+UNREACHABLE_SINCE=0
 
 while :; do
   if [ -f "$DECISION" ]; then
@@ -140,6 +156,20 @@ while :; do
   # Windows (O2), and the marker is single-line jq -c output with a known id.
   IFS= read -r CUR_MARKER < "$MARKER" 2>/dev/null || exit 0
   case "$CUR_MARKER" in *"\"id\":\"$REQ_ID\""*) ;; *) exit 0 ;; esac
+
+  if [ "$EPOCHSECONDS" -ge "$NEXT_PROBE" ]; then
+    NEXT_PROBE=$((EPOCHSECONDS + BOARD_PROBE_SECONDS))
+    # No beacon at all = no board on this config dir, now or a moment ago: give
+    # up at once, exactly as before. A beacon whose port is closed is the
+    # restart window instead, so that one gets the grace.
+    [ -f "$SERVER_INFO" ] || exit 0
+    if board_alive; then
+      UNREACHABLE_SINCE=0
+    else
+      [ "$UNREACHABLE_SINCE" -eq 0 ] && UNREACHABLE_SINCE=$EPOCHSECONDS
+      [ $((EPOCHSECONDS - UNREACHABLE_SINCE)) -ge "$BOARD_GRACE_SECONDS" ] && exit 0
+    fi
+  fi
 
   [ "$EPOCHSECONDS" -ge "$DEADLINE" ] && exit 0
   sleep 0.5

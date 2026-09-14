@@ -96,13 +96,15 @@ ELAPSED=$(( $(date +%s) - START ))
 assert_eq "$OUT" "" "no output without server.json"
 [ "$ELAPSED" -le 2 ] && pass "instant exit without server.json" || fail "instant exit" "took ${ELAPSED}s"
 
-# A port nothing listens on = board closed
+# A port nothing listens on = the board is restarting (the server deletes its own
+# beacon on the way out), so the gate holds for the grace and gives up at the
+# deadline — waitSeconds=5 here, well inside BOARD_GRACE_SECONDS.
 echo '{"port":39799,"pid":999999}' > "$CCK_DIR/server.json"
 START=$(date +%s)
 OUT=$(run_hook "${PERM_INPUT/SID/s-deadsrv}")
 ELAPSED=$(( $(date +%s) - START ))
 assert_eq "$OUT" "" "no output with dead server port"
-[ "$ELAPSED" -le 3 ] && pass "instant exit on dead port" || fail "instant exit dead port" "took ${ELAPSED}s"
+[ "$ELAPSED" -ge 4 ] && [ "$ELAPSED" -le 8 ] && pass "waits out the grace on a dead port" || fail "dead-port grace" "took ${ELAPSED}s"
 
 # ─── Approve from the board ──────────────────────────────────────
 echo "Permission allow:"

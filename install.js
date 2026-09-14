@@ -130,11 +130,26 @@ async function runInstall({ pluginOnly = false } = {}) {
     if (!upd.ok) console.log(`    ${yellow('⚠')} Marketplace refresh failed: ${upd.error}`);
 
     const inst = runCLI('claude plugin install claude-code-kanban@claude-code-kanban', ['already installed', 'already exists']);
+    const alreadyInstalled = inst.idempotent || /already installed/i.test(inst.output || '');
     if (inst.ok) {
-      console.log(`    ${green('✓')} ${inst.idempotent ? 'Already installed' : 'Plugin installed'}`);
+      console.log(`    ${green('✓')} ${alreadyInstalled ? 'Already installed' : 'Plugin installed'}`);
     } else {
       console.log(`    ${red('✗')} Plugin install failed: ${inst.error}`);
       failed = true;
+    }
+
+    // `install` is a no-op once the plugin is present — it exits 0 and only says so
+    // on stdout — so a re-copied plugin keeps running from the old cached version
+    // until `update` pulls the new one in. That is how a config dir ends up serving
+    // a plugin older than the board it talks to.
+    if (alreadyInstalled) {
+      const upgrade = runCLI('claude plugin update claude-code-kanban', ['already at the latest']);
+      if (upgrade.ok) {
+        const line = (upgrade.output || '').split('\n').find(l => l.includes('updated from'));
+        console.log(`    ${green('✓')} ${line ? line.replace(/^[^A-Za-z]*/, '') : 'Already at the latest version'}`);
+      } else {
+        console.log(`    ${yellow('⚠')} Plugin update failed: ${upgrade.error}`);
+      }
     }
   } else {
     console.log(`    ${dim('Skipped')}`);
