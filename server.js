@@ -1678,6 +1678,48 @@ app.get('/api/sessions/:sessionId/artifacts', (req, res) => {
   }
 });
 
+// API: List the files at the top level of a session's scratchpad dir, newest first.
+// Flat on purpose, not a depth limit to relax later — sessions drop clones and build
+// output in there, and an unpruned walk costs three orders of magnitude more than the
+// readdir. Measurements in docs/session-scanning.md.
+app.get('/api/sessions/:sessionId/scratchpad-files', async (req, res) => {
+  try {
+    const metadata = loadSessionMetadata();
+    const id = metadata[req.params.sessionId] ? req.params.sessionId : resolveSessionId(req.params.sessionId);
+    const meta = metadata[id];
+    const dir = meta ? getScratchpadDir(id, meta) : null;
+    if (!dir) return res.json({ files: [] });
+
+    let entries;
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch (_) {
+      // The harness creates the dir lazily, so "missing" is the common case.
+      return res.json({ files: [] });
+    }
+
+    const stats = await Promise.all(
+      entries
+        .filter((entry) => entry.isFile())
+        .map(async (entry) => {
+          const full = path.join(dir, entry.name);
+          try {
+            const stat = await fs.stat(full);
+            return { name: entry.name, path: full, modifiedAt: new Date(stat.mtimeMs).toISOString() };
+          } catch (_) {
+            return null;
+          }
+        }),
+    );
+
+    const files = stats.filter(Boolean).sort((a, b) => (a.modifiedAt < b.modifiedAt ? 1 : -1));
+    res.json({ files });
+  } catch (error) {
+    console.error('Error listing scratchpad files:', error);
+    res.status(500).json({ error: 'Failed to list scratchpad files' });
+  }
+});
+
 // API: List workflow scripts for a session. Parses each script's meta for the
 // canonical name + description (cold path — only when the workflow modal opens).
 app.get('/api/sessions/:sessionId/workflows', async (req, res) => {
@@ -3016,9 +3058,23 @@ app.delete('/api/tasks/:sessionId/:taskId', async (req, res) => {
 
 // #region PREVIEW
 // API: File preview — read file and broadcast to clients
-const PREVIEW_KINDS = { '.md': 'markdown', '.markdown': 'markdown', '.html': 'html', '.htm': 'html' };
+// `text` files are shown as source, highlighted by extension, so the value doubles as
+// the hljs language name where the two differ. An allowlist rather than byte sniffing:
+// the client puts the whole response in the DOM, and a mislabelled binary would land
+// there as megabytes of mojibake.
+const PREVIEW_TEXT_EXTS =
+  'txt log csv tsv json jsonl ndjson yml yaml toml ini cfg conf env js mjs cjs ts tsx jsx py rb go rs java kt cs c h cpp hpp php pl lua sh bash zsh ps1 psm1 bat cmd sql graphql css scss less xml svg patch diff';
+const PREVIEW_KINDS = {
+  '.md': 'markdown',
+  '.markdown': 'markdown',
+  '.html': 'html',
+  '.htm': 'html',
+  ...Object.fromEntries(PREVIEW_TEXT_EXTS.split(' ').map((ext) => [`.${ext}`, 'text'])),
+};
 // Whole files are pushed into a modal, so anything huge freezes the tab regardless of kind.
 const PREVIEW_MAX_BYTES = 8 * 1024 * 1024;
+// Source in a modal is for reading, not for scrolling a generated bundle.
+const PREVIEW_TEXT_MAX_BYTES = 2 * 1024 * 1024;
 
 function previewError(status, message) {
   const err = new Error(message);
@@ -3046,12 +3102,10 @@ async function statFileTarget(absPath) {
 // validation (and its status codes) but never the content.
 async function validatePreviewFile(absPath) {
   const { kind, size } = await statFileTarget(absPath);
-  if (!kind) throw previewError(400, 'Only .md/.markdown/.html/.htm files are allowed');
-  if (size > PREVIEW_MAX_BYTES) {
-    throw previewError(
-      400,
-      `Preview too large (${Math.round(size / 1048576)}MB, max ${PREVIEW_MAX_BYTES / 1048576}MB)`
-    );
+  if (!kind) throw previewError(400, 'Not a previewable text, markdown or HTML file');
+  const max = kind === 'text' ? PREVIEW_TEXT_MAX_BYTES : PREVIEW_MAX_BYTES;
+  if (size > max) {
+    throw previewError(400, `Preview too large (${Math.round(size / 1048576)}MB, max ${max / 1048576}MB)`);
   }
   return { kind, size };
 }

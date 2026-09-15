@@ -2474,6 +2474,9 @@ body::before {
   opacity: 0.3;
   transition: opacity 0.15s ease;
 }
+.info-grid-after {
+  grid-column: 1 / -1;
+}
 .info-grid:hover .row-actions {
   opacity: 1;
 }
@@ -3904,6 +3907,7 @@ body::before {
 }
 
 .linked-doc-list,
+.scratch-file-list,
 .artifact-list {
   list-style: none;
   padding: 0;
@@ -3914,6 +3918,7 @@ body::before {
 }
 
 .linked-doc-item,
+.scratch-file-item,
 .artifact-item {
   display: flex;
   align-items: baseline;
@@ -3922,6 +3927,7 @@ body::before {
 }
 
 .linked-doc-link,
+.scratch-file-link,
 .artifact-link {
   color: var(--accent-text);
   text-decoration: underline;
@@ -3930,7 +3936,8 @@ body::before {
   flex-shrink: 0;
 }
 
-.linked-doc-path {
+.linked-doc-path,
+.scratch-file-time {
   color: var(--text-muted);
   font-size: 11px;
   opacity: 0.7;
@@ -3944,6 +3951,7 @@ body::before {
    here, per grid in the session info. margin-left:auto pins the group to the same
    right edge however long the names in between are. */
 .linked-doc-actions,
+.scratch-file-actions,
 .artifact-actions {
   margin-left: auto;
   align-self: center;
@@ -3951,8 +3959,35 @@ body::before {
 }
 
 .linked-doc-item:hover .linked-doc-actions,
+.scratch-file-item:hover .scratch-file-actions,
 .artifact-item:hover .artifact-actions {
   opacity: 1;
+}
+
+/* Hangs off the Scratchpad path row, so it carries no header of its own — the
+   indent is what reads as "these are in that dir". */
+.scratch-files-section {
+  margin-top: 6px;
+  padding-left: 12px;
+  font-size: 11px;
+}
+
+.scratch-file-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.scratch-file-time {
+  flex-shrink: 0;
+}
+
+.scratch-files-more {
+  margin: 6px 0 0;
+  font-size: 11px;
 }
 
 /* The × is a glyph, not an svg, so .row-actions button svg does not size it. */
@@ -3983,7 +4018,8 @@ body::before {
 
 /* Artifacts are read out of the transcript, so the section renders before the
    list arrives and stays in the DOM as the patch target when there is none. */
-.artifacts-section:empty {
+.artifacts-section:empty,
+.scratch-files-section:empty {
   display: none;
 }
 
@@ -4596,6 +4632,29 @@ body.light .msg-assistant .msg-text {
   flex: 1 1 auto;
   overflow: hidden;
   padding-right: 0;
+}
+
+/* Source is read line by line, so it keeps its own line breaks and scrolls sideways
+   instead of inheriting the body's `word-break: break-word`. */
+.preview-source {
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow-x: auto;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre;
+  word-break: normal;
+  tab-size: 4;
+}
+
+.preview-source code {
+  background: none;
+  padding: 0;
+  font: inherit;
 }
 
 .preview-html-frame {

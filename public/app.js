@@ -3306,6 +3306,7 @@ function renderSessions() {
       </div>`;
     bindLinkedDocsHandlers(sessionsList.querySelector('.linked-docs-section'), zenSession.id);
     ensureSessionArtifacts(zenSession.id);
+    ensureScratchFiles(zenSession.id);
     return;
   }
 
@@ -6304,6 +6305,23 @@ function bindPreviewRelativeLinks(bodyEl) {
 }
 
 // `kind` comes from the server, which is the only place that decides what is previewable.
+// hljs gets the extension as the language hint and `highlightAuto` is deliberately not
+// the fallback: on a config or data file it guesses wildly, and wrong colors read as a
+// broken file. Above the size cap it is skipped outright — it is O(size) with heavy
+// backtracking on the main thread, and .jsonl/.log files in a scratchpad reach megabytes.
+const HLJS_MAX_CHARS = 256 * 1024;
+
+function renderSourcePreview(filePath, content) {
+  const ext = (filePath.split('.').pop() || '').toLowerCase();
+  if (typeof hljs !== 'undefined' && content.length <= HLJS_MAX_CHARS && hljs.getLanguage(ext)) {
+    try {
+      const value = hljs.highlight(content, { language: ext, ignoreIllegals: true }).value;
+      return `<pre class="preview-source"><code class="hljs language-${ext}">${value}</code></pre>`;
+    } catch (_) {}
+  }
+  return `<pre class="preview-source"><code class="hljs">${escapeHtml(content)}</code></pre>`;
+}
+
 function openPreviewModal(filePath, content, kind) {
   currentPreviewPath = filePath;
   document.getElementById('preview-modal-title').textContent = filePath.split(/[\\/]/).pop();
@@ -6313,6 +6331,8 @@ function openPreviewModal(filePath, content, kind) {
   bindPreviewRelativeLinks(bodyEl);
   if (isHtml) {
     renderHtmlPreview(bodyEl, content);
+  } else if (kind === 'text') {
+    bodyEl.innerHTML = renderSourcePreview(filePath, content);
   } else {
     const { fm, body } = splitFrontmatter(content);
     bodyEl.innerHTML = (fm ? renderFrontmatterBlock(fm) : '') + renderMarkdown(body);
@@ -6375,20 +6395,28 @@ function closePreviewModal() {
   currentPreviewPath = null;
 }
 
+function openFileInEditor(filePath) {
+  postAndToast('/api/open-in-editor', { file: filePath }, 'in editor');
+}
+
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
 function openPreviewInEditor() {
   if (!currentPreviewPath) return;
-  postAndToast('/api/open-in-editor', { file: currentPreviewPath }, 'in editor');
+  openFileInEditor(currentPreviewPath);
 }
 
-async function openPreviewByPath(filePath, base) {
+// The server is the only place that knows what it can render, so a 400 is its answer
+// to "not previewable" rather than a failure: callers that have a fallback destination
+// pass `onUnsupported` instead of keeping a copy of the extension list here.
+async function openPreviewByPath(filePath, base, onUnsupported) {
   if (!filePath) return;
   try {
     const qs = new URLSearchParams({ path: filePath });
     if (base) qs.set('base', base);
     const r = await fetch(`/api/preview?${qs}`);
     if (!r.ok) {
-      showToast('Preview file unavailable');
+      if (r.status === 400 && onUnsupported) onUnsupported(filePath);
+      else showToast('Preview file unavailable');
       return;
     }
     const data = await r.json();
@@ -6589,10 +6617,84 @@ async function ensureSessionArtifacts(sessionId) {
   } finally {
     artifactsInFlight.delete(sessionId);
   }
-  const html = artifactsInnerHtml(sessionId);
-  for (const slot of document.querySelectorAll(`[data-artifacts-for="${CSS.escape(sessionId)}"]`)) {
+  paintSectionSlots('data-artifacts-for', sessionId, artifactsInnerHtml(sessionId));
+}
+
+// One record per session: `{ at, files, expanded }`. Unlike the artifacts scan the
+// server caches nothing here, so a TTL is what stops the zen panel — re-rendered on
+// every SSE tick — from turning a readdir plus a stat per file into a 2 s poll.
+const scratchFilesBySession = new Map();
+const scratchFilesInFlight = new Set();
+const SCRATCH_FILES_COLLAPSED = 5;
+const SCRATCH_FILES_TTL_MS = 10000;
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+function openScratchFile(filePath) {
+  openPreviewByPath(filePath, undefined, openFileInEditor);
+}
+
+function scratchFilesInnerHtml(sessionId) {
+  const entry = scratchFilesBySession.get(sessionId);
+  const list = entry?.files || [];
+  if (!list.length) return '';
+  const shown = entry.expanded ? list : list.slice(0, SCRATCH_FILES_COLLAPSED);
+  const items = shown
+    .map(
+      (f) => `<li class="scratch-file-item">
+        <button type="button" class="scratch-file-link" data-file="${escapeHtml(f.path)}" onclick="openScratchFile(this.dataset.file)" title="${escapeHtml(f.path)}">${escapeHtml(f.name)}</button>
+        <span class="scratch-file-time">${formatDate(f.modifiedAt)}</span>
+        <span class="row-actions scratch-file-actions">
+          <button type="button" data-file="${escapeHtml(f.path)}" onclick="copyWithFeedback(this.dataset.file, this)" title="Copy path" aria-label="Copy file path">${ICON_COPY}</button>
+          <button type="button" data-file="${escapeHtml(f.path)}" onclick="openFileInEditor(this.dataset.file)" title="Open in editor" aria-label="Open file in editor">${ICON_OPEN_EXTERNAL}</button>
+        </span>
+      </li>`,
+    )
+    .join('');
+  const more =
+    list.length > SCRATCH_FILES_COLLAPSED
+      ? `<button type="button" class="expand-toggle-btn scratch-files-more" onclick="toggleScratchFiles('${escAttrJs(sessionId)}')">${entry.expanded ? 'Show less' : `Show all ${list.length}`}</button>`
+      : '';
+  return `<ul class="scratch-file-list">${items}</ul>${more}`;
+}
+
+function renderScratchFilesHtml(sessionId) {
+  return `<div class="scratch-files-section" data-scratch-files-for="${escapeHtml(sessionId)}">${scratchFilesInnerHtml(sessionId)}</div>`;
+}
+
+function paintSectionSlots(attr, sessionId, html) {
+  for (const slot of document.querySelectorAll(`[${attr}="${CSS.escape(sessionId)}"]`)) {
     slot.innerHTML = html;
   }
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+function toggleScratchFiles(sessionId) {
+  const entry = scratchFilesBySession.get(sessionId);
+  if (!entry) return;
+  entry.expanded = !entry.expanded;
+  paintSectionSlots('data-scratch-files-for', sessionId, scratchFilesInnerHtml(sessionId));
+}
+
+async function ensureScratchFiles(sessionId) {
+  if (!sessionId || scratchFilesInFlight.has(sessionId)) return;
+  const cached = scratchFilesBySession.get(sessionId);
+  if (cached && Date.now() - cached.at < SCRATCH_FILES_TTL_MS) return;
+  scratchFilesInFlight.add(sessionId);
+  try {
+    const res = await fetch(`/api/sessions/${sessionId}/scratchpad-files`);
+    if (!res.ok) return;
+    const data = await res.json();
+    scratchFilesBySession.set(sessionId, {
+      at: Date.now(),
+      files: data.files || [],
+      expanded: cached?.expanded || false,
+    });
+  } catch (_) {
+    return;
+  } finally {
+    scratchFilesInFlight.delete(sessionId);
+  }
+  paintSectionSlots('data-scratch-files-for', sessionId, scratchFilesInnerHtml(sessionId));
 }
 
 // One delegated listener per section: the list is re-rendered on every change, so
@@ -8125,6 +8227,7 @@ async function showSessionInfoModal(sessionId) {
   const cachedTasks = currentSessionId === sessionId ? currentTasks : [];
   showInfoModal(session, null, cachedTasks, null, null);
   ensureSessionArtifacts(sessionId);
+  ensureScratchFiles(sessionId);
 
   const rerender = (teamConfig, tasks, planContent, parentInfo) => {
     if (_planSessionId !== sessionId) return; // user opened a different modal
@@ -8196,7 +8299,8 @@ function renderScratchpadRow(session) {
       <button onclick="copyWithFeedback('${escAttrJs(dir)}', this)" title="Copy">${ICON_COPY}</button>
       <button data-folder="${escapeHtml(dir)}" onclick="openFolderInEditor(this.dataset.folder)" title="Open in editor">${ICON_OPEN_EXTERNAL}</button>
     </span>
-  </div>`;
+  </div>
+  ${renderScratchFilesHtml(session.id)}`;
 }
 
 function showInfoModal(session, teamConfig, tasks, planContent, parentInfo) {
@@ -8251,7 +8355,11 @@ function showInfoModal(session, teamConfig, tasks, planContent, parentInfo) {
     infoRows.push([
       'Scratchpad',
       session.scratchpadDir,
-      { openPath: session.scratchpadDir, abbrev: abbreviateScratchpadDir(session.scratchpadDir) },
+      {
+        openPath: session.scratchpadDir,
+        abbrev: abbreviateScratchpadDir(session.scratchpadDir),
+        after: renderScratchFilesHtml(session.id),
+      },
     ]);
   }
   if (session.sharedTaskList) {
@@ -8281,6 +8389,9 @@ function showInfoModal(session, teamConfig, tasks, planContent, parentInfo) {
       openBtn = `<button data-folder="${folder}" data-file="${file}" data-claude-dir="${opts.openClaudeDir ? '1' : ''}" onclick="openFolderInEditor(this.dataset.claudeDir ? undefined : this.dataset.folder, this.dataset.file || undefined)" title="Open in editor">${ICON_OPEN_EXTERNAL}</button>`;
     }
     html += `<span class="row-actions">${copyBtn}${openBtn}</span>`;
+    // Spans all three columns so the extra hangs under its own row rather than
+    // being pushed into the next row's label cell.
+    if (opts?.after) html += `<span class="info-grid-after">${opts.after}</span>`;
   });
   html += `</div>`;
 
