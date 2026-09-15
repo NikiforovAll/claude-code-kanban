@@ -6710,7 +6710,7 @@ function workflowLiveInnerHtml(sessionId) {
     .map((p) => {
       const state = p.started === 0 ? 'pending' : p.done >= p.started ? 'done' : 'running';
       const count = p.started ? `${p.done}/${p.started}` : '';
-      return `<span class="wf-live-phase ${state}">
+      return `<span class="wf-live-phase ${escapeHtml(state)}">
         <span class="wf-live-phase-title">${escapeHtml(p.title)}</span>
         <span class="wf-live-phase-count">${count}</span>
       </span>`;
