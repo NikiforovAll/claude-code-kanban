@@ -6321,7 +6321,7 @@ function renderSourcePreview(filePath, content) {
   if (typeof hljs !== 'undefined' && content.length <= HLJS_MAX_CHARS && hljs.getLanguage(ext)) {
     try {
       const value = hljs.highlight(content, { language: ext, ignoreIllegals: true }).value;
-      return `<pre class="preview-source"><code class="hljs language-${ext}">${value}</code></pre>`;
+      return `<pre class="preview-source"><code class="hljs language-${escapeHtml(ext)}">${value}</code></pre>`;
     } catch (_) {}
   }
   return `<pre class="preview-source"><code class="hljs">${escapeHtml(content)}</code></pre>`;
@@ -6673,9 +6673,9 @@ function scratchFilesInnerHtml(sessionId) {
   const shown = expanded ? list : list.slice(0, SCRATCH_FILES_COLLAPSED);
   const items = shown
     .map((f) => {
-      const filePath = escapeHtml(f.path);
-      return `<li class="scratch-file-item" data-file="${filePath}">
-        <button type="button" class="scratch-file-link" onclick="openScratchFile(this.parentNode.dataset.file)" title="${filePath}">${escapeHtml(f.name)}</button>
+      const escPath = escapeHtml(f.path);
+      return `<li class="scratch-file-item" data-file="${escPath}">
+        <button type="button" class="scratch-file-link" onclick="openScratchFile(this.parentNode.dataset.file)" title="${escPath}">${escapeHtml(f.name)}</button>
         <span class="scratch-file-time">${formatDate(f.modifiedAt)}</span>
         <span class="row-actions scratch-file-actions">
           <button type="button" onclick="copyWithFeedback(this.closest('li').dataset.file, this)" title="Copy path" aria-label="Copy file path">${ICON_COPY}</button>
