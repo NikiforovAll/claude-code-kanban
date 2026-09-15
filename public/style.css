@@ -900,17 +900,6 @@ body::before {
   gap: 3px 10px;
 }
 
-.zen-panel .linked-docs-section {
-  margin-top: 12px;
-  padding-top: 10px;
-  border-top: 1px solid var(--border);
-}
-
-.zen-panel .artifacts-section {
-  padding-top: 10px;
-  border-top: 1px solid var(--border);
-}
-
 .zen-scratchpad {
   display: flex;
   align-items: center;
@@ -2474,9 +2463,6 @@ body::before {
   opacity: 0.3;
   transition: opacity 0.15s ease;
 }
-.info-grid-after {
-  grid-column: 1 / -1;
-}
 .info-grid:hover .row-actions {
   opacity: 1;
 }
@@ -3956,6 +3942,10 @@ body::before {
   margin-left: auto;
   align-self: center;
   flex-shrink: 0;
+  /* Two .row-actions buttons wide (22px each, 4px gap), filled from the left, so a
+     row with one action puts it in the same column as the rows that have two. */
+  min-width: 48px;
+  justify-content: flex-start;
 }
 
 .linked-doc-item:hover .linked-doc-actions,
@@ -3964,11 +3954,9 @@ body::before {
   opacity: 1;
 }
 
-/* Hangs off the Scratchpad path row, so it carries no header of its own — the
-   indent is what reads as "these are in that dir". */
+/* Hangs off the Scratchpad path row, so it carries no header of its own. */
 .scratch-files-section {
   margin-top: 6px;
-  padding-left: 12px;
   font-size: 11px;
 }
 
@@ -3979,6 +3967,13 @@ body::before {
   font: inherit;
   cursor: pointer;
   text-align: left;
+  /* A scratch name can be longer than the zen panel is wide; without this it pushes
+     the action buttons out of their column. The full path is on the title. */
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .scratch-file-time {
@@ -4013,7 +4008,13 @@ body::before {
 /* A section of the session panel: linked documents, artifacts. */
 .panel-section {
   margin-bottom: 16px;
-  font-size: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+}
+
+.linked-docs-section {
+  margin-top: 12px;
 }
 
 /* Artifacts are read out of the transcript, so the section renders before the

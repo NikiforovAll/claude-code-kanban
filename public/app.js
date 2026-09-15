@@ -1392,9 +1392,13 @@ function clearWaitingUi() {
   waitingCustomDraft = {};
   if (currentMsgDetailIdx === MSG_DETAIL_WAITING_IDX) {
     // In follow mode stay in the modal and swap to the latest message —
-    // closing it would silently drop the user out of following.
-    if (msgDetailFollowLatest && currentMessages.length) showMsgDetail(currentMessages.length - 1);
-    else closeMsgDetailModal();
+    // closing it would silently drop the user out of following. An ask that
+    // opened its own window is the exception: there was no following to drop.
+    if (msgDetailFollowLatest && !waitingDetailAutoOpened && currentMessages.length) {
+      showMsgDetail(currentMessages.length - 1);
+    } else {
+      closeMsgDetailModal();
+    }
   }
   // The saved-plan modal stays open after a decision — only its approval row goes
   document.getElementById('plan-approval-footer')?.remove();
@@ -2023,6 +2027,7 @@ function showMsgDetail(idx) {
 function closeMsgDetailModal() {
   hideModalOverlay('msg-detail-modal');
   msgDetailFollowLatest = false;
+  waitingDetailAutoOpened = false;
   // Drop the message highlight on close, mirroring task-card behavior.
   msgHighlightDimmed = true;
   const container = document.getElementById('message-panel-content');
@@ -6625,7 +6630,7 @@ async function ensureSessionArtifacts(sessionId) {
 // every SSE tick — from turning a readdir plus a stat per file into a 2 s poll.
 const scratchFilesBySession = new Map();
 const scratchFilesInFlight = new Set();
-const SCRATCH_FILES_COLLAPSED = 5;
+const SCRATCH_FILES_COLLAPSED = 3;
 const SCRATCH_FILES_TTL_MS = 10000;
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
@@ -7101,11 +7106,16 @@ function maybeFollowLatest() {
 // on the card and the badge until they get to it. Each ask id is offered once,
 // so closing the modal does not bring it back on the next poll.
 let lastAutoOpenedWaitingId = null;
+// Set only on that self-opening path: answering an ask the user never asked to see
+// should put the screen back the way it was, where answering one they navigated to
+// keeps them following. Cleared with the modal, so a manual reopen is not "auto".
+let waitingDetailAutoOpened = false;
 function maybeAutoOpenWaiting() {
   if (!isWaitingAnswerable() || !isWaitingFresh()) return;
   if (currentWaiting.id === lastAutoOpenedWaitingId || isAnyModalOpen()) return;
   lastAutoOpenedWaitingId = currentWaiting.id;
   msgDetailFollowLatest = true;
+  waitingDetailAutoOpened = true;
   maybeFollowLatest();
 }
 
@@ -8227,7 +8237,6 @@ async function showSessionInfoModal(sessionId) {
   const cachedTasks = currentSessionId === sessionId ? currentTasks : [];
   showInfoModal(session, null, cachedTasks, null, null);
   ensureSessionArtifacts(sessionId);
-  ensureScratchFiles(sessionId);
 
   const rerender = (teamConfig, tasks, planContent, parentInfo) => {
     if (_planSessionId !== sessionId) return; // user opened a different modal
@@ -8355,11 +8364,7 @@ function showInfoModal(session, teamConfig, tasks, planContent, parentInfo) {
     infoRows.push([
       'Scratchpad',
       session.scratchpadDir,
-      {
-        openPath: session.scratchpadDir,
-        abbrev: abbreviateScratchpadDir(session.scratchpadDir),
-        after: renderScratchFilesHtml(session.id),
-      },
+      { openPath: session.scratchpadDir, abbrev: abbreviateScratchpadDir(session.scratchpadDir) },
     ]);
   }
   if (session.sharedTaskList) {
@@ -8389,9 +8394,6 @@ function showInfoModal(session, teamConfig, tasks, planContent, parentInfo) {
       openBtn = `<button data-folder="${folder}" data-file="${file}" data-claude-dir="${opts.openClaudeDir ? '1' : ''}" onclick="openFolderInEditor(this.dataset.claudeDir ? undefined : this.dataset.folder, this.dataset.file || undefined)" title="Open in editor">${ICON_OPEN_EXTERNAL}</button>`;
     }
     html += `<span class="row-actions">${copyBtn}${openBtn}</span>`;
-    // Spans all three columns so the extra hangs under its own row rather than
-    // being pushed into the next row's label cell.
-    if (opts?.after) html += `<span class="info-grid-after">${opts.after}</span>`;
   });
   html += `</div>`;
 

@@ -3071,6 +3071,22 @@ const PREVIEW_KINDS = {
   '.htm': 'html',
   ...Object.fromEntries(PREVIEW_TEXT_EXTS.split(' ').map((ext) => [`.${ext}`, 'text'])),
 };
+// A scratchpad collects files whose real extension is buried under a trailing one —
+// report.html.before, app.js.map, config.env.local, page.html~. One hop past an
+// extension the allowlist does not know asks the question that actually decides the
+// kind, "is the extension under it previewable", instead of enumerating the suffix
+// conventions a session might invent. Compressed suffixes stop the hop: the bytes
+// beneath them are binary, which is what the allowlist exists to keep out of the DOM.
+const PREVIEW_OPAQUE_EXTS = new Set(['.gz', '.br', '.zst', '.xz', '.bz2', '.zip', '.7z']);
+
+function previewKindFor(absPath) {
+  const trimmed = absPath.replace(/~+$/, '');
+  const ext = path.extname(trimmed).toLowerCase();
+  if (PREVIEW_KINDS[ext]) return PREVIEW_KINDS[ext];
+  if (!ext || PREVIEW_OPAQUE_EXTS.has(ext)) return null;
+  return PREVIEW_KINDS[path.extname(trimmed.slice(0, -ext.length)).toLowerCase()] || null;
+}
+
 // Whole files are pushed into a modal, so anything huge freezes the tab regardless of kind.
 const PREVIEW_MAX_BYTES = 8 * 1024 * 1024;
 // Source in a modal is for reading, not for scrolling a generated bundle.
@@ -3089,7 +3105,7 @@ async function statFileTarget(absPath) {
   try {
     const stats = await fs.stat(absPath);
     if (!stats.isFile()) throw previewError(400, 'Not a file');
-    return { size: stats.size, kind: PREVIEW_KINDS[path.extname(absPath).toLowerCase()] || null };
+    return { size: stats.size, kind: previewKindFor(absPath) };
   } catch (e) {
     if (e.status) throw e;
     if (e.code === 'ENOENT') throw previewError(404, 'File not found');
@@ -3267,7 +3283,9 @@ app.get('/api/preview', async (req, res) => {
     const { content, kind } = await readPreviewFile(abs);
     res.json({ path: abs, content, kind });
   } catch (error) {
-    console.error('Error in GET /api/preview:', error);
+    // A previewError carries the status it wants reported and is an answer, not a
+    // failure — the scratchpad rows probe this endpoint and route a 400 to the editor.
+    if (!error.status) console.error('Error in GET /api/preview:', error);
     res.status(error.status || 500).json({ error: error.message || 'Preview failed' });
   }
 });
