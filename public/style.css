@@ -645,7 +645,9 @@ body::before {
   padding-right: 22px;
 }
 
-.session-indicators .pulse {
+.session-indicators .pulse,
+.wf-live-name .pulse {
+  flex: none;
   width: 6px;
   height: 6px;
   background: var(--accent);
@@ -769,7 +771,10 @@ body::before {
   transition: width 0.5s ease-out;
 }
 
-.session-item:not(.active) .progress-fill {
+/* The live-workflow bar takes the muted fill too: its card already carries a pulsing
+   accent dot, and a second accent bar under it shouts. */
+.session-item:not(.active) .progress-fill,
+.wf-live-bar .progress-fill {
   background: color-mix(in srgb, var(--text-tertiary) 55%, transparent);
 }
 
@@ -4031,6 +4036,17 @@ body::before {
   display: none;
 }
 
+/* Its own card below the zen panel — the run is live state, not session detail, so it
+   comes and goes on its own while the panel above stays put. */
+.workflow-live-section {
+  margin-top: 10px;
+  padding: 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 11px;
+}
+
 .wf-live {
   cursor: pointer;
 }
@@ -4047,28 +4063,8 @@ body::before {
   white-space: nowrap;
 }
 
-.wf-live-name .pulse {
-  flex: none;
-  width: 6px;
-  height: 6px;
-  background: var(--accent);
-  border-radius: 50%;
-  animation: pulse 2s ease-in-out infinite;
-}
-
 .wf-live-bar {
-  height: 3px;
   margin: 6px 0;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: 2px;
-  overflow: hidden;
-}
-
-.wf-live-fill {
-  height: 100%;
-  background: var(--accent);
-  transition: width 0.3s ease;
 }
 
 .wf-live-phases {

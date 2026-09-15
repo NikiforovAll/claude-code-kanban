@@ -1729,21 +1729,17 @@ app.get('/api/sessions/:sessionId/scratchpad-files', async (req, res) => {
 
 // API: List workflow scripts for a session. Parses each script's meta for the
 // canonical name + description (cold path — only when the workflow modal opens).
-app.get('/api/sessions/:sessionId/workflows', async (req, res) => {
+app.get('/api/sessions/:sessionId/workflows', (req, res) => {
   try {
-    const scripts = getWorkflowScripts(req.params.sessionId);
-    const workflows = await Promise.all(
-      scripts.map(async (w) => {
-        let meta = {};
-        try { meta = parseWorkflowMeta(await fs.readFile(w.path, 'utf8')); } catch (_) {}
-        return {
-          id: w.id,
-          name: meta.name || w.name,
-          description: meta.description || null,
-          modifiedAt: w.mtimeMs ? new Date(w.mtimeMs).toISOString() : null,
-        };
-      }),
-    );
+    const workflows = getWorkflowScripts(req.params.sessionId).map((w) => {
+      const meta = getWorkflowMeta(w.path);
+      return {
+        id: w.id,
+        name: meta.name || w.name,
+        description: meta.description || null,
+        modifiedAt: w.mtimeMs ? new Date(w.mtimeMs).toISOString() : null,
+      };
+    });
     res.json({ workflows });
   } catch (error) {
     console.error('Error listing workflows:', error);
@@ -1777,6 +1773,20 @@ function matchStr(src, key) {
   return m ? m[2] : null;
 }
 
+const workflowMetaCache = new Map();
+const EMPTY_WORKFLOW_META = { name: null, description: null, phases: [] };
+// A script never changes mid-run, and three endpoints parse the same file — one of them
+// on a poll — so key the parse by the script's mtime.
+function getWorkflowMeta(scriptPath) {
+  return cachedByMtime(
+    workflowMetaCache,
+    scriptPath,
+    scriptPath,
+    () => parseWorkflowMeta(readFileSync(scriptPath, 'utf8')),
+    EMPTY_WORKFLOW_META,
+  );
+}
+
 function parseWorkflowMeta(source) {
   const meta = { name: matchStr(source, 'name'), description: matchStr(source, 'description'), phases: [] };
   const phasesM = source.match(/phases\s*:\s*\[([\s\S]*?)\]/);
@@ -1789,24 +1799,59 @@ function parseWorkflowMeta(source) {
   return meta;
 }
 
-// journal.jsonl records {type:'started',agentId} then {type:'result',agentId,...}
-// per workflow agent. Map agentId → {started, done}; done count matches the
-// "N/M agents" ratio the /workflows viewer shows.
+// journal.jsonl records {type:'started',agentId,phase,label} then
+// {type:'result',agentId,...} per workflow agent. Map agentId →
+// {started, done, phase, label}; done count matches the "N/M agents" ratio the
+// /workflows viewer shows.
+const workflowJournalCache = new Map();
+function workflowJournalPath(runDir) {
+  return path.join(runDir, 'journal.jsonl');
+}
+
 function readWorkflowJournal(runDir) {
+  const journalPath = workflowJournalPath(runDir);
+  return cachedByMtime(workflowJournalCache, journalPath, journalPath, () => parseWorkflowJournal(journalPath), new Map());
+}
+
+function parseWorkflowJournal(journalPath) {
   const status = new Map();
   let content;
-  try { content = readFileSync(path.join(runDir, 'journal.jsonl'), 'utf8'); } catch { return status; }
+  try { content = readFileSync(journalPath, 'utf8'); } catch { return status; }
   for (const line of content.split('\n')) {
     if (!line.trim()) continue;
     let o;
     try { o = JSON.parse(line); } catch { continue; }
     if (!o.agentId) continue;
-    const e = status.get(o.agentId) || { started: false, done: false };
+    const e = status.get(o.agentId) || { started: false, done: false, phase: null, label: null };
     if (o.type === 'started') e.started = true;
     else if (o.type === 'result') e.done = true;
+    if (o.phase) e.phase = o.phase;
+    if (o.label) e.label = o.label;
     status.set(o.agentId, e);
   }
   return status;
+}
+
+// One definition of "how far along is this run", shared by the modal's /run view and
+// the sidebar widget, so the two can never disagree about what counts as done.
+function summarizeWorkflowJournal(journal) {
+  const byPhase = new Map();
+  const running = [];
+  let startedCount = 0;
+  let doneCount = 0;
+  for (const e of journal.values()) {
+    if (!e.started) continue;
+    const phase = e.phase || '';
+    const c = byPhase.get(phase) || { started: 0, done: 0 };
+    startedCount++;
+    c.started++;
+    if (e.done) {
+      doneCount++;
+      c.done++;
+    } else running.push(e.label || phase || 'agent');
+    byPhase.set(phase, c);
+  }
+  return { startedCount, doneCount, byPhase, running };
 }
 
 // A workflow's run artifacts (journal + agent transcripts) live at
@@ -1816,8 +1861,9 @@ function readWorkflowJournal(runDir) {
 // then to scanning every project/session (the session dir can sit under a
 // different projEnc than the script when a workflow runs from another cwd). wfId
 // comes from the trusted script index (validated filename), so it can't
-// traverse. Cold path only.
-function resolveWorkflowRunDir(meta, wfId, scriptPath) {
+// traverse. That last scan is a cold path only — `skipScan` is what keeps it out
+// of the polled live view, where a script with no run dir would pay it every tick.
+function resolveWorkflowRunDir(meta, wfId, scriptPath, skipScan = false) {
   const rel = path.join('subagents', 'workflows', wfId);
   if (scriptPath) {
     const sessionDir = path.dirname(path.dirname(path.dirname(scriptPath)));
@@ -1828,6 +1874,7 @@ function resolveWorkflowRunDir(meta, wfId, scriptPath) {
     const local = path.join(sessionDirFromMeta(meta), rel);
     if (existsSync(local)) return local;
   }
+  if (skipScan) return null;
   try {
     for (const proj of readdirSync(PROJECTS_DIR, { withFileTypes: true })) {
       if (!proj.isDirectory()) continue;
@@ -1846,15 +1893,13 @@ function resolveWorkflowRunDir(meta, wfId, scriptPath) {
 
 // API: Workflow run state — declared phases (from the script) plus the agent
 // roster (type/model/output-tokens/duration/status) reconstructed from the run
-// dir's journal + transcripts. Phase↔agent mapping and per-agent labels are
-// runtime-only and never persisted, so the roster is flat by design.
+// dir's journal + transcripts. The roster is flat: the journal carries each
+// agent's phase and label, but the modal lists agents in start order.
 app.get('/api/sessions/:sessionId/workflows/:wfId/run', async (req, res) => {
   try {
     const wf = getWorkflowScripts(req.params.sessionId).find((w) => w.id === req.params.wfId);
     if (!wf) return res.status(404).json({ error: 'Workflow not found' });
-    let source = '';
-    try { source = await fs.readFile(wf.path, 'utf8'); } catch (_) {}
-    const parsed = parseWorkflowMeta(source);
+    const parsed = getWorkflowMeta(wf.path);
 
     const sessionId = resolveSessionId(req.params.sessionId);
     const meta = loadSessionMetadata()[sessionId] || {};
@@ -1873,17 +1918,19 @@ app.get('/api/sessions/:sessionId/workflows/:wfId/run', async (req, res) => {
         try {
           type = JSON.parse(readFileSync(path.join(runDir, `agent-${agentId}.meta.json`), 'utf8')).agentType || null;
         } catch (_) {}
-        const done = journal.get(agentId)?.done;
+        const entry = journal.get(agentId);
         const durationMs = stats.firstTs && stats.lastTs ? new Date(stats.lastTs) - new Date(stats.firstTs) : null;
         if (stats.lastTs && (!stoppedAt || stats.lastTs > stoppedAt)) stoppedAt = stats.lastTs;
         agents.push({
           agentId,
           type,
+          phase: entry?.phase || null,
+          label: entry?.label || null,
           model: stats.model || null,
           outputTokens: stats.outputTokens || 0,
           durationMs,
           startedAt: stats.firstTs || null,
-          status: done ? 'done' : 'running',
+          status: entry?.done ? 'done' : 'running',
         });
       }
       agents.sort((a, b) => (a.startedAt || '').localeCompare(b.startedAt || ''));
@@ -1891,12 +1938,7 @@ app.get('/api/sessions/:sessionId/workflows/:wfId/run', async (req, res) => {
     // Roster is start-ordered, so the earliest start is simply the first agent.
     const startedAt = agents[0]?.startedAt || null;
 
-    let startedCount = 0;
-    let doneCount = 0;
-    for (const e of journal.values()) {
-      if (e.started) startedCount++;
-      if (e.done) doneCount++;
-    }
+    let { startedCount, doneCount } = summarizeWorkflowJournal(journal);
     if (!startedCount) {
       startedCount = agents.length;
       doneCount = agents.filter((a) => a.status === 'done').length;
@@ -1916,6 +1958,58 @@ app.get('/api/sessions/:sessionId/workflows/:wfId/run', async (req, res) => {
   } catch (error) {
     console.error('Error building workflow run view:', error);
     res.status(500).json({ error: 'Failed to build workflow run view' });
+  }
+});
+
+// A workflow has no terminal journal entry, so "still running" is every started
+// agent without a result plus a journal that moved recently — a run killed
+// mid-flight would otherwise stay live forever.
+const WORKFLOW_LIVE_MAX_IDLE_MS = 10 * 60 * 1000;
+// Only the newest few scripts can hold the live run, and each miss costs two
+// existsSync probes — a session that has accumulated scripts must not turn the
+// poll into a scan of all of them.
+const WORKFLOW_LIVE_MAX_SCRIPTS = 3;
+
+// API: The session's running workflow, or null. The zen panel polls this, so it
+// reads the journal only — never the agent transcripts the /run view parses.
+app.get('/api/sessions/:sessionId/workflow-live', (req, res) => {
+  try {
+    const sessionId = resolveSessionId(req.params.sessionId);
+    const meta = loadSessionMetadata()[sessionId] || {};
+    for (const wf of getWorkflowScripts(req.params.sessionId).slice(0, WORKFLOW_LIVE_MAX_SCRIPTS)) {
+      const runDir = resolveWorkflowRunDir(meta, wf.id, wf.path, true);
+      if (!runDir) continue;
+      let mtimeMs = 0;
+      try { mtimeMs = statSync(path.join(runDir, 'journal.jsonl')).mtimeMs; } catch { continue; }
+      if (Date.now() - mtimeMs > WORKFLOW_LIVE_MAX_IDLE_MS) continue;
+
+      const { startedCount, doneCount, byPhase, running } = summarizeWorkflowJournal(readWorkflowJournal(runDir));
+      if (!startedCount || doneCount >= startedCount) continue;
+
+      const parsed = getWorkflowMeta(wf.path);
+      const declared = parsed.phases.map((p) => p.title);
+      const extra = [...byPhase.keys()].filter((t) => t && !declared.includes(t));
+      const phases = [...declared, ...extra].map((title) => ({
+        title,
+        started: byPhase.get(title)?.started || 0,
+        done: byPhase.get(title)?.done || 0,
+      }));
+
+      return res.json({
+        workflow: {
+          id: wf.id,
+          name: parsed.name || wf.name,
+          startedCount,
+          doneCount,
+          phases,
+          running: running.slice(0, 4),
+        },
+      });
+    }
+    res.json({ workflow: null });
+  } catch (error) {
+    console.error('Error building live workflow view:', error);
+    res.status(500).json({ error: 'Failed to build live workflow view' });
   }
 });
 

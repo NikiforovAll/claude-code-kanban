@@ -3310,15 +3310,15 @@ function renderSessions() {
     sessionsList.innerHTML = `${renderSessionCard(zenSession)}
       <div class="zen-panel">
         ${renderContextDetail(zenSession.contextStatus) || '<div class="zen-panel-empty">No context data for this session</div>'}
-        ${zenSession.hasWorkflow ? renderWorkflowLiveHtml(zenSession.id) : ''}
         ${renderScratchpadRow(zenSession)}
         ${renderLinkedDocsHtml(zenSession.id)}
         ${renderArtifactsHtml(zenSession.id)}
-      </div>`;
+      </div>
+      ${zenSession.hasWorkflow ? renderWorkflowLiveHtml(zenSession.id) : ''}`;
     bindLinkedDocsHandlers(sessionsList.querySelector('.linked-docs-section'), zenSession.id);
     artifactsSection.load(zenSession.id);
     scratchFilesSection.load(zenSession.id);
-    if (zenSession.hasWorkflow) workflowLiveSection.load(zenSession.id);
+    if (zenSession.hasWorkflow) pollWorkflowLive(zenSession.id);
     return;
   }
 
@@ -6697,7 +6697,9 @@ const workflowLiveSection = makeSectionLoader({
   endpoint: 'workflow-live',
   pick: (data) => (data.workflow ? [data.workflow] : []),
   innerHtml: (sessionId) => workflowLiveInnerHtml(sessionId),
-  ttlMs: 5000,
+  // The agent hooks re-render the sidebar on every subagent start and stop, so the TTL is
+  // what keeps that burst down to one ask per run step.
+  ttlMs: 4000,
 });
 
 function workflowLiveInnerHtml(sessionId) {
@@ -6724,14 +6726,43 @@ function workflowLiveInnerHtml(sessionId) {
     </div>
     <div class="wf-live" onclick="showWorkflowModal('${escAttrJs(sessionId)}')" title="Open workflow run">
       <div class="wf-live-name"><span class="pulse"></span>${escapeHtml(run.name || run.id)}</div>
-      <div class="wf-live-bar"><div class="wf-live-fill" style="width: ${pct}%"></div></div>
+      <div class="progress-bar wf-live-bar"><div class="progress-fill" style="width: ${pct}%"></div></div>
       ${phases ? `<div class="wf-live-phases">${phases}</div>` : ''}
       ${running}
     </div>`;
 }
 
 function renderWorkflowLiveHtml(sessionId) {
-  return `<div class="workflow-live-section panel-section" data-workflow-live-for="${escapeHtml(sessionId)}">${workflowLiveInnerHtml(sessionId)}</div>`;
+  return `<div class="workflow-live-section" data-workflow-live-for="${escapeHtml(sessionId)}">${workflowLiveInnerHtml(sessionId)}</div>`;
+}
+
+// Every agent start and stop already re-renders the sidebar through the agent-activity
+// feed, which is what keeps the card current. The timer is the fallback for a config dir
+// with no cck hooks installed: there the last agent's result reaches nobody, and the card
+// would sit on a finished run until the next render. Slow on purpose — the hooked case
+// never waits for it. The generation guard drops a chain left mid-fetch by an earlier
+// render, so renders can't stack up chains.
+const WORKFLOW_LIVE_POLL_MS = 30000;
+let workflowLivePoll = null;
+let workflowLivePollFor = null;
+
+function pollWorkflowLive(sessionId) {
+  workflowLiveSection.load(sessionId);
+  // A render must not restart the timer: renders arrive far faster than the interval, and
+  // each restart would push the fallback tick back out of reach, leaving a finished run on
+  // screen forever in a config dir with no hooks.
+  if (workflowLivePoll && workflowLivePollFor === sessionId) return;
+  clearTimeout(workflowLivePoll);
+  workflowLivePollFor = sessionId;
+  const tick = async () => {
+    workflowLivePoll = null;
+    if (workflowLivePollFor !== sessionId) return;
+    if (!document.querySelector(`[data-workflow-live-for="${CSS.escape(sessionId)}"]`)) return;
+    await workflowLiveSection.load(sessionId);
+    if (workflowLivePollFor !== sessionId || !workflowLiveSection.get(sessionId).length) return;
+    workflowLivePoll = setTimeout(tick, WORKFLOW_LIVE_POLL_MS);
+  };
+  workflowLivePoll = setTimeout(tick, WORKFLOW_LIVE_POLL_MS);
 }
 
 const SCRATCH_FILES_COLLAPSED = 3;
