@@ -1544,8 +1544,10 @@ app.get('/api/sessions/:sessionId', async (req, res) => {
   try {
     const sessionPath = taskDirFor(req.params.sessionId);
 
+    // A session that never used the board has no task dir. That is the common case and
+    // an answer, not a failure; a 404 only reached the browser console.
     if (!existsSync(sessionPath)) {
-      return res.status(404).json({ error: 'Session not found' });
+      return res.json([]);
     }
 
     const taskFiles = readdirSync(sessionPath).filter(f => f.endsWith('.json'));
@@ -1621,11 +1623,13 @@ app.get('/api/sessions/:sessionId/plan', async (req, res) => {
   try {
     const metadata = loadSessionMetadata();
     const meta = metadata[req.params.sessionId] || metadata[resolveSessionId(req.params.sessionId)];
+    // Most sessions have no saved plan, and the info modal asks for one every time it
+    // opens, so "no plan" is a normal answer rather than a 404 in the console.
     const slug = meta?.slug;
-    if (!slug) return res.status(404).json({ error: 'No plan found' });
+    if (!slug) return res.json({ content: null });
 
     const planPath = path.join(PLANS_DIR, `${slug}.md`);
-    if (!existsSync(planPath)) return res.status(404).json({ error: 'No plan found' });
+    if (!existsSync(planPath)) return res.json({ content: null });
 
     const content = await fs.readFile(planPath, 'utf8');
     res.json({ content, slug });
@@ -3117,20 +3121,29 @@ async function statFileTarget(absPath) {
   }
 }
 
+function enforcePreviewSize(kind, size) {
+  const max = kind === 'text' ? PREVIEW_TEXT_MAX_BYTES : PREVIEW_MAX_BYTES;
+  if (size > max) {
+    throw previewError(400, `Preview too large (${Math.round(size / 1048576)}MB, max ${max / 1048576}MB)`);
+  }
+}
+
 // Checks the file is previewable without reading it — the broadcast path needs the
 // validation (and its status codes) but never the content.
 async function validatePreviewFile(absPath) {
   const { kind, size } = await statFileTarget(absPath);
   if (!kind) throw previewError(400, 'Not a previewable text, markdown or HTML file');
-  const max = kind === 'text' ? PREVIEW_TEXT_MAX_BYTES : PREVIEW_MAX_BYTES;
-  if (size > max) {
-    throw previewError(400, `Preview too large (${Math.round(size / 1048576)}MB, max ${max / 1048576}MB)`);
-  }
+  enforcePreviewSize(kind, size);
   return { kind, size };
 }
 
 async function readPreviewFile(absPath) {
-  const { kind } = await validatePreviewFile(absPath);
+  const { kind, size } = await statFileTarget(absPath);
+  // A kind the previewer can't render is an answer, not a failure, reported the way
+  // /api/file/resolve reports it: the caller opens the file in the editor instead. A 400
+  // would only reach the browser console. A size refusal stays a 400 — that one is real.
+  if (!kind) return { content: null, kind: null };
+  enforcePreviewSize(kind, size);
   const raw = await fs.readFile(absPath, 'utf8');
   if (kind !== 'html') return { content: raw, kind };
   // The client renders HTML into a `srcdoc` iframe, which has no base URL — sibling
@@ -3287,7 +3300,7 @@ app.get('/api/preview', async (req, res) => {
     res.json({ path: abs, content, kind });
   } catch (error) {
     // A previewError carries the status it wants reported and is an answer, not a
-    // failure — the scratchpad rows probe this endpoint and route a 400 to the editor.
+    // failure — a missing file or one too large to render is the user's doing.
     if (!error.status) console.error('Error in GET /api/preview:', error);
     res.status(error.status || 500).json({ error: error.message || 'Preview failed' });
   }

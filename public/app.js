@@ -416,14 +416,8 @@ async function fetchTasks(sessionId) {
     document.getElementById('message-toggle')?.style.removeProperty('display');
     const res = await fetch(`/api/sessions/${sessionId}`);
 
-    let newTasks;
-    if (res.ok) {
-      newTasks = await res.json();
-    } else if (res.status === 404) {
-      newTasks = [];
-    } else {
-      throw new Error(`Failed to fetch tasks: ${res.status}`);
-    }
+    if (!res.ok) throw new Error(`Failed to fetch tasks: ${res.status}`);
+    const newTasks = await res.json();
 
     const hash = JSON.stringify(newTasks);
     if (sessionId === currentSessionId && hash === lastCurrentTasksHash) {
@@ -6410,9 +6404,9 @@ function openPreviewInEditor() {
   openFileInEditor(currentPreviewPath);
 }
 
-// The server is the only place that knows what it can render, so a 400 is its answer
-// to "not previewable" rather than a failure: callers that have a fallback destination
-// pass `onUnsupported` instead of keeping a copy of the extension list here.
+// The server is the only place that knows what it can render, so a null `kind` is its
+// answer to "not previewable" rather than a failure: callers that have a fallback
+// destination pass `onUnsupported` instead of keeping a copy of the extension list here.
 async function openPreviewByPath(filePath, base, onUnsupported) {
   if (!filePath) return;
   try {
@@ -6420,11 +6414,15 @@ async function openPreviewByPath(filePath, base, onUnsupported) {
     if (base) qs.set('base', base);
     const r = await fetch(`/api/preview?${qs}`);
     if (!r.ok) {
-      if (r.status === 400 && onUnsupported) onUnsupported(filePath);
-      else showToast('Preview file unavailable');
+      showToast('Preview file unavailable');
       return;
     }
     const data = await r.json();
+    if (data.kind === null) {
+      if (onUnsupported) onUnsupported(data.path);
+      else showToast('Nothing to preview in this file');
+      return;
+    }
     openPreviewModal(data.path, data.content, data.kind);
   } catch {
     showToast('Failed to load preview');
@@ -6675,7 +6673,7 @@ function scratchFilesInnerHtml(sessionId) {
     .map((f) => {
       const escPath = escapeHtml(f.path);
       return `<li class="scratch-file-item" data-file="${escPath}">
-        <button type="button" class="scratch-file-link" onclick="openScratchFile(this.parentNode.dataset.file)" title="${escPath}">${escapeHtml(f.name)}</button>
+        <button type="button" class="scratch-file-link" onclick="openScratchFile(this.closest('li').dataset.file)" title="${escPath}">${escapeHtml(f.name)}</button>
         <span class="scratch-file-time">${formatDate(f.modifiedAt)}</span>
         <span class="row-actions scratch-file-actions">
           <button type="button" onclick="copyWithFeedback(this.closest('li').dataset.file, this)" title="Copy path" aria-label="Copy file path">${ICON_COPY}</button>
