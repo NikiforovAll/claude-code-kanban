@@ -3094,6 +3094,30 @@ function previewKindFor(absPath) {
   return PREVIEW_KINDS[path.extname(trimmed.slice(0, -ext.length)).toLowerCase()] || null;
 }
 
+// The hop makes a claim about bytes from a name, and PREVIEW_OPAQUE_EXTS can only stop
+// it for suffixes it already knows: report.json.gpg, notes.md.enc and secrets.yml.age
+// all hop to the extension underneath and would render their ciphertext. Enumerating
+// the encryption conventions fails open the same way, so the claim is confirmed against
+// the bytes instead — a NUL in the head is git's test for "not text", and encrypted or
+// compressed output trips it immediately.
+const TEXT_SNIFF_BYTES = 8192;
+
+async function readHead(absPath) {
+  const fh = await fs.open(absPath, 'r');
+  try {
+    const buf = Buffer.alloc(TEXT_SNIFF_BYTES);
+    const { bytesRead } = await fh.read(buf, 0, TEXT_SNIFF_BYTES, 0);
+    return buf.subarray(0, bytesRead);
+  } finally {
+    await fh.close();
+  }
+}
+
+async function confirmKind(absPath, kind) {
+  if (!kind) return null;
+  return (await readHead(absPath)).includes(0) ? null : kind;
+}
+
 // Whole files are pushed into a modal, so anything huge freezes the tab regardless of kind.
 const PREVIEW_MAX_BYTES = 8 * 1024 * 1024;
 // Source in a modal is for reading, not for scrolling a generated bundle.
@@ -3112,7 +3136,7 @@ async function statFileTarget(absPath) {
   try {
     const stats = await fs.stat(absPath);
     if (!stats.isFile()) throw previewError(400, 'Not a file');
-    return { size: stats.size, kind: previewKindFor(absPath) };
+    return { size: stats.size, kind: await confirmKind(absPath, previewKindFor(absPath)) };
   } catch (e) {
     if (e.status) throw e;
     if (e.code === 'ENOENT') throw previewError(404, 'File not found');
@@ -3128,7 +3152,7 @@ function enforcePreviewSize(kind, size) {
   }
 }
 
-// Checks the file is previewable without reading it — the broadcast path needs the
+// Checks the file is previewable without reading it whole — the broadcast path needs the
 // validation (and its status codes) but never the content.
 async function validatePreviewFile(absPath) {
   const { kind, size } = await statFileTarget(absPath);
@@ -3293,12 +3317,16 @@ app.get('/api/session/pins', (_req, res) => {
 });
 
 app.get('/api/preview', async (req, res) => {
+  const abs = resolvePreviewPath(req.query.path, req.query.base);
+  if (!abs) return res.status(400).json({ error: 'path is required' });
   try {
-    const abs = resolvePreviewPath(req.query.path, req.query.base);
-    if (!abs) return res.status(400).json({ error: 'path is required' });
     const { content, kind } = await readPreviewFile(abs);
-    res.json({ path: abs, content, kind });
+    res.json({ path: abs, exists: true, content, kind });
   } catch (error) {
+    // Reported the way /api/file/resolve reports it: a relative link inside a rendered
+    // document is followed without knowing the target is there, so a link to a deleted
+    // file would put a 404 in the browser console. The caller toasts it from `exists`.
+    if (error.status === 404) return res.json({ path: abs, exists: false, content: null, kind: null });
     // A previewError carries the status it wants reported and is an answer, not a
     // failure — a missing file or one too large to render is the user's doing.
     if (!error.status) console.error('Error in GET /api/preview:', error);
@@ -3306,16 +3334,20 @@ app.get('/api/preview', async (req, res) => {
   }
 });
 
-// API: Resolve a hand-typed path to an absolute one that exists. Deliberately not
-// extension-restricted — a linked file the previewer can't render (kind: null) is
-// still linkable, the client just opens it in the editor instead.
+// API: Resolve a hand-typed path to an absolute one, reporting whether it exists and
+// what it is. Deliberately not extension-restricted — a linked file the previewer can't
+// render (kind: null) is still linkable, the client just opens it in the editor instead.
 app.get('/api/file/resolve', async (req, res) => {
+  const abs = resolvePreviewPath(req.query.path, req.query.base);
+  if (!abs) return res.status(400).json({ error: 'path is required' });
   try {
-    const abs = resolvePreviewPath(req.query.path, req.query.base);
-    if (!abs) return res.status(400).json({ error: 'path is required' });
     // No size cap here — an unpreviewable file of any size is still linkable.
-    res.json({ path: abs, ...(await statFileTarget(abs)) });
+    res.json({ path: abs, exists: true, ...(await statFileTarget(abs)) });
   } catch (error) {
+    // A path that is not there is an answer, not a transport failure: a linked-doc row
+    // classifies its file through this endpoint, so a file since deleted would put a 404
+    // in the browser console on every render. The link editor reports it from `exists`.
+    if (error.status === 404) return res.json({ path: abs, exists: false, kind: null });
     console.error('Error in GET /api/file/resolve:', error);
     res.status(error.status || 500).json({ error: error.message || 'Failed to resolve file' });
   }

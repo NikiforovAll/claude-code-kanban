@@ -6296,9 +6296,8 @@ function bindPreviewRelativeLinks(bodyEl) {
     const isAbsolutePath = href.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(href);
     if (isAbsoluteUrl) return;
     const cleanHref = href.replace(/#.*$/, '');
-    if (!isPreviewablePath(cleanHref)) return;
     e.preventDefault();
-    openPreviewByPath(cleanHref, isAbsolutePath ? undefined : currentPreviewPath);
+    openPreviewByPath(cleanHref, isAbsolutePath ? undefined : currentPreviewPath, openFileInEditor);
   });
   bodyEl.dataset.relLinkBound = '1';
 }
@@ -6418,6 +6417,10 @@ async function openPreviewByPath(filePath, base, onUnsupported) {
       return;
     }
     const data = await r.json();
+    if (data.exists === false) {
+      showToast('File not found');
+      return;
+    }
     if (data.kind === null) {
       if (onUnsupported) onUnsupported(data.path);
       else showToast('Nothing to preview in this file');
@@ -6476,10 +6479,34 @@ function getSessionBaseDir(sessionId) {
   return s?.cwd || s?.project || '';
 }
 
-// Linked paths are stored as bare strings, so previewability is re-derived from the
-// extension on every render instead of being remembered alongside the path.
-function isPreviewablePath(p) {
-  return /\.(md|markdown|html?)$/i.test(p);
+// Linked paths are stored as bare strings, so the row has to ask what each one is. The
+// server owns that answer — /api/file/resolve reports `kind` for any file, previewable
+// or not — and it is cached for the tab because a path's kind does not change under it.
+// A resolve that fails is cached as unpreviewable: the editor is the right destination
+// for a file the server cannot read either, and re-asking on every render of a panel the
+// SSE tick repaints would be a poll.
+const previewKindByPath = new Map();
+const kindResolveInFlight = new Set();
+
+async function loadPreviewKinds(sessionId, paths) {
+  const pending = paths.filter((p) => !previewKindByPath.has(p) && !kindResolveInFlight.has(p));
+  if (!pending.length) return;
+  for (const p of pending) kindResolveInFlight.add(p);
+  try {
+    await Promise.all(
+      pending.map(async (p) => {
+        let kind = null;
+        try {
+          const r = await fetch(`/api/file/resolve?path=${encodeURIComponent(p)}`);
+          if (r.ok) kind = (await r.json()).kind;
+        } catch (_) {}
+        previewKindByPath.set(p, kind);
+      }),
+    );
+  } finally {
+    for (const p of pending) kindResolveInFlight.delete(p);
+  }
+  afterLinkedDocsChanged(sessionId);
 }
 
 // A scratchpad manifest opens in the external `scratch` viewer, not the editor —
@@ -6508,11 +6535,14 @@ const LINKED_DOC_OPENERS = {
   },
 };
 
+// The manifest is checked before previewability, not after: its `.json` is previewable
+// text, but the pad is what the user linked, so the viewer wins over the raw file.
+// Without the CLI there is nothing to launch, so it falls back to the editor.
 function linkedDocOpener(p) {
-  if (isPreviewablePath(p)) return 'preview';
-  // Without the CLI there is nothing to launch, so the manifest falls back to the editor.
-  if (isScratchpadPath(p) && appConfig.scratchAvailable) return 'scratch';
-  return 'editor';
+  if (isScratchpadPath(p)) return appConfig.scratchAvailable ? 'scratch' : 'editor';
+  // A path whose kind has not arrived yet renders as previewable, which is what the
+  // click does anyway — openPreviewByPath falls back to the editor on a null kind.
+  return previewKindByPath.get(p) === null ? 'editor' : 'preview';
 }
 
 // Every manifest is called scratchpad.json, so the pad's folder names it. Kept
@@ -6525,7 +6555,7 @@ function linkedDocLabel(p) {
 function openLinkedDoc(p, baseDir) {
   const opener = linkedDocOpener(p);
   if (opener === 'preview') {
-    openPreviewByPath(p, baseDir);
+    openPreviewByPath(p, baseDir, openFileInEditor);
     return;
   }
   const { url, body, toast } = LINKED_DOC_OPENERS[opener];
@@ -6534,6 +6564,9 @@ function openLinkedDoc(p, baseDir) {
 
 function renderLinkedDocsHtml(sessionId) {
   const paths = getSessionPreviewPaths(sessionId);
+  // Kicked off from the render rather than the three call sites, so a new surface that
+  // shows linked docs cannot forget it. Returns at once once every path is cached.
+  loadPreviewKinds(sessionId, paths);
   const baseDir = getSessionBaseDir(sessionId);
   const items = paths
     .map((p) => {
@@ -6769,7 +6802,7 @@ async function linkFileByPath(sessionId, raw, slot) {
     if (base) qs.set('base', base);
     const r = await fetch(`/api/file/resolve?${qs}`);
     const data = await r.json().catch(() => ({}));
-    if (!r.ok) {
+    if (!r.ok || !data.exists) {
       fail(data.error || 'File not found');
       return;
     }
