@@ -4026,8 +4026,102 @@ body::before {
 /* Artifacts are read out of the transcript, so the section renders before the
    list arrives and stays in the DOM as the patch target when there is none. */
 .artifacts-section:empty,
-.scratch-files-section:empty {
+.scratch-files-section:empty,
+.workflow-live-section:empty {
   display: none;
+}
+
+.wf-live {
+  cursor: pointer;
+}
+
+.wf-live-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wf-live-name .pulse {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  background: var(--accent);
+  border-radius: 50%;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.wf-live-bar {
+  height: 3px;
+  margin: 6px 0;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.wf-live-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.3s ease;
+}
+
+.wf-live-phases {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* A phase reads as one chip, so the dot goes in ::before rather than costing a span. */
+.wf-live-phase {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.wf-live-phase::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+
+.wf-live-phase.running::before {
+  background: var(--accent);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.wf-live-phase.done::before {
+  background: var(--ok, #3fb950);
+}
+
+.wf-live-phase.done {
+  color: var(--text-muted);
+}
+
+.wf-live-phase-count {
+  font-family: var(--font-mono);
+}
+
+.wf-live-running {
+  margin-top: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
 }
 
 .panel-section-header {

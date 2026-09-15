@@ -14,6 +14,7 @@ const {
   parseSessionsIndex,
   parseJsonlLine,
   parseTaskNotification,
+  parseAgentMessage,
   getSystemMessageLabel,
   readSessionInfoFromJsonl,
   readRecentMessages,
@@ -897,6 +898,136 @@ describe('readRecentMessages: task-notification rendering', () => {
       assert.ok(notifs.every((m) => m.taskId === 'ae80b022c427830bd'));
       // One came from the queued path, one from the delivered path.
       assert.deepEqual(notifs.map((m) => !!m.queued).sort(), [false, true]);
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// A subagent handing its report back through SendMessage arrives wrapped in an
+// <agent-message> envelope with harness security notes around it. Unparsed, the
+// whole frame renders under a person icon as if the user had typed it.
+describe('parseAgentMessage', () => {
+  const raw = loadFixture('agent-handback.txt');
+
+  it('labels the hand-back with the sender and keeps only the report', () => {
+    const a = parseAgentMessage(raw);
+    assert.equal(a.from, 'abd86c3f28b1c29ad');
+    assert.equal(a.label, 'Subagent hand-back · abd86c3f');
+    assert.ok(a.body.startsWith('Wrote `scratchpad/specdev-permissions.md`.'));
+    assert.ok(a.body.includes('**Counts:** 39 findings total'));
+    assert.ok(a.body.endsWith('appear verbatim in the corpus.'));
+  });
+
+  it('drops the envelope, the frame and the trailing authority note', () => {
+    const { body } = parseAgentMessage(raw);
+    assert.ok(!body.includes('<agent-message'));
+    assert.ok(!body.includes('[Subagent hand-back]'));
+    assert.ok(!body.includes('carry no user authority'));
+    assert.ok(!body.includes('Another Claude session sent a message'));
+  });
+
+  it('labels a plain agent message (no hand-back frame)', () => {
+    const a = parseAgentMessage('<agent-message from="af63655dfcad86551">\nboard moved task #4\n</agent-message>');
+    assert.equal(a.label, 'Agent message · af63655d');
+    assert.equal(a.body, 'board moved task #4');
+  });
+
+  // A named sender ("code-review") is not a hex agent id — truncating it to eight
+  // characters renders "code-rev".
+  it('shows a named sender whole and truncates only a hex agent id', () => {
+    const named = parseAgentMessage('<agent-message from="code-review">\nlooks fine\n</agent-message>');
+    assert.equal(named.label, 'Agent message · code-review');
+  });
+
+  // The envelope must OPEN the message. A user prompt (or an agent report) that
+  // quotes the tag while describing the format must stay a user message.
+  it('ignores prose that merely quotes the envelope', () => {
+    assert.equal(
+      parseAgentMessage('Here is the shape to parse: <agent-message from="ID">body</agent-message> — got it?'),
+      null
+    );
+  });
+
+  it('accepts the harness preamble before the envelope', () => {
+    const a = parseAgentMessage(
+      'Another Claude session sent a message while you were working:\n<agent-message from="deadbeef12345678">\nhi\n</agent-message>'
+    );
+    assert.equal(a.body, 'hi');
+  });
+
+  it('takes the LAST closing tag, so a body quoting the envelope is not truncated', () => {
+    const a = parseAgentMessage(
+      '<agent-message from="deadbeef12345678">\nthe frame ends with </agent-message> like so\n</agent-message>'
+    );
+    assert.ok(a.body.includes('</agent-message> like so'));
+  });
+
+  it('returns null for non-agent text', () => {
+    assert.equal(parseAgentMessage('just a normal message'), null);
+    assert.equal(parseAgentMessage(null), null);
+    assert.equal(parseAgentMessage(undefined), null);
+  });
+});
+
+// End-to-end: both delivery paths must render as an agent message, never as user input.
+describe('readRecentMessages: agent-message rendering', () => {
+  const raw = loadFixture('agent-handback.txt');
+  const dummy = JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'x' }] }, timestamp: '2026-09-15T11:00:00Z' });
+
+  function readOne(line) {
+    const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'parser-test-'));
+    const sessionFile = path.join(tmpDir, 'agent-msg-session.jsonl');
+    writeFileSync(sessionFile, [dummy, line].join('\n') + '\n');
+    try {
+      return readRecentMessages(sessionFile, 10);
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }
+
+  // The frame body as the harness repeats it on `origin` (Claude Code >= 2.1).
+  const originBody = raw.split('<agent-message from="abd86c3f28b1c29ad">\n')[1].split('\n</agent-message>')[0];
+  const enqueueLine = JSON.stringify({ type: 'queue-operation', operation: 'enqueue', content: raw, timestamp: '2026-09-15T11:10:41.602Z' });
+  const deliveredLine = JSON.stringify({
+    type: 'user',
+    isMeta: true,
+    message: { role: 'user', content: raw },
+    origin: { kind: 'peer', from: 'abd86c3f28b1c29ad', body: originBody, handback: true },
+    timestamp: '2026-09-15T11:10:41.625Z'
+  });
+
+  function assertCleanHandBack(msg) {
+    assert.ok(msg, 'agent message present');
+    assert.equal(msg.agentMessage, true);
+    assert.equal(msg.agentFrom, 'abd86c3f28b1c29ad');
+    assert.equal(msg.systemLabel, 'Subagent hand-back · abd86c3f');
+    assert.ok(msg.text.startsWith('Wrote `scratchpad/specdev-permissions.md`.'));
+    assert.ok(!msg.text.includes('<agent-message'));
+    assert.ok(!msg.text.includes('carry no user authority'));
+  }
+
+  it('normalizes the queued (queue-operation enqueue) hand-back', () => {
+    assertCleanHandBack(readOne(enqueueLine).find((m) => m.agentMessage));
+  });
+
+  // The delivered record is isMeta — filtered as user input — so it is read from
+  // its structured `origin` instead. Sessions where the harness wrote no enqueue
+  // record have nothing else to render.
+  it('normalizes the delivered (isMeta, origin:peer) hand-back', () => {
+    assertCleanHandBack(readOne(deliveredLine).find((m) => m.agentMessage));
+  });
+
+  it('renders the enqueue+delivered pair once', () => {
+    const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'parser-test-'));
+    const sessionFile = path.join(tmpDir, 'agent-msg-session.jsonl');
+    writeFileSync(sessionFile, [dummy, enqueueLine, deliveredLine].join('\n') + '\n');
+    try {
+      const agentMsgs = readRecentMessages(sessionFile, 10).filter((m) => m.agentMessage);
+      assert.equal(agentMsgs.length, 1);
+      assertCleanHandBack(agentMsgs[0]);
+      // It was delivered, so the queued marker is dropped from the surviving row.
+      assert.equal(agentMsgs[0].queued, undefined);
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }

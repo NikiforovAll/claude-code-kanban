@@ -1148,11 +1148,22 @@ function renderMessageListBody(messages) {
 
     const clickable = `data-msg-idx="${i}" onclick="msgDetailFollowLatest=false;showMsgDetail(${i})" style="cursor:pointer"`;
     const pinBtn = renderMsgPinBtn(m, i);
+
     if (m.type === 'user') {
       if (m.systemLabel) {
+        // A message another agent sent into this session (subagent hand-back, peer
+        // session) is agent output: the agent icon, a sender label, and a markdown
+        // preview of the report — never the person icon.
+        const preview = m.agentMessage ? buildAssistantPreview(m.fullText || m.text) : null;
+        const bodyHtml = preview?.md
+          ? `<div class="msg-text msg-text-md">
+              <div class="msg-md-content rendered-md${preview.remainder ? ' is-truncated' : ''}">${renderMarkdown(preview.md)}</div>${preview.remainder ? `<div class="msg-md-more">${escapeHtml(preview.remainder)}</div>` : ''}
+            </div>`
+          : '';
+        const queuedTag = m.queued ? '<span class="msg-queued-tag">queued</span>' : '';
         parts.push(`<div class="msg-item msg-system" ${clickable}>
-            ${MSG_ICON_SYSTEM}
-            <div class="msg-body"><div class="msg-text"><code>${escapeHtml(m.systemLabel)}</code></div><div class="msg-time">${formatDate(m.timestamp)}</div></div>${pinBtn}
+            ${m.agentMessage ? ICON_AGENT : MSG_ICON_SYSTEM}
+            <div class="msg-body"><div class="msg-text"><code>${escapeHtml(m.systemLabel)}</code></div>${bodyHtml}<div class="msg-time">${formatDate(m.timestamp)}${queuedTag}</div></div>${pinBtn}
           </div>`);
       } else {
         const cmd = parseCommandMessage(m.text);
@@ -1983,7 +1994,7 @@ function showMsgDetail(idx) {
     const rawText = stripAnsi(m.fullText || m.text || '');
     const cmd = m.type === 'user' ? parseCommandMessage(rawText) : null;
     document.getElementById('msg-detail-title').textContent =
-      m.type === 'assistant' ? 'Claude' : m.systemLabel ? 'System' : 'User';
+      m.type === 'assistant' ? 'Claude' : m.agentMessage ? m.systemLabel : m.systemLabel ? 'System' : 'User';
     document.getElementById('msg-detail-agent-btn').style.display = 'none';
     const userExtras = m.type === 'user' ? renderUserAttachments(m) : '';
     if (m.compactSummary) {
@@ -3299,6 +3310,7 @@ function renderSessions() {
     sessionsList.innerHTML = `${renderSessionCard(zenSession)}
       <div class="zen-panel">
         ${renderContextDetail(zenSession.contextStatus) || '<div class="zen-panel-empty">No context data for this session</div>'}
+        ${zenSession.hasWorkflow ? renderWorkflowLiveHtml(zenSession.id) : ''}
         ${renderScratchpadRow(zenSession)}
         ${renderLinkedDocsHtml(zenSession.id)}
         ${renderArtifactsHtml(zenSession.id)}
@@ -3306,6 +3318,7 @@ function renderSessions() {
     bindLinkedDocsHandlers(sessionsList.querySelector('.linked-docs-section'), zenSession.id);
     artifactsSection.load(zenSession.id);
     scratchFilesSection.load(zenSession.id);
+    if (zenSession.hasWorkflow) workflowLiveSection.load(zenSession.id);
     return;
   }
 
@@ -6676,6 +6689,50 @@ const artifactsSection = makeSectionLoader({
   pick: (data) => data.artifacts || [],
   innerHtml: (sessionId) => artifactsInnerHtml(sessionId),
 });
+
+// The server decides liveness (a run has no terminal journal entry) and answers with
+// nothing once the workflow finishes, so the section empties itself and disappears.
+const workflowLiveSection = makeSectionLoader({
+  attr: 'data-workflow-live-for',
+  endpoint: 'workflow-live',
+  pick: (data) => (data.workflow ? [data.workflow] : []),
+  innerHtml: (sessionId) => workflowLiveInnerHtml(sessionId),
+  ttlMs: 5000,
+});
+
+function workflowLiveInnerHtml(sessionId) {
+  const run = workflowLiveSection.get(sessionId)[0];
+  if (!run) return '';
+  const pct = run.startedCount ? Math.round((run.doneCount / run.startedCount) * 100) : 0;
+  const phases = (run.phases || [])
+    .map((p) => {
+      const state = p.started === 0 ? 'pending' : p.done >= p.started ? 'done' : 'running';
+      const count = p.started ? `${p.done}/${p.started}` : '';
+      return `<span class="wf-live-phase ${state}">
+        <span class="wf-live-phase-title">${escapeHtml(p.title)}</span>
+        <span class="wf-live-phase-count">${count}</span>
+      </span>`;
+    })
+    .join('');
+  const running = run.running?.length
+    ? `<div class="wf-live-running" title="${escapeHtml(run.running.join(', '))}">${escapeHtml(run.running.join(' · '))}</div>`
+    : '';
+  return `<div class="panel-section-header">
+      ${WORKFLOW_GEAR_SVG}
+      <span>Workflow</span>
+      <span class="panel-section-count">${run.doneCount}/${run.startedCount} agents</span>
+    </div>
+    <div class="wf-live" onclick="showWorkflowModal('${escAttrJs(sessionId)}')" title="Open workflow run">
+      <div class="wf-live-name"><span class="pulse"></span>${escapeHtml(run.name || run.id)}</div>
+      <div class="wf-live-bar"><div class="wf-live-fill" style="width: ${pct}%"></div></div>
+      ${phases ? `<div class="wf-live-phases">${phases}</div>` : ''}
+      ${running}
+    </div>`;
+}
+
+function renderWorkflowLiveHtml(sessionId) {
+  return `<div class="workflow-live-section panel-section" data-workflow-live-for="${escapeHtml(sessionId)}">${workflowLiveInnerHtml(sessionId)}</div>`;
+}
 
 const SCRATCH_FILES_COLLAPSED = 3;
 // Unlike the artifacts scan the server caches nothing here, so a TTL is what stops the
