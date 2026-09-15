@@ -3310,8 +3310,8 @@ function renderSessions() {
         ${renderArtifactsHtml(zenSession.id)}
       </div>`;
     bindLinkedDocsHandlers(sessionsList.querySelector('.linked-docs-section'), zenSession.id);
-    ensureSessionArtifacts(zenSession.id);
-    ensureScratchFiles(zenSession.id);
+    artifactsSection.load(zenSession.id);
+    scratchFilesSection.load(zenSession.id);
     return;
   }
 
@@ -6571,11 +6571,41 @@ function renderLinkedDocsHtml(sessionId) {
   </div>`;
 }
 
-// Artifacts are read out of the transcript rather than stored with the session, so
-// the list arrives after the panel is already on screen and the slot — always
-// rendered, empty or not — is patched in place once it does.
-const artifactsBySession = new Map();
-const artifactsInFlight = new Set();
+function paintSectionSlots(attr, sessionId, html) {
+  for (const slot of document.querySelectorAll(`[${attr}="${CSS.escape(sessionId)}"]`)) {
+    slot.innerHTML = html;
+  }
+}
+
+// A panel section whose data is not part of the session object arrives after the panel
+// is already on screen, so every one of them needs the same lifecycle: one fetch per
+// session at a time, and a patch of the slot — always rendered, empty or not — once the
+// data lands. `ttlMs` is for the sections the server does not cache itself; at 0 the
+// section re-asks on every render, which is right when the server holds the answer.
+function makeSectionLoader({ attr, endpoint, pick, innerHtml, ttlMs = 0 }) {
+  const store = new Map();
+  const inFlight = new Set();
+  return {
+    get: (sessionId) => store.get(sessionId)?.data || [],
+    repaint: (sessionId) => paintSectionSlots(attr, sessionId, innerHtml(sessionId)),
+    async load(sessionId) {
+      if (!sessionId || inFlight.has(sessionId)) return;
+      const cached = store.get(sessionId);
+      if (cached && Date.now() - cached.at < ttlMs) return;
+      inFlight.add(sessionId);
+      try {
+        const res = await fetch(`/api/sessions/${sessionId}/${endpoint}`);
+        if (!res.ok) return;
+        store.set(sessionId, { at: Date.now(), data: pick(await res.json()) });
+      } catch (_) {
+        return;
+      } finally {
+        inFlight.delete(sessionId);
+      }
+      paintSectionSlots(attr, sessionId, innerHtml(sessionId));
+    },
+  };
+}
 
 function artifactLabel(a) {
   if (a.title) return a.title;
@@ -6583,7 +6613,7 @@ function artifactLabel(a) {
 }
 
 function artifactsInnerHtml(sessionId) {
-  const list = artifactsBySession.get(sessionId) || [];
+  const list = artifactsSection.get(sessionId);
   if (!list.length) return '';
   const items = list
     .map(
@@ -6607,31 +6637,29 @@ function renderArtifactsHtml(sessionId) {
   return `<div class="artifacts-section panel-section" data-artifacts-for="${escapeHtml(sessionId)}">${artifactsInnerHtml(sessionId)}</div>`;
 }
 
-// Always asks: the server holds the scan until the transcript grows, so a repeat
-// costs one stat, and an artifact published while the panel is open still appears.
-async function ensureSessionArtifacts(sessionId) {
-  if (!sessionId || artifactsInFlight.has(sessionId)) return;
-  artifactsInFlight.add(sessionId);
-  try {
-    const res = await fetch(`/api/sessions/${sessionId}/artifacts`);
-    if (!res.ok) return;
-    const data = await res.json();
-    artifactsBySession.set(sessionId, data.artifacts || []);
-  } catch (_) {
-    return;
-  } finally {
-    artifactsInFlight.delete(sessionId);
-  }
-  paintSectionSlots('data-artifacts-for', sessionId, artifactsInnerHtml(sessionId));
-}
+// No TTL: the server holds the scan until the transcript grows, so a repeat costs one
+// stat, and an artifact published while the panel is open still appears.
+const artifactsSection = makeSectionLoader({
+  attr: 'data-artifacts-for',
+  endpoint: 'artifacts',
+  pick: (data) => data.artifacts || [],
+  innerHtml: (sessionId) => artifactsInnerHtml(sessionId),
+});
 
-// One record per session: `{ at, files, expanded }`. Unlike the artifacts scan the
-// server caches nothing here, so a TTL is what stops the zen panel — re-rendered on
-// every SSE tick — from turning a readdir plus a stat per file into a 2 s poll.
-const scratchFilesBySession = new Map();
-const scratchFilesInFlight = new Set();
 const SCRATCH_FILES_COLLAPSED = 3;
-const SCRATCH_FILES_TTL_MS = 10000;
+// Unlike the artifacts scan the server caches nothing here, so a TTL is what stops the
+// zen panel — re-rendered on every SSE tick — from turning a readdir plus a stat per
+// file into a 2 s poll.
+const scratchFilesSection = makeSectionLoader({
+  attr: 'data-scratch-files-for',
+  endpoint: 'scratchpad-files',
+  pick: (data) => data.files || [],
+  innerHtml: (sessionId) => scratchFilesInnerHtml(sessionId),
+  ttlMs: 10000,
+});
+// Outlives the cache entries on purpose: a refetch on the TTL must not collapse a list
+// the user opened.
+const scratchFilesExpanded = new Set();
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
 function openScratchFile(filePath) {
@@ -6639,25 +6667,26 @@ function openScratchFile(filePath) {
 }
 
 function scratchFilesInnerHtml(sessionId) {
-  const entry = scratchFilesBySession.get(sessionId);
-  const list = entry?.files || [];
+  const list = scratchFilesSection.get(sessionId);
   if (!list.length) return '';
-  const shown = entry.expanded ? list : list.slice(0, SCRATCH_FILES_COLLAPSED);
+  const expanded = scratchFilesExpanded.has(sessionId);
+  const shown = expanded ? list : list.slice(0, SCRATCH_FILES_COLLAPSED);
   const items = shown
-    .map(
-      (f) => `<li class="scratch-file-item">
-        <button type="button" class="scratch-file-link" data-file="${escapeHtml(f.path)}" onclick="openScratchFile(this.dataset.file)" title="${escapeHtml(f.path)}">${escapeHtml(f.name)}</button>
+    .map((f) => {
+      const filePath = escapeHtml(f.path);
+      return `<li class="scratch-file-item" data-file="${filePath}">
+        <button type="button" class="scratch-file-link" onclick="openScratchFile(this.parentNode.dataset.file)" title="${filePath}">${escapeHtml(f.name)}</button>
         <span class="scratch-file-time">${formatDate(f.modifiedAt)}</span>
         <span class="row-actions scratch-file-actions">
-          <button type="button" data-file="${escapeHtml(f.path)}" onclick="copyWithFeedback(this.dataset.file, this)" title="Copy path" aria-label="Copy file path">${ICON_COPY}</button>
-          <button type="button" data-file="${escapeHtml(f.path)}" onclick="openFileInEditor(this.dataset.file)" title="Open in editor" aria-label="Open file in editor">${ICON_OPEN_EXTERNAL}</button>
+          <button type="button" onclick="copyWithFeedback(this.closest('li').dataset.file, this)" title="Copy path" aria-label="Copy file path">${ICON_COPY}</button>
+          <button type="button" onclick="openFileInEditor(this.closest('li').dataset.file)" title="Open in editor" aria-label="Open file in editor">${ICON_OPEN_EXTERNAL}</button>
         </span>
-      </li>`,
-    )
+      </li>`;
+    })
     .join('');
   const more =
     list.length > SCRATCH_FILES_COLLAPSED
-      ? `<button type="button" class="expand-toggle-btn scratch-files-more" onclick="toggleScratchFiles('${escAttrJs(sessionId)}')">${entry.expanded ? 'Show less' : `Show all ${list.length}`}</button>`
+      ? `<button type="button" class="expand-toggle-btn scratch-files-more" onclick="toggleScratchFiles('${escAttrJs(sessionId)}')">${expanded ? 'Show less' : `Show all ${list.length}`}</button>`
       : '';
   return `<ul class="scratch-file-list">${items}</ul>${more}`;
 }
@@ -6666,40 +6695,11 @@ function renderScratchFilesHtml(sessionId) {
   return `<div class="scratch-files-section" data-scratch-files-for="${escapeHtml(sessionId)}">${scratchFilesInnerHtml(sessionId)}</div>`;
 }
 
-function paintSectionSlots(attr, sessionId, html) {
-  for (const slot of document.querySelectorAll(`[${attr}="${CSS.escape(sessionId)}"]`)) {
-    slot.innerHTML = html;
-  }
-}
-
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
 function toggleScratchFiles(sessionId) {
-  const entry = scratchFilesBySession.get(sessionId);
-  if (!entry) return;
-  entry.expanded = !entry.expanded;
-  paintSectionSlots('data-scratch-files-for', sessionId, scratchFilesInnerHtml(sessionId));
-}
-
-async function ensureScratchFiles(sessionId) {
-  if (!sessionId || scratchFilesInFlight.has(sessionId)) return;
-  const cached = scratchFilesBySession.get(sessionId);
-  if (cached && Date.now() - cached.at < SCRATCH_FILES_TTL_MS) return;
-  scratchFilesInFlight.add(sessionId);
-  try {
-    const res = await fetch(`/api/sessions/${sessionId}/scratchpad-files`);
-    if (!res.ok) return;
-    const data = await res.json();
-    scratchFilesBySession.set(sessionId, {
-      at: Date.now(),
-      files: data.files || [],
-      expanded: cached?.expanded || false,
-    });
-  } catch (_) {
-    return;
-  } finally {
-    scratchFilesInFlight.delete(sessionId);
-  }
-  paintSectionSlots('data-scratch-files-for', sessionId, scratchFilesInnerHtml(sessionId));
+  if (scratchFilesExpanded.has(sessionId)) scratchFilesExpanded.delete(sessionId);
+  else scratchFilesExpanded.add(sessionId);
+  scratchFilesSection.repaint(sessionId);
 }
 
 // One delegated listener per section: the list is re-rendered on every change, so
@@ -8236,7 +8236,7 @@ async function showSessionInfoModal(sessionId) {
   _planSessionId = sessionId;
   const cachedTasks = currentSessionId === sessionId ? currentTasks : [];
   showInfoModal(session, null, cachedTasks, null, null);
-  ensureSessionArtifacts(sessionId);
+  artifactsSection.load(sessionId);
 
   const rerender = (teamConfig, tasks, planContent, parentInfo) => {
     if (_planSessionId !== sessionId) return; // user opened a different modal

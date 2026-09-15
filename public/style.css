@@ -3919,11 +3919,14 @@ body::before {
   text-decoration: underline;
   text-decoration-style: dotted;
   text-underline-offset: 3px;
+}
+
+.linked-doc-link,
+.artifact-link {
   flex-shrink: 0;
 }
 
-.linked-doc-path,
-.scratch-file-time {
+.linked-doc-path {
   color: var(--text-muted);
   font-size: 11px;
   opacity: 0.7;
@@ -3931,6 +3934,14 @@ body::before {
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+}
+
+.scratch-file-time {
+  color: var(--text-muted);
+  font-size: 11px;
+  opacity: 0.7;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 /* Rides on the shared .row-actions group; only the reveal trigger differs — per row
@@ -3969,15 +3980,10 @@ body::before {
   text-align: left;
   /* A scratch name can be longer than the zen panel is wide; without this it pushes
      the action buttons out of their column. The full path is on the title. */
-  flex-shrink: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.scratch-file-time {
-  flex-shrink: 0;
 }
 
 .scratch-files-more {

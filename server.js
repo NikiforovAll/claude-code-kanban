@@ -1705,14 +1705,17 @@ app.get('/api/sessions/:sessionId/scratchpad-files', async (req, res) => {
           const full = path.join(dir, entry.name);
           try {
             const stat = await fs.stat(full);
-            return { name: entry.name, path: full, modifiedAt: new Date(stat.mtimeMs).toISOString() };
+            return { name: entry.name, path: full, mtimeMs: stat.mtimeMs };
           } catch (_) {
             return null;
           }
         }),
     );
 
-    const files = stats.filter(Boolean).sort((a, b) => (a.modifiedAt < b.modifiedAt ? 1 : -1));
+    const files = stats
+      .filter(Boolean)
+      .sort((a, b) => b.mtimeMs - a.mtimeMs)
+      .map(({ name, path: full, mtimeMs }) => ({ name, path: full, modifiedAt: new Date(mtimeMs).toISOString() }));
     res.json({ files });
   } catch (error) {
     console.error('Error listing scratchpad files:', error);
