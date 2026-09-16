@@ -6336,7 +6336,8 @@ function renderSourcePreview(filePath, content) {
 
 function openPreviewModal(filePath, content, kind) {
   currentPreviewPath = filePath;
-  document.getElementById('preview-modal-title').textContent = filePath.split(/[\\/]/).pop();
+  const fileName = filePath.split(/[\\/]/).pop();
+  document.getElementById('preview-modal-title').textContent = fileName;
   const bodyEl = document.getElementById('preview-modal-body');
   const isHtml = kind === 'html';
   document.querySelector('#preview-modal .modal').classList.toggle('preview-html', isHtml);
@@ -6345,6 +6346,12 @@ function openPreviewModal(filePath, content, kind) {
     renderHtmlPreview(bodyEl, content);
   } else if (kind === 'text') {
     bodyEl.innerHTML = renderSourcePreview(filePath, content);
+  } else if (kind === 'image') {
+    const img = document.createElement('img');
+    img.className = 'preview-image';
+    img.src = `/api/preview/image?${new URLSearchParams({ path: filePath })}`;
+    img.alt = fileName;
+    bodyEl.replaceChildren(img);
   } else {
     const { fm, body } = splitFrontmatter(content);
     bodyEl.innerHTML = (fm ? renderFrontmatterBlock(fm) : '') + renderMarkdown(body);

@@ -33,7 +33,7 @@ const {
   updateLoopInfo,
   buildLoopInfoFromState
 } = require('./lib/parsers');
-const { inlineHtmlAssets } = require('./lib/inline-assets');
+const { inlineHtmlAssets, MIME_BY_EXT } = require('./lib/inline-assets');
 const { buildDecision, decisionFileName, isDecisionFile, approvalsFrom, boardRefusal } = require('./lib/approvals');
 const { getClaudeDir, getArgValue, storageNamespace } = require('./lib/claude-dir');
 
@@ -3165,12 +3165,15 @@ app.delete('/api/tasks/:sessionId/:taskId', async (req, res) => {
 // there as megabytes of mojibake.
 const PREVIEW_TEXT_EXTS =
   'txt log csv tsv json jsonl ndjson yml yaml toml ini cfg conf env js mjs cjs ts tsx jsx py rb go rs java kt cs c h cpp hpp php pl lua sh bash zsh ps1 psm1 bat cmd sql graphql css scss less xml svg patch diff';
+// Served as bytes by GET /api/preview/image, so the NUL sniff below does not apply.
+const PREVIEW_IMAGE_EXTS = 'png jpg jpeg gif webp avif bmp';
 const PREVIEW_KINDS = {
   '.md': 'markdown',
   '.markdown': 'markdown',
   '.html': 'html',
   '.htm': 'html',
   ...Object.fromEntries(PREVIEW_TEXT_EXTS.split(' ').map((ext) => [`.${ext}`, 'text'])),
+  ...Object.fromEntries(PREVIEW_IMAGE_EXTS.split(' ').map((ext) => [`.${ext}`, 'image'])),
 };
 // A scratchpad collects files whose real extension is buried under a trailing one —
 // report.html.before, app.js.map, config.env.local, page.html~. One hop past an
@@ -3180,12 +3183,15 @@ const PREVIEW_KINDS = {
 // beneath them are binary, which is what the allowlist exists to keep out of the DOM.
 const PREVIEW_OPAQUE_EXTS = new Set(['.gz', '.br', '.zst', '.xz', '.bz2', '.zip', '.7z']);
 
-function previewKindFor(absPath) {
+function previewExtFor(absPath) {
   const trimmed = absPath.replace(/~+$/, '');
   const ext = path.extname(trimmed).toLowerCase();
-  if (PREVIEW_KINDS[ext]) return PREVIEW_KINDS[ext];
-  if (!ext || PREVIEW_OPAQUE_EXTS.has(ext)) return null;
-  return PREVIEW_KINDS[path.extname(trimmed.slice(0, -ext.length)).toLowerCase()] || null;
+  if (PREVIEW_KINDS[ext] || !ext || PREVIEW_OPAQUE_EXTS.has(ext)) return ext;
+  return path.extname(trimmed.slice(0, -ext.length)).toLowerCase();
+}
+
+function previewKindFor(absPath) {
+  return PREVIEW_KINDS[previewExtFor(absPath)] || null;
 }
 
 // The hop makes a claim about bytes from a name, and PREVIEW_OPAQUE_EXTS can only stop
@@ -3230,7 +3236,8 @@ async function statFileTarget(absPath) {
   try {
     const stats = await fs.stat(absPath);
     if (!stats.isFile()) throw previewError(400, 'Not a file');
-    return { size: stats.size, kind: await confirmKind(absPath, previewKindFor(absPath)) };
+    const kind = previewKindFor(absPath);
+    return { size: stats.size, kind: kind === 'image' ? kind : await confirmKind(absPath, kind) };
   } catch (e) {
     if (e.status) throw e;
     if (e.code === 'ENOENT') throw previewError(404, 'File not found');
@@ -3250,7 +3257,7 @@ function enforcePreviewSize(kind, size) {
 // validation (and its status codes) but never the content.
 async function validatePreviewFile(absPath) {
   const { kind, size } = await statFileTarget(absPath);
-  if (!kind) throw previewError(400, 'Not a previewable text, markdown or HTML file');
+  if (!kind) throw previewError(400, 'Not a previewable text, markdown, HTML or image file');
   enforcePreviewSize(kind, size);
   return { kind, size };
 }
@@ -3262,6 +3269,8 @@ async function readPreviewFile(absPath) {
   // would only reach the browser console. A size refusal stays a 400 — that one is real.
   if (!kind) return { content: null, kind: null };
   enforcePreviewSize(kind, size);
+  // Images travel as bytes through GET /api/preview/image; the client builds the URL from `path`.
+  if (kind === 'image') return { content: null, kind };
   const raw = await fs.readFile(absPath, 'utf8');
   if (kind !== 'html') return { content: raw, kind };
   // The client renders HTML into a `srcdoc` iframe, which has no base URL — sibling
@@ -3424,6 +3433,20 @@ app.get('/api/preview', async (req, res) => {
     // A previewError carries the status it wants reported and is an answer, not a
     // failure — a missing file or one too large to render is the user's doing.
     if (!error.status) console.error('Error in GET /api/preview:', error);
+    res.status(error.status || 500).json({ error: error.message || 'Preview failed' });
+  }
+});
+
+app.get('/api/preview/image', async (req, res) => {
+  const abs = resolvePreviewPath(req.query.path, req.query.base);
+  if (!abs) return res.status(400).json({ error: 'path is required' });
+  try {
+    const { kind } = await statFileTarget(abs);
+    if (kind !== 'image') throw previewError(400, 'Not an image');
+    res.type(MIME_BY_EXT[previewExtFor(abs)]);
+    res.sendFile(abs);
+  } catch (error) {
+    if (!error.status) console.error('Error in GET /api/preview/image:', error);
     res.status(error.status || 500).json({ error: error.message || 'Preview failed' });
   }
 });

@@ -4691,6 +4691,16 @@ body.light .msg-assistant .msg-text {
   padding-right: 8px;
 }
 
+#preview-modal-body .preview-image {
+  display: block;
+  max-width: 100%;
+  max-height: 70vh;
+  margin: 0 auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-hover);
+}
+
 #preview-modal-meta {
   margin-top: 12px;
   font-size: 11px;
