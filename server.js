@@ -1461,6 +1461,24 @@ app.get('/api/projects', (_req, res) => {
   res.json(projects);
 });
 
+// API: Return session IDs of currently-running Claude processes (by CWD match)
+app.get('/api/sessions/running', (req, res) => {
+  try {
+    const lsofOut = execSync('lsof -c claude -a -d cwd -Fn 2>/dev/null', { timeout: 3000, encoding: 'utf8' });
+    const activeCwds = new Set();
+    for (const line of lsofOut.split('\n')) {
+      if (line.startsWith('n')) activeCwds.add(line.slice(1).trim());
+    }
+    if (activeCwds.size === 0) return res.json([]);
+    const runningIds = Object.entries(sessionMetadataCache)
+      .filter(([, meta]) => meta?.cwd && activeCwds.has(meta.cwd))
+      .map(([id]) => id);
+    res.json(runningIds);
+  } catch {
+    res.json([]);
+  }
+});
+
 // API: Get tasks for a session
 app.get('/api/sessions/:sessionId', async (req, res) => {
   try {
@@ -1970,7 +1988,14 @@ app.post('/api/launch-claude', (req, res) => {
   end if
 end tell`;
     } else {
-      script = `tell application "Terminal"\nactivate\ndo script "${escapedCmd}"\nend tell`;
+      script = `tell application "Terminal"
+  activate
+  if (count of windows) > 0 then
+    tell front window to do script "${escapedCmd}"
+  else
+    do script "${escapedCmd}"
+  end if
+end tell`;
     }
 
     spawn('osascript', ['-e', script], { detached: true, stdio: 'ignore' }).unref();
@@ -1979,6 +2004,167 @@ end tell`;
     if (error.status) return res.status(error.status).json({ error: error.message });
     console.error('Error launching Claude:', error);
     res.status(500).json({ error: 'Failed to launch Claude' });
+  }
+});
+
+// API: Focus the Terminal tab whose shell is running in the given directory.
+app.post('/api/focus-terminal', (req, res) => {
+  try {
+    if (process.platform !== 'darwin') {
+      return res.status(400).json({ error: 'Terminal focus only supported on macOS' });
+    }
+    const { cwd, sessionId } = req.body;
+    if (!cwd) return res.status(400).json({ error: 'cwd required' });
+    if (sessionId && !/^[a-zA-Z0-9_-]+$/.test(sessionId)) {
+      return res.status(400).json({ error: 'Invalid session ID' });
+    }
+
+    let matchedTty = null;
+
+    // Step 1: read ~/.claude/sessions/<pid>.json registry — Claude writes its own PID
+    // and sessionId here, so this gives an exact PID↔session mapping without process scanning.
+    if (sessionId) {
+      try {
+        const sessionsDir = path.join(CLAUDE_DIR, 'sessions');
+        const files = readdirSync(sessionsDir).filter((f) => f.endsWith('.json'));
+        for (const file of files) {
+          try {
+            const entry = JSON.parse(readFileSync(path.join(sessionsDir, file), 'utf8'));
+            if (entry.sessionId === sessionId && entry.pid) {
+              const tty = execSync(`ps -p ${entry.pid} -o tty= 2>/dev/null`, { encoding: 'utf8' }).trim();
+              if (tty && tty !== '??') { matchedTty = `/dev/${tty}`; break; }
+            }
+          } catch { /* stale or unreadable entry */ }
+        }
+      } catch { /* sessions dir missing */ }
+    }
+
+    // Step 2: fall back to CWD matching via lsof (catches sessions not in the registry).
+    if (!matchedTty && cwd) {
+      try {
+        const safePath = assertOpenTarget(cwd, 'folder');
+        const { realpathSync } = require('node:fs');
+        const realPath = (() => { try { return realpathSync(safePath); } catch { return safePath; } })();
+        const matchesPath = (p) => p === safePath || p === realPath;
+
+        const lsofOut = execSync('lsof -d cwd -Fn 2>/dev/null', { timeout: 5000, encoding: 'utf8' });
+        let currentPid = null;
+        for (const line of lsofOut.split('\n')) {
+          if (line.startsWith('p')) {
+            currentPid = line.slice(1).trim();
+          } else if (line.startsWith('n') && currentPid) {
+            if (matchesPath(line.slice(1).trim())) {
+              try {
+                const tty = execSync(`ps -p ${currentPid} -o tty= 2>/dev/null`, { encoding: 'utf8' }).trim();
+                if (tty && tty !== '??') { matchedTty = `/dev/${tty}`; break; }
+              } catch { /* ignore */ }
+            }
+            currentPid = null;
+          }
+        }
+      } catch { /* lsof not available */ }
+    }
+
+    if (!matchedTty) return res.json({ ok: false, reason: 'no terminal found for this path' });
+
+    const escapedTty = matchedTty.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    const script = `tell application "Terminal"
+  activate
+  repeat with w in windows
+    repeat with t in tabs of w
+      if tty of t is "${escapedTty}" then
+        set selected of t to true
+        set index of w to 1
+        return
+      end if
+    end repeat
+  end repeat
+end tell`;
+
+    spawn('osascript', ['-e', script], { detached: true, stdio: 'ignore' }).unref();
+    res.json({ ok: true });
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    res.status(500).json({ error: 'Failed to focus terminal' });
+  }
+});
+
+// API: Send text input to the terminal running a session (writes to the foreground process's stdin)
+app.post('/api/sessions/:sessionId/send-input', (req, res) => {
+  try {
+    if (process.platform !== 'darwin') {
+      return res.status(400).json({ error: 'Terminal input only supported on macOS' });
+    }
+    const { sessionId } = req.params;
+    if (!/^[a-zA-Z0-9_-]+$/.test(sessionId)) {
+      return res.status(400).json({ error: 'Invalid session ID' });
+    }
+    const { text } = req.body;
+    if (!text || typeof text !== 'string') return res.status(400).json({ error: 'text required' });
+    if (text.length > 10000) return res.status(400).json({ error: 'text too long' });
+
+    let matchedTty = null;
+
+    // Step 1: exact PID→session lookup via ~/.claude/sessions/<pid>.json
+    try {
+      const files = readdirSync(SESSIONS_DIR).filter((f) => f.endsWith('.json'));
+      for (const file of files) {
+        try {
+          const entry = JSON.parse(readFileSync(path.join(SESSIONS_DIR, file), 'utf8'));
+          if (entry.sessionId === sessionId && entry.pid) {
+            const tty = execSync(`ps -p ${entry.pid} -o tty= 2>/dev/null`, { encoding: 'utf8' }).trim();
+            if (tty && tty !== '??') { matchedTty = `/dev/${tty}`; break; }
+          }
+        } catch { /* stale entry */ }
+      }
+    } catch { /* sessions dir missing */ }
+
+    // Step 2: fall back to CWD match via lsof
+    if (!matchedTty) {
+      const cwd = sessionMetadataCache[sessionId]?.cwd;
+      if (cwd) {
+        try {
+          const { realpathSync } = require('node:fs');
+          const realCwd = (() => { try { return realpathSync(cwd); } catch { return cwd; } })();
+          const lsofOut = execSync('lsof -d cwd -Fn 2>/dev/null', { timeout: 5000, encoding: 'utf8' });
+          let pid = null;
+          for (const line of lsofOut.split('\n')) {
+            if (line.startsWith('p')) { pid = line.slice(1).trim(); }
+            else if (line.startsWith('n') && pid) {
+              const p = line.slice(1).trim();
+              if (p === cwd || p === realCwd) {
+                try {
+                  const tty = execSync(`ps -p ${pid} -o tty= 2>/dev/null`, { encoding: 'utf8' }).trim();
+                  if (tty && tty !== '??') { matchedTty = `/dev/${tty}`; break; }
+                } catch { /* ignore */ }
+              }
+              pid = null;
+            }
+          }
+        } catch { /* lsof unavailable */ }
+      }
+    }
+
+    if (!matchedTty) return res.status(404).json({ error: 'no terminal found for this session' });
+
+    // Use Terminal.app's `write text` to inject input into the foreground process's stdin
+    const escapedTty = matchedTty.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    const escapedText = text.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    const script = `tell application "Terminal"
+  repeat with w in windows
+    repeat with t in tabs of w
+      if tty of t is "${escapedTty}" then
+        write text "${escapedText}" to t
+        return
+      end if
+    end repeat
+  end repeat
+end tell`;
+
+    spawn('osascript', ['-e', script], { detached: true, stdio: 'ignore' }).unref();
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to send input' });
   }
 });
 
@@ -2861,177 +3047,8 @@ app.get('/api/config', (_req, res) => {
 // #endregion
 
 // #region TASK_ROUTES
-// API: Get all tasks across all sessions
-app.get('/api/tasks/all', async (_req, res) => {
-  try {
-    if (!existsSync(TASKS_DIR)) {
-      return res.json([]);
-    }
-
-    const metadata = loadSessionMetadata();
-    const { listToSessions } = loadAllTaskMaps();
-    const sessionDirs = readdirSync(TASKS_DIR, { withFileTypes: true })
-      .filter(d => d.isDirectory());
-
-    const allTasks = [];
-
-    for (const sessionDir of sessionDirs) {
-      const sessionPath = path.join(TASKS_DIR, sessionDir.name);
-      const taskFiles = readdirSync(sessionPath).filter(f => f.endsWith('.json'));
-      const meta = metadata[sessionDir.name] || {};
-
-      // For custom task list directories (non-UUID dirs), resolve project from the
-      // mapped sessions since those dirs don't have their own metadata entry.
-      let project = meta.project || null;
-      if (!project) {
-        const mappedSessions = listToSessions[sessionDir.name];
-        if (mappedSessions) {
-          for (const [sid, info] of Object.entries(mappedSessions)) {
-            project = metadata[sid]?.project || info.project || null;
-            if (project) break;
-          }
-        }
-      }
-
-      for (const file of taskFiles) {
-        try {
-          const task = JSON.parse(readFileSync(path.join(sessionPath, file), 'utf8'));
-          allTasks.push({
-            ...task,
-            sessionId: sessionDir.name,
-            sessionName: getSessionDisplayName(sessionDir.name, meta),
-            project
-          });
-        } catch {
-          // Skip invalid files
-        }
-      }
-    }
-
-    res.json(allTasks);
-  } catch (error) {
-    console.error('Error getting all tasks:', error);
-    res.status(500).json({ error: 'Failed to get all tasks' });
-  }
-});
-
-const { enqueueSessionEvent, formatTaskMoved, handleSessionEvents } = require('./lib/session-events');
+const { handleSessionEvents } = require('./lib/session-events');
 app.get('/api/sessions/:sessionId/events', handleSessionEvents);
-
-// API: Create a task
-app.post('/api/tasks/:sessionId', async (req, res) => {
-  try {
-    const { sessionId } = req.params;
-    const subject = (req.body.subject || '').trim();
-    if (!subject) return res.status(400).json({ error: 'Subject is required' });
-
-    const sessionDir = taskDirFor(sessionId);
-    if (!existsSync(sessionDir)) mkdirSync(sessionDir, { recursive: true });
-
-    // Ids are the agent's own numbering scheme, so a hand-made task has to keep counting
-    // from the highest one on disk -- reusing a number would overwrite that task's file.
-    const ids = readdirSync(sessionDir)
-      .filter((f) => f.endsWith('.json'))
-      .map((f) => parseInt(path.basename(f, '.json'), 10))
-      .filter((n) => Number.isInteger(n));
-    const id = String(Math.max(0, ...ids) + 1);
-
-    const asanaUrl = (req.body.asanaUrl || '').trim();
-    const task = {
-      id,
-      subject,
-      description: (req.body.description || '').trim(),
-      ...(asanaUrl ? { asanaUrl } : {}),
-      activeForm: subject,
-      status: 'pending',
-      blocks: [],
-      blockedBy: [],
-    };
-
-    // No doorbell here, unlike a move: the user typed this task, so telling their session
-    // about it would only repeat what they just said. Dragging it to In Progress rings.
-    await fs.writeFile(path.join(sessionDir, `${id}.json`), JSON.stringify(task, null, 2));
-    res.json({ success: true, task });
-  } catch (error) {
-    console.error('Error creating task:', error);
-    res.status(500).json({ error: 'Failed to create task' });
-  }
-});
-
-// API: Update task fields (subject, description)
-app.put('/api/tasks/:sessionId/:taskId', async (req, res) => {
-  try {
-    const { sessionId, taskId } = req.params;
-    const { subject, description } = req.body;
-
-    const sessionDir = taskDirFor(sessionId);
-    const taskPath = path.join(sessionDir, `${taskId}.json`);
-
-    if (!existsSync(taskPath)) {
-      return res.status(404).json({ error: 'Task not found' });
-    }
-
-    const task = JSON.parse(await fs.readFile(taskPath, 'utf8'));
-    const prevStatus = task.status;
-
-    if (subject !== undefined) task.subject = subject;
-    if (description !== undefined) task.description = description;
-    if (req.body.status !== undefined) task.status = req.body.status;
-
-    await fs.writeFile(taskPath, JSON.stringify(task, null, 2));
-
-    // Ring the session only for a move. The direction has to ride in the line because
-    // the write above destroyed the old status -- nothing downstream can recover it, and
-    // which way a task moved is what decides whether to start work or stop it.
-    if (task.status !== prevStatus) {
-      // The route param is a task *directory*, which for a shared list or team board is
-      // not a session id -- and the postman polls with its own session id, so an unresolved
-      // name would queue the line where nobody drains it.
-      const line = formatTaskMoved(taskId, prevStatus, task);
-      for (const sid of resolveSessionsForTaskDir(sessionId)) enqueueSessionEvent(sid, line);
-    }
-
-    res.json({ success: true, task });
-  } catch (error) {
-    console.error('Error updating task:', error);
-    res.status(500).json({ error: 'Failed to update task' });
-  }
-});
-
-// API: Delete a task
-app.delete('/api/tasks/:sessionId/:taskId', async (req, res) => {
-  try {
-    const { sessionId, taskId } = req.params;
-    const sessionPath = taskDirFor(sessionId);
-    const taskPath = path.join(sessionPath, `${taskId}.json`);
-
-    if (!existsSync(taskPath)) {
-      return res.status(404).json({ error: 'Task not found' });
-    }
-
-    // A deleted task can't block anything, so drop the dangling reference instead of
-    // refusing the delete -- a stale blockedBy id would pin the other task as BLOCKED forever.
-    const taskFiles = readdirSync(sessionPath).filter(f => f.endsWith('.json'));
-
-    for (const file of taskFiles) {
-      const otherPath = path.join(sessionPath, file);
-      const otherTask = JSON.parse(readFileSync(otherPath, 'utf8'));
-      if (otherTask.blockedBy?.includes(taskId)) {
-        otherTask.blockedBy = otherTask.blockedBy.filter(id => id !== taskId);
-        await fs.writeFile(otherPath, JSON.stringify(otherTask, null, 2));
-      }
-    }
-
-    // Delete the task file
-    await fs.unlink(taskPath);
-
-    res.json({ success: true, taskId });
-  } catch (error) {
-    console.error('Error deleting task:', error);
-    res.status(500).json({ error: 'Failed to delete task' });
-  }
-});
-
 // #endregion
 
 // #region PREVIEW
@@ -3555,18 +3572,27 @@ setInterval(cleanupContextStatus, 30 * 60 * 1000);
 // Yields to the event loop periodically so any inbound request isn't starved.
 async function prewarmCaches() {
   const t0 = Date.now();
+  const PREWARM_AGE_MS = 7 * 24 * 60 * 60 * 1000; // only sessions active in the last 7 days
+  const cutoff = Date.now() - PREWARM_AGE_MS;
   try {
     const metadata = loadSessionMetadata();
+    const total = Object.keys(metadata).length;
+
+    // Filter to recently-modified sessions only — old sessions won't have active
+    // loop schedules and their JSONLs can be large, so reading them all at startup
+    // is the main source of the prewarm delay.
+    const recent = Object.values(metadata).filter((meta) => {
+      if (!meta?.jsonlPath) return false;
+      try { return statSync(meta.jsonlPath).mtimeMs > cutoff; } catch { return false; }
+    });
 
     let i = 0;
-    for (const meta of Object.values(metadata)) {
-      if (meta?.jsonlPath) {
-        try { refreshLoopInfoState(meta.jsonlPath); } catch {}
-      }
-      if (++i % 50 === 0) await new Promise(r => setImmediate(r));
+    for (const meta of recent) {
+      try { refreshLoopInfoState(meta.jsonlPath); } catch {}
+      if (++i % 20 === 0) await new Promise(r => setImmediate(r));
     }
 
-    console.log(`[prewarm] done in ${Date.now() - t0}ms (${Object.keys(metadata).length} sessions)`);
+    console.log(`[prewarm] done in ${Date.now() - t0}ms (${recent.length}/${total} sessions)`);
   } catch (e) {
     console.warn('[prewarm] failed:', e.message);
   }

@@ -20,11 +20,10 @@ const store = {
 
 // The baseline "nothing is filtered" state: what resetState() returns to, what updateUrl() omits
 // from the query string, and what decides whether a control tints ember in the header summary.
-const FILTER_DEFAULTS = { project: '__recent__', session: 'active', limit: '20' };
+const FILTER_DEFAULTS = { project: '', session: 'active', limit: '20' };
 
 let sessions = [];
 let currentSessionId = null;
-let currentTasks = [];
 let viewMode = 'session';
 let sessionFilter = FILTER_DEFAULTS.session;
 // Only meaningful while sessionFilter === 'active' (filterBySessions clears it otherwise)
@@ -41,8 +40,6 @@ let stableGroupOrder = []; // cached project path order to prevent jumping
 let sessionGroups = []; // user-named groups: [{id, name, color, members:[{type,ref}]}]
 let sgDrag = null; // in-flight sidebar drag: {kind:'session'|'project'|'group', ref}
 let searchQuery = ''; // Search query for fuzzy search
-let allTasksCache = []; // Cache all tasks for search
-let ownerFilter = '';
 let currentAgents = [];
 let currentWaiting = null;
 let lastWaitingHash = '';
@@ -52,10 +49,6 @@ let lastMessagesHash = '';
 let currentMessages = [];
 let agentDurationInterval = null;
 let agentPollInterval = null;
-let selectedTaskId = null;
-let selectedSessionId = null;
-// Task stays selected (keyboard nav) but its white highlight is dimmed once the detail panel closes.
-let taskHighlightDimmed = false;
 let focusZone = 'board'; // 'board' | 'sidebar'
 let appConfig = { marketplaceUrl: null, costUrl: null, memoryUrl: null, scratchAvailable: false };
 let selectedSessionIdx = -1;
@@ -89,7 +82,6 @@ function getUrlState() {
     filter: params.get('filter'),
     limit: params.get('limit'),
     project: params.get('project'),
-    owner: params.get('owner'),
     search: params.get('search'),
     messages: params.has('messages') ? params.get('messages') === '1' : store.getItem('message-panel-open') === 'true',
     projectView: params.get('projectView'),
@@ -104,7 +96,6 @@ function updateUrl() {
   if (sessionFilter !== FILTER_DEFAULTS.session) params.set('filter', sessionFilter);
   if (sessionLimit !== FILTER_DEFAULTS.limit) params.set('limit', sessionLimit);
   if (filterProject && filterProject !== FILTER_DEFAULTS.project) params.set('project', filterProject);
-  if (ownerFilter) params.set('owner', ownerFilter);
   if (searchQuery) params.set('search', searchQuery);
   if (messagePanelOpen) params.set('messages', '1');
   const qs = params.toString();
@@ -144,7 +135,6 @@ function resetState() {
   sessionFilter = FILTER_DEFAULTS.session;
   sessionLimit = FILTER_DEFAULTS.limit;
   filterProject = FILTER_DEFAULTS.project;
-  ownerFilter = '';
   searchQuery = '';
   viewMode = 'all';
   if (agentLogMode) exitAgentLogMode();
@@ -156,7 +146,7 @@ function resetState() {
   if (searchInput) searchInput.value = '';
   document.getElementById('search-clear-btn')?.classList.remove('visible');
   renderFilterState();
-  fetchSessions().then(() => showAllTasks());
+  fetchSessions();
 }
 
 //#endregion
@@ -167,26 +157,14 @@ const noSession = document.getElementById('no-session');
 const sessionView = document.getElementById('session-view');
 const sessionTitle = document.getElementById('session-title');
 const sessionMeta = document.getElementById('session-meta');
-const progressPercent = document.getElementById('progress-percent');
-const progressBar = document.getElementById('progress-bar');
-const pendingTasks = document.getElementById('pending-tasks');
-const inProgressTasks = document.getElementById('in-progress-tasks');
-const completedTasks = document.getElementById('completed-tasks');
-const pendingCount = document.getElementById('pending-count');
-const inProgressCount = document.getElementById('in-progress-count');
-const completedCount = document.getElementById('completed-count');
-const detailPanel = document.getElementById('detail-panel');
-const detailContent = document.getElementById('detail-content');
 const CONTENT_TRUNCATE_MAX = 1500;
-const COLUMNS = [{ el: pendingTasks }, { el: inProgressTasks }, { el: completedTasks }];
 
 let lastSessionsHash = '';
-let lastTasksHash = '';
 
 //#endregion
 
 //#region DATA_FETCHING
-async function fetchSessions(includeTasks = true) {
+async function fetchSessions() {
   try {
     const allPinnedIds = new Set([...pinnedSessionIds, ...stickySessionIds]);
     if (revealedPlanSessionId) allPinnedIds.add(revealedPlanSessionId);
@@ -198,26 +176,12 @@ async function fetchSessions(includeTasks = true) {
     const projectParam =
       filterProject && filterProject !== '__recent__' ? `&project=${encodeURIComponent(filterProject)}` : '';
     const filterParam = sessionFilter === 'active' ? '&filter=active' : '';
-    const sessionsPromise = fetch(
+    const newSessions = await fetch(
       `/api/sessions?limit=${sessionLimit}${pinnedParam}${projectParam}${filterParam}`,
     ).then((r) => r.json());
 
-    let newSessions, newTasks;
-    if (includeTasks) {
-      [newSessions, newTasks] = await Promise.all([sessionsPromise, fetch('/api/tasks/all').then((r) => r.json())]);
-    } else {
-      newSessions = await sessionsPromise;
-    }
-
     const sessionsHash = JSON.stringify(newSessions);
-    if (includeTasks) {
-      const tasksHash = JSON.stringify(newTasks);
-      if (sessionsHash === lastSessionsHash && tasksHash === lastTasksHash) return;
-      lastTasksHash = tasksHash;
-      allTasksCache = newTasks;
-    } else {
-      if (sessionsHash === lastSessionsHash) return;
-    }
+    if (sessionsHash === lastSessionsHash) return;
     lastSessionsHash = sessionsHash;
 
     sessions = newSessions;
@@ -399,43 +363,29 @@ function setActivityFilter(kind) {
   renderActivityChip();
 }
 
-let lastCurrentTasksHash = '';
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+function selectSession(sessionId) {
+  fetchTasks(sessionId);
+  openInlineTerminal(sessionId);
+}
 
 async function fetchTasks(sessionId) {
   try {
     viewMode = 'session';
     document.getElementById('message-toggle')?.style.removeProperty('display');
-    const res = await fetch(`/api/sessions/${sessionId}`);
-
-    let newTasks;
-    if (res.ok) {
-      newTasks = await res.json();
-    } else if (res.status === 404) {
-      newTasks = [];
-    } else {
-      throw new Error(`Failed to fetch tasks: ${res.status}`);
+    const strip = document.getElementById('project-sessions-strip');
+    if (strip) {
+      strip.style.display = 'none';
+      strip.innerHTML = '';
     }
-
-    const hash = JSON.stringify(newTasks);
-    if (sessionId === currentSessionId && hash === lastCurrentTasksHash) {
-      return;
-    }
-    lastCurrentTasksHash = hash;
-
-    currentTasks = newTasks;
     if (agentLogMode && sessionId !== currentSessionId) exitAgentLogMode();
     if (sessionId !== currentSessionId && document.getElementById('scratchpad-modal').classList.contains('visible'))
       closeScratchpad();
-    if (revealedPlanSessionId && sessionId !== revealedPlanSessionId) {
-      revealedPlanSessionId = null;
-    }
-    if (revealedStorageSessionId && sessionId !== revealedStorageSessionId) {
-      revealedStorageSessionId = null;
-    }
+    if (revealedPlanSessionId && sessionId !== revealedPlanSessionId) revealedPlanSessionId = null;
+    if (revealedStorageSessionId && sessionId !== revealedStorageSessionId) revealedStorageSessionId = null;
     if (currentSessionId && currentSessionId !== sessionId) deferredPinPlacement.delete(currentSessionId);
     currentSessionId = sessionId;
     currentPins = loadPins(sessionId);
-    ownerFilter = '';
     resetMessageScrollState();
     for (const k of Object.keys(ownerColorCache)) delete ownerColorCache[k];
     for (const k of Object.keys(teamColorMap)) delete teamColorMap[k];
@@ -444,13 +394,12 @@ async function fetchTasks(sessionId) {
     updateUrl();
     renderSession();
     renderSessions();
+    fetchAndRenderSessionBoard();
     fetchAgents(sessionId);
     if (!agentLogMode) fetchMessages(sessionId);
   } catch (error) {
-    console.error('Failed to fetch tasks:', error);
-    currentTasks = [];
+    console.error('Failed to fetch session:', error);
     currentSessionId = sessionId;
-    lastCurrentTasksHash = '';
     updateUrl();
     renderSession();
   }
@@ -487,7 +436,6 @@ async function fetchAgents(sessionId) {
     updateTeamColors(agents, data.teamColors);
     for (const k of Object.keys(ownerColorCache)) delete ownerColorCache[k];
     renderAgentFooter();
-    if (currentSessionId === sessionId) renderKanban();
     const waitHash = JSON.stringify(currentWaiting);
     if (waitHash !== lastWaitingHash) {
       lastWaitingHash = waitHash;
@@ -515,23 +463,13 @@ async function fetchProjectView(projectPath) {
   currentProjectSessionIds = projectSessions.map((s) => s.id);
   const activeSessionIds = projectSessions.filter((s) => isSessionActive(s) || isAnyPinned(s.id)).map((s) => s.id);
 
-  const encoded = btoa(projectPath);
-  const [tasksResult, agentResults] = await Promise.all([
-    fetch(`/api/projects/${encodeURIComponent(encoded)}/tasks`)
-      .then((r) => r.json())
-      .catch((e) => {
-        console.error('[fetchProjectView] tasks:', e);
-        return [];
-      }),
-    Promise.all(
-      activeSessionIds.map((id) =>
-        fetch(`/api/sessions/${id}/agents`)
-          .then((r) => r.json())
-          .catch(() => ({ agents: [] })),
-      ),
+  const agentResults = await Promise.all(
+    activeSessionIds.map((id) =>
+      fetch(`/api/sessions/${id}/agents`)
+        .then((r) => r.json())
+        .catch(() => ({ agents: [] })),
     ),
-  ]);
-  currentTasks = tasksResult;
+  );
   const seen = new Set();
   currentAgents = [];
   const mergedColors = {};
@@ -555,7 +493,6 @@ async function fetchProjectView(projectPath) {
 
   renderProjectView();
   renderAgentFooter();
-  renderKanban();
   updateUrl();
 }
 
@@ -1409,6 +1346,7 @@ function renderMessages(messages) {
   ) {
     loadOlderMessages();
   }
+  renderInlineTerminalMessages(messages);
 }
 
 let currentMsgDetailIdx = null;
@@ -2999,6 +2937,198 @@ function highlightSelectedAgent() {
 
 //#endregion
 
+//#region SESSION_BOARD
+let boardSessions = [];
+
+async function fetchAndRenderSessionBoard() {
+  try {
+    const resp = await fetch('/api/sessions?limit=200');
+    if (resp.ok) {
+      const all = await resp.json();
+      const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+      const recent = all.filter((s) => s.modifiedAt && new Date(s.modifiedAt).getTime() > cutoff);
+      boardSessions = recent.length > 0 ? recent : all.slice(0, 50);
+    }
+  } catch {
+    boardSessions = sessions;
+  }
+  renderSessionBoard();
+}
+
+function renderSessionBoard() {
+  const board = document.getElementById('session-board');
+  if (!board) return;
+
+  const all = boardSessions.length > 0 ? boardSessions : sessions;
+  const byProject = new Map();
+  const ungrouped = [];
+
+  for (const s of all) {
+    if (s.project) {
+      if (!byProject.has(s.project)) byProject.set(s.project, []);
+      byProject.get(s.project).push(s);
+    } else {
+      ungrouped.push(s);
+    }
+  }
+
+  const projects = [...byProject.entries()].sort((a, b) => {
+    const aLatest = Math.max(...a[1].map((s) => new Date(s.modifiedAt).getTime()));
+    const bLatest = Math.max(...b[1].map((s) => new Date(s.modifiedAt).getTime()));
+    return bLatest - aLatest;
+  });
+
+  let html = projects.map(([path, sArr]) => renderBoardColumn(path, sArr)).join('');
+  if (ungrouped.length > 0) html += renderBoardColumn(null, ungrouped);
+  board.innerHTML = html || '<div class="sb-empty">No sessions found</div>';
+
+  const totalLive = all.filter((s) => isSessionLive(s)).length;
+  const metaEl = document.getElementById('session-meta');
+  if (metaEl && !currentSessionId) {
+    metaEl.textContent = `${all.length} sessions${totalLive > 0 ? ` · ${totalLive} live` : ''}`;
+  }
+}
+
+function renderBoardColumn(projectPath, colSessions) {
+  const folderName = projectPath ? projectPath.split(/[/\\]/).pop() : '(no project)';
+  const fullPath = projectPath ? escapeHtml(projectPath) : '';
+  const liveCount = colSessions.filter((s) => isSessionLive(s)).length;
+  const cards = colSessions
+    .sort((a, b) => new Date(b.modifiedAt).getTime() - new Date(a.modifiedAt).getTime())
+    .map(renderBoardCard)
+    .join('');
+  const newTabBtn = projectPath
+    ? `<button class="sb-new-tab" onclick="launchClaude('${escAttrJs(projectPath)}', null)" title="New terminal in ${fullPath}">
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/><line x1="18" y1="13" x2="18" y2="19"/><line x1="15" y1="16" x2="21" y2="16"/></svg>
+        New tab
+      </button>`
+    : '';
+  return `
+    <div class="sb-col">
+      <div class="sb-col-header" title="${fullPath}">
+        <span class="sb-col-name" title="${fullPath}">${escapeHtml(folderName)}</span>
+        <span class="sb-col-count">${liveCount > 0 ? '<span class="sb-live-dot"></span>' : ''}${colSessions.length}</span>
+      </div>
+      <div class="sb-cards">${cards}</div>
+      ${newTabBtn}
+    </div>`;
+}
+
+function renderBoardCard(session) {
+  const name = sessionDisplayName(session);
+  const isLive = isSessionLive(session);
+  const isSelected = session.id === currentSessionId;
+  const sid = escAttrJs(session.id);
+  const ctx = session.contextStatus?.context_window;
+  const usedPct = ctx?.used_percentage ?? null;
+  const ctxBar =
+    usedPct !== null
+      ? `<div class="sb-ctx-bar"><div class="sb-ctx-fill${usedPct > 80 ? ' high' : ''}" style="width:${usedPct}%"></div></div><span class="sb-ctx-label">${usedPct}%</span>`
+      : '';
+  return `
+    <div class="sb-card${isLive ? ' live' : ''}${session.hasWaitingForUser ? ' waiting' : ''}${isSelected ? ' selected' : ''}"
+         onclick="selectSession('${sid}')"
+         title="${escapeHtml(name)}">
+      <div class="sb-card-name">
+        ${isLive ? '<span class="pulse sb-pulse"></span>' : ''}
+        <span>${escapeHtml(name)}</span>
+      </div>
+      ${session.gitBranch ? `<div class="sb-card-branch">${escapeHtml(session.gitBranch)}</div>` : ''}
+      <div class="sb-card-footer">
+        <span class="sb-card-meta">${escapeHtml(formatDate(session.modifiedAt))}</span>
+        ${ctxBar ? `<div class="sb-ctx">${ctxBar}</div>` : ''}
+      </div>
+    </div>`;
+}
+
+// #region INLINE_TERMINAL
+let inlineTerminalExpanded = false;
+
+function openInlineTerminal(sessionId) {
+  const main = document.querySelector('.main');
+  if (!main) return;
+  main.classList.add('has-inline-terminal');
+  inlineTerminalExpanded = false;
+  main.classList.remove('it-expanded');
+
+  const s = boardSessions.find((x) => x.id === sessionId) || sessions.find((x) => x.id === sessionId);
+  const nameEl = document.getElementById('inline-terminal-session-name');
+  if (nameEl) nameEl.textContent = s ? sessionDisplayName(s) : sessionId;
+
+  renderInlineTerminalMessages(currentMessages);
+  setTimeout(() => document.getElementById('inline-terminal-input')?.focus(), 50);
+}
+
+function closeInlineTerminal() {
+  const main = document.querySelector('.main');
+  if (main) {
+    main.classList.remove('has-inline-terminal', 'it-expanded');
+  }
+  inlineTerminalExpanded = false;
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+function toggleInlineTerminalExpand() {
+  const main = document.querySelector('.main');
+  if (!main) return;
+  inlineTerminalExpanded = !inlineTerminalExpanded;
+  main.classList.toggle('it-expanded', inlineTerminalExpanded);
+}
+
+function renderInlineTerminalMessages(messages) {
+  const container = document.getElementById('inline-terminal-messages');
+  if (!container || !document.querySelector('.main')?.classList.contains('has-inline-terminal')) return;
+
+  const wasAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 40;
+
+  if (!messages?.length) {
+    container.innerHTML =
+      '<div class="msg-empty" style="padding:20px 12px">No messages yet — session log will appear here as Claude works</div>';
+    return;
+  }
+  container.innerHTML = renderMessageList(messages) + renderWaitingEntry();
+  if (wasAtBottom) container.scrollTop = container.scrollHeight;
+}
+
+async function sendTerminalInput() {
+  if (!currentSessionId) return;
+  const input = document.getElementById('inline-terminal-input');
+  if (!input) return;
+  const text = input.value;
+  if (!text.trim()) return;
+  input.value = '';
+  input.disabled = true;
+  try {
+    const res = await fetch(`/api/sessions/${currentSessionId}/send-input`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      showToast(err.error || 'Failed to send input', 'error');
+    }
+  } catch {
+    showToast('Failed to send input', 'error');
+  } finally {
+    input.disabled = false;
+    input.focus();
+  }
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+function handleTerminalInputKey(event) {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    sendTerminalInput();
+  } else if (event.key === 'Escape') {
+    closeInlineTerminal();
+  }
+}
+// #endregion
+
+//#endregion
+
 //#region RENDERING
 let revealedPlanSessionId = null;
 let revealedStorageSessionId = null;
@@ -3027,52 +3157,21 @@ async function revealPlanSession(planSessionId) {
 }
 
 async function showAllTasks() {
-  try {
-    viewMode = 'all';
-    if (agentLogMode) exitAgentLogMode();
-    currentSessionId = null;
-    ownerFilter = '';
-    resetAgentState();
-    const res = await fetch('/api/tasks/all');
-    allTasksCache = await res.json();
-    let tasks = allTasksCache;
-    if (filterProject) {
-      tasks = tasks.filter((t) => matchesProjectFilter(t.project));
-    }
-    currentTasks = tasks;
-    updateUrl();
-    renderAllTasks();
-    renderSessions();
-    renderActivityChip();
-  } catch (error) {
-    console.error('Failed to fetch all tasks:', error);
+  if (agentLogMode) exitAgentLogMode();
+  const strip = document.getElementById('project-sessions-strip');
+  if (strip) {
+    strip.style.display = 'none';
+    strip.innerHTML = '';
   }
-}
-
-function renderAllTasks() {
-  noSession.style.display = 'none';
-  sessionView.classList.add('visible');
-  document.getElementById('owner-filter-bar').classList.remove('visible');
-
-  const visibleTasks = currentTasks.filter((t) => !isInternalTask(t));
-  const totalTasks = visibleTasks.length;
-  const completed = visibleTasks.filter((t) => t.status === 'completed').length;
-  const percent = totalTasks > 0 ? Math.round((completed / totalTasks) * 100) : 0;
-
-  const isFiltered = filterProject && filterProject !== '__recent__';
-  const projectName = isFiltered ? filterProject.split(/[/\\]/).pop() : null;
-  sessionTitle.textContent = isFiltered
-    ? `Tasks: ${projectName}`
-    : filterProject === '__recent__'
-      ? 'Recent Tasks'
-      : 'All Tasks';
-  sessionMeta.textContent = isFiltered
-    ? `${totalTasks} tasks in this project`
-    : `${totalTasks} tasks across ${sessions.length} sessions`;
-  progressPercent.textContent = `${percent}%`;
-  progressBar.style.width = `${percent}%`;
-
-  renderKanban();
+  currentSessionId = null;
+  resetAgentState();
+  updateUrl();
+  const infoBar = document.getElementById('session-info-bar');
+  if (infoBar) infoBar.classList.remove('visible');
+  const msgToggle = document.getElementById('message-toggle');
+  if (msgToggle) msgToggle.style.display = 'none';
+  renderSessions();
+  fetchAndRenderSessionBoard();
 }
 
 // Filter pipeline: active filter → force-include revealed/current (non-pinned) sessions →
@@ -3117,22 +3216,12 @@ function getFilteredSessions() {
   }
 
   if (searchQuery) {
-    const taskMatchIds = new Set();
-    for (const t of allTasksCache) {
-      if (
-        (t.subject && fuzzyMatch(t.subject, searchQuery)) ||
-        (t.description && fuzzyMatch(t.description, searchQuery)) ||
-        (t.activeForm && fuzzyMatch(t.activeForm, searchQuery))
-      )
-        taskMatchIds.add(t.sessionId);
-    }
     const groupMatchIds = sgSearchMatchIds(searchQuery);
     const matchesSearch = (s) =>
       (s.name && fuzzyMatch(s.name, searchQuery)) ||
       (s.id && fuzzyMatch(s.id, searchQuery)) ||
       (s.project && fuzzyMatch(s.project, searchQuery)) ||
       (s.description && fuzzyMatch(s.description, searchQuery)) ||
-      taskMatchIds.has(s.id) ||
       groupMatchIds.has(s.id);
 
     filteredSessions = filteredSessions.filter(matchesSearch);
@@ -3166,6 +3255,7 @@ function getFilteredSessions() {
 }
 
 function renderSessions() {
+  if (!document.getElementById('sessions-list')) return;
   // Rebuilding the list under the pointer cancels an in-flight drop and would swallow a
   // half-typed group name, and the SSE path can fire at any moment — defer instead.
   if (sgDrag || sgIsEditing()) return;
@@ -3244,7 +3334,7 @@ function renderSessions() {
               <span class="session-indicators">
                 ${isTeam ? `<span class="team-badge" title="${memberCount} team members"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>${memberCount}</span>` : ''}
                 ${isTeam || session.project || showCtx ? `<span class="team-info-btn" onclick="event.stopPropagation(); showSessionInfoModal('${sid}')" title="View session info"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></span>` : ''}
-                ${session.cwd ? `<span class="team-info-btn" onclick="event.stopPropagation(); launchClaude(${JSON.stringify(session.cwd)}, '${sid}')" title="Resume in Terminal"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg></span>` : ''}
+                ${session.cwd ? `<span class="team-info-btn" onclick="event.stopPropagation(); launchClaude('${escAttrJs(session.cwd)}', '${sid}')" title="Resume in Terminal"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg></span>` : ''}
                 ${renderWorkflowBadge(session)}
                 ${renderLoopBadge(session)}
                 ${hasScratchpad ? `<span class="scratchpad-badge" onclick="event.stopPropagation(); openSessionScratchpad('${sid}')" title="Open scratchpad"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></span>` : ''}
@@ -3336,6 +3426,9 @@ function renderSessions() {
               ${countHtml(projectSessions)}
               <span class="project-view-btn" data-project-path="${escapedPath}" title="Open project view — combined tasks from all sessions">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+              </span>
+              <span class="project-new-tab-btn" data-project-path="${escapedPath}" title="New terminal tab in this directory">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/><line x1="18" y1="13" x2="18" y2="19"/><line x1="15" y1="16" x2="21" y2="16"/></svg>
               </span>
             </div>
             <div class="project-group-breadcrumb${nestedCls}" data-full-path="${escapedPath}" title="Click to copy path">${breadcrumbHtml}</div>
@@ -3532,40 +3625,59 @@ function renderSessions() {
 }
 
 function renderSession() {
-  noSession.style.display = 'none';
-  sessionView.classList.add('visible');
-
-  const session = sessions.find((s) => s.id === currentSessionId);
-  if (!session) return;
+  const infoBar = document.getElementById('session-info-bar');
+  const session =
+    sessions.find((s) => s.id === currentSessionId) || boardSessions.find((s) => s.id === currentSessionId);
+  if (!session || !infoBar) return;
+  infoBar.classList.add('visible');
 
   const displayName =
     session.customTitle || session.name || session.gitBranch || session.description || currentSessionId;
 
-  sessionTitle.textContent = displayName;
+  if (sessionTitle) sessionTitle.textContent = displayName;
 
-  // Build meta text with project path and description
   const projectName = session.project ? session.project.split('/').pop() : null;
-  const metaParts = [`${currentTasks.length} tasks`];
-  if (projectName) {
-    metaParts.push(projectName);
-  }
-  if (session.description && session.description !== displayName) {
-    metaParts.push(session.description);
-  }
+  const metaParts = [];
+  if (projectName) metaParts.push(projectName);
+  if (session.description && session.description !== displayName) metaParts.push(session.description);
   metaParts.push(formatDate(session.modifiedAt));
-  sessionMeta.textContent = metaParts.join(' · ');
+  if (sessionMeta) sessionMeta.textContent = metaParts.join(' · ');
 
-  const completed = currentTasks.filter((t) => t.status === 'completed').length;
-  const percent = currentTasks.length > 0 ? Math.round((completed / currentTasks.length) * 100) : 0;
+  const msgToggle = document.getElementById('message-toggle');
+  if (msgToggle) msgToggle.style.removeProperty('display');
+}
 
-  progressPercent.textContent = `${percent}%`;
-  progressBar.style.width = `${percent}%`;
-  const hasInProgress = currentTasks.some((t) => t.status === 'in_progress');
-  progressBar.classList.toggle('shimmer', hasInProgress && percent < 100);
-
-  updateOwnerFilter();
-  renderKanban();
-  renderSessions();
+function renderProjectSessionsStrip() {
+  const strip = document.getElementById('project-sessions-strip');
+  if (!strip) return;
+  if (viewMode !== 'project' || !currentProjectPath) {
+    strip.style.display = 'none';
+    strip.innerHTML = '';
+    return;
+  }
+  const projectSessions = sessions.filter((s) => s.project === currentProjectPath);
+  strip.style.display = 'flex';
+  const chips = projectSessions
+    .map((s) => {
+      const name = sessionDisplayName(s);
+      const isLive = isSessionLive(s);
+      const pending = (s.pending || 0) + (s.inProgress || 0);
+      const sid = escAttrJs(s.id);
+      return `
+      <button class="proj-session-chip${isLive ? ' live' : ''}" onclick="fetchTasks('${sid}')" title="${escapeHtml(name)}">
+        ${isLive ? '<span class="pulse proj-chip-pulse"></span>' : ''}
+        <span class="proj-session-chip-name">${escapeHtml(name)}</span>
+        ${pending > 0 ? `<span class="proj-session-chip-count">${pending}</span>` : ''}
+      </button>`;
+    })
+    .join('');
+  const newTabBtn = currentProjectPath
+    ? `<button class="proj-session-chip proj-session-chip-new" onclick="launchClaude('${escAttrJs(currentProjectPath)}', null)" title="New terminal tab in ${escapeHtml(currentProjectPath)}">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/><line x1="18" y1="13" x2="18" y2="19"/><line x1="15" y1="16" x2="21" y2="16"/></svg>
+        <span>New tab</span>
+      </button>`
+    : '';
+  strip.innerHTML = chips + newTabBtn;
 }
 
 function renderProjectView() {
@@ -3575,355 +3687,12 @@ function renderProjectView() {
   const folderName = currentProjectPath ? currentProjectPath.split(/[/\\]/).pop() : 'Project';
   sessionTitle.textContent = folderName;
 
-  const metaParts = [`${currentProjectSessionIds.length} sessions`, `${currentTasks.length} tasks`];
+  const metaParts = [`${currentProjectSessionIds.length} sessions`];
   if (currentProjectPath) metaParts.push(currentProjectPath);
   sessionMeta.textContent = metaParts.join(' · ');
 
-  const completed = currentTasks.filter((t) => t.status === 'completed').length;
-  const percent = currentTasks.length > 0 ? Math.round((completed / currentTasks.length) * 100) : 0;
-
-  progressPercent.textContent = `${percent}%`;
-  progressBar.style.width = `${percent}%`;
-  const hasInProgress = currentTasks.some((t) => t.status === 'in_progress');
-  progressBar.classList.toggle('shimmer', hasInProgress && percent < 100);
-
-  updateOwnerFilter();
-  renderKanban();
+  renderProjectSessionsStrip();
   renderSessions();
-}
-
-function renderTaskCard(task) {
-  const isBlocked = task.blockedBy && task.blockedBy.length > 0;
-  const useSlug = viewMode === 'all' || viewMode === 'project';
-  const taskId = useSlug ? `${(task._taskDir || task.sessionId || '')?.slice(0, 4)}-${task.id}` : task.id;
-  const sessionLabel = viewMode === 'all' && task.sessionName ? task.sessionName : null;
-  const statusClass = task.status.replace('_', '-');
-  const actualSessionId = task._taskDir || task.sessionId || currentSessionId || '';
-
-  return `
-        <div
-          role="listitem"
-          tabindex="0"
-          data-task-id="${escapeHtml(task.id)}"
-          data-session-id="${escapeHtml(actualSessionId)}"
-          onclick="showTaskDetail('${escAttrJs(task.id)}', '${escAttrJs(actualSessionId)}')"
-          draggable="true"
-          ondragstart="onCardDragStart(event)"
-          ondragend="onCardDragEnd(event)"
-          class="task-card ${statusClass} ${isBlocked ? 'blocked' : ''}"
-          aria-label="${escapeHtml(task.subject)} — ${task.status.replace('_', ' ')}">
-          <div class="task-id">
-            <span>#${taskId}</span>
-            ${isBlocked ? '<span class="task-badge blocked">Blocked</span>' : ''}
-            ${
-              task.owner
-                ? (
-                    () => {
-                      const c = getOwnerColor(task.owner);
-                      return `<span class="task-owner-badge" style="background:${c.bg};color:${c.color}">${escapeHtml(task.owner)}</span>`;
-                    }
-                  )()
-                : ''
-            }
-            <button class="task-terminal-btn" title="Open in Terminal" onclick="event.stopPropagation(); launchClaudeForSession('${escAttrJs(actualSessionId)}')" type="button"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg></button>
-          </div>
-          <div class="task-title">${escapeHtml(task.subject)}</div>
-          ${sessionLabel ? `<div class="task-session">${escapeHtml(sessionLabel)}</div>` : ''}
-          ${task.status === 'in_progress' && task.activeForm ? `<div class="task-active">${escapeHtml(task.activeForm)}</div>` : ''}
-          ${isBlocked ? `<div class="task-blocked">Waiting on ${task.blockedBy.map((id) => `#${id}`).join(', ')}</div>` : ''}
-          ${task.description ? `<div class="task-desc">${escapeHtml(task.description.split('\n')[0])}</div>` : ''}
-          ${task.asanaUrl ? `<a class="task-asana-link" href="${escapeHtml(task.asanaUrl)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="Open Asana task"><svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z"/></svg> Asana</a>` : ''}
-        </div>
-      `;
-}
-
-//#endregion
-
-//#region KANBAN
-// FLIP pass around renderKanban's innerHTML rebuild (#41): the rebuild lands cards at
-// their final spot instantly, so a status change reads as a full-board reload. Recording
-// where each card was and animating from there makes a move glide instead.
-const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
-
-function cardFlipKey(el) {
-  return `${el.dataset.sessionId}|${el.dataset.taskId}`;
-}
-
-function captureCardRects() {
-  const rects = new Map();
-  for (const el of document.querySelectorAll('.column-tasks .task-card')) {
-    rects.set(cardFlipKey(el), el.getBoundingClientRect());
-  }
-  return rects;
-}
-
-function playCardFlip(before) {
-  // An empty board before the render means a view switch, not a move — nothing to glide.
-  if (reducedMotion.matches || before.size === 0) return;
-  for (const el of document.querySelectorAll('.column-tasks .task-card')) {
-    const prev = before.get(cardFlipKey(el));
-    if (!prev) {
-      el.animate(
-        [
-          { opacity: 0, transform: 'scale(0.97)' },
-          { opacity: 1, transform: 'none' },
-        ],
-        { duration: 150, easing: 'ease-out' },
-      );
-      continue;
-    }
-    const now = el.getBoundingClientRect();
-    const dx = prev.left - now.left;
-    const dy = prev.top - now.top;
-    if (dx || dy) {
-      el.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], {
-        duration: 220,
-        easing: 'cubic-bezier(0.2, 0.7, 0.3, 1)',
-      });
-    }
-  }
-}
-
-// Rewrite a column only when its markup actually changed: SSE ticks fire on any task-file
-// write (updatedAt bumps, agent refreshes), and an unconditional innerHTML rebuild makes
-// the whole board blink for updates with nothing visible in them (#41).
-function setColumnHtml(el, html) {
-  if (el._lastHtml === html) return;
-  el._lastHtml = html;
-  el.innerHTML = html;
-}
-
-function renderKanban() {
-  let filtered = currentTasks.filter((t) => !isInternalTask(t));
-  if (ownerFilter) {
-    filtered = filtered.filter((t) => t.owner === ownerFilter);
-  }
-  const pending = filtered.filter((t) => t.status === 'pending');
-  const inProgress = filtered.filter((t) => t.status === 'in_progress');
-  const completed = filtered.filter((t) => t.status === 'completed');
-
-  pendingCount.textContent = pending.length;
-  inProgressCount.textContent = inProgress.length;
-  completedCount.textContent = completed.length;
-
-  const emptyIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>`;
-  const plusIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 5v14M5 12h14"/></svg>`;
-
-  const writes = [];
-  // Adding is a live text input inside the column, so a background refresh would blow it
-  // away mid-typing -- leave the column alone until the input is gone.
-  if (!addingTask) {
-    const addTile = canAddTask()
-      ? `<button type="button" class="column-add${pending.length ? '' : ' empty'}" onclick="startAddTask()">${plusIcon}<span>Add task</span></button>`
-      : '';
-    writes.push([
-      pendingTasks,
-      pending.length > 0
-        ? pending.map(renderTaskCard).join('') + addTile
-        : addTile || `<div class="column-empty">${emptyIcon}<div>No pending tasks</div></div>`,
-    ]);
-  }
-
-  writes.push([
-    inProgressTasks,
-    inProgress.length > 0
-      ? inProgress.map(renderTaskCard).join('')
-      : `<div class="column-empty">${emptyIcon}<div>No active tasks</div></div>`,
-  ]);
-
-  writes.push([
-    completedTasks,
-    completed.length > 0
-      ? completed.map(renderTaskCard).join('')
-      : `<div class="column-empty">${emptyIcon}<div>No completed tasks</div></div>`,
-  ]);
-
-  // Capture rects (a forced layout read per card) only when a column will
-  // actually be rewritten — most SSE ticks change nothing and skip the FLIP.
-  const willChange = writes.some(([el, html]) => el._lastHtml !== html);
-  const flipRects = willChange ? captureCardRects() : null;
-  for (const [el, html] of writes) setColumnHtml(el, html);
-  if (flipRects) playCardFlip(flipRects);
-
-  if (selectedTaskId) {
-    const card =
-      document.querySelector(
-        `.task-card[data-task-id="${escSel(selectedTaskId)}"][data-session-id="${escSel(selectedSessionId)}"]`,
-      ) || document.querySelector(`.task-card[data-task-id="${escSel(selectedTaskId)}"]`);
-    if (card) {
-      if (focusZone === 'board' && !taskHighlightDimmed) card.classList.add('selected');
-    } else {
-      selectedTaskId = null;
-      selectedSessionId = null;
-    }
-    if (selectedTaskId && detailPanel.classList.contains('visible')) {
-      showTaskDetail(selectedTaskId, selectedSessionId);
-    }
-  }
-}
-
-//#endregion
-
-//#region ADD_TASK
-const addingTask = false;
-
-// A task the user types is theirs to place, and the only session it can belong to is the
-// one on screen -- the project and all-sessions views span many task dirs, so there is no
-// single target to write into.
-function canAddTask() {
-  return viewMode === 'session' && !!currentSessionId;
-}
-
-let _newTaskSessionId = null;
-
-// biome-ignore lint/correctness/noUnusedVariables: used in HTML
-function startAddTask() {
-  if (!canAddTask()) return;
-  _newTaskSessionId = currentSessionId;
-  document.getElementById('new-task-title').value = '';
-  document.getElementById('new-task-desc').value = '';
-  document.getElementById('new-task-asana').value = '';
-  const modal = document.getElementById('new-task-modal');
-  modal.classList.add('visible');
-  setTimeout(() => document.getElementById('new-task-title').focus(), 50);
-}
-
-function closeNewTaskModal() {
-  document.getElementById('new-task-modal').classList.remove('visible');
-  _newTaskSessionId = null;
-}
-
-async function submitNewTask() {
-  const subject = document.getElementById('new-task-title').value.trim();
-  if (!subject) {
-    document.getElementById('new-task-title').focus();
-    return;
-  }
-  const description = document.getElementById('new-task-desc').value.trim();
-  const asanaUrl = document.getElementById('new-task-asana').value.trim();
-  const sessionId = _newTaskSessionId;
-  const btn = document.getElementById('new-task-submit');
-  btn.disabled = true;
-  btn.textContent = 'Creating…';
-  try {
-    const res = await fetch(`/api/tasks/${sessionId}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ subject, description, asanaUrl }),
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const { task } = await res.json();
-    currentTasks.push({ ...task, sessionId });
-    closeNewTaskModal();
-    renderKanban();
-  } catch (error) {
-    console.error('Failed to create task:', error);
-    showToast('Failed to create task', 'error');
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Create & Launch';
-  }
-}
-
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && document.getElementById('new-task-modal')?.classList.contains('visible')) {
-    closeNewTaskModal();
-  }
-  if (
-    e.key === 'Enter' &&
-    document.getElementById('new-task-modal')?.classList.contains('visible') &&
-    document.activeElement?.id !== 'new-task-desc'
-  ) {
-    e.preventDefault();
-    submitNewTask();
-  }
-});
-//#endregion
-
-//#region DRAG_DROP
-// biome-ignore lint/correctness/noUnusedVariables: used in HTML
-function onCardDragStart(e) {
-  const card = e.target.closest('.task-card');
-  if (!card) return;
-  card.classList.add('dragging');
-  e.dataTransfer.effectAllowed = 'move';
-  e.dataTransfer.setData(
-    'text/plain',
-    JSON.stringify({
-      taskId: card.dataset.taskId,
-      sessionId: card.dataset.sessionId,
-    }),
-  );
-}
-
-// biome-ignore lint/correctness/noUnusedVariables: used in HTML
-function onCardDragEnd(e) {
-  const card = e.target.closest('.task-card');
-  if (card) card.classList.remove('dragging');
-  // biome-ignore lint/suspicious/useIterableCallbackReturn: forEach side-effect
-  document.querySelectorAll('.column-tasks.drag-over').forEach((el) => el.classList.remove('drag-over'));
-}
-
-// biome-ignore lint/correctness/noUnusedVariables: used in HTML
-function onColumnDragOver(e) {
-  // A sidebar session/project drag has nothing to do with task status — don't offer the board
-  // as a drop target for it.
-  if (sgDrag) return;
-  e.preventDefault();
-  e.dataTransfer.dropEffect = 'move';
-  e.currentTarget.classList.add('drag-over');
-}
-
-// biome-ignore lint/correctness/noUnusedVariables: used in HTML
-function onColumnDragLeave(e) {
-  if (!e.currentTarget.contains(e.relatedTarget)) {
-    e.currentTarget.classList.remove('drag-over');
-  }
-}
-
-// biome-ignore lint/correctness/noUnusedVariables: used in HTML
-async function onColumnDrop(e) {
-  if (sgDrag) return;
-  e.preventDefault();
-  e.currentTarget.classList.remove('drag-over');
-  const newStatus = e.currentTarget.dataset.status;
-  let data;
-  try {
-    data = JSON.parse(e.dataTransfer.getData('text/plain'));
-  } catch (_) {
-    return;
-  }
-  const { taskId, sessionId } = data;
-  const task = currentTasks.find(
-    (t) => t.id === taskId && (t._taskDir === sessionId || (t.sessionId || currentSessionId) === sessionId),
-  );
-  if (!task || task.status === newStatus) return;
-  try {
-    const res = await fetch(`/api/tasks/${sessionId}/${taskId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: newStatus }),
-    });
-    if (res.ok) {
-      task.status = newStatus;
-      renderKanban();
-      if (newStatus === 'in_progress') {
-        const sess = sessions.find((s) => s.id === sessionId);
-        const launchCwd =
-          sess?.cwd ??
-          (await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`)
-            .then((r) => (r.ok ? r.json() : null))
-            .then((d) => d?.cwd ?? null)
-            .catch(() => null));
-        if (launchCwd) {
-          const prompt = task.asanaUrl
-            ? `${task.description ? `${task.description}\n\n` : ''}/assess-issue ${task.asanaUrl}`
-            : task.description || null;
-          launchClaude(launchCwd, null, prompt);
-        }
-      }
-    }
-  } catch (_) {}
 }
 
 //#endregion
@@ -3935,7 +3704,7 @@ async function onColumnDrop(e) {
 // windows the list), so membership is never garbage-collected on load.
 const SESSION_GROUPS_KEY = 'sessionGroups';
 const SG_ACTION_SELECTOR =
-  '.session-pin-btn, .team-info-btn, .plan-indicator, .scratchpad-badge, .bookmarks-badge, .linked-docs-badge, .project-view-btn, .group-path-toggle, .pinned-ungroup-btn, .sg-action';
+  '.session-pin-btn, .team-info-btn, .plan-indicator, .scratchpad-badge, .bookmarks-badge, .linked-docs-badge, .project-view-btn, .project-new-tab-btn, .group-path-toggle, .pinned-ungroup-btn, .sg-action';
 
 // Collapse state shares the existing `collapsedGroups` key; this namespace keeps it from
 // colliding with a project path or the __ungrouped__ / __pinned_* sentinels.
@@ -4309,6 +4078,7 @@ function sgOnDragEnd() {
 }
 
 function initSessionGroupsDnd() {
+  if (!sessionsList) return;
   sessionsList.addEventListener('dragstart', sgOnDragStart);
   sessionsList.addEventListener('dragover', sgOnDragOver);
   sessionsList.addEventListener('dragleave', (e) => {
@@ -4436,74 +4206,6 @@ document.addEventListener('click', (e) => {
 //#endregion
 
 //#region KEYBOARD_NAV
-function selectTask(taskId, sessionId) {
-  clearTaskSelection();
-  selectedTaskId = taskId;
-  selectedSessionId = sessionId;
-  taskHighlightDimmed = false;
-  if (!taskId) return;
-  const card =
-    document.querySelector(`.task-card[data-task-id="${escSel(taskId)}"][data-session-id="${escSel(sessionId)}"]`) ||
-    document.querySelector(`.task-card[data-task-id="${escSel(taskId)}"]`);
-  if (card) {
-    card.classList.add('selected');
-    card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-  }
-}
-
-function getSelectedCardInfo() {
-  if (!selectedTaskId) return null;
-  for (let ci = 0; ci < COLUMNS.length; ci++) {
-    const cards = Array.from(COLUMNS[ci].el.querySelectorAll('.task-card'));
-    for (let i = 0; i < cards.length; i++) {
-      if (
-        cards[i].dataset.taskId === selectedTaskId &&
-        (!selectedSessionId || cards[i].dataset.sessionId === selectedSessionId)
-      ) {
-        return { colIndex: ci, cardIndex: i, card: cards[i] };
-      }
-    }
-  }
-  return null;
-}
-
-function navigateVertical(direction) {
-  const info = getSelectedCardInfo();
-  if (!info) {
-    for (const col of COLUMNS) {
-      const cards = Array.from(col.el.querySelectorAll('.task-card'));
-      if (cards.length > 0) {
-        selectTask(cards[0].dataset.taskId, cards[0].dataset.sessionId);
-        return;
-      }
-    }
-    return;
-  }
-  const cards = Array.from(COLUMNS[info.colIndex].el.querySelectorAll('.task-card'));
-  const newIndex = info.cardIndex + direction;
-  if (newIndex >= 0 && newIndex < cards.length) {
-    selectTask(cards[newIndex].dataset.taskId, cards[newIndex].dataset.sessionId);
-  }
-}
-
-function navigateHorizontal(direction) {
-  const info = getSelectedCardInfo();
-  if (!info) {
-    navigateVertical(1);
-    return;
-  }
-  let newColIndex = info.colIndex + direction;
-  while (newColIndex >= 0 && newColIndex < COLUMNS.length) {
-    const cards = Array.from(COLUMNS[newColIndex].el.querySelectorAll('.task-card'));
-    if (cards.length > 0) {
-      const clampedIndex = Math.min(info.cardIndex, cards.length - 1);
-      selectTask(cards[clampedIndex].dataset.taskId, cards[clampedIndex].dataset.sessionId);
-      return;
-    }
-    newColIndex += direction;
-  }
-}
-
 function getKbId(el) {
   return el.dataset.sessionId || el.dataset.groupPath || null;
 }
@@ -4583,11 +4285,6 @@ function getSessionItems() {
 function clearKbSelection() {
   const prev = sessionsList.querySelector('.kb-selected');
   if (prev) prev.classList.remove('kb-selected');
-}
-
-function clearTaskSelection() {
-  const prev = document.querySelector('.task-card.selected');
-  if (prev) prev.classList.remove('selected');
 }
 
 function selectSessionByIndex(idx, items) {
@@ -4731,7 +4428,6 @@ function activateSelectedSession(items) {
 function setFocusZone(zone) {
   const sidebar = document.querySelector('.sidebar');
   clearKbSelection();
-  clearTaskSelection();
 
   focusZone = zone;
   if (zone === 'sidebar') {
@@ -4751,395 +4447,6 @@ function setFocusZone(zone) {
         selectSessionByIndex(0);
       }
     }
-  } else {
-    // Focusing the board is an explicit nav gesture — restore the highlight.
-    taskHighlightDimmed = false;
-    // Session changed while in sidebar — reset stale selection
-    if (selectedSessionId && selectedSessionId !== currentSessionId) {
-      selectedTaskId = null;
-      selectedSessionId = null;
-    }
-    if (selectedTaskId) {
-      const card = document.querySelector(
-        `.task-card[data-task-id="${escSel(selectedTaskId)}"][data-session-id="${escSel(selectedSessionId)}"]`,
-      );
-      if (card) card.classList.add('selected');
-    } else {
-      navigateVertical(1);
-    }
-    if (selectedTaskId && detailPanel.classList.contains('visible')) {
-      showTaskDetail(selectedTaskId, selectedSessionId);
-    }
-  }
-}
-
-// biome-ignore lint/correctness/noUnusedVariables: used in HTML
-function getAvailableTasksOptions(currentTaskId = null) {
-  const pending = currentTasks.filter((t) => t.status === 'pending' && t.id !== currentTaskId);
-  const inProgress = currentTasks.filter((t) => t.status === 'in_progress' && t.id !== currentTaskId);
-  const completed = currentTasks.filter((t) => t.status === 'completed' && t.id !== currentTaskId);
-
-  // Build options grouped by status
-  let options = '';
-
-  if (pending.length > 0) {
-    options += '<optgroup label="Pending">';
-    pending.forEach((t, _idx) => {
-      options += `<option value="${escapeHtml(t.id)}">#${t.id} - ${escapeHtml(t.subject)}</option>`;
-    });
-    options += '</optgroup>';
-  }
-
-  if (inProgress.length > 0) {
-    options += '<optgroup label="In Progress">';
-    inProgress.forEach((t, _idx) => {
-      options += `<option value="${escapeHtml(t.id)}">#${t.id} - ${escapeHtml(t.subject)}</option>`;
-    });
-    options += '</optgroup>';
-  }
-
-  if (completed.length > 0) {
-    options += '<optgroup label="Completed">';
-    completed.forEach((t, _idx) => {
-      options += `<option value="${escapeHtml(t.id)}">#${t.id} - ${escapeHtml(t.subject)}</option>`;
-    });
-    options += '</optgroup>';
-  }
-
-  return options;
-}
-
-//#endregion
-
-//#region TASK_DETAIL
-async function showTaskDetail(taskId, sessionId = null) {
-  let task = currentTasks.find(
-    (t) => t.id === taskId && (!sessionId || t.sessionId === sessionId || t._taskDir === sessionId),
-  );
-
-  // If task not found in currentTasks, fetch it from the session
-  if (!task && sessionId && sessionId !== 'undefined') {
-    try {
-      const res = await fetch(`/api/sessions/${sessionId}`);
-      const tasks = await res.json();
-      task = tasks.find((t) => t.id === taskId);
-      if (!task) return;
-    } catch (error) {
-      console.error('Failed to fetch task:', error);
-      return;
-    }
-  }
-
-  if (!task) return;
-
-  const actualSid = task.sessionId || sessionId || currentSessionId;
-  selectTask(taskId, actualSid);
-  detailPanel.classList.add('visible');
-
-  const statusLabels = {
-    completed: '<span class="detail-status completed"><span class="dot"></span>Completed</span>',
-    in_progress: '<span class="detail-status in_progress"><span class="dot"></span>In Progress</span>',
-    pending: '<span class="detail-status pending"><span class="dot"></span>Pending</span>',
-  };
-
-  const isBlocked = task.blockedBy && task.blockedBy.length > 0;
-  const actualSessionId = task.sessionId || sessionId || currentSessionId;
-
-  detailContent.innerHTML = `
-        <div class="detail-section">
-          <div class="detail-label">Task #${task.id}</div>
-          <h2 class="detail-title">${escapeHtml(task.subject)}</h2>
-        </div>
-
-        <div class="detail-section" style="display: flex; gap: 12px; align-items: center;">
-          <div>${statusLabels[task.status] || ''}</div>
-          ${task.owner ? `<div style="font-size: 13px; color: ${getOwnerColor(task.owner).color}; font-weight: 500;">${escapeHtml(task.owner)}</div>` : ''}
-          ${isBlocked && task.status !== 'in_progress' ? '<div style="font-size: 10px; color: var(--warning);">Blocked</div>' : ''}
-        </div>
-
-        <div class="detail-section">
-          <div class="detail-label">Description</div>
-          <div class="detail-desc">${task.description ? renderMarkdown(task.description) : '<em style="color: var(--text-muted);">No description</em>'}</div>
-        </div>
-
-        ${
-          task.activeForm && task.status === 'in_progress'
-            ? `
-          <div class="detail-section">
-            <div class="detail-box active">
-              <strong>Currently:</strong> ${escapeHtml(task.activeForm)}
-            </div>
-          </div>
-        `
-            : ''
-        }
-
-        ${
-          task.blockedBy && task.blockedBy.length > 0
-            ? `
-        <div class="detail-section">
-          <div class="detail-label">Blocked By</div>
-          <div class="detail-deps">
-            <div class="detail-box blocked"><strong>Blocked by:</strong> ${task.blockedBy.map((id) => `#${id}`).join(', ')}</div>
-          </div>
-        </div>`
-            : ''
-        }
-
-        ${
-          task.blocks && task.blocks.length > 0
-            ? `
-        <div class="detail-section">
-          <div class="detail-label">Blocks</div>
-          <div class="detail-deps">
-            <div class="detail-box blocks"><strong>Blocks:</strong> ${task.blocks.map((id) => `#${id}`).join(', ')}</div>
-          </div>
-        </div>`
-            : ''
-        }
-      `;
-
-  // Setup button handlers (read-only in project view)
-  const deleteBtn = document.getElementById('delete-task-btn');
-  const isProjectView = viewMode === 'project';
-  deleteBtn.style.display = isProjectView ? 'none' : '';
-  if (!isProjectView) deleteBtn.onclick = () => deleteTask(task.id, actualSessionId);
-
-  if (!isProjectView) {
-    const titleEl = detailContent.querySelector('.detail-title');
-    if (titleEl) {
-      titleEl.onclick = () => editTitle(titleEl, task, actualSessionId);
-    }
-
-    const descEl = detailContent.querySelector('.detail-desc');
-    if (descEl) {
-      descEl.onclick = () => editDescription(descEl, task, actualSessionId);
-    }
-  }
-}
-
-function editTitle(titleEl, task, sessionId) {
-  if (titleEl.querySelector('input')) return;
-  const input = document.createElement('input');
-  input.type = 'text';
-  input.className = 'detail-title-input';
-  input.value = task.subject;
-
-  titleEl.replaceWith(input);
-  input.focus();
-  input.select();
-
-  const save = async () => {
-    const val = input.value.trim();
-    if (val && val !== task.subject) {
-      await saveTaskField(task.id, sessionId, 'subject', val);
-    } else {
-      showTaskDetail(task.id, sessionId);
-    }
-  };
-
-  input.onkeydown = (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      save();
-    }
-    if (e.key === 'Escape') showTaskDetail(task.id, sessionId);
-  };
-  input.onblur = () => save();
-}
-
-function editDescription(descEl, task, sessionId) {
-  if (descEl.querySelector('textarea')) return;
-  const wrapper = document.createElement('div');
-  const textarea = document.createElement('textarea');
-  textarea.className = 'detail-desc-textarea';
-  textarea.value = task.description || '';
-  textarea.rows = Math.max(5, (task.description || '').split('\n').length + 2);
-
-  const actions = document.createElement('div');
-  actions.className = 'edit-actions';
-
-  const saveBtn = document.createElement('button');
-  saveBtn.className = 'edit-save';
-  saveBtn.textContent = 'Save';
-
-  const cancelBtn = document.createElement('button');
-  cancelBtn.className = 'edit-cancel';
-  cancelBtn.textContent = 'Cancel';
-
-  actions.append(cancelBtn, saveBtn);
-  wrapper.append(textarea, actions);
-  descEl.replaceWith(wrapper);
-  textarea.focus();
-
-  const save = async () => {
-    const val = textarea.value;
-    if (val !== (task.description || '')) {
-      await saveTaskField(task.id, sessionId, 'description', val);
-    } else {
-      showTaskDetail(task.id, sessionId);
-    }
-  };
-
-  saveBtn.onclick = save;
-  cancelBtn.onclick = () => showTaskDetail(task.id, sessionId);
-  textarea.onkeydown = (e) => {
-    if (e.key === 'Escape') showTaskDetail(task.id, sessionId);
-  };
-}
-
-async function saveTaskField(taskId, sessionId, field, value) {
-  try {
-    const res = await fetch(`/api/tasks/${sessionId}/${taskId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ [field]: value }),
-    });
-
-    if (res.ok) {
-      lastCurrentTasksHash = null;
-      if (viewMode === 'all') {
-        const tasksRes = await fetch('/api/tasks/all');
-        currentTasks = await tasksRes.json();
-        renderKanban();
-      } else {
-        await fetchTasks(sessionId);
-      }
-      showTaskDetail(taskId, sessionId);
-    }
-  } catch (error) {
-    console.error('Failed to update task:', error);
-  }
-}
-
-function closeDetailPanel() {
-  detailPanel.classList.remove('visible');
-  document.getElementById('delete-task-btn').style.display = 'none';
-  // Keep the task selected AND highlighted after closing (no dim-off).
-  taskHighlightDimmed = false;
-}
-
-let deleteTaskId = null;
-let deleteSessionId = null;
-let deleteModalKeyHandler = null;
-
-// biome-ignore lint/correctness/noUnusedVariables: used in HTML
-function showBlockedTaskModal(task) {
-  const messageDiv = document.getElementById('blocked-task-message');
-
-  const blockedByList = task.blockedBy
-    .map((id) => {
-      const blockingTask = currentTasks.find((t) => t.id === id);
-      if (blockingTask) {
-        return `<li><strong>#${blockingTask.id}</strong> - ${escapeHtml(blockingTask.subject)}</li>`;
-      }
-      return `<li><strong>#${id}</strong></li>`;
-    })
-    .join('');
-
-  messageDiv.innerHTML = `
-        <p style="margin-bottom: 12px;">Task <strong>#${task.id}</strong> - ${escapeHtml(task.subject)} is currently blocked by:</p>
-        <ul style="margin: 0 0 16px 20px; padding: 0;">${blockedByList}</ul>
-        <p style="margin: 0; color: var(--text-secondary); font-size: 13px;">
-          Please resolve these dependencies before moving this task to <strong>In Progress</strong>.
-        </p>
-      `;
-
-  const modal = document.getElementById('blocked-task-modal');
-  modal.classList.add('visible');
-
-  // Handle ESC key
-  const keyHandler = (e) => {
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      closeBlockedTaskModal();
-      document.removeEventListener('keydown', keyHandler);
-    }
-  };
-  document.addEventListener('keydown', keyHandler);
-}
-
-function closeBlockedTaskModal() {
-  const modal = document.getElementById('blocked-task-modal');
-  modal.classList.remove('visible');
-}
-
-//#endregion
-
-//#region DELETE_TASK
-function deleteTask(taskId, sessionId) {
-  const task = currentTasks.find((t) => t.id === taskId);
-  if (!task) return;
-
-  deleteTaskId = taskId;
-  deleteSessionId = sessionId;
-
-  const message = document.getElementById('delete-confirm-message');
-  message.textContent = `Delete task "${task.subject}"? This cannot be undone.`;
-
-  const modal = document.getElementById('delete-confirm-modal');
-  modal.classList.add('visible');
-
-  const buttons = [document.getElementById('delete-cancel-btn'), document.getElementById('delete-confirm-btn')];
-  let focusIdx = 1;
-  buttons[focusIdx].focus();
-
-  deleteModalKeyHandler = (e) => {
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      closeDeleteConfirmModal();
-    } else if (matchKey(e, 'ArrowLeft', 'KeyH')) {
-      e.preventDefault();
-      focusIdx = 0;
-      buttons[focusIdx].focus();
-    } else if (matchKey(e, 'ArrowRight', 'KeyL')) {
-      e.preventDefault();
-      focusIdx = 1;
-      buttons[focusIdx].focus();
-    } else if (e.key === 'Enter') {
-      e.preventDefault();
-      buttons[focusIdx].click();
-    }
-  };
-  document.addEventListener('keydown', deleteModalKeyHandler);
-}
-
-function closeDeleteConfirmModal() {
-  const modal = document.getElementById('delete-confirm-modal');
-  modal.classList.remove('visible');
-  deleteTaskId = null;
-  deleteSessionId = null;
-  if (deleteModalKeyHandler) {
-    document.removeEventListener('keydown', deleteModalKeyHandler);
-    deleteModalKeyHandler = null;
-  }
-}
-
-// biome-ignore lint/correctness/noUnusedVariables: used in HTML
-async function confirmDelete() {
-  if (!deleteTaskId || !deleteSessionId) return;
-
-  const taskId = deleteTaskId;
-  const sessionId = deleteSessionId;
-
-  closeDeleteConfirmModal();
-
-  try {
-    const res = await fetch(`/api/tasks/${sessionId}/${taskId}`, {
-      method: 'DELETE',
-    });
-
-    if (res.ok) {
-      closeDetailPanel();
-      await refreshCurrentView();
-      fetch(`/api/sessions/${encodeURIComponent(sessionId)}/kill-claude`, { method: 'POST' }).catch(() => {});
-    } else {
-      const error = await res.json();
-      alert(`Failed to delete task: ${error.error || 'Unknown error'}`);
-    }
-  } catch (error) {
-    console.error('Failed to delete task:', error);
-    alert('Failed to delete task');
   }
 }
 
@@ -5268,18 +4575,6 @@ function closeHelpModal() {
   const modal = document.getElementById('help-modal');
   modal.classList.remove('visible');
 }
-
-async function refreshCurrentView() {
-  if (viewMode === 'all') {
-    await showAllTasks();
-  } else if (currentSessionId) {
-    await fetchTasks(currentSessionId);
-  } else {
-    await fetchSessions();
-  }
-}
-
-document.getElementById('close-detail').onclick = closeDetailPanel;
 
 //#endregion
 
@@ -5991,65 +5286,17 @@ document.addEventListener('keydown', (e) => {
     }
   }
 
-  // Board navigation
-  if (focusZone === 'board') {
-    if (matchKey(e, 'ArrowDown', 'KeyJ', 'ArrowUp', 'KeyK', 'ArrowLeft', 'KeyH', 'ArrowRight', 'KeyL')) {
-      e.preventDefault();
-      if (!selectedTaskId && !document.querySelector('.task-card.selected')) {
-        setFocusZone('sidebar');
-        return;
-      }
-      if (matchKey(e, 'ArrowDown', 'KeyJ')) navigateVertical(1);
-      else if (matchKey(e, 'ArrowUp', 'KeyK')) navigateVertical(-1);
-      else if (matchKey(e, 'ArrowLeft', 'KeyH')) navigateHorizontal(-1);
-      else if (matchKey(e, 'ArrowRight', 'KeyL')) navigateHorizontal(1);
-
-      if (selectedTaskId && detailPanel.classList.contains('visible')) {
-        showTaskDetail(selectedTaskId, selectedSessionId);
-      }
-      return;
-    }
-
-    if ((e.key === 'Enter' || e.key === ' ') && selectedTaskId && e.target.tagName !== 'BUTTON') {
-      e.preventDefault();
-      if (detailPanel.classList.contains('visible')) {
-        const labelEl = document.querySelector('.detail-label');
-        const shownId = labelEl?.textContent.match(/\d+/)?.[0];
-        if (shownId === selectedTaskId) {
-          closeDetailPanel();
-        } else {
-          showTaskDetail(selectedTaskId, selectedSessionId);
-        }
-      } else {
-        showTaskDetail(selectedTaskId, selectedSessionId);
-      }
-      return;
-    }
-
-    if (matchKey(e, 'KeyD') && selectedTaskId) {
-      e.preventDefault();
-      deleteTask(selectedTaskId, selectedSessionId || currentSessionId);
-      return;
-    }
-  }
-
   if (e.key === 'Escape') {
-    if (detailPanel.classList.contains('visible')) closeDetailPanel();
-    else if (agentLogMode) exitAgentLogMode();
+    if (agentLogMode) exitAgentLogMode();
     else if (messagePanelOpen) toggleMessagePanel();
-    else {
-      // Nothing open — plain unfocus: drop the task-card selection highlight
-      clearTaskSelection();
-      selectedTaskId = null;
-    }
     return;
   }
 
-  // Shared actions — work in both sidebar and board
+  // Shared actions
   const contextSid =
     focusZone === 'sidebar'
       ? sessionsList.querySelector('.kb-selected')?.dataset.sessionId || currentSessionId
-      : selectedSessionId || currentSessionId;
+      : currentSessionId;
   if (matchKey(e, 'KeyP') && !e.shiftKey) {
     e.preventDefault();
     if (contextSid) openPlanForSession(contextSid);
@@ -6093,8 +5340,7 @@ document.addEventListener('keydown', (e) => {
     const newItems = getNavigableItems();
     const targetIdx = newItems.length > 0 ? Math.max(0, prevIdx - 1) : -1;
     // If the dismissed session is currently open, navigate to the previous one
-    if (currentSessionId === contextSid || selectedSessionId === contextSid) {
-      selectedSessionId = null;
+    if (currentSessionId === contextSid) {
       if (targetIdx >= 0) {
         const targetSid = newItems[targetIdx]?.dataset?.sessionId;
         if (targetSid) {
@@ -6129,7 +5375,6 @@ document.addEventListener('keydown', (e) => {
     if (_manualRefreshing) return;
     _manualRefreshing = true;
     lastSessionsHash = '';
-    lastTasksHash = '';
     const refreshes = [fetchSessions()];
     if (currentSessionId) refreshes.push(fetchTasks(currentSessionId));
     refreshRateLimits();
@@ -6633,11 +5878,8 @@ function setupEventSource() {
         clearTimeout(taskRefreshTimer);
         taskRefreshTimer = setTimeout(async () => {
           await fetchSessions().catch((err) => console.error('[SSE] fetchSessions failed:', err));
-          if (viewMode === 'all') {
-            currentTasks = filterProject ? allTasksCache.filter((t) => matchesProjectFilter(t.project)) : allTasksCache;
-            renderAllTasks();
-            renderActivityChip();
-          } else if (viewMode === 'project' && currentProjectPath) {
+          fetchAndRenderSessionBoard();
+          if (viewMode === 'project' && currentProjectPath) {
             const hasUpdate = currentProjectSessionIds.some((id) => pendingTaskSessionIds.has(id));
             if (hasUpdate) fetchProjectView(currentProjectPath);
           } else if (currentSessionId && pendingTaskSessionIds.has(currentSessionId)) {
@@ -7502,6 +6744,7 @@ const FILTERS = [
 // Keeps the header (summary + funnel tint) and the popover's selects in sync with state.
 // Safe to call on every filter change — it only touches classes, values, and text.
 function renderFilterState() {
+  if (!document.getElementById('sessions-list')) return;
   const short = [];
   const long = [];
   for (const f of FILTERS) {
@@ -7608,6 +6851,14 @@ document.addEventListener('click', (e) => {
     return;
   }
 
+  const newTabBtn = e.target.closest('.project-new-tab-btn');
+  if (newTabBtn) {
+    e.stopPropagation();
+    const projectPath = newTabBtn.dataset.projectPath;
+    if (projectPath) launchClaude(projectPath, null);
+    return;
+  }
+
   if (e.target.closest('.pinned-ungroup-btn')) {
     e.stopPropagation();
     store.setItem('groupPinnedSessions', 'false');
@@ -7660,6 +6911,7 @@ let projectsCache = null;
 
 async function updateProjectDropdown() {
   const dropdown = document.getElementById('project-filter');
+  if (!dropdown) return;
 
   if (!projectsCacheDirty && projectsCache) {
     renderProjectDropdown(dropdown, projectsCache);
@@ -7852,6 +7104,7 @@ function toggleSidebar() {
 
 function loadSidebarState() {
   const sidebar = document.querySelector('.sidebar');
+  if (!sidebar) return;
   if (store.getItem('sidebar-collapsed') === 'true') {
     sidebar.classList.add('collapsed');
   }
@@ -7866,6 +7119,7 @@ function loadSidebarState() {
 // listener add/remove live here once. Callers keep only their geometry.
 // onStart may return false to veto the drag.
 function _initDragResize(handle, { onStart, onMove, onEnd }) {
+  if (!handle) return;
   let startX, startY;
 
   handle.addEventListener('mousedown', (e) => {
@@ -7895,6 +7149,7 @@ function _initDragResize(handle, { onStart, onMove, onEnd }) {
 function initSidebarResize() {
   const sidebar = document.querySelector('.sidebar');
   const handle = document.getElementById('sidebar-resize');
+  if (!sidebar || !handle) return;
   let startWidth;
 
   _initDragResize(handle, {
@@ -7937,10 +7192,7 @@ function initPanelResize(panelId, handleId, cssVar, storageKey) {
 }
 
 function loadPanelWidths() {
-  [
-    ['detail-panel', '--detail-panel-width'],
-    ['message-panel', '--message-panel-width'],
-  ].forEach(([id, cssVar]) => {
+  [['message-panel', '--message-panel-width']].forEach(([id, cssVar]) => {
     const w = store.getItem(`${id}-width`);
     if (w) document.getElementById(id).style.setProperty(cssVar, w);
   });
@@ -7953,18 +7205,14 @@ async function showSessionInfoModal(sessionId) {
   const session = sessions.find((s) => s.id === sessionId);
   if (!session) return;
 
-  // Open modal immediately with session metadata (cwd / path / branch are
-  // already in-memory). Plan / team / tasks are fetched in the background
-  // and re-rendered when they arrive, so the modal doesn't block on network.
   _planSessionId = sessionId;
-  const cachedTasks = currentSessionId === sessionId ? currentTasks : [];
-  showInfoModal(session, null, cachedTasks, null, null);
+  showInfoModal(session, null, [], null, null);
 
-  const rerender = (teamConfig, tasks, planContent, parentInfo) => {
-    if (_planSessionId !== sessionId) return; // user opened a different modal
+  const rerender = (teamConfig, planContent, parentInfo) => {
+    if (_planSessionId !== sessionId) return;
     const modal = document.getElementById('team-modal');
-    if (!modal?.classList.contains('visible')) return; // user closed modal — don't reopen
-    showInfoModal(session, teamConfig, tasks, planContent, parentInfo);
+    if (!modal?.classList.contains('visible')) return;
+    showInfoModal(session, teamConfig, [], planContent, parentInfo);
   };
 
   const teamPromise = session.isTeam
@@ -7978,24 +7226,12 @@ async function showSessionInfoModal(sessionId) {
     .catch(() => null)
     .then((data) => data?.content || null);
 
-  const tasksPromise =
-    cachedTasks.length > 0
-      ? Promise.resolve(cachedTasks)
-      : fetch(`/api/sessions/${sessionId}`)
-          .then((r) => (r.ok ? r.json() : []))
-          .catch(() => []);
-
   const parentPromise = fetch(`/api/sessions/${sessionId}/parent`)
     .then((r) => (r.ok ? r.json() : null))
     .catch(() => null);
 
-  const [teamConfig, planContent, tasks, parentInfo] = await Promise.all([
-    teamPromise,
-    planPromise,
-    tasksPromise,
-    parentPromise,
-  ]);
-  rerender(teamConfig, tasks, planContent, parentInfo);
+  const [teamConfig, planContent, parentInfo] = await Promise.all([teamPromise, planPromise, parentPromise]);
+  rerender(teamConfig, planContent, parentInfo);
 }
 
 let _infoModalSessionId = null;
@@ -8895,52 +8131,6 @@ function closeToolStatsModal() {
 }
 //#endregion
 
-//#region OWNER_FILTER
-function updateOwnerFilter() {
-  const bar = document.getElementById('owner-filter-bar');
-  const select = document.getElementById('owner-filter');
-
-  const session = sessions.find((s) => s.id === currentSessionId);
-  if (!session?.isTeam) {
-    bar.classList.remove('visible');
-    return;
-  }
-
-  bar.classList.add('visible');
-  const owners = [
-    ...new Set(
-      currentTasks
-        .filter((t) => !isInternalTask(t))
-        .map((t) => t.owner)
-        .filter(Boolean),
-    ),
-  ].sort();
-  select.innerHTML =
-    '<option value="">All Members</option>' +
-    owners
-      .map((o) => {
-        const c = getOwnerColor(o);
-        return `<option value="${escapeHtml(o)}" style="color:${c.color};background:${c.bg}"${o === ownerFilter ? ' selected' : ''}>${escapeHtml(o)}</option>`;
-      })
-      .join('');
-  const current = ownerFilter ? getOwnerColor(ownerFilter) : null;
-  select.style.color = current ? current.color : '';
-  select.style.backgroundColor = current ? current.bg : '';
-}
-
-// biome-ignore lint/correctness/noUnusedVariables: used in HTML
-function filterByOwner(value) {
-  ownerFilter = value;
-  const select = document.getElementById('owner-filter');
-  const c = value ? getOwnerColor(value) : null;
-  select.style.color = c ? c.color : '';
-  select.style.backgroundColor = c ? c.bg : '';
-  updateUrl();
-  renderKanban();
-}
-
-//#endregion
-
 //#region PWA
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js');
@@ -9132,10 +8322,7 @@ const urlState = getUrlState();
 const lastView = loadLastView();
 sessionFilter = urlState.filter || FILTER_DEFAULTS.session;
 sessionLimit = urlState.limit || FILTER_DEFAULTS.limit;
-// The URL wins; the persisted view only fills in when it carries a project key, so 'all' (null)
-// restores as 'all' and pre-existing blobs without the key still default to '__recent__'.
 filterProject = urlState.project || (lastView && 'project' in lastView ? lastView.project : FILTER_DEFAULTS.project);
-ownerFilter = urlState.owner || '';
 searchQuery = urlState.search || '';
 
 renderFilterState();
@@ -9165,6 +8352,7 @@ Promise.all([
 ])
   .then(() => fetchSessions())
   .then(async () => {
+    await fetchAndRenderSessionBoard();
     if (urlState.projectView) {
       try {
         await fetchProjectView(atob(urlState.projectView));
@@ -9203,12 +8391,11 @@ window.addEventListener('popstate', () => {
   sessionFilter = s.filter || FILTER_DEFAULTS.session;
   sessionLimit = s.limit || FILTER_DEFAULTS.limit;
   filterProject = s.project || FILTER_DEFAULTS.project;
-  ownerFilter = s.owner || '';
   searchQuery = s.search || '';
   renderFilterState();
   // fetchSessions derives query params from the globals set above — refetch so
   // back/forward across a filter change doesn't render a stale server-filtered list.
-  fetchSessions(false);
+  fetchSessions();
   if (s.projectView) {
     try {
       fetchProjectView(atob(s.projectView));

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CC Kanban</title>
+  <title>Claude Sessions</title>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231a1a1a'/%3E%3Crect x='4' y='6' width='7' height='20' rx='2' fill='%23e8927c'/%3E%3Crect x='13' y='6' width='7' height='14' rx='2' fill='%23e8927c'/%3E%3Crect x='22' y='6' width='7' height='8' rx='2' fill='%23e8927c'/%3E%3C/svg%3E">
   <link rel="manifest" href="/manifest.json">
   <meta name="theme-color" content="#101114" media="(prefers-color-scheme: dark)">
@@ -43,224 +43,113 @@
   </div>
   <a href="#main-content" class="skip-link">Skip to main content</a>
   <div class="app">
-    <!-- Sidebar -->
-    <aside class="sidebar">
-      <header class="sidebar-header">
-        <div id="activity-chips" class="activity-chips"></div>
-        <button id="sidebar-toggle" class="sidebar-toggle-btn" onclick="toggleSidebar()" title="Toggle sidebar" aria-label="Toggle sidebar">
+
+    <!-- Top bar -->
+    <header class="top-bar">
+      <div class="top-bar-brand">
+        <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="2" y="4" width="6" height="24" rx="2" fill="currentColor" opacity="0.9"/>
+          <rect x="11" y="4" width="6" height="17" rx="2" fill="currentColor" opacity="0.7"/>
+          <rect x="20" y="4" width="6" height="10" rx="2" fill="currentColor" opacity="0.5"/>
+        </svg>
+        <span>Claude Sessions</span>
+      </div>
+      <div id="activity-chips" class="activity-chips"></div>
+      <div class="top-bar-actions">
+        <button id="message-toggle" class="icon-btn" style="display:none" onclick="toggleMessagePanel()" title="Session log (L)" aria-label="Toggle session log">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M15 18l-6-6 6-6"/>
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
           </svg>
         </button>
-      </header>
+        <button id="scratchpad-toggle" class="icon-btn" onclick="toggleScratchpad()" title="Scratchpad (N)" aria-label="Toggle scratchpad">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
+          </svg>
+        </button>
+        <button class="icon-btn" onclick="showStorageManager()" title="Storage manager (Shift+S)" aria-label="Storage manager">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
+          </svg>
+        </button>
+        <span class="icon-btn theme-picker" id="themePickerBtn" title="Color theme" onclick="toggleThemeMenu(event)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/></svg>
+          <div class="theme-menu" id="themeMenu"></div>
+        </span>
+        <button id="theme-toggle" class="icon-btn" onclick="toggleTheme()" title="Toggle theme" aria-label="Toggle theme">
+          <svg id="theme-icon-dark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/>
+          </svg>
+          <svg id="theme-icon-light" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none">
+            <circle cx="12" cy="12" r="5"/>
+            <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+          </svg>
+        </button>
+        <button class="icon-btn" onclick="showHelpModal()" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+            <circle cx="12" cy="17" r="0.5" fill="currentColor"/>
+          </svg>
+        </button>
+        <a href="https://github.com/NikiforovAll/claude-code-kanban" target="_blank" class="icon-btn" title="View on GitHub" aria-label="View on GitHub">
+          <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16">
+            <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
+          </svg>
+        </a>
+      </div>
+    </header>
 
-      <!-- Tasks -->
-      <div class="sidebar-section flex-1">
-        <div class="section-header" onclick="toggleSection('sessions-filters', 'sessions-chevron')" style="cursor: pointer;">
-          <span class="section-header-label">Sessions</span>
-          <span id="filter-summary" class="filter-summary" title=""></span>
-          <span class="section-header-actions">
-            <button
-              id="filter-menu-btn"
-              class="icon-btn section-btn"
-              onclick="toggleFilterMenu(event)"
-              title="Filters"
-              aria-label="Filters"
-              aria-haspopup="true"
-              aria-expanded="false"
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M20 4H4l6.5 8v6l3 2v-8L20 4z"/>
-              </svg>
-            </button>
-            <button
-              class="icon-btn section-btn"
-              onclick="event.stopPropagation(); resetState()"
-              title="Reset filters and clear selection"
-              aria-label="Reset filters and clear selection"
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M3 2v6h6"/>
-                <path d="M3.51 15a9 9 0 1 0 2.13-9.36L3 8"/>
-              </svg>
-            </button>
-            <svg id="sessions-chevron" class="collapse-chevron" viewBox="0 0 24 24">
-              <path d="M6 9l6 6 6-6"/>
-            </svg>
-          </span>
-          <div id="filter-menu" class="filter-menu" onclick="event.stopPropagation()">
-            <div class="filter-row">
-              <select id="project-filter" class="filter-dropdown" onchange="filterByProject(this.value)" aria-label="Filter by project">
-                <option value="">All Projects</option>
-              </select>
-            </div>
-            <div class="filter-row">
-              <select id="session-filter" class="filter-dropdown" onchange="filterBySessions(this.value)" aria-label="Filter by session status">
-                <option value="all">All Sessions</option>
-                <option value="active">Active Only</option>
-              </select>
-            </div>
-            <div class="filter-row">
-              <select id="session-limit" class="filter-dropdown" onchange="changeSessionLimit(this.value)" aria-label="Number of sessions to show">
-                <option value="10">Show 10</option>
-                <option value="20">Show 20</option>
-                <option value="50">Show 50</option>
-                <option value="all">Show All</option>
-              </select>
-            </div>
+    <!-- Session info bar (shown when a session is selected) -->
+    <div id="session-info-bar" class="session-info-bar">
+      <span id="session-title" class="session-info-title"></span>
+      <span id="session-meta" class="session-info-meta"></span>
+    </div>
+
+    <!-- Main board area -->
+    <main id="main-content" class="main">
+      <div id="project-sessions-strip" class="project-sessions-strip" style="display:none"></div>
+      <div id="session-board" class="session-board"><div class="sb-col"><div class="sb-col-header"><span class="sb-col-name">Loading…</span></div></div></div>
+      <!-- Inline terminal: shows session log + input bar without opening a terminal app -->
+      <div id="inline-terminal" class="inline-terminal">
+        <div class="inline-terminal-header">
+          <div class="inline-terminal-header-left">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+            <span id="inline-terminal-session-name">Session</span>
           </div>
-        </div>
-        <div id="sessions-filters" class="collapsible-section">
-          <div class="search-container">
-            <input
-              id="search-input"
-              type="text"
-              class="search-input"
-              placeholder="Search tasks, sessions, projects..."
-              oninput="handleSearch(this.value)"
-            />
-            <button id="search-clear-btn" class="search-clear" onclick="clearSearch()" title="Clear search" aria-label="Clear search">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M18 6L6 18M6 6l12 12"/>
-              </svg>
+          <div class="inline-terminal-header-actions">
+            <button class="icon-btn" id="inline-terminal-expand-btn" onclick="toggleInlineTerminalExpand()" title="Expand terminal" aria-label="Expand terminal">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+            </button>
+            <button class="icon-btn" onclick="closeInlineTerminal()" title="Close terminal" aria-label="Close terminal">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M18 6L6 18M6 6l12 12"/></svg>
             </button>
           </div>
         </div>
-        <div id="sessions-list" class="sessions-list"></div>
+        <div id="inline-terminal-messages" class="inline-terminal-messages"></div>
+        <div class="inline-terminal-input-bar">
+          <span class="inline-terminal-prompt">❯</span>
+          <input id="inline-terminal-input" class="inline-terminal-input" type="text"
+                 placeholder="Type a message or /command and press Enter…"
+                 onkeydown="handleTerminalInputKey(event)"
+                 autocomplete="off" spellcheck="false">
+          <button class="inline-terminal-send-btn" onclick="sendTerminalInput()" title="Send (Enter)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+          </button>
+        </div>
       </div>
 
-      <div class="sidebar-footer" id="sidebar-footer"></div>
-      <div class="sidebar-resize-handle" id="sidebar-resize"></div>
-    </aside>
-
-    <!-- Main -->
-    <main class="main">
-      <div id="no-session" class="empty-state">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-          <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
-        </svg>
-        <p>Select a session to view tasks</p>
-      </div>
-
-      <div id="session-view" class="session-view">
-        <header class="view-header">
-          <div>
-            <h1 id="session-title" class="view-title">Session</h1>
-            <p id="session-meta" class="view-meta"></p>
-          </div>
-          <div class="view-actions">
-            <div class="view-progress">
-              <div class="progress-bar">
-                <div id="progress-bar" class="progress-fill" style="width: 0%"></div>
-              </div>
-              <span id="progress-percent" class="progress-text">0%</span>
-            </div>
-            <button id="message-toggle" class="icon-btn" onclick="toggleMessagePanel()" title="Session log (L)" aria-label="Toggle session log">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-              </svg>
-            </button>
-            <button id="scratchpad-toggle" class="icon-btn" onclick="toggleScratchpad()" title="Scratchpad (N)" aria-label="Toggle scratchpad">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
-              </svg>
-            </button>
-            <button class="icon-btn" onclick="showStorageManager()" title="Storage manager (Shift+S)" aria-label="Storage manager">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
-              </svg>
-            </button>
-            <span class="icon-btn theme-picker" id="themePickerBtn" title="Color theme" onclick="toggleThemeMenu(event)">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/></svg>
-              <div class="theme-menu" id="themeMenu"></div>
-            </span>
-            <button id="theme-toggle" class="icon-btn" onclick="toggleTheme()" title="Toggle theme" aria-label="Toggle theme">
-              <svg id="theme-icon-dark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/>
-              </svg>
-              <svg id="theme-icon-light" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none">
-                <circle cx="12" cy="12" r="5"/>
-                <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
-              </svg>
-            </button>
-            <button class="icon-btn" onclick="showHelpModal()" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="12" cy="12" r="10"/>
-                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
-                <circle cx="12" cy="17" r="0.5" fill="currentColor"/>
-              </svg>
-            </button>
-            <a href="https://github.com/NikiforovAll/claude-code-kanban" target="_blank" class="icon-btn" title="View on GitHub" aria-label="View on GitHub">
-              <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16">
-                <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
-              </svg>
-            </a>
-          </div>
-        </header>
-
-        <div class="kanban" id="main-content">
-          <div id="owner-filter-bar" class="owner-filter-bar">
-            <select id="owner-filter" class="filter-dropdown" onchange="filterByOwner(this.value)" aria-label="Filter by team member">
-              <option value="">All Members</option>
-            </select>
-          </div>
-          <div class="kanban-column" aria-label="Pending tasks">
-            <div class="column-header">
-              <span class="column-dot pending"></span>
-              <span class="column-title pending">Pending</span>
-              <span id="pending-count" class="column-count pending">0</span>
-            </div>
-            <div id="pending-tasks" class="column-tasks" role="list" data-status="pending" ondragover="onColumnDragOver(event)" ondragleave="onColumnDragLeave(event)" ondrop="onColumnDrop(event)"></div>
-          </div>
-
-          <div class="kanban-column" aria-label="In progress tasks">
-            <div class="column-header">
-              <span class="column-dot in-progress"></span>
-              <span class="column-title in-progress">In Progress</span>
-              <span id="in-progress-count" class="column-count in-progress">0</span>
-            </div>
-            <div id="in-progress-tasks" class="column-tasks" role="list" data-status="in_progress" ondragover="onColumnDragOver(event)" ondragleave="onColumnDragLeave(event)" ondrop="onColumnDrop(event)"></div>
-          </div>
-
-          <div class="kanban-column" aria-label="Completed tasks">
-            <div class="column-header">
-              <span class="column-dot completed"></span>
-              <span class="column-title completed">Completed</span>
-              <span id="completed-count" class="column-count completed">0</span>
-            </div>
-            <div id="completed-tasks" class="column-tasks" role="list" data-status="completed" ondragover="onColumnDragOver(event)" ondragleave="onColumnDragLeave(event)" ondrop="onColumnDrop(event)"></div>
-          </div>
+      <div id="agent-footer" class="agent-footer">
+        <div class="agent-footer-header" onclick="toggleAgentFooter()">
+          <span id="agent-footer-label">Agents</span>
+          <button class="agent-footer-toggle" id="agent-footer-toggle" aria-label="Toggle agent panel">&#x25BE;</button>
         </div>
-        <div id="agent-footer" class="agent-footer">
-          <div class="agent-footer-header" onclick="toggleAgentFooter()">
-            <span id="agent-footer-label">Agents</span>
-            <button class="agent-footer-toggle" id="agent-footer-toggle" aria-label="Toggle agent panel">&#x25BE;</button>
-          </div>
-          <div class="agent-footer-content" id="agent-footer-content"></div>
-        </div>
+        <div class="agent-footer-content" id="agent-footer-content"></div>
       </div>
     </main>
 
-    <!-- Detail panel -->
-    <aside id="detail-panel" class="detail-panel">
-      <div class="panel-resize-handle" id="detail-panel-resize"></div>
-      <header class="detail-header">
-        <h3>Task Details</h3>
-        <div style="display: flex; gap: 8px; align-items: center;">
-          <button id="delete-task-btn" class="icon-btn icon-btn-danger" title="Delete task (D)" aria-label="Delete task" style="display: none;">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
-            </svg>
-          </button>
-          <button id="close-detail" class="detail-close" aria-label="Close detail panel">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M6 18L18 6M6 6l12 12"/>
-            </svg>
-          </button>
-        </div>
-      </header>
-      <div id="detail-content" class="detail-content"></div>
-    </aside>
+    <!-- Dummy elements kept so existing JS const references don't break -->
+    <div id="no-session" style="display:none"></div>
+    <div id="session-view" style="display:none"></div>
 
     <aside id="message-panel" class="message-panel">
       <div class="panel-resize-handle" id="message-panel-resize"></div>
@@ -362,57 +251,6 @@
     </div>
   </div>
 
-  <!-- Delete Confirmation Modal -->
-  <div id="delete-confirm-modal" class="modal-overlay" onclick="closeDeleteConfirmModal()">
-    <div class="modal modal-sm" onclick="event.stopPropagation()">
-      <div class="modal-header">
-        <h3 class="modal-title">Delete Task</h3>
-        <button class="modal-close" aria-label="Close dialog" onclick="closeDeleteConfirmModal()">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M18 6L6 18M6 6l12 12"/>
-          </svg>
-        </button>
-      </div>
-      <div class="modal-body">
-        <p id="delete-confirm-message" style="margin: 0; color: var(--text-primary);"></p>
-      </div>
-      <div class="modal-footer">
-        <button id="delete-cancel-btn" class="btn btn-secondary" onclick="closeDeleteConfirmModal()">Cancel</button>
-        <button id="delete-confirm-btn" class="btn btn-danger" onclick="confirmDelete()">Delete</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- New Task Modal -->
-  <div id="new-task-modal" class="modal-overlay" onclick="closeNewTaskModal()">
-    <div class="modal modal-sm" onclick="event.stopPropagation()" style="width:420px">
-      <div class="modal-header">
-        <h3 class="modal-title">New Task</h3>
-        <button class="modal-close" aria-label="Close" onclick="closeNewTaskModal()">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
-        </button>
-      </div>
-      <div class="modal-body" style="display:flex;flex-direction:column;gap:12px">
-        <div class="new-task-field">
-          <label class="new-task-label" for="new-task-title">Title <span style="color:var(--accent)">*</span></label>
-          <input id="new-task-title" class="form-input" type="text" placeholder="Task title" autocomplete="off"/>
-        </div>
-        <div class="new-task-field">
-          <label class="new-task-label" for="new-task-desc">Description <span style="color:var(--text-muted);font-weight:400">(acts as Claude prompt)</span></label>
-          <textarea id="new-task-desc" class="form-input new-task-textarea" placeholder="What should Claude work on?" rows="3"></textarea>
-        </div>
-        <div class="new-task-field">
-          <label class="new-task-label" for="new-task-asana">Asana Task URL <span style="color:var(--text-muted);font-weight:400">(optional)</span></label>
-          <input id="new-task-asana" class="form-input" type="url" placeholder="https://app.asana.com/..."/>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-secondary" onclick="closeNewTaskModal()">Cancel</button>
-        <button id="new-task-submit" class="btn btn-primary" onclick="submitNewTask()">Create &amp; Launch</button>
-      </div>
-    </div>
-  </div>
-
   <!-- Team Info Modal -->
   <div id="team-modal" class="modal-overlay" onclick="closeTeamModal()">
     <div class="modal" onclick="event.stopPropagation()">
@@ -490,33 +328,6 @@
       <div id="plan-modal-body" class="modal-body detail-desc rendered-md modal-zoomable"></div>
       <div class="modal-footer">
         <button class="btn btn-secondary" onclick="closePlanModal()">Close</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Blocked Task Warning Modal -->
-  <div id="blocked-task-modal" class="modal-overlay" onclick="closeBlockedTaskModal()">
-    <div class="modal modal-sm" onclick="event.stopPropagation()">
-      <div class="modal-header">
-        <h3 class="modal-title" style="display: flex; align-items: center; gap: 8px;">
-          <svg viewBox="0 0 24 24" fill="none" stroke="var(--danger)" stroke-width="2" style="width: 20px; height: 20px;">
-            <circle cx="12" cy="12" r="10"/>
-            <line x1="15" y1="9" x2="9" y2="15"/>
-            <line x1="9" y1="9" x2="15" y2="15"/>
-          </svg>
-          Cannot Start Blocked Task
-        </h3>
-        <button class="modal-close" aria-label="Close dialog" onclick="closeBlockedTaskModal()">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M18 6L6 18M6 6l12 12"/>
-          </svg>
-        </button>
-      </div>
-      <div class="modal-body">
-        <div id="blocked-task-message" style="color: var(--text-primary); line-height: 1.6;"></div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-secondary" onclick="closeBlockedTaskModal()">OK</button>
       </div>
     </div>
   </div>
