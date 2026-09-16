@@ -588,6 +588,9 @@ body::before {
 
 .session-item.kb-selected {
   border-color: var(--accent);
+  box-shadow:
+    inset 0 0 0 1px var(--accent),
+    0 0 10px var(--accent-glow);
 }
 
 .session-item.stale {

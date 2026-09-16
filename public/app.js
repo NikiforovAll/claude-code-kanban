@@ -429,6 +429,7 @@ async function fetchTasks(sessionId) {
     if (agentLogMode && sessionId !== currentSessionId) exitAgentLogMode();
     if (sessionId !== currentSessionId && document.getElementById('scratchpad-modal').classList.contains('visible'))
       closeScratchpad();
+    if (sessionId !== currentSessionId && detailPanel.classList.contains('visible')) closeDetailPanel();
     if (revealedPlanSessionId && sessionId !== revealedPlanSessionId) {
       revealedPlanSessionId = null;
     }
