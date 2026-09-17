@@ -22,6 +22,7 @@ const {
   buildSessionDigest,
   readCompactSummaries,
   readArtifactLinks,
+  readScratchpadCreations,
   extractPromptFromTranscript,
   extractModelFromTranscript,
   extractStructuredResultFromTranscript,
@@ -1159,7 +1160,9 @@ app.get('/api/sessions', async (req, res) => {
     const limit = limitParam === 'all' ? null : parseInt(limitParam, 10);
 
     const pinnedParam = req.query.pinned;
+    const includeIds = req.query.include ? new Set(req.query.include.split(',').filter(Boolean)) : new Set();
     const pinnedIds = pinnedParam ? new Set(pinnedParam.split(',').filter(Boolean)) : new Set();
+    for (const id of includeIds) pinnedIds.add(id);
     const activeFilter = req.query.filter === 'active';
 
     const metadata = loadSessionMetadata();
@@ -1502,8 +1505,12 @@ app.get('/api/sessions', async (req, res) => {
 
     // Apply project filter before limit so the limit is per-project
     const projectFilter = req.query.project;
+    // `include` is narrower than `pinned`: pinned rows survive the limit but still obey
+    // the project filter, because pinning is a preference and the filter is an intent.
+    // The client sends the session it currently has open, which it cannot render at all
+    // if the row is missing — that one is not a preference.
     if (projectFilter) {
-      sessions = sessions.filter(s => s.project === projectFilter);
+      sessions = sessions.filter(s => s.project === projectFilter || includeIds.has(s.id));
     }
 
     // Apply limit if specified, but always include pinned sessions
@@ -1656,18 +1663,25 @@ app.get('/api/sessions/:sessionId/loop', (req, res) => {
   }
 });
 
+// Memo for a cold read keyed on the file's identity, so a repeat ask costs the one stat
+// it already pays to notice the file grew. `load` may return a promise: the promise is
+// what gets cached, so concurrent callers share a single read. Null when the file is gone.
+function cachedByFileStat(cache, filePath, load) {
+  let stat;
+  try { stat = statSync(filePath); } catch (_) { return null; }
+  const hit = cache.get(filePath);
+  if (hit && hit.mtimeMs === stat.mtimeMs && hit.size === stat.size) return hit.value;
+  const value = load();
+  cache.set(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, value });
+  return value;
+}
+
 // Cold path — a full transcript scan, so the result is held until the file grows.
 // The zen panel asks again on every re-render, which then costs one stat.
 const artifactsByPath = new Map();
 
 function getArtifactLinks(jsonlPath) {
-  let stat;
-  try { stat = statSync(jsonlPath); } catch (_) { return []; }
-  const hit = artifactsByPath.get(jsonlPath);
-  if (hit && hit.mtimeMs === stat.mtimeMs && hit.size === stat.size) return hit.artifacts;
-  const artifacts = readArtifactLinks(jsonlPath);
-  artifactsByPath.set(jsonlPath, { mtimeMs: stat.mtimeMs, size: stat.size, artifacts });
-  return artifacts;
+  return cachedByFileStat(artifactsByPath, jsonlPath, () => readArtifactLinks(jsonlPath)) || [];
 }
 
 app.get('/api/sessions/:sessionId/artifacts', (req, res) => {
@@ -1679,6 +1693,96 @@ app.get('/api/sessions/:sessionId/artifacts', (req, res) => {
   } catch (error) {
     console.error('Error reading artifacts:', error);
     res.status(500).json({ error: 'Failed to read artifacts' });
+  }
+});
+
+// A scratchpad is a folder plus a `scratchpad.json` manifest, rendered by the
+// external `scratch` CLI. cck only recognizes the shape and launches the viewer —
+// it reads nothing from the manifest but `name` and `created`, so the two stay
+// independently versioned.
+const SCRATCHPAD_MANIFEST = 'scratchpad.json';
+
+// Fallback only, for a `scratch new` whose output the transcript never captured. A pad
+// has no central registry — the CLI treats the folder path as the pad's identity and
+// finds pads by scanning — and `_scratchpads/` is one user's habit, not a convention it
+// knows, so there is no layout to guess. Depth 3 rather than a deeper walk for the
+// reason docs/session-scanning.md records: pruned, it measures 0-3 ms on the worst-case
+// project dirs, while an unpruned walk of the same dirs costs ~800 ms.
+const PAD_SCAN_IGNORE = new Set(['node_modules', '.git', '.hg', '.svn', 'dist', 'build']);
+const PAD_SCAN_MAX_DEPTH = 3;
+// A pad manifest's `created` is written after the tool call starts, so the match is
+// a window, not an instant. Measured lag on a real `scratch new` was 4.1 s; the
+// window is wide enough to survive a slow disk and far too narrow to reach a pad
+// made in an earlier session.
+const PAD_CREATE_WINDOW_MS = 120000;
+
+async function findPads(root, depth = 0) {
+  let entries;
+  try { entries = await fs.readdir(root, { withFileTypes: true }); } catch (_) { return []; }
+  // A pad is never nested inside another pad, so a manifest ends the descent.
+  if (entries.some((e) => e.isFile() && e.name === SCRATCHPAD_MANIFEST)) return [root];
+  if (depth >= PAD_SCAN_MAX_DEPTH) return [];
+  const nested = await Promise.all(
+    entries
+      .filter((e) => e.isDirectory() && !PAD_SCAN_IGNORE.has(e.name))
+      .map((e) => findPads(path.join(root, e.name), depth + 1)),
+  );
+  return nested.flat();
+}
+
+// The pads a session made, as linked-doc rows. Derived on every read rather than
+// stored, so re-reading a transcript cannot double-link or drift; the UI keeps the
+// one piece of state this cannot derive — which rows the user unlinked.
+async function readCreatedPads(meta) {
+  const creations = readScratchpadCreations(meta.jsonlPath);
+  // No `scratch new` in the transcript means no disk work at all, so sessions that
+  // never touch the CLI pay a substring pass over the transcript and nothing more.
+  if (!creations.length) return [];
+  const reported = new Set(creations.filter((c) => c.path).map((c) => c.path));
+  const unresolved = creations.filter((c) => !c.path).map((c) => c.ts);
+  // The project, not `meta.cwd`: cwd is wherever the session last stood, which drifts
+  // into subdirectories — a session that made a pad and then worked inside it reports
+  // a cwd below the pad, and a scan from there finds nothing above it.
+  const root = meta.project || meta.cwd;
+  const scanned = unresolved.length && root ? await findPads(root) : [];
+  const candidates = [...new Set([...reported, ...scanned.map((dir) => path.join(dir, SCRATCHPAD_MANIFEST))])];
+  const rows = await Promise.all(
+    candidates.map(async (file) => {
+      let manifest;
+      try { manifest = JSON.parse(await fs.readFile(file, 'utf8')); } catch (_) { return null; }
+      const created = Date.parse(manifest?.created);
+      if (!Number.isFinite(created)) return null;
+      // A path the CLI printed names its pad outright. A scanned one has to earn its
+      // place by having been created while a `scratch new` we could not resolve ran.
+      if (!reported.has(file) && !unresolved.some((ts) => created >= ts && created - ts <= PAD_CREATE_WINDOW_MS)) {
+        return null;
+      }
+      return { path: file, name: manifest.name || path.basename(path.dirname(file)), created: manifest.created, ts: created };
+    }),
+  );
+  return rows
+    .filter(Boolean)
+    .sort((a, b) => a.ts - b.ts)
+    .map(({ ts: _ts, ...row }) => row);
+}
+
+// Cold path — a full transcript scan, and a directory walk when the transcript did not
+// carry the pad paths, so the result is held until the transcript grows.
+const padsByPath = new Map();
+
+function getCreatedPads(meta) {
+  return cachedByFileStat(padsByPath, meta.jsonlPath, () => readCreatedPads(meta)) || [];
+}
+
+app.get('/api/sessions/:sessionId/pads', async (req, res) => {
+  try {
+    const metadata = loadSessionMetadata();
+    const meta = metadata[req.params.sessionId] || metadata[resolveSessionId(req.params.sessionId)];
+    if (!meta?.jsonlPath) return res.json({ pads: [] });
+    res.json({ pads: await getCreatedPads(meta) });
+  } catch (error) {
+    console.error('Error reading created pads:', error);
+    res.status(500).json({ error: 'Failed to read created pads' });
   }
 });
 
@@ -2087,11 +2191,6 @@ app.post('/api/open-in-editor', (req, res) => {
     res.status(500).json({ error: 'Failed to open in editor' });
   }
 });
-
-// A scratchpad is a folder plus a `scratchpad.json` manifest, rendered by the
-// external `scratch` CLI. cck only recognizes the shape and launches the viewer —
-// it never parses the manifest, so the two stay independently versioned.
-const SCRATCHPAD_MANIFEST = 'scratchpad.json';
 
 // Resolve a linked path to the pad the viewer wants: `<parent>/<name>` where
 // `<name>/scratchpad.json` exists. Accepts either the manifest or its directory.

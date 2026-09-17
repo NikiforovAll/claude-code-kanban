@@ -200,15 +200,16 @@ async function fetchSessions(includeTasks = true) {
     const allPinnedIds = new Set([...pinnedSessionIds, ...stickySessionIds]);
     if (revealedPlanSessionId) allPinnedIds.add(revealedPlanSessionId);
     if (revealedStorageSessionId) allPinnedIds.add(revealedStorageSessionId);
-    // When server filters by activity, the focused session may not be active —
-    // include it in pinned so the server still returns it.
-    if ((sessionFilter === 'active' || zenMode) && currentSessionId) allPinnedIds.add(currentSessionId);
     const pinnedParam = allPinnedIds.size > 0 ? `&pinned=${[...allPinnedIds].join(',')}` : '';
+    // The focused session must come back whatever the filters say: renderSession and the
+    // info modal both look it up in `sessions` and bail when it is absent, so a session
+    // opened from outside the current filter would leave the view on the previous one.
+    const includeParam = currentSessionId ? `&include=${encodeURIComponent(currentSessionId)}` : '';
     const projectParam =
       filterProject && filterProject !== '__recent__' ? `&project=${encodeURIComponent(filterProject)}` : '';
     const filterParam = sessionFilter === 'active' ? '&filter=active' : '';
     const sessionsPromise = fetch(
-      `/api/sessions?limit=${sessionLimit}${pinnedParam}${projectParam}${filterParam}`,
+      `/api/sessions?limit=${sessionLimit}${pinnedParam}${includeParam}${projectParam}${filterParam}`,
     ).then((r) => r.json());
 
     let newSessions, newTasks;
@@ -234,6 +235,16 @@ async function fetchSessions(includeTasks = true) {
     renderActivityChip();
   } catch (error) {
     console.error('Failed to fetch sessions:', error);
+  }
+}
+
+// One session by id, ignoring every sidebar filter — that is what `include` means.
+async function fetchSessionById(id) {
+  try {
+    const r = await fetch(`/api/sessions?limit=1&include=${encodeURIComponent(id)}`);
+    return r.ok ? (await r.json()).find((s) => s.id === id) || null : null;
+  } catch (_) {
+    return null;
   }
 }
 
@@ -3032,6 +3043,13 @@ async function revealSession(id) {
     await fetchSessions();
     session = sessions.find((s) => s.id === id);
   }
+  if (!session) {
+    // The id is outside the list the filters asked for. renderSession bails on a session
+    // missing from `sessions`, so pull that one row in before opening it; later polls
+    // keep it, because fetchSessions pins currentSessionId.
+    session = await fetchSessionById(id);
+    if (session) sessions.push(session);
+  }
   const uncollapsed = session ? uncollapseFor(session) : false;
   if (uncollapsed) persistCollapsedGroups();
   expandSidebar();
@@ -3135,7 +3153,10 @@ function getFilteredSessions() {
     }
   }
   if (filterProject) {
-    filteredSessions = filteredSessions.filter((s) => matchesProjectFilter(s.project));
+    // The open session keeps its row even when it belongs to another project, so that
+    // revealing one by id has something to scroll to. Same exemption the active branch
+    // above already makes, for the same reason.
+    filteredSessions = filteredSessions.filter((s) => matchesProjectFilter(s.project) || s.id === currentSessionId);
   }
 
   if (activityFilter.size > 0) {
@@ -3267,7 +3288,7 @@ function renderSessions() {
       pinState === 'pinned' || pinState === 'sticky' ? 'Unpin session (.)' : 'Pin session (. · > sticky)';
     // Zen renders the full context detail below the card, so the compact bar would just repeat it.
     const showCtx = !!session.contextStatus && !zenMode;
-    const linkedDocsCount = getSessionPreviewPaths(session.id).length;
+    const linkedDocsCount = getSessionPadPaths(session.id).length;
     const bookmarksCount = loadPins(session.id).length;
     const hasScratchpad = !!(store.getItem(_sessionScratchpadKey(session.id)) || '').trim();
     const tempClass = session.hasRecentLog || session.inProgress || session.hasWaitingForUser ? 'warm' : 'stale';
@@ -6231,6 +6252,21 @@ function getSessionPreviewPaths(sessionId) {
   }
 }
 
+// What the linked-docs surfaces actually show: the paths the user linked by hand,
+// plus the pads this session created and has not dismissed. Derived rows come last
+// and never duplicate a hand-linked path, so linking a pad manually still works and
+// simply moves it to the top of the list.
+function getSessionPadPaths(sessionId) {
+  const linked = getSessionPreviewPaths(sessionId);
+  // Most sessions never made a pad, and renderSessions asks this for every card on every
+  // SSE tick — so the dismissal list is only worth reading when there is one to filter.
+  const pads = padsBySession.get(sessionId);
+  if (!pads?.length) return linked;
+  const hidden = getHiddenPadPaths(sessionId);
+  const derived = pads.map((p) => p.path).filter((p) => !hidden.includes(p) && !linked.includes(p));
+  return [...linked, ...derived];
+}
+
 function addSessionPreviewPath(sessionId, filePath) {
   if (!sessionId || !filePath) return;
   const paths = getSessionPreviewPaths(sessionId).filter((p) => p !== filePath);
@@ -6243,6 +6279,33 @@ function removeSessionPreviewPath(sessionId, filePath) {
   const paths = getSessionPreviewPaths(sessionId).filter((p) => p !== filePath);
   if (paths.length) store.setItem(PREVIEW_STORAGE_PREFIX + sessionId, JSON.stringify(paths));
   else store.removeItem(PREVIEW_STORAGE_PREFIX + sessionId);
+  hidePadPath(sessionId, filePath);
+}
+
+// Pads the session created are derived from the transcript on every read, never
+// stored — so re-reading one cannot double-link. That leaves exactly one fact the
+// server cannot derive: which of them the user dismissed. Without this the × on a
+// pad row would undo itself on the next render.
+const PAD_HIDDEN_PREFIX = 'hidden-pads-';
+
+function getHiddenPadPaths(sessionId) {
+  if (!sessionId) return [];
+  try {
+    const raw = store.getItem(PAD_HIDDEN_PREFIX + sessionId);
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
+}
+
+function hidePadPath(sessionId, filePath) {
+  // Only a derived row needs a tombstone. A hand-linked path is gone once it leaves
+  // the stored list, and recording it here would suppress a later re-link.
+  const pads = padsBySession.get(sessionId) || [];
+  if (!pads.some((p) => p.path === filePath)) return;
+  const hidden = getHiddenPadPaths(sessionId);
+  if (!hidden.includes(filePath)) store.setItem(PAD_HIDDEN_PREFIX + sessionId, JSON.stringify([...hidden, filePath]));
 }
 
 // Every surface that shows linked docs — info modal, session card badge, preview
@@ -6530,6 +6593,23 @@ async function loadPreviewKinds(sessionId, paths) {
   afterLinkedDocsChanged(sessionId);
 }
 
+// The pads a session made with `scratch new`, fetched once per tab per session and
+// then folded into the linked-doc list. Same shape as loadPreviewKinds above: the
+// render kicks it off, the answer re-renders, so no call site can forget it.
+const padsBySession = new Map();
+
+async function loadSessionPads(sessionId) {
+  // The empty entry doubles as the in-flight marker: readers already treat "no pads yet"
+  // and "no pads" the same, so a second container to tell them apart would buy nothing.
+  if (!sessionId || padsBySession.has(sessionId)) return;
+  padsBySession.set(sessionId, []);
+  try {
+    const r = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/pads`);
+    if (r.ok) padsBySession.set(sessionId, (await r.json()).pads || []);
+  } catch (_) {}
+  afterLinkedDocsChanged(sessionId);
+}
+
 // A scratchpad manifest opens in the external `scratch` viewer, not the editor —
 // the raw JSON is a manifest, not the document the user linked.
 function isScratchpadPath(p) {
@@ -6584,10 +6664,11 @@ function openLinkedDoc(p, baseDir) {
 }
 
 function renderLinkedDocsHtml(sessionId) {
-  const paths = getSessionPreviewPaths(sessionId);
+  const paths = getSessionPadPaths(sessionId);
   // Kicked off from the render rather than the three call sites, so a new surface that
   // shows linked docs cannot forget it. Returns at once once every path is cached.
   loadPreviewKinds(sessionId, paths);
+  loadSessionPads(sessionId);
   const baseDir = getSessionBaseDir(sessionId);
   const items = paths
     .map((p) => {
@@ -8686,11 +8767,36 @@ let spPeekedId = null;
 // Per-open cache: spSource is frozen while the picker is up, so a fetched log stays valid.
 const spPeekCache = new Map();
 
+// A session outside the sidebar filter has no name to fuzzy-match against, so a full id
+// is read as a request for that exact session and resolved against the server instead.
+// Values: 'pending' while the request is out, then the session or null.
+const spGlobal = new Map();
+
+async function spResolveGlobal(id) {
+  spGlobal.set(id, 'pending');
+  spGlobal.set(id, await fetchSessionById(id));
+  if (document.getElementById('session-picker-input').value.trim().toLowerCase() === id) renderSessionPicker();
+}
+
+// The row to show for a query nothing in the list matched, as `{ hit, empty }` — one of
+// the two is always null. Starts the lookup when the query is an id not asked about yet.
+function spResolveMiss(query) {
+  if (!SESSION_UUID_RE.test(query)) {
+    return { hit: null, empty: spSource.length ? 'No session matches' : 'No sessions in the current sidebar filter' };
+  }
+  const id = query.toLowerCase();
+  if (!spGlobal.has(id)) spResolveGlobal(id);
+  const found = spGlobal.get(id);
+  if (found === 'pending') return { hit: null, empty: 'Looking up session…' };
+  return found ? { hit: found, empty: null } : { hit: null, empty: 'No session with that id' };
+}
+
 function openSessionPicker() {
   const input = document.getElementById('session-picker-input');
   input.value = '';
   spSource = getFilteredSessions().sort((a, b) => Date.parse(b.modifiedAt) - Date.parse(a.modifiedAt));
   spPeekCache.clear();
+  spGlobal.clear();
   document.getElementById('session-picker-modal').classList.add('visible');
   renderSessionPicker();
   input.focus();
@@ -8781,11 +8887,14 @@ function renderSessionPicker() {
   const list = document.getElementById('session-picker-list');
   const query = document.getElementById('session-picker-input').value.trim();
   spRows = spSource.filter((s) => spMatches(s, query));
-
   if (!spRows.length) {
-    spIdx = -1;
-    list.innerHTML = `<div class="sp-empty">${spSource.length ? 'No session matches' : 'No sessions in the current sidebar filter'}</div>`;
-    return;
+    const { hit, empty } = spResolveMiss(query);
+    if (hit) spRows = [hit];
+    else {
+      spIdx = -1;
+      list.innerHTML = `<div class="sp-empty">${empty}</div>`;
+      return;
+    }
   }
 
   list.innerHTML = spRows
