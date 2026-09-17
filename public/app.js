@@ -3288,7 +3288,7 @@ function renderSessions() {
       pinState === 'pinned' || pinState === 'sticky' ? 'Unpin session (.)' : 'Pin session (. · > sticky)';
     // Zen renders the full context detail below the card, so the compact bar would just repeat it.
     const showCtx = !!session.contextStatus && !zenMode;
-    const linkedDocsCount = getSessionPadPaths(session.id).length;
+    const linkedDocsCount = getSessionPreviewPaths(session.id).length;
     const bookmarksCount = loadPins(session.id).length;
     const hasScratchpad = !!(store.getItem(_sessionScratchpadKey(session.id)) || '').trim();
     const tempClass = session.hasRecentLog || session.inProgress || session.hasWaitingForUser ? 'warm' : 'stale';
@@ -3615,6 +3615,11 @@ function renderSession() {
 
   const session = sessions.find((s) => s.id === currentSessionId);
   if (!session) return;
+
+  // Opening the session, not opening a linked-docs surface: the card badge is the
+  // first place a pad shows up, and it would otherwise stay at zero until the user
+  // happened to open the info modal or zen panel.
+  loadSessionPads(currentSessionId);
 
   const displayName =
     session.customTitle || session.name || session.gitBranch || session.description || currentSessionId;
@@ -5752,12 +5757,8 @@ function _renderStorageLinkedDocs() {
   const entries = [];
   for (const key of store.keys()) {
     if (!key.startsWith(PREVIEW_STORAGE_PREFIX)) continue;
-    try {
-      const arr = JSON.parse(store.getItem(key)) || [];
-      if (Array.isArray(arr) && arr.length) {
-        entries.push({ sessionId: key.slice(PREVIEW_STORAGE_PREFIX.length), paths: arr });
-      }
-    } catch {}
+    const paths = readStoredList(key);
+    if (paths.length) entries.push({ sessionId: key.slice(PREVIEW_STORAGE_PREFIX.length), paths });
   }
   if (!entries.length) return '<div class="storage-empty">No linked documents</div>';
 
@@ -5818,6 +5819,8 @@ function _storageUnlinkDoc(sessionId, path) {
 
 function _storageClearLinkedDocs(sessionId) {
   store.removeItem(PREVIEW_STORAGE_PREFIX + sessionId);
+  // The auto-link record deliberately survives: clearing is unlinking every row at
+  // once, and an unlinked pad must not come back on the next read of the transcript.
   afterLinkedDocsChanged(sessionId);
 }
 
@@ -5834,6 +5837,8 @@ function _findOrphanedKeys() {
       if (!known.has(key.slice('scratchpad-'.length))) orphaned.push(key);
     } else if (key.startsWith(PREVIEW_STORAGE_PREFIX)) {
       if (!known.has(key.slice(PREVIEW_STORAGE_PREFIX.length))) orphaned.push(key);
+    } else if (key.startsWith(PAD_LINKED_PREFIX)) {
+      if (!known.has(key.slice(PAD_LINKED_PREFIX.length))) orphaned.push(key);
     }
   }
   return orphaned;
@@ -6241,30 +6246,17 @@ document.addEventListener('keydown', (e) => {
 const PREVIEW_STORAGE_PREFIX = 'preview-paths-';
 let currentPreviewPath = null;
 
-function getSessionPreviewPaths(sessionId) {
-  if (!sessionId) return [];
+function readStoredList(key) {
   try {
-    const raw = store.getItem(PREVIEW_STORAGE_PREFIX + sessionId);
-    const arr = raw ? JSON.parse(raw) : [];
+    const arr = JSON.parse(store.getItem(key) || '[]');
     return Array.isArray(arr) ? arr : [];
   } catch {
     return [];
   }
 }
 
-// What the linked-docs surfaces actually show: the paths the user linked by hand,
-// plus the pads this session created and has not dismissed. Derived rows come last
-// and never duplicate a hand-linked path, so linking a pad manually still works and
-// simply moves it to the top of the list.
-function getSessionPadPaths(sessionId) {
-  const linked = getSessionPreviewPaths(sessionId);
-  // Most sessions never made a pad, and renderSessions asks this for every card on every
-  // SSE tick — so the dismissal list is only worth reading when there is one to filter.
-  const pads = padsBySession.get(sessionId);
-  if (!pads?.length) return linked;
-  const hidden = getHiddenPadPaths(sessionId);
-  const derived = pads.map((p) => p.path).filter((p) => !hidden.includes(p) && !linked.includes(p));
-  return [...linked, ...derived];
+function getSessionPreviewPaths(sessionId) {
+  return sessionId ? readStoredList(PREVIEW_STORAGE_PREFIX + sessionId) : [];
 }
 
 function addSessionPreviewPath(sessionId, filePath) {
@@ -6279,33 +6271,6 @@ function removeSessionPreviewPath(sessionId, filePath) {
   const paths = getSessionPreviewPaths(sessionId).filter((p) => p !== filePath);
   if (paths.length) store.setItem(PREVIEW_STORAGE_PREFIX + sessionId, JSON.stringify(paths));
   else store.removeItem(PREVIEW_STORAGE_PREFIX + sessionId);
-  hidePadPath(sessionId, filePath);
-}
-
-// Pads the session created are derived from the transcript on every read, never
-// stored — so re-reading one cannot double-link. That leaves exactly one fact the
-// server cannot derive: which of them the user dismissed. Without this the × on a
-// pad row would undo itself on the next render.
-const PAD_HIDDEN_PREFIX = 'hidden-pads-';
-
-function getHiddenPadPaths(sessionId) {
-  if (!sessionId) return [];
-  try {
-    const raw = store.getItem(PAD_HIDDEN_PREFIX + sessionId);
-    const arr = raw ? JSON.parse(raw) : [];
-    return Array.isArray(arr) ? arr : [];
-  } catch {
-    return [];
-  }
-}
-
-function hidePadPath(sessionId, filePath) {
-  // Only a derived row needs a tombstone. A hand-linked path is gone once it leaves
-  // the stored list, and recording it here would suppress a later re-link.
-  const pads = padsBySession.get(sessionId) || [];
-  if (!pads.some((p) => p.path === filePath)) return;
-  const hidden = getHiddenPadPaths(sessionId);
-  if (!hidden.includes(filePath)) store.setItem(PAD_HIDDEN_PREFIX + sessionId, JSON.stringify([...hidden, filePath]));
 }
 
 // Every surface that shows linked docs — info modal, session card badge, preview
@@ -6593,21 +6558,39 @@ async function loadPreviewKinds(sessionId, paths) {
   afterLinkedDocsChanged(sessionId);
 }
 
-// The pads a session made with `scratch new`, fetched once per tab per session and
-// then folded into the linked-doc list. Same shape as loadPreviewKinds above: the
-// render kicks it off, the answer re-renders, so no call site can forget it.
-const padsBySession = new Map();
+// A pad the session made with `scratch new` becomes an ordinary linked document.
+// The server derives the pads on every read, so this record of the ones already
+// linked is what stops the next read undoing an unlink.
+const PAD_LINKED_PREFIX = 'autolinked-pads-';
+const padsFetched = new Set();
+
+function getOfferedPadPaths(sessionId) {
+  return readStoredList(PAD_LINKED_PREFIX + sessionId);
+}
+
+function setOfferedPadPaths(sessionId, paths) {
+  store.setItem(PAD_LINKED_PREFIX + sessionId, JSON.stringify(paths));
+}
 
 async function loadSessionPads(sessionId) {
-  // The empty entry doubles as the in-flight marker: readers already treat "no pads yet"
-  // and "no pads" the same, so a second container to tell them apart would buy nothing.
-  if (!sessionId || padsBySession.has(sessionId)) return;
-  padsBySession.set(sessionId, []);
+  if (!sessionId || padsFetched.has(sessionId)) return;
+  padsFetched.add(sessionId);
+  let pads;
   try {
     const r = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/pads`);
-    if (r.ok) padsBySession.set(sessionId, (await r.json()).pads || []);
-  } catch (_) {}
-  afterLinkedDocsChanged(sessionId);
+    if (!r.ok) throw new Error(r.status);
+    pads = (await r.json()).pads || [];
+  } catch (_) {
+    padsFetched.delete(sessionId);
+    return;
+  }
+  const offered = getOfferedPadPaths(sessionId);
+  const fresh = pads.map((p) => p.path).filter((p) => !offered.includes(p));
+  if (!fresh.length) return;
+  // Recorded before the link, so a render triggered by the link already sees a pad
+  // that will not be offered again.
+  setOfferedPadPaths(sessionId, [...offered, ...fresh]);
+  for (const p of fresh) setSessionDocLink(sessionId, p, false);
 }
 
 // A scratchpad manifest opens in the external `scratch` viewer, not the editor —
@@ -6664,11 +6647,10 @@ function openLinkedDoc(p, baseDir) {
 }
 
 function renderLinkedDocsHtml(sessionId) {
-  const paths = getSessionPadPaths(sessionId);
+  const paths = getSessionPreviewPaths(sessionId);
   // Kicked off from the render rather than the three call sites, so a new surface that
   // shows linked docs cannot forget it. Returns at once once every path is cached.
   loadPreviewKinds(sessionId, paths);
-  loadSessionPads(sessionId);
   const baseDir = getSessionBaseDir(sessionId);
   const items = paths
     .map((p) => {
@@ -8445,6 +8427,10 @@ async function showSessionInfoModal(sessionId) {
   const cachedTasks = currentSessionId === sessionId ? currentTasks : [];
   showInfoModal(session, null, cachedTasks, null, null);
   artifactsSection.load(sessionId);
+  // The modal reaches any card's session, not just the open one, so this is the second
+  // place a pad can first be seen. Linking belongs on the two open events rather than
+  // in renderLinkedDocsHtml, which only builds a string and runs on every repaint.
+  loadSessionPads(sessionId);
 
   const rerender = (teamConfig, tasks, planContent, parentInfo) => {
     if (_planSessionId !== sessionId) return; // user opened a different modal

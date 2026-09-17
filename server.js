@@ -1731,8 +1731,8 @@ async function findPads(root, depth = 0) {
 }
 
 // The pads a session made, as linked-doc rows. Derived on every read rather than
-// stored, so re-reading a transcript cannot double-link or drift; the UI keeps the
-// one piece of state this cannot derive — which rows the user unlinked.
+// stored, so re-reading a transcript cannot drift; the client links each pad once
+// and records that it did, which is what stops a re-read undoing an unlink.
 async function readCreatedPads(meta) {
   const creations = readScratchpadCreations(meta.jsonlPath);
   // No `scratch new` in the transcript means no disk work at all, so sessions that
