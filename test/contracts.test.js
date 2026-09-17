@@ -22,7 +22,8 @@ const {
   buildAgentProgressMap,
   readCompactSummaries,
   findTerminatedTeammates,
-  extractPromptFromTranscript
+  extractPromptFromTranscript,
+  readScratchpadCreations
 } = require('../lib/parsers');
 
 const ajv = new Ajv({ allErrors: true, strict: false });
@@ -718,6 +719,66 @@ describe('Parser: extractPromptFromTranscript', () => {
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('Parser: readScratchpadCreations', () => {
+  const write = (lines) => {
+    const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'parser-test-'));
+    const file = path.join(tmpDir, 'pads.jsonl');
+    writeFileSync(file, `${lines.join('\n')}\n`);
+    return { file, tmpDir };
+  };
+
+  const call = (command, id = 'toolu_1') =>
+    JSON.stringify({
+      type: 'assistant',
+      timestamp: '2026-03-05T10:00:00.344Z',
+      message: { role: 'assistant', content: [{ type: 'tool_use', id, name: 'Bash', input: { command } }] }
+    });
+
+  const result = (text, id = 'toolu_1') =>
+    JSON.stringify({
+      type: 'user',
+      timestamp: '2026-03-05T10:00:01Z',
+      message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: text }] }
+    });
+
+  const run = (lines) => {
+    const { file, tmpDir } = write(lines);
+    try {
+      return readScratchpadCreations(file);
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  };
+
+  it('takes the printed manifest path as the answer', () => {
+    const out = 'pad dir   : C:\\p\\notes\\demo\n  manifest  : C:\\p\\notes\\demo\\scratchpad.json';
+    const rows = run([call('scratch new "demo" --dir notes'), result(out)]);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].path, 'C:\\p\\notes\\demo\\scratchpad.json');
+  });
+
+  it('reads the pad name out of the command when the output was piped away', () => {
+    const rows = run([call('scratch new "in-app-feedback" --dir _plans 2>&1 | tail -3'), result('not ignored')]);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].path, null);
+    assert.equal(rows[0].name, 'in-app-feedback');
+    assert.equal(rows[0].ts, Date.parse('2026-03-05T10:00:00.344Z'));
+  });
+
+  it('reads single-quoted and bare names, and survives a leading cd', () => {
+    assert.equal(run([call("cd '/repo'; scratch new 'vid promo' --dir x")])[0].name, 'vid promo');
+    assert.equal(run([call('scratch new notes')])[0].name, 'notes');
+  });
+
+  it('does not mistake a flag for the name', () => {
+    assert.equal(run([call('scratch new --dir _plans')])[0].name, null);
+  });
+
+  it('ignores a transcript with no scratch new call', () => {
+    assert.deepEqual(run([call('ls -la')]), []);
   });
 });
 

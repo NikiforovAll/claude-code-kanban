@@ -1698,7 +1698,7 @@ app.get('/api/sessions/:sessionId/artifacts', (req, res) => {
 
 // A scratchpad is a folder plus a `scratchpad.json` manifest, rendered by the
 // external `scratch` CLI. cck only recognizes the shape and launches the viewer —
-// it reads nothing from the manifest but `name` and `created`, so the two stay
+// it reads nothing from the manifest but `name`, `created` and `id`, so the two stay
 // independently versioned.
 const SCRATCHPAD_MANIFEST = 'scratchpad.json';
 
@@ -1739,7 +1739,14 @@ async function readCreatedPads(meta) {
   // never touch the CLI pay a substring pass over the transcript and nothing more.
   if (!creations.length) return [];
   const reported = new Set(creations.filter((c) => c.path).map((c) => c.path));
-  const unresolved = creations.filter((c) => !c.path).map((c) => c.ts);
+  const unresolved = creations.filter((c) => !c.path);
+  const askedFor = new Set(unresolved.map((c) => c.name).filter(Boolean));
+  // Only a call whose name could not be read falls back to the clock, and it compares
+  // against the call's second, not the call: the manifest records `created` to the
+  // second while the transcript timestamps to the millisecond, so a pad written during
+  // the same second as its own command otherwise reads as older than it.
+  const byClock = unresolved.filter((c) => !c.name).map((c) => Math.floor(c.ts / 1000) * 1000);
+  const sessionId = path.basename(meta.jsonlPath, '.jsonl');
   // The project, not `meta.cwd`: cwd is wherever the session last stood, which drifts
   // into subdirectories — a session that made a pad and then worked inside it reports
   // a cwd below the pad, and a scan from there finds nothing above it.
@@ -1752,12 +1759,19 @@ async function readCreatedPads(meta) {
       try { manifest = JSON.parse(await fs.readFile(file, 'utf8')); } catch (_) { return null; }
       const created = Date.parse(manifest?.created);
       if (!Number.isFinite(created)) return null;
-      // A path the CLI printed names its pad outright. A scanned one has to earn its
-      // place by having been created while a `scratch new` we could not resolve ran.
-      if (!reported.has(file) && !unresolved.some((ts) => created >= ts && created - ts <= PAD_CREATE_WINDOW_MS)) {
-        return null;
-      }
-      return { path: file, name: manifest.name || path.basename(path.dirname(file)), created: manifest.created, ts: created };
+      const name = manifest.name || path.basename(path.dirname(file));
+      // A path the CLI printed names its pad outright. Otherwise `scratch new --id`
+      // settles it: the flag stamps the session that asked for the pad into the
+      // manifest, so an id decides ownership both ways — one naming another session
+      // disowns the pad whatever the name or the clock say. Only a pad with no id is
+      // guessed at, by the name the command asked for and then by the clock.
+      const claimed =
+        reported.has(file) ||
+        (manifest.id
+          ? manifest.id === sessionId
+          : askedFor.has(name) || byClock.some((from) => created >= from && created - from <= PAD_CREATE_WINDOW_MS));
+      if (!claimed) return null;
+      return { path: file, name, created: manifest.created, ts: created };
     }),
   );
   return rows
@@ -3402,7 +3416,10 @@ function resolvePreviewPath(rawPath, base) {
   // Every path entering the preview/link surface passes through here, so accepting
   // `file://` once covers /api/preview, /api/document/link and /api/file/resolve.
   const filePath = fileUrlToPath(rawPath);
-  if (path.isAbsolute(filePath)) return dropUrlFragment(filePath);
+  // Normalized, not passed through: a linked document is identified by its path string,
+  // and `C:/a/b` typed into the link editor has to reach the same string as the `C:\a\b`
+  // a server-side `path.join` produces, or the same file is linked twice.
+  if (path.isAbsolute(filePath)) return dropUrlFragment(path.normalize(filePath));
   if (base && typeof base === 'string' && path.isAbsolute(base)) {
     let baseDir = base;
     try {

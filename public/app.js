@@ -6259,16 +6259,27 @@ function getSessionPreviewPaths(sessionId) {
   return sessionId ? readStoredList(PREVIEW_STORAGE_PREFIX + sessionId) : [];
 }
 
+// Windows reaches one file as both `C:\a\b` and `C:/a/b`, and the two sides of a link
+// disagree by construction: a pad path is built with `path.join`, a hand-typed one is
+// stored as it was typed. Rows are compared through here so the same file cannot be
+// listed twice — and lists written before this existed heal on the next link.
+function canonicalPath(filePath) {
+  const slashed = String(filePath).replace(/\\/g, '/');
+  return /^[A-Za-z]:/.test(slashed) ? slashed.toLowerCase() : slashed;
+}
+
 function addSessionPreviewPath(sessionId, filePath) {
   if (!sessionId || !filePath) return;
-  const paths = getSessionPreviewPaths(sessionId).filter((p) => p !== filePath);
+  const key = canonicalPath(filePath);
+  const paths = getSessionPreviewPaths(sessionId).filter((p) => canonicalPath(p) !== key);
   paths.unshift(filePath);
   store.setItem(PREVIEW_STORAGE_PREFIX + sessionId, JSON.stringify(paths.slice(0, 20)));
 }
 
 function removeSessionPreviewPath(sessionId, filePath) {
   if (!sessionId) return;
-  const paths = getSessionPreviewPaths(sessionId).filter((p) => p !== filePath);
+  const key = canonicalPath(filePath);
+  const paths = getSessionPreviewPaths(sessionId).filter((p) => canonicalPath(p) !== key);
   if (paths.length) store.setItem(PREVIEW_STORAGE_PREFIX + sessionId, JSON.stringify(paths));
   else store.removeItem(PREVIEW_STORAGE_PREFIX + sessionId);
 }
@@ -6391,7 +6402,8 @@ function openPreviewModal(filePath, content, kind) {
 
 function isPreviewLinkedToCurrentSession() {
   if (!currentPreviewPath || !currentSessionId) return false;
-  return getSessionPreviewPaths(currentSessionId).includes(currentPreviewPath);
+  const key = canonicalPath(currentPreviewPath);
+  return getSessionPreviewPaths(currentSessionId).some((p) => canonicalPath(p) === key);
 }
 
 function updatePreviewLinkBtn() {
@@ -6584,8 +6596,8 @@ async function loadSessionPads(sessionId) {
     padsFetched.delete(sessionId);
     return;
   }
-  const offered = getOfferedPadPaths(sessionId);
-  const fresh = pads.map((p) => p.path).filter((p) => !offered.includes(p));
+  const offered = new Set(getOfferedPadPaths(sessionId).map(canonicalPath));
+  const fresh = pads.map((p) => p.path).filter((p) => !offered.has(canonicalPath(p)));
   if (!fresh.length) return;
   // Recorded before the link, so a render triggered by the link already sees a pad
   // that will not be offered again.
