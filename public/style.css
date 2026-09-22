@@ -3999,6 +3999,32 @@ body::before {
   font-size: 11px;
 }
 
+/* A folder row wraps so its child list lands on its own full-width line under the
+   name, indented one chevron in. */
+.scratch-folder-item {
+  flex-wrap: wrap;
+}
+
+.scratch-folder-item > .scratch-file-list,
+.scratch-folder-item > .scratch-folder-empty {
+  flex-basis: 100%;
+  margin-top: 4px;
+  padding-left: 14px;
+}
+
+.scratch-folder-empty {
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+
+.scratch-folder-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  text-decoration: none;
+  color: var(--text-secondary);
+}
+
 /* The × is a glyph, not an svg, so .row-actions button svg does not size it. */
 .linked-doc-remove {
   font-family: var(--mono);
@@ -5922,7 +5948,8 @@ pre.mermaid svg {
 
 .project-group-header .group-chevron,
 .session-group-header .group-chevron,
-.sg-section-toggle .group-chevron {
+.sg-section-toggle .group-chevron,
+.scratch-folder-toggle .group-chevron {
   transition: transform 0.15s ease;
   flex-shrink: 0;
   display: block;
@@ -5930,7 +5957,8 @@ pre.mermaid svg {
 
 .project-group-header.collapsed .group-chevron,
 .session-group-header.collapsed .group-chevron,
-.sg-section-toggle.collapsed .group-chevron {
+.sg-section-toggle.collapsed .group-chevron,
+.scratch-folder-toggle.collapsed .group-chevron {
   transform: rotate(-90deg);
 }
 

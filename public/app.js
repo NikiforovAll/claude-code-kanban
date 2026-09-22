@@ -6862,10 +6862,42 @@ const scratchFilesSection = makeSectionLoader({
 // Outlives the cache entries on purpose: a refetch on the TTL must not collapse a list
 // the user opened.
 const scratchFilesExpanded = new Set();
+// Open folders only, keyed by absolute path: path -> { status: 'loading' | 'ready' |
+// 'error', children }. Closing a folder drops its entry, so the cache is bounded by
+// what is on screen and a reopen shows fresh contents for one readdir.
+const scratchFolders = new Map();
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
 function openScratchFile(filePath) {
   openPreviewByPath(filePath, undefined, openFileInEditor);
+}
+
+function scratchRowHtml(f) {
+  const escPath = escapeHtml(f.path);
+  const isDir = f.kind === 'dir';
+  const folder = isDir ? scratchFolders.get(f.path) : null;
+  const name = escapeHtml(f.name);
+  const link = isDir
+    ? `<button type="button" class="scratch-file-link scratch-folder-toggle${folder ? '' : ' collapsed'}" title="${escPath}" aria-expanded="${!!folder}">${groupChevronSvg(10)}${name}/</button>`
+    : `<button type="button" class="scratch-file-link" onclick="openScratchFile(this.closest('li').dataset.file)" title="${escPath}">${name}</button>`;
+  let body = '';
+  if (folder?.status === 'loading') body = '<div class="scratch-folder-empty">Loading…</div>';
+  else if (folder?.status === 'error') body = '<div class="scratch-folder-empty">Failed to load</div>';
+  else if (folder && !folder.children.length) body = '<div class="scratch-folder-empty">Empty</div>';
+  else if (folder) body = scratchRowsHtml(folder.children);
+  return `<li class="scratch-file-item${isDir ? ' scratch-folder-item' : ''}" data-file="${escPath}">
+    ${link}
+    <span class="scratch-file-time">${formatDate(f.modifiedAt)}</span>
+    <span class="row-actions scratch-file-actions">
+      <button type="button" onclick="copyWithFeedback(this.closest('li').dataset.file, this)" title="Copy path" aria-label="Copy path">${ICON_COPY}</button>
+      <button type="button" onclick="${isDir ? 'openFolderInEditor' : 'openFileInEditor'}(this.closest('li').dataset.file)" title="Open in editor" aria-label="Open in editor">${ICON_OPEN_EXTERNAL}</button>
+    </span>
+    ${body}
+  </li>`;
+}
+
+function scratchRowsHtml(rows) {
+  return `<ul class="scratch-file-list">${rows.map(scratchRowHtml).join('')}</ul>`;
 }
 
 function scratchFilesInnerHtml(sessionId) {
@@ -6873,24 +6905,42 @@ function scratchFilesInnerHtml(sessionId) {
   if (!list.length) return '';
   const expanded = scratchFilesExpanded.has(sessionId);
   const shown = expanded ? list : list.slice(0, SCRATCH_FILES_COLLAPSED);
-  const items = shown
-    .map((f) => {
-      const escPath = escapeHtml(f.path);
-      return `<li class="scratch-file-item" data-file="${escPath}">
-        <button type="button" class="scratch-file-link" onclick="openScratchFile(this.closest('li').dataset.file)" title="${escPath}">${escapeHtml(f.name)}</button>
-        <span class="scratch-file-time">${formatDate(f.modifiedAt)}</span>
-        <span class="row-actions scratch-file-actions">
-          <button type="button" onclick="copyWithFeedback(this.closest('li').dataset.file, this)" title="Copy path" aria-label="Copy file path">${ICON_COPY}</button>
-          <button type="button" onclick="openFileInEditor(this.closest('li').dataset.file)" title="Open in editor" aria-label="Open file in editor">${ICON_OPEN_EXTERNAL}</button>
-        </span>
-      </li>`;
-    })
-    .join('');
   const more =
     list.length > SCRATCH_FILES_COLLAPSED
       ? `<button type="button" class="expand-toggle-btn scratch-files-more" onclick="toggleScratchFiles('${escAttrJs(sessionId)}')">${expanded ? 'Show less' : `Show all ${list.length}`}</button>`
       : '';
-  return `<ul class="scratch-file-list">${items}</ul>${more}`;
+  return `${scratchRowsHtml(shown)}${more}`;
+}
+
+// Delegated at the document because the whole zen panel is re-rendered on every SSE tick,
+// which would drop a listener bound on the section.
+document.addEventListener('click', (e) => {
+  const toggle = e.target.closest('.scratch-folder-toggle');
+  if (!toggle) return;
+  const section = toggle.closest('[data-scratch-files-for]');
+  if (section) toggleScratchFolder(section.dataset.scratchFilesFor, toggle.closest('li').dataset.file);
+});
+
+async function toggleScratchFolder(sessionId, dirPath) {
+  if (scratchFolders.has(dirPath)) {
+    scratchFolders.delete(dirPath);
+    scratchFilesSection.repaint(sessionId);
+    return;
+  }
+  scratchFolders.set(dirPath, { status: 'loading', children: [] });
+  scratchFilesSection.repaint(sessionId);
+  let entry = { status: 'error', children: [] };
+  try {
+    const res = await fetch(`/api/sessions/${sessionId}/scratchpad-files?path=${encodeURIComponent(dirPath)}`);
+    if (res.ok) entry = { status: 'ready', children: (await res.json()).files || [] };
+  } catch (_) {
+    // Reads "Failed to load"; closing and reopening the folder retries.
+  }
+  // The user may have closed the folder while the request was in flight.
+  if (scratchFolders.has(dirPath)) {
+    scratchFolders.set(dirPath, entry);
+    scratchFilesSection.repaint(sessionId);
+  }
 }
 
 function renderScratchFilesHtml(sessionId) {

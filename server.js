@@ -13,6 +13,7 @@ const { spawnSync, spawn } = require('node:child_process');
 const { assertOpenTarget, openInEditor, whichSync, exeBehindShim } = require('./lib/open-editor');
 const { createNetGuard } = require('./lib/net-guard');
 const { isContained } = require('./lib/contain');
+const { resolveScratchSubdir, listScratchDir } = require('./lib/scratch-files');
 const { fileUrlToPath } = require('./lib/file-url');
 
 const {
@@ -1800,45 +1801,25 @@ app.get('/api/sessions/:sessionId/pads', async (req, res) => {
   }
 });
 
-// API: List the files at the top level of a session's scratchpad dir, newest first.
-// Flat on purpose, not a depth limit to relax later — sessions drop clones and build
-// output in there, and an unpruned walk costs three orders of magnitude more than the
-// readdir. Measurements in docs/session-scanning.md.
+// API: List one level of a session's scratchpad dir — the root, or the folder named by
+// `?path=`, which is the absolute path a previous listing handed out and must still sit
+// under the root. One readdir per request, never a walk: sessions drop clones and
+// build output in there, and an unpruned walk costs three orders of magnitude more than
+// the readdir. The client asks for a folder only when the user opens it. Measurements
+// in docs/session-scanning.md.
 app.get('/api/sessions/:sessionId/scratchpad-files', async (req, res) => {
   try {
     const metadata = loadSessionMetadata();
     const id = metadata[req.params.sessionId] ? req.params.sessionId : resolveSessionId(req.params.sessionId);
     const meta = metadata[id];
-    const dir = meta ? getScratchpadDir(id, meta) : null;
-    if (!dir) return res.json({ files: [] });
+    const root = meta ? getScratchpadDir(id, meta) : null;
+    if (!root) return res.json({ files: [] });
 
-    let entries;
-    try {
-      entries = await fs.readdir(dir, { withFileTypes: true });
-    } catch (_) {
-      // The harness creates the dir lazily, so "missing" is the common case.
-      return res.json({ files: [] });
-    }
+    const dir = resolveScratchSubdir(root, req.query.path);
+    if (!dir) return res.status(400).json({ error: 'Path is outside the scratchpad dir' });
 
-    const stats = await Promise.all(
-      entries
-        .filter((entry) => entry.isFile())
-        .map(async (entry) => {
-          const full = path.join(dir, entry.name);
-          try {
-            const stat = await fs.stat(full);
-            return { name: entry.name, path: full, mtimeMs: stat.mtimeMs };
-          } catch (_) {
-            return null;
-          }
-        }),
-    );
-
-    const files = stats
-      .filter(Boolean)
-      .sort((a, b) => b.mtimeMs - a.mtimeMs)
-      .map(({ name, path: full, mtimeMs }) => ({ name, path: full, modifiedAt: new Date(mtimeMs).toISOString() }));
-    res.json({ files });
+    // The harness creates the dir lazily, so "missing" is the common case and lists as empty.
+    res.json({ files: await listScratchDir(dir) });
   } catch (error) {
     console.error('Error listing scratchpad files:', error);
     res.status(500).json({ error: 'Failed to list scratchpad files' });
