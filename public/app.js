@@ -6878,7 +6878,7 @@ function scratchRowHtml(f) {
   const folder = isDir ? scratchFolders.get(f.path) : null;
   const name = escapeHtml(f.name);
   const link = isDir
-    ? `<button type="button" class="scratch-file-link scratch-folder-toggle${folder ? '' : ' collapsed'}" title="${escPath}" aria-expanded="${!!folder}">${groupChevronSvg(10)}${name}/</button>`
+    ? `<button type="button" class="scratch-file-link scratch-folder-toggle${folder ? '' : ' collapsed'}" title="${escPath}" ${folder ? 'aria-expanded="true"' : 'aria-expanded="false"'}>${groupChevronSvg(10)}${name}/</button>`
     : `<button type="button" class="scratch-file-link" onclick="openScratchFile(this.closest('li').dataset.file)" title="${escPath}">${name}</button>`;
   let body = '';
   if (folder?.status === 'loading') body = '<div class="scratch-folder-empty">Loading…</div>';
