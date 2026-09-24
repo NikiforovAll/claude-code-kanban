@@ -8996,6 +8996,19 @@ function initSessionPicker() {
     const row = e.target.closest('.sp-row');
     if (row) spOpen(Number(row.dataset.idx));
   });
+  // Vimium eats Escape inside a text input and only blurs it, so the page never sees the key.
+  // A blur that no click in the picker caused, while the window keeps focus, is that Escape.
+  const modal = document.getElementById('session-picker-modal');
+  let pointerDown = false;
+  modal.addEventListener('mousedown', () => {
+    pointerDown = true;
+  });
+  document.addEventListener('mouseup', () => {
+    pointerDown = false;
+  });
+  input.addEventListener('blur', () => {
+    if (!pointerDown && modal.classList.contains('visible') && document.hasFocus()) closeSessionPicker();
+  });
 }
 //#endregion
 
