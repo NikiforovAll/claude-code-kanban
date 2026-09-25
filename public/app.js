@@ -9690,6 +9690,9 @@ function filterByOwner(value) {
 // leaving the session view or switching sessions drops only the socket; coming back
 // reattaches and the server replays the screen.
 const TERMINAL_TOKEN_KEY = 'terminal-token';
+const TERMINAL_TOKEN_RE = /^[0-9a-f]{64}$/;
+// Ctrl+Alt letters cck keeps instead of forwarding to the hub: New session and Resume session.
+const CCK_CTRL_ALT_KEYS = new Set(['KeyN', 'KeyR']);
 const TERMINAL_MODES_KEY = 'terminal-sessions';
 const ACK_BATCH_BYTES = 32 * 1024;
 const TERMINAL_RETRY_MS = [500, 1000, 2000, 4000, 8000];
@@ -9718,8 +9721,8 @@ const termState = {
 
 // The hub passes the token in the fragment, which is never sent to a server or logged.
 function readTerminalToken() {
-  const m = /[#&]t=([0-9a-f]{64})/.exec(location.hash);
-  if (m) {
+  const m = /[#&]t=([^&]*)/.exec(location.hash);
+  if (m && TERMINAL_TOKEN_RE.test(m[1])) {
     storeTerminalToken(m[1]);
     history.replaceState(null, '', location.pathname + location.search);
     return m[1];
@@ -9759,7 +9762,7 @@ function requestTerminalToken() {
     const onMessage = (e) => {
       if (e.source !== window.parent || e.origin !== hubOrigin() || e.data?.type !== 'hub:terminalToken') return;
       const token = e.data.token;
-      if (typeof token !== 'string' || !/^[0-9a-f]{64}$/.test(token) || token === terminalToken) return done(false);
+      if (typeof token !== 'string' || !TERMINAL_TOKEN_RE.test(token) || token === terminalToken) return done(false);
       terminalToken = token;
       storeTerminalToken(token);
       done(true);
@@ -9803,8 +9806,7 @@ function terminalPaneFocused() {
 }
 
 function terminalShortcut(e) {
-  const newKey = e.code === 'KeyN' || e.code === 'KeyR';
-  if (newKey && e.ctrlKey && e.altKey && !e.shiftKey && !e.metaKey && terminalAvailable()) {
+  if (CCK_CTRL_ALT_KEYS.has(e.code) && e.ctrlKey && e.altKey && !e.shiftKey && !e.metaKey && terminalAvailable()) {
     return () => openNewSession(null, e.code === 'KeyR');
   }
   if (e.code !== 'Backquote' || e.metaKey) return null;
@@ -10340,13 +10342,13 @@ function endTerminalSession() {
 }
 
 // Detaching first means no exit message reaches the pane, so no Resume prompt shows before the board.
-async function closeTerminalSession() {
+function closeTerminalSession() {
   const id = termState.sessionId;
   if (terminalPaneFocused()) leaveTerminalPane();
   detachTerminal();
   setTerminalMode(id, false);
   syncTerminal();
-  await endTerminal(id);
+  return endTerminal(id);
 }
 
 function openTerminalManager() {
@@ -10471,7 +10473,7 @@ function placeholderSession(id, spec) {
   return {
     id,
     placeholder: true,
-    pick: spec.mode === 'pick',
+    mode: spec.mode,
     name: spec.name || (spec.mode === 'pick' ? 'Resume session' : 'New session'),
     project: spec.cwd,
     worktree: spec.worktree ? { repo: spec.cwd, name: spec.worktree === true ? 'new' : spec.worktree } : null,
@@ -10513,7 +10515,7 @@ function renderPlaceholderCard(session) {
           <button onclick="fetchTasks('${escAttrJs(session.id)}')" data-session-id="${escapeHtml(session.id)}" class="session-item session-placeholder ${isActive ? 'active' : ''}" title="${escapeHtml(`${session.id} | ${session.project}`)}">
             <div class="session-name">${escapeHtml(session.name)}</div>
             ${projectHtml ? `<div class="session-secondary">${projectHtml}</div>` : ''}
-            <div class="session-waiting"><span class="pulse"></span>${session.pick ? 'pick a session to resume' : 'waiting for your first message'}</div>
+            <div class="session-waiting"><span class="pulse"></span>${session.mode === 'pick' ? 'pick a session to resume' : 'waiting for your first message'}</div>
           </button>
         `;
 }
@@ -10712,10 +10714,7 @@ function startNewSession() {
   const v = newSessionValues();
   if (!v.cwd || newSessionProblem(v) || ns.browsing) return;
   const id = crypto.randomUUID();
-  newSpecs.set(
-    id,
-    ns.resume ? { cwd: v.cwd, mode: 'pick', startedAt: Date.now() } : { ...v, mode: 'new', startedAt: Date.now() },
-  );
+  newSpecs.set(id, { ...(ns.resume ? { cwd: v.cwd } : v), mode: ns.resume ? 'pick' : 'new', startedAt: Date.now() });
   sessions = mergePlaceholders(sessions.filter((s) => !s.placeholder));
   setTerminalMode(id, true);
   closeNewSession();
@@ -11079,14 +11078,13 @@ function isHubKey(e) {
   if (!window.__HUB__?.enabled) return false;
   if (e.ctrlKey && e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) return true;
   // Own branch: the Alt+digit case below requires !ctrlKey. The hub owns the Ctrl+Alt+letter
-  // keymap and ignores unbound letters. cck keeps Ctrl+Alt+N (New session) and Ctrl+Alt+R (Resume session).
+  // keymap and ignores unbound letters.
   if (
     e.ctrlKey &&
     e.altKey &&
     !e.shiftKey &&
     !e.metaKey &&
-    e.code !== 'KeyN' &&
-    e.code !== 'KeyR' &&
+    !CCK_CTRL_ALT_KEYS.has(e.code) &&
     (/^[a-z]$/i.test(e.key) || /^Key[A-Z]$/.test(e.code))
   ) {
     return true;
