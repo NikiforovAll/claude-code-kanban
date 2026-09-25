@@ -9738,12 +9738,26 @@ function loadXterm() {
 function terminalTheme() {
   const css = getComputedStyle(document.body);
   const v = (name) => css.getPropertyValue(name).trim();
-  return {
+  const theme = {
     background: v('--bg-deep'),
     foreground: v('--text-primary'),
     cursor: v('--accent'),
     cursorAccent: v('--bg-deep'),
     selectionBackground: v('--accent-dim'),
+  };
+  for (const name of ANSI_COLOR_NAMES) {
+    theme[name] = v(`--ansi-${name}`);
+    theme[`bright${name[0].toUpperCase()}${name.slice(1)}`] = v(`--ansi-bright-${name}`);
+  }
+  return theme;
+}
+
+function terminalThemeOptions() {
+  return {
+    theme: terminalTheme(),
+    // Claude Code draws its own UI in fixed 256/truecolor values picked for a dark background
+    // (inline code is #afd7ff), which no palette reaches; the floor pulls them readable on light.
+    minimumContrastRatio: isLightTheme() ? 4.5 : 1,
   };
 }
 
@@ -9775,7 +9789,7 @@ function ensureTerm() {
     scrollback: cfg.scrollback,
     cursorBlink: true,
     allowProposedApi: true,
-    theme: terminalTheme(),
+    ...terminalThemeOptions(),
   });
   termState.fit = new window.FitAddon.FitAddon();
   term.loadAddon(termState.fit);
@@ -9815,10 +9829,28 @@ function ensureTerm() {
       visible = nowVisible;
     });
   }).observe(host);
+  const themeKey = () => `${isLightTheme()}|${document.body.dataset.colorTheme || ''}`;
+  let appliedTheme = themeKey();
   new MutationObserver(() => {
-    term.options.theme = terminalTheme();
+    if (themeKey() === appliedTheme) return;
+    appliedTheme = themeKey();
+    Object.assign(term.options, terminalThemeOptions());
     repaintTerminal();
   }).observe(document.body, { attributes: true, attributeFilter: ['class', 'data-color-theme'] });
+  // Vimium eats Escape inside a text field and only blurs it, so the key never reaches Claude.
+  // A blur no click caused, while the pane stays shown and the window keeps focus, is that Escape.
+  let pointerDown = false;
+  document.addEventListener('mousedown', () => (pointerDown = true), true);
+  document.addEventListener('mouseup', () => (pointerDown = false), true);
+  term.textarea.addEventListener('blur', () => {
+    if (pointerDown) return;
+    requestAnimationFrame(() => {
+      if (!termState.attached || !host.offsetWidth) return;
+      if (!document.hasFocus() || document.activeElement !== document.body) return;
+      terminalSend({ t: 'in', d: '\x1b' });
+      term.focus();
+    });
+  });
   termState.term = term;
   return term;
 }
