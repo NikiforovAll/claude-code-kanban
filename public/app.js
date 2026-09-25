@@ -64,6 +64,7 @@ let selectedSessionId = null;
 let taskHighlightDimmed = false;
 let focusZone = 'board'; // 'board' | 'sidebar'
 let appConfig = { marketplaceUrl: null, costUrl: null, memoryUrl: null, scratchAvailable: false };
+let runningTerminals = new Set();
 let selectedSessionIdx = -1;
 let selectedSessionKbId = null;
 let sessionJustSelected = false;
@@ -1505,6 +1506,8 @@ const ICON_AGENT_WAITING =
   '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
 const ICON_AGENT_ACTIVE =
   '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/><line x1="8" y1="16" x2="8" y2="16"/><line x1="16" y1="16" x2="16" y2="16"/></svg>';
+const ICON_TERMINAL =
+  '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>';
 const ICON_CHAT =
   '<svg class="msg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
 const TOOL_ICONS = {
@@ -3316,6 +3319,7 @@ function renderSessions() {
                 ${session.hasPlan && !session.planSourceSessionId ? `<span class="plan-indicator" onclick="event.stopPropagation(); openPlanForSession('${sid}')" title="View plan">${ICON_PLAN}</span>` : ''}
                 ${session.planSourceSessionId ? `<span class="plan-indicator" title="Implements plan — click to reveal plan session" onclick="event.stopPropagation(); revealPlanSession('${escAttrJs(session.planSourceSessionId)}')">${ICON_PLAN}</span>` : ''}
                 ${session.sharedTaskList ? `<span class="shared-tasklist-badge" title="Shared task list: ${escapeHtml(session.sharedTaskList)}">${linkSvg(12)}</span>` : ''}
+                ${runningTerminals.has(session.id) ? `<span class="terminal-badge" onclick="event.stopPropagation(); showSessionTerminal('${sid}')" title="Running in a terminal here">${ICON_TERMINAL}</span>` : ''}
                 ${session.hasWaitingForUser ? `<span class="agent-badge agent-badge-waiting" title="Waiting for user">${ICON_AGENT_WAITING}</span>` : ''}
                 ${session.hasRunningAgents && !session.hasWaitingForUser ? `<span class="agent-badge agent-badge-active" title="Agents running">${ICON_AGENT_ACTIVE}</span>` : ''}
                 ${isLive || session.hasRunningAgents ? `<span class="pulse" title="${isLive ? 'Live' : 'Active agents'}"></span>` : ''}
@@ -7143,6 +7147,10 @@ function setupEventSource() {
         console.warn('[SSE] Reconnected after drop — forcing full refresh');
         fetchSessions().catch(() => {});
         if (currentSessionId) fetchTasks(currentSessionId);
+        if (terminalAvailable())
+          loadTerminals()
+            .then(renderSessions)
+            .catch(() => {});
       }
       wasConnected = true;
       retryDelay = 1000;
@@ -7204,6 +7212,8 @@ function setupEventSource() {
       if (data.type === 'plan-update') {
         refreshOpenPlan();
       }
+
+      if (data.type === 'terminals-update' && Array.isArray(data.ids)) setRunningTerminals(data.ids);
 
       if (data.type === 'agent-update') {
         pendingAgentSessionIds.add(data.sessionId);
@@ -10370,8 +10380,7 @@ async function renderTerminalManager() {
   const body = document.getElementById('terminal-manager-body');
   let list = [];
   try {
-    const res = await fetch('/api/terminals', { cache: 'no-store' });
-    list = (await res.json()).sessions || [];
+    list = await loadTerminals();
   } catch (e) {
     body.innerHTML = `<div class="terminal-manager-empty">${escapeHtml(e.message)}</div>`;
     return;
@@ -10413,9 +10422,7 @@ async function renderTerminalManager() {
   body.querySelectorAll('[data-open]').forEach((b) => {
     b.onclick = () => {
       closeTerminalManager();
-      setTerminalMode(b.dataset.open, true);
-      if (b.dataset.open === currentSessionId && viewMode === 'session') syncTerminal();
-      else fetchTasks(b.dataset.open);
+      showSessionTerminal(b.dataset.open);
     };
   });
   body.querySelectorAll('[data-end]').forEach((b) => {
@@ -10528,12 +10535,29 @@ async function restorePendingSessions() {
   document.getElementById('new-session-btn').hidden = !terminalAvailable();
   if (!terminalAvailable()) return;
   try {
-    const res = await fetch('/api/terminals', { cache: 'no-store' });
-    for (const t of (await res.json()).sessions || []) {
+    for (const t of await loadTerminals()) {
       if ((t.mode !== 'new' && t.mode !== 'pick') || newSpecs.has(t.id)) continue;
       newSpecs.set(t.id, { cwd: t.cwd, name: t.name, worktree: t.worktree, mode: t.mode, startedAt: t.startedAt });
     }
   } catch (_) {}
+}
+
+async function loadTerminals() {
+  const res = await fetch('/api/terminals', { cache: 'no-store' });
+  const list = (await res.json()).sessions || [];
+  runningTerminals = new Set(list.map((t) => t.id));
+  return list;
+}
+
+function setRunningTerminals(ids) {
+  runningTerminals = new Set(ids);
+  renderSessions();
+}
+
+function showSessionTerminal(sessionId) {
+  setTerminalMode(sessionId, true);
+  if (currentSessionId === sessionId && viewMode === 'session') syncTerminal();
+  else fetchTasks(sessionId);
 }
 
 function openNewSession(folder, resume = false) {

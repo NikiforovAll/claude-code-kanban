@@ -1968,7 +1968,8 @@ body::before {
 .team-info-btn,
 .plan-indicator,
 .loop-badge,
-.workflow-badge {
+.workflow-badge,
+.terminal-badge {
   width: 18px;
   height: 18px;
   display: inline-flex;
@@ -4148,6 +4149,12 @@ body::before {
   line-height: 1;
   flex-shrink: 0;
   color: var(--text-secondary);
+}
+.terminal-badge {
+  color: var(--text-secondary);
+}
+.terminal-badge:hover {
+  color: var(--accent, var(--text-primary));
 }
 .agent-badge-waiting {
   color: var(--warning);

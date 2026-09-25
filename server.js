@@ -3129,6 +3129,7 @@ const terminal = createTerminalService({
   },
   isAllowedFolder,
   liveSessions: () => loadLiveSessions(true),
+  onChange: () => broadcast({ type: 'terminals-update', ids: terminal.list().map((t) => t.id) }),
 });
 
 let folderDialogOpen = false;
