@@ -5783,10 +5783,6 @@ select.form-input option:checked {
   align-items: center;
 }
 
-.ns-footer .ns-keys {
-  margin-right: auto;
-}
-
 .ns-footer .btn-primary:disabled {
   opacity: 0.5;
   cursor: not-allowed;
