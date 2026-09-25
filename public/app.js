@@ -5927,9 +5927,10 @@ document.addEventListener('keydown', (e) => {
   }
 
   // Above the text-field guard: xterm's input is a textarea, and the toggle must work from it.
-  if (e.ctrlKey && !e.altKey && !e.metaKey && e.code === 'Backquote') {
+  if (e.ctrlKey && !e.metaKey && e.code === 'Backquote') {
     e.preventDefault();
-    if (e.shiftKey) openTerminalManager();
+    if (e.altKey) toggleTerminal();
+    else if (e.shiftKey) openTerminalManager();
     else toggleTerminal(true);
     return;
   }
@@ -9622,6 +9623,7 @@ const termState = {
   sessionId: null,
   shown: false,
   attached: false,
+  leaving: false,
   ackPending: 0,
   ackTimer: null,
 };
@@ -9669,10 +9671,9 @@ function wantsTerminal() {
 function toggleTerminal(focusFirst = false) {
   if (!terminalAvailable() || viewMode !== 'session' || !currentSessionId) return;
   if (focusFirst && wantsTerminal() && termState.term) {
-    if (!document.getElementById('terminal-pane').contains(document.activeElement)) {
-      focusTerminalPane();
-      return;
-    }
+    if (document.getElementById('terminal-pane').contains(document.activeElement)) leaveTerminalPane();
+    else focusTerminalPane();
+    return;
   }
   setTerminalMode(currentSessionId, !terminalModes().has(currentSessionId));
   syncTerminal();
@@ -9710,6 +9711,12 @@ function focusTerminalPane() {
   const prompt = document.getElementById('terminal-prompt');
   if (prompt.classList.contains('visible')) prompt.querySelector('button')?.focus();
   else termState.term?.focus();
+}
+
+function leaveTerminalPane() {
+  termState.leaving = true;
+  document.activeElement.blur();
+  termState.leaving = false;
 }
 
 function loadXterm() {
@@ -9766,7 +9773,7 @@ function terminalThemeOptions() {
 function terminalKeyFilter(e) {
   if (e.type !== 'keydown') return true;
   const ctrlOnly = e.ctrlKey && !e.altKey && !e.metaKey;
-  if (ctrlOnly && e.code === 'Backquote') return false;
+  if (e.ctrlKey && !e.metaKey && e.code === 'Backquote') return false;
   if (ctrlOnly && e.code === 'KeyC' && (e.shiftKey || termState.term.hasSelection())) {
     e.preventDefault();
     navigator.clipboard?.writeText(termState.term.getSelection()).catch(() => {});
@@ -9843,7 +9850,7 @@ function ensureTerm() {
   document.addEventListener('mousedown', () => (pointerDown = true), true);
   document.addEventListener('mouseup', () => (pointerDown = false), true);
   term.textarea.addEventListener('blur', () => {
-    if (pointerDown) return;
+    if (pointerDown || termState.leaving) return;
     requestAnimationFrame(() => {
       if (!termState.attached || !host.offsetWidth) return;
       if (!document.hasFocus() || document.activeElement !== document.body) return;
