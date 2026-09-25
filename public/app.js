@@ -7403,8 +7403,6 @@ function renderContextDetail(raw) {
   const totalK = ctx.size / 1000;
   const color = getContextColor(ctx.usedTokens, ctx.modelName);
 
-  const cw = raw.context_window || {};
-  const usage = cw.current_usage || {};
   const cost = raw.cost || {};
 
   return `
@@ -7421,14 +7419,6 @@ function renderContextDetail(raw) {
             <span>${formatTokens((ctx.pct / 100) * totalK)} / ${formatTokens(totalK)}</span>
           </div>
           <div class="detail-context-stats">
-            <div class="stat-item"><span class="stat-label">Cache read</span><span class="stat-value">${formatTokens((usage.cache_read_input_tokens || 0) / 1000)}</span></div>
-            <div class="stat-item"><span class="stat-label">Cache write</span><span class="stat-value">${formatTokens((usage.cache_creation_input_tokens || 0) / 1000)}</span></div>
-            <div class="stat-item"><span class="stat-label">Current input</span><span class="stat-value">${formatTokens((usage.input_tokens || 0) / 1000)}</span></div>
-            <div class="stat-item"><span class="stat-label">Current output</span><span class="stat-value">${formatTokens((usage.output_tokens || 0) / 1000)}</span></div>
-            <div class="stat-divider"></div>
-            <div class="stat-item"><span class="stat-label">Total input</span><span class="stat-value">${formatTokens(ctx.inputTokens / 1000)}</span></div>
-            <div class="stat-item"><span class="stat-label">Total output</span><span class="stat-value">${formatTokens(ctx.outputTokens / 1000)}</span></div>
-            <div class="stat-divider"></div>
             <div class="stat-item"><span class="stat-label">Cost</span><span class="stat-value" style="color:${getCostColor(cost.total_cost_usd)}">${formatCost(cost.total_cost_usd)}</span></div>
             <div class="stat-item"><span class="stat-label">Duration</span><span class="stat-value">${formatDuration(cost.total_duration_ms)}</span></div>
             <div class="stat-item"><span class="stat-label">API time</span><span class="stat-value">${formatDuration(cost.total_api_duration_ms)}</span></div>
