@@ -4,7 +4,9 @@
   font-display: swap;
 }
 
-:root {
+/* body repeats :root so var()-derived tokens resolve against the theme vars set on body. */
+:root,
+body {
   --bg-deep: #101114;
   --bg-surface: #16181c;
   --bg-elevated: #1e2025;
