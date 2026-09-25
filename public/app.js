@@ -3135,11 +3135,12 @@ function getFilteredSessions() {
     filteredSessions = filteredSessions.filter((s) => {
       if (dismissedSessionIds.has(s.id)) return false;
       const isActive =
-        s.hasMessages &&
-        ((!s.sharedTaskList && (s.pending > 0 || s.inProgress > 0)) ||
-          s.hasActiveAgents ||
-          s.hasWaitingForUser ||
-          s.hasRecentActivity);
+        runningTerminals.has(s.id) ||
+        (s.hasMessages &&
+          ((!s.sharedTaskList && (s.pending > 0 || s.inProgress > 0)) ||
+            s.hasActiveAgents ||
+            s.hasWaitingForUser ||
+            s.hasRecentActivity));
       if (isActive) activeSessionIds.add(s.id);
       return isActive;
     });
@@ -10551,7 +10552,8 @@ async function loadTerminals() {
 
 function setRunningTerminals(ids) {
   runningTerminals = new Set(ids);
-  renderSessions();
+  if (ids.some((id) => !sessions.some((s) => s.id === id))) fetchSessions(false).catch(() => {});
+  else renderSessions();
 }
 
 function showSessionTerminal(sessionId) {

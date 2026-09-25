@@ -1175,6 +1175,7 @@ app.get('/api/sessions', async (req, res) => {
     const pinnedIds = pinnedParam ? new Set(pinnedParam.split(',').filter(Boolean)) : new Set();
     for (const id of includeIds) pinnedIds.add(id);
     const activeFilter = req.query.filter === 'active';
+    const terminalIds = activeFilter ? new Set(terminal.list().map((t) => t.id)) : new Set();
 
     const metadata = loadSessionMetadata();
     const sessionsMap = new Map();
@@ -1204,7 +1205,7 @@ app.get('/api/sessions', async (req, res) => {
 
           // Cheap-probe: when filter=active, skip expensive enrichment for inactive non-pinned sessions.
           // Mirrors the post-filter predicate using only signals already computed above.
-          if (activeFilter && !pinnedIds.has(entry.name)) {
+          if (activeFilter && !pinnedIds.has(entry.name) && !terminalIds.has(entry.name)) {
             const cheaplyActive = logStat.hasMessages && (
               hasVisibleLogActivity(entry.name, logAge)
               || agentStatus.hasActive
@@ -1304,7 +1305,7 @@ app.get('/api/sessions', async (req, res) => {
         const metaAgentStatus = checkAgentStatus(metaAgentDir, stale, logMtime, metaIsTeam);
 
         // Cheap-probe: no tasks here (metadata-only), so active = recent log OR live agent.
-        if (activeFilter && !pinnedIds.has(sessionId)) {
+        if (activeFilter && !pinnedIds.has(sessionId) && !terminalIds.has(sessionId)) {
           const cheaplyActive = logStat.hasMessages && (
             hasVisibleLogActivity(sessionId, logAge) || metaAgentStatus.hasActive || !!metaAgentStatus.waitingForUser
           );
@@ -1505,7 +1506,7 @@ app.get('/api/sessions', async (req, res) => {
           || s.hasRecentActivity
         );
       for (const [id, s] of sessionsMap) {
-        if (pinnedIds.has(id)) continue;
+        if (pinnedIds.has(id) || terminalIds.has(id)) continue;
         if (!isActive(s)) sessionsMap.delete(id);
       }
     }
