@@ -37,7 +37,8 @@ const {
 } = require('./lib/parsers');
 const { inlineHtmlAssets, MIME_BY_EXT } = require('./lib/inline-assets');
 const { buildDecision, decisionFileName, isDecisionFile, approvalsFrom, boardRefusal } = require('./lib/approvals');
-const { getClaudeDir, getArgValue, storageNamespace } = require('./lib/claude-dir');
+const { getClaudeDir, getArgValue, storageNamespace, isDefaultClaudeDir } = require('./lib/claude-dir');
+const { createTerminalService, readTerminalConfig } = require('./lib/terminal');
 
 if (process.argv.includes("--install") || process.argv.includes("--uninstall")) {
   const { runInstall, runUninstall } = require("./install");
@@ -432,7 +433,7 @@ function loadLiveSessions() {
         try {
           const s = JSON.parse(readFileSync(path.join(SESSIONS_DIR, file), 'utf8'));
           if (s?.sessionId && s.kind === 'interactive') {
-            sessions.push({ sessionId: s.sessionId, cwd: s.cwd || null, startedAt: s.startedAt || 0, status: s.status || null });
+            sessions.push({ sessionId: s.sessionId, pid: s.pid || null, cwd: s.cwd || null, startedAt: s.startedAt || 0, status: s.status || null });
           }
         } catch (_) { /* skip invalid */ }
       }
@@ -451,6 +452,14 @@ function loadLiveSessions() {
 function isRegistryIdle(sessionId) {
   const live = loadLiveSessions().find(s => s.sessionId === sessionId);
   return live?.status === 'idle';
+}
+
+// A registry file outlives a crashed claude, so the pid is probed rather than trusted.
+function isSessionProcessAlive(sessionId) {
+  return loadLiveSessions().some((s) => {
+    if (s.sessionId !== sessionId || !s.pid) return false;
+    try { process.kill(s.pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }
+  });
 }
 
 function hasRecentLogActivity(sessionId, logAge) {
@@ -3074,9 +3083,58 @@ app.get('/api/config', (_req, res) => {
     costUrl: COST_URL,
     memoryUrl: MEMORY_URL,
     scratchAvailable: !!whichSync('scratch'),
+    terminal: terminal.clientConfig(),
   });
 });
 
+// #endregion
+
+// #region TERMINAL
+const terminal = createTerminalService({
+  config: readTerminalConfig({ getArgValue }),
+  net,
+  claudeDir: CLAUDE_DIR,
+  isDefaultDir: isDefaultClaudeDir(CLAUDE_DIR),
+  token: process.env.CCK_TERMINAL_TOKEN,
+  which: whichSync,
+  isLiveElsewhere: isSessionProcessAlive,
+  // The project, not the last cwd: `claude --resume` finds a session under the
+  // project dir it started in, and cwd drifts into subdirectories.
+  resolveCwd: (id) => {
+    const meta = loadSessionMetadata()[id];
+    return meta ? meta.project || meta.cwd || null : null;
+  },
+});
+
+// The hub's eviction check reads this to keep a pool with live PTYs alive.
+app.get('/api/terminals', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ sessions: terminal.list() });
+});
+
+app.delete('/api/terminals/:id', (req, res) => {
+  const err = terminal.end(req.params.id, req.get('x-terminal-token'));
+  if (err === 'auth') return res.status(401).json({ error: 'invalid terminal token' });
+  if (err === 'not-found') return res.status(404).json({ error: 'no such terminal' });
+  res.status(204).end();
+});
+
+// Served from node_modules, never a CDN: any script on this page can use the token.
+const XTERM_FILES = {
+  'xterm.js': '@xterm/xterm/lib/xterm.js',
+  'xterm.css': '@xterm/xterm/css/xterm.css',
+  'addon-fit.js': '@xterm/addon-fit/lib/addon-fit.js',
+  'addon-webgl.js': '@xterm/addon-webgl/lib/addon-webgl.js',
+  'addon-unicode11.js': '@xterm/addon-unicode11/lib/addon-unicode11.js',
+};
+app.get('/vendor/xterm/:file', (req, res) => {
+  const rel = Object.hasOwn(XTERM_FILES, req.params.file) ? XTERM_FILES[req.params.file] : null;
+  if (!rel) return res.status(404).end();
+  let file;
+  try { file = require.resolve(rel); } catch { return res.status(404).end(); }
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.sendFile(file);
+});
 // #endregion
 
 // #region TASK_ROUTES
@@ -3894,6 +3952,12 @@ async function prewarmCaches() {
     migrateLegacyApprovalsConfig();
     const warning = net.exposureWarning();
     if (warning) console.log(warning);
+    const terminalReason = terminal.unavailableReason();
+    if (terminalReason && terminalReason !== 'disabled') console.log(`Terminal unavailable: ${terminalReason}`);
+    // Under the hub the hub owns the token and hands it to the iframe itself.
+    if (!terminalReason && !process.env.CLAUDE_HUB) {
+      console.log(`Terminal enabled - open http://localhost:${actualPort}/#t=${terminal.token}`);
+    }
 
     if (process.argv.includes('--open')) {
       import('open').then(open => open.default(`http://localhost:${actualPort}`));
@@ -3901,12 +3965,14 @@ async function prewarmCaches() {
     setImmediate(prewarmCaches);
   };
 
-  const server = net.listenLoopback(app, PORT, onReady);
+  const listenOpts = { onUpgrade: terminal.handleUpgrade };
+  const server = net.listenLoopback(app, PORT, onReady, listenOpts);
+  process.on('exit', terminal.shutdown);
 
   server.on('error', (err) => {
     if (err.code === 'EADDRINUSE') {
       console.log(`Port ${PORT} in use, trying random port...`);
-      net.listenLoopback(app, 0, onReady);
+      net.listenLoopback(app, 0, onReady, listenOpts);
     } else {
       throw err;
     }

@@ -117,6 +117,7 @@ function updateUrl() {
   const url = qs ? `?${qs}` : window.location.pathname;
   history.replaceState(null, '', url);
   persistLastView();
+  syncTerminal();
 }
 
 const LAST_VIEW_KEY = 'lastView';
@@ -5909,6 +5910,7 @@ const MODAL_CLOSERS = {
   'agent-modal': () => closeAgentModal(),
   'help-modal': () => closeHelpModal(),
   'session-picker-modal': () => closeSessionPicker(),
+  'terminal-manager-modal': () => closeTerminalManager(),
 };
 
 document.addEventListener('keydown', (e) => {
@@ -5922,6 +5924,14 @@ document.addEventListener('keydown', (e) => {
       adjustModalZoom(delta);
       return;
     }
+  }
+
+  // Above the text-field guard: xterm's input is a textarea, and the toggle must work from it.
+  if (e.ctrlKey && !e.altKey && !e.metaKey && e.code === 'Backquote') {
+    e.preventDefault();
+    if (e.shiftKey) openTerminalManager();
+    else toggleTerminal(true);
+    return;
   }
 
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') {
@@ -9593,6 +9603,448 @@ function filterByOwner(value) {
 
 //#endregion
 
+//#region TERMINAL
+// The kanban and the terminal share one slot: terminal mode hides #main-content and shows
+// the pane. The PTY lives on the server (lib/terminal.js) and outlives the pane, so
+// leaving terminal mode or switching sessions drops only the socket; coming back
+// reattaches and the server replays the screen.
+const TERMINAL_TOKEN_KEY = 'terminal-token';
+const TERMINAL_MODES_KEY = 'terminal-sessions';
+const ACK_BATCH_BYTES = 32 * 1024;
+// Read at load, before the first updateUrl() rewrites the URL without the fragment.
+const terminalToken = readTerminalToken();
+const termState = {
+  loaded: null,
+  term: null,
+  fit: null,
+  webgl: null,
+  ws: null,
+  sessionId: null,
+  shown: false,
+  ackPending: 0,
+  ackTimer: null,
+};
+
+// The hub passes the token in the fragment, which is never sent to a server or logged.
+function readTerminalToken() {
+  const m = /[#&]t=([0-9a-f]{64})/.exec(location.hash);
+  if (m) {
+    try {
+      sessionStorage.setItem(TERMINAL_TOKEN_KEY, m[1]);
+    } catch (_) {}
+    history.replaceState(null, '', location.pathname + location.search);
+    return m[1];
+  }
+  try {
+    return sessionStorage.getItem(TERMINAL_TOKEN_KEY);
+  } catch (_) {
+    return null;
+  }
+}
+
+function terminalAvailable() {
+  return !!appConfig.terminal?.available && !!terminalToken;
+}
+
+function terminalModes() {
+  return new Set(readStoredList(TERMINAL_MODES_KEY));
+}
+
+function setTerminalMode(sessionId, on) {
+  const modes = terminalModes();
+  if (on) modes.add(sessionId);
+  else modes.delete(sessionId);
+  try {
+    store.setItem(TERMINAL_MODES_KEY, JSON.stringify([...modes].slice(-50)));
+  } catch (_) {}
+}
+
+function wantsTerminal() {
+  return terminalAvailable() && viewMode === 'session' && !!currentSessionId && terminalModes().has(currentSessionId);
+}
+
+// The shortcut focuses an open but unfocused terminal before it closes it. The button does not:
+// clicking it always moves focus off the terminal.
+function toggleTerminal(focusFirst = false) {
+  if (!terminalAvailable() || viewMode !== 'session' || !currentSessionId) return;
+  if (focusFirst && wantsTerminal() && termState.term) {
+    if (!document.getElementById('terminal-host').contains(document.activeElement)) {
+      termState.term.focus();
+      return;
+    }
+  }
+  setTerminalMode(currentSessionId, !terminalModes().has(currentSessionId));
+  syncTerminal();
+}
+
+// Idempotent: runs on every view change, so whichever path changed the view lands here.
+function syncTerminal() {
+  const btn = document.getElementById('terminal-toggle');
+  const on = wantsTerminal();
+  if (btn) {
+    btn.style.display = terminalAvailable() && viewMode === 'session' && currentSessionId ? '' : 'none';
+    btn.classList.toggle('active', on);
+  }
+  sessionView.classList.toggle('terminal-mode', on);
+  if (!on) {
+    termState.shown = false;
+    if (termState.sessionId) detachTerminal();
+    return;
+  }
+  const wasShown = termState.shown;
+  termState.shown = true;
+  if (termState.sessionId !== currentSessionId) openTerminal(currentSessionId, 'auto');
+  else if (!wasShown) onTerminalShown();
+}
+
+function onTerminalShown() {
+  requestAnimationFrame(() => {
+    fitTerminal();
+    repaintTerminal();
+    termState.term?.focus();
+  });
+}
+
+function loadXterm() {
+  if (termState.loaded) return termState.loaded;
+  const css = document.createElement('link');
+  css.rel = 'stylesheet';
+  css.href = '/vendor/xterm/xterm.css';
+  document.head.appendChild(css);
+  const script = (src) =>
+    new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = src;
+      s.onload = resolve;
+      s.onerror = () => reject(new Error(`failed to load ${src}`));
+      document.head.appendChild(s);
+    });
+  termState.loaded = script('/vendor/xterm/xterm.js').then(() =>
+    Promise.all(['addon-fit', 'addon-webgl', 'addon-unicode11'].map((n) => script(`/vendor/xterm/${n}.js`))),
+  );
+  termState.loaded.catch(() => {
+    termState.loaded = null;
+  });
+  return termState.loaded;
+}
+
+function terminalTheme() {
+  const css = getComputedStyle(document.body);
+  const v = (name) => css.getPropertyValue(name).trim();
+  return {
+    background: v('--bg-deep'),
+    foreground: v('--text-primary'),
+    cursor: v('--accent'),
+    cursorAccent: v('--bg-deep'),
+    selectionBackground: v('--accent-dim'),
+  };
+}
+
+// Returning false hands the key back to the page: xterm skips it and the document
+// listeners (the toggle, hub forwarding, native paste) see it instead.
+function terminalKeyFilter(e) {
+  if (e.type !== 'keydown') return true;
+  const ctrlOnly = e.ctrlKey && !e.altKey && !e.metaKey;
+  if (ctrlOnly && e.code === 'Backquote') return false;
+  if (ctrlOnly && e.code === 'KeyC' && (e.shiftKey || termState.term.hasSelection())) {
+    e.preventDefault();
+    navigator.clipboard?.writeText(termState.term.getSelection()).catch(() => {});
+    termState.term.clearSelection();
+    return false;
+  }
+  if (ctrlOnly && e.code === 'KeyV') return false;
+  return !isHubKey(e);
+}
+
+function ensureTerm() {
+  if (termState.term) return termState.term;
+  const cfg = appConfig.terminal;
+  const host = document.getElementById('terminal-host');
+  const fontFamily =
+    cfg.fontFamily || getComputedStyle(document.body).getPropertyValue('--font-mono').trim() || 'monospace';
+  const term = new window.Terminal({
+    fontFamily,
+    fontSize: cfg.fontSize,
+    scrollback: cfg.scrollback,
+    cursorBlink: true,
+    allowProposedApi: true,
+    theme: terminalTheme(),
+  });
+  termState.fit = new window.FitAddon.FitAddon();
+  term.loadAddon(termState.fit);
+  term.loadAddon(new window.Unicode11Addon.Unicode11Addon());
+  term.unicode.activeVersion = '11';
+  term.open(host);
+  try {
+    const gl = new window.WebglAddon.WebglAddon();
+    gl.onContextLoss(() => {
+      gl.dispose();
+      termState.webgl = null;
+      repaintTerminal();
+    });
+    term.loadAddon(gl);
+    termState.webgl = gl;
+  } catch (_) {
+    // No WebGL: xterm falls back to its DOM renderer.
+  }
+  document.fonts
+    ?.load(`${cfg.fontSize}px ${fontFamily}`)
+    .then(repaintTerminal)
+    .catch(() => {});
+  term.attachCustomKeyEventHandler(terminalKeyFilter);
+  term.onData((d) => terminalSend({ t: 'in', d }));
+  term.onResize(({ cols, rows }) => terminalSend({ t: 'resize', cols, rows }));
+  // One fit per frame while a drag resizes the host. The atlas is rebuilt only when the host comes
+  // back from 0×0, which is also how a hidden hub iframe or pane shows again.
+  let frame = 0;
+  let visible = false;
+  new ResizeObserver(() => {
+    if (frame) return;
+    frame = requestAnimationFrame(() => {
+      frame = 0;
+      const nowVisible = host.offsetWidth > 0;
+      fitTerminal();
+      if (nowVisible && !visible) repaintTerminal();
+      visible = nowVisible;
+    });
+  }).observe(host);
+  new MutationObserver(() => {
+    term.options.theme = terminalTheme();
+    repaintTerminal();
+  }).observe(document.body, { attributes: true, attributeFilter: ['class', 'data-color-theme'] });
+  termState.term = term;
+  return term;
+}
+
+// The WebGL renderer keeps its last frame and glyph atlas while the pane (or the hub's iframe) is
+// display:none, and comes back showing stale cells or backgrounds with no text. xterm does not
+// repaint on its own when the canvas is shown again.
+function repaintTerminal() {
+  const term = termState.term;
+  if (!term) return;
+  try {
+    termState.webgl?.clearTextureAtlas();
+  } catch (_) {}
+  term.refresh(0, term.rows - 1);
+}
+
+// The fit addon measures 0×0 while the pane (or the hub's iframe) is display:none.
+function fitTerminal() {
+  const host = document.getElementById('terminal-host');
+  if (!termState.fit || !host.offsetWidth || !host.offsetHeight) return;
+  try {
+    termState.fit.fit();
+  } catch (_) {}
+}
+
+function terminalSend(msg) {
+  if (termState.ws?.readyState === WebSocket.OPEN) termState.ws.send(JSON.stringify(msg));
+}
+
+function ackTerminal(ws, n) {
+  termState.ackPending += n;
+  const flush = () => {
+    clearTimeout(termState.ackTimer);
+    termState.ackTimer = null;
+    if (termState.ws === ws && termState.ackPending) terminalSend({ t: 'ack', n: termState.ackPending });
+    termState.ackPending = 0;
+  };
+  if (termState.ackPending >= ACK_BATCH_BYTES) flush();
+  else if (!termState.ackTimer) termState.ackTimer = setTimeout(flush, 50);
+}
+
+function setTerminalStatus(text) {
+  document.getElementById('terminal-status').textContent = text;
+}
+
+function hideTerminalPrompt() {
+  document.getElementById('terminal-prompt').classList.remove('visible');
+}
+
+function showTerminalPrompt(sessionId, message, choices) {
+  const el = document.getElementById('terminal-prompt');
+  el.innerHTML = `<div>${escapeHtml(message)}</div><div class="terminal-prompt-actions">${choices
+    .map(
+      ([mode, label], i) =>
+        `<button type="button" class="btn ${i === 0 ? 'btn-primary' : 'btn-secondary'}" data-mode="${escapeHtml(mode)}">${escapeHtml(label)}</button>`,
+    )
+    .join('')}</div>`;
+  el.querySelectorAll('button[data-mode]').forEach((b) => {
+    b.onclick = () => openTerminal(sessionId, b.dataset.mode);
+  });
+  el.classList.add('visible');
+  el.querySelector('button')?.focus();
+}
+
+function detachTerminal() {
+  const ws = termState.ws;
+  termState.ws = null;
+  termState.sessionId = null;
+  if (ws) {
+    ws.onclose = null;
+    ws.close();
+  }
+  hideTerminalPrompt();
+}
+
+async function openTerminal(sessionId, mode) {
+  detachTerminal();
+  termState.sessionId = sessionId;
+  setTerminalStatus('');
+  try {
+    await loadXterm();
+  } catch (e) {
+    setTerminalStatus(e.message);
+    return;
+  }
+  if (termState.sessionId !== sessionId) return;
+  const term = ensureTerm();
+  term.reset();
+  repaintTerminal();
+  fitTerminal();
+  const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/api/terminal/ws`);
+  ws.binaryType = 'arraybuffer';
+  termState.ws = ws;
+  termState.ackPending = 0;
+  ws.onopen = () =>
+    ws.send(
+      JSON.stringify({ t: 'hello', token: terminalToken, id: sessionId, mode, cols: term.cols, rows: term.rows }),
+    );
+  ws.onmessage = (ev) => {
+    if (termState.ws !== ws) return;
+    if (typeof ev.data !== 'string') {
+      const bytes = new Uint8Array(ev.data);
+      term.write(bytes, () => ackTerminal(ws, bytes.length));
+      return;
+    }
+    let msg;
+    try {
+      msg = JSON.parse(ev.data);
+    } catch (_) {
+      return;
+    }
+    onTerminalMessage(sessionId, msg);
+  };
+  ws.onclose = () => {
+    if (termState.ws !== ws) return;
+    termState.ws = null;
+    if (!document.getElementById('terminal-prompt').classList.contains('visible')) setTerminalStatus('Disconnected');
+  };
+}
+
+function onTerminalMessage(sessionId, msg) {
+  if (msg.t === 'ready') {
+    hideTerminalPrompt();
+    setTerminalStatus('');
+    terminalSend({ t: 'resize', cols: termState.term.cols, rows: termState.term.rows });
+    termState.term.focus();
+  } else if (msg.t === 'live') {
+    showTerminalPrompt(
+      sessionId,
+      'This session is running in another terminal. Resuming it here too makes both processes write to the same transcript.',
+      [
+        ['fork', 'Fork'],
+        ['resume', 'Resume anyway'],
+        ['shell', 'Shell only'],
+      ],
+    );
+  } else if (msg.t === 'exit') {
+    showTerminalPrompt(sessionId, `The shell exited (code ${msg.code}).`, [
+      ['resume', 'Resume'],
+      ['fork', 'Fork'],
+      ['shell', 'Shell'],
+    ]);
+  } else if (msg.t === 'error') {
+    setTerminalStatus(msg.msg || 'Terminal error');
+  }
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+function endTerminalSession() {
+  terminalSend({ t: 'kill' });
+}
+
+function openTerminalManager() {
+  if (!terminalAvailable()) return;
+  document.getElementById('terminal-manager-modal').classList.add('visible');
+  renderTerminalManager();
+}
+
+function closeTerminalManager() {
+  hideModalOverlay('terminal-manager-modal');
+}
+
+async function renderTerminalManager() {
+  const body = document.getElementById('terminal-manager-body');
+  let list = [];
+  try {
+    const res = await fetch('/api/terminals', { cache: 'no-store' });
+    list = (await res.json()).sessions || [];
+  } catch (e) {
+    body.innerHTML = `<div class="terminal-manager-empty">${escapeHtml(e.message)}</div>`;
+    return;
+  }
+  const max = appConfig.terminal?.maxSessions;
+  document.getElementById('terminal-manager-count').textContent = max ? `${list.length} / ${max}` : `${list.length}`;
+  if (!list.length) {
+    body.innerHTML = '<div class="terminal-manager-empty">No terminals running</div>';
+    return;
+  }
+  list.sort((a, b) => b.startedAt - a.startedAt);
+  body.innerHTML = list
+    .map((t) => {
+      const session = sessions.find((s) => s.id === t.id);
+      const name = session ? sessionDisplayName(session) : t.id.slice(0, 8);
+      const here = t.id === termState.sessionId ? ' · this tab' : '';
+      const meta = `${t.mode} · pid ${t.pid} · up ${formatDuration(Date.now() - t.startedAt)} · ${t.clients} attached${here} · ${t.cwd}`;
+      return `<div class="terminal-manager-row">
+        <div class="terminal-manager-info">
+          <div class="terminal-manager-name">${escapeHtml(name)}</div>
+          <div class="terminal-manager-meta" title="${escapeHtml(meta)}">${escapeHtml(meta)}</div>
+        </div>
+        <button type="button" class="btn btn-secondary" data-open="${escapeHtml(t.id)}">Open</button>
+        <button type="button" class="btn btn-secondary" data-end="${escapeHtml(t.id)}">End</button>
+      </div>`;
+    })
+    .join('');
+  body.querySelectorAll('[data-open]').forEach((b) => {
+    b.onclick = () => {
+      closeTerminalManager();
+      setTerminalMode(b.dataset.open, true);
+      if (b.dataset.open === currentSessionId && viewMode === 'session') syncTerminal();
+      else fetchTasks(b.dataset.open);
+    };
+  });
+  body.querySelectorAll('[data-end]').forEach((b) => {
+    b.onclick = async () => {
+      b.disabled = true;
+      await endTerminal(b.dataset.end);
+      renderTerminalManager();
+    };
+  });
+}
+
+function endTerminal(id) {
+  return fetch(`/api/terminals/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    headers: { 'X-Terminal-Token': terminalToken || '' },
+  }).catch(() => {});
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+async function endAllTerminals() {
+  const buttons = document.querySelectorAll('#terminal-manager-body [data-end]');
+  await Promise.all([...buttons].map((b) => endTerminal(b.dataset.end)));
+  renderTerminalManager();
+}
+
+window.addEventListener('message', (e) => {
+  if (e.source !== window.parent || e.origin !== hubOrigin()) return;
+  if (e.data?.type === 'hub:active' && e.data.active && wantsTerminal()) onTerminalShown();
+});
+
+//#endregion
+
 //#region PWA
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js');
@@ -9878,23 +10330,21 @@ window.addEventListener('popstate', () => {
 // e.code travels with e.key because macOS composes Option+<key> into a character (Option+P is
 // 'π'), so the key alone cannot identify the binding. The hub owns the keymap and normalizes;
 // these tests only decide whether a press is the hub's to handle.
-document.addEventListener('keydown', (e) => {
-  if (!window.__HUB__?.enabled) return;
-  const fwd = () => {
-    e.preventDefault();
-    hubPost({ type: 'hub:keydown', key: e.key, code: e.code, ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey });
-  };
-  if (e.ctrlKey && e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
-    fwd();
-  }
+function isHubKey(e) {
+  if (!window.__HUB__?.enabled) return false;
+  if (e.ctrlKey && e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) return true;
   // Own branch: the Alt+digit case below requires !ctrlKey. The hub owns the Ctrl+Alt+letter
   // keymap and ignores unbound letters.
   if (e.ctrlKey && e.altKey && !e.shiftKey && !e.metaKey && (/^[a-z]$/i.test(e.key) || /^Key[A-Z]$/.test(e.code))) {
-    fwd();
+    return true;
   }
-  if (e.altKey && !e.ctrlKey && !e.shiftKey && !e.metaKey && (/^[1-9]$/.test(e.key) || /^Digit[1-9]$/.test(e.code))) {
-    fwd();
-  }
+  return e.altKey && !e.ctrlKey && !e.shiftKey && !e.metaKey && (/^[1-9]$/.test(e.key) || /^Digit[1-9]$/.test(e.code));
+}
+
+document.addEventListener('keydown', (e) => {
+  if (!isHubKey(e)) return;
+  e.preventDefault();
+  hubPost({ type: 'hub:keydown', key: e.key, code: e.code, ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey });
 });
 
 document.addEventListener('click', (e) => {

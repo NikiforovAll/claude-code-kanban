@@ -2537,6 +2537,126 @@ body::before {
 
 /* #endregion */
 
+/* #region TERMINAL */
+.terminal-pane {
+  flex: 1;
+  display: none;
+  flex-direction: column;
+  min-height: 0;
+  padding: 8px 12px 12px;
+  gap: 6px;
+}
+
+.session-view.terminal-mode .kanban,
+.session-view.terminal-mode .agent-footer {
+  display: none;
+}
+
+.session-view.terminal-mode .terminal-pane {
+  display: flex;
+}
+
+.terminal-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.terminal-host {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg-deep);
+}
+
+.terminal-host .xterm {
+  height: 100%;
+}
+
+/* xterm.css paints the viewport #000; it shows below the last row when the height is not a whole number of rows. */
+.terminal-host .xterm .xterm-viewport {
+  background-color: var(--bg-deep);
+}
+
+.terminal-manager-modal {
+  width: 90%;
+  max-width: 720px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.terminal-manager-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.terminal-manager-row:last-child {
+  border-bottom: none;
+}
+
+.terminal-manager-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.terminal-manager-name {
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.terminal-manager-meta {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.terminal-manager-empty {
+  color: var(--text-muted);
+  padding: 16px 0;
+  text-align: center;
+}
+
+.terminal-prompt {
+  display: none;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.terminal-prompt.visible {
+  display: flex;
+}
+
+.terminal-prompt-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+#terminal-toggle.active {
+  color: var(--accent);
+}
+
+/* #endregion */
+
 /* #region MESSAGE_PANEL */
 .message-panel {
   position: fixed;
