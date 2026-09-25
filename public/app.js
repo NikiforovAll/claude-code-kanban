@@ -9665,6 +9665,9 @@ function filterByOwner(value) {
 const TERMINAL_TOKEN_KEY = 'terminal-token';
 const TERMINAL_MODES_KEY = 'terminal-sessions';
 const ACK_BATCH_BYTES = 32 * 1024;
+const TERMINAL_RETRY_MS = [500, 1000, 2000, 4000, 8000];
+const TERMINAL_STABLE_MS = 5000;
+const STALE_TOKEN_MSG = 'The terminal token is out of date. Reload the hub window.';
 // Read at load, before the first updateUrl() rewrites the URL without the fragment.
 const terminalToken = readTerminalToken();
 const termState = {
@@ -9682,6 +9685,7 @@ const termState = {
   leaving: false,
   ackPending: 0,
   ackTimer: null,
+  retryTimer: null,
 };
 
 // The hub passes the token in the fragment, which is never sent to a server or logged.
@@ -9779,8 +9783,7 @@ function syncTerminal() {
   const wasShown = termState.shown;
   termState.shown = true;
   syncCloseGuard();
-  if (termState.sessionId !== currentSessionId)
-    openTerminal(currentSessionId, newSpecs.has(currentSessionId) ? 'new' : 'auto');
+  if (termState.sessionId !== currentSessionId) openTerminal(currentSessionId, terminalOpenMode(currentSessionId));
   else if (!wasShown) onTerminalShown();
 }
 
@@ -10074,6 +10077,8 @@ function detachTerminal() {
   clearTimeout(termState.ackTimer);
   termState.ackTimer = null;
   termState.ackPending = 0;
+  clearTimeout(termState.retryTimer);
+  termState.retryTimer = null;
   setTerminalAttached(false);
   if (ws) {
     ws.onclose = null;
@@ -10082,10 +10087,10 @@ function detachTerminal() {
   hideTerminalPrompt();
 }
 
-async function openTerminal(sessionId, mode) {
+async function openTerminal(sessionId, mode, attempt = 0) {
   detachTerminal();
   termState.sessionId = sessionId;
-  setTerminalStatus('');
+  if (!attempt) setTerminalStatus('');
   try {
     await loadXterm();
   } catch (e) {
@@ -10095,13 +10100,17 @@ async function openTerminal(sessionId, mode) {
   if (termState.sessionId !== sessionId) return;
   const term = ensureTerm();
   // RIS through the write queue, not term.reset(): reset() runs at once, and output the previous
-  // session had already queued would still be drawn after it.
-  term.write('\x1bc', repaintTerminal);
+  // session had already queued would still be drawn after it. A retry keeps the last screen
+  // until the replay arrives.
+  const reset = () => term.write('\x1bc', repaintTerminal);
+  if (!attempt) reset();
   fitTerminal();
   const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/api/terminal/ws`);
   ws.binaryType = 'arraybuffer';
   termState.ws = ws;
   const spec = mode === 'new' ? newSpecs.get(sessionId) : null;
+  let readyAt = 0;
+  let refused = false;
   ws.onopen = () =>
     ws.send(
       JSON.stringify({
@@ -10133,14 +10142,44 @@ async function openTerminal(sessionId, mode) {
     } catch (_) {
       return;
     }
+    if (msg.t === 'ready') {
+      readyAt = Date.now();
+      if (attempt) reset();
+    } else if (msg.t === 'error') refused = true;
     onTerminalMessage(sessionId, msg);
   };
   ws.onclose = () => {
     if (termState.ws !== ws) return;
     termState.ws = null;
     setTerminalAttached(false);
-    if (!document.getElementById('terminal-prompt').classList.contains('visible')) setTerminalStatus('Disconnected');
+    // A refusal already shows the server's reason, and retrying would only repeat it.
+    if (refused || document.getElementById('terminal-prompt').classList.contains('visible')) return;
+    const stable = readyAt && Date.now() - readyAt > TERMINAL_STABLE_MS;
+    retryTerminal(sessionId, stable ? 0 : attempt);
   };
+}
+
+function terminalOpenMode(sessionId) {
+  return newSpecs.has(sessionId) ? 'new' : 'auto';
+}
+
+// The PTY outlives the socket, so a dropped connection (cck restart, sleep, proxy hiccup) reattaches
+// to the same screen. Only a socket that stayed up resets the backoff, so a server that accepts and
+// then drops every socket still runs out of attempts.
+function retryTerminal(sessionId, attempt) {
+  const delay = TERMINAL_RETRY_MS[attempt];
+  if (delay === undefined) {
+    setTerminalStatus('');
+    showTerminalPrompt(sessionId, 'Disconnected', 'The connection to the terminal was lost.', [
+      [terminalOpenMode(sessionId), 'Reconnect'],
+    ]);
+    return;
+  }
+  setTerminalStatus('Reconnecting…');
+  termState.retryTimer = setTimeout(() => {
+    termState.retryTimer = null;
+    if (termState.sessionId === sessionId) openTerminal(sessionId, terminalOpenMode(sessionId), attempt + 1);
+  }, delay);
 }
 
 function onTerminalMessage(sessionId, msg) {
@@ -10501,7 +10540,7 @@ async function browseNewSessionFolder() {
   try {
     const res = await terminalFetch('/api/terminal/pick-folder', 'POST');
     const body = await res.json().catch(() => ({}));
-    if (res.status === 401) setNewSessionError('The terminal token is out of date. Reload the hub window.');
+    if (res.status === 401) setNewSessionError(STALE_TOKEN_MSG);
     else if (!res.ok) setNewSessionError(body.error || `Folder dialog failed (${res.status})`);
     else if (body.path) {
       ns.picked = [body.path, ...ns.picked.filter((p) => p !== body.path)];
