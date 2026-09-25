@@ -5938,10 +5938,26 @@ document.addEventListener('keydown', (e) => {
   }
 
   // Above the text-field guard: xterm's input is a textarea, and the toggle must work from it.
-  if (e.key === 'Escape' && document.getElementById('terminal-prompt').contains(e.target)) {
-    e.preventDefault();
-    toggleTerminal();
-    return;
+  const terminalPrompt = document.getElementById('terminal-prompt');
+  if (terminalPrompt.contains(e.target)) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      toggleTerminal();
+      return;
+    }
+    if (e.key === 'Enter' || e.key === ' ') return;
+    const step = matchKey(e, 'ArrowLeft', 'ArrowUp', 'KeyH', 'KeyK')
+      ? -1
+      : matchKey(e, 'ArrowRight', 'ArrowDown', 'KeyL', 'KeyJ')
+        ? 1
+        : 0;
+    if (step) {
+      e.preventDefault();
+      const buttons = [...terminalPrompt.querySelectorAll('button')];
+      const i = buttons.indexOf(e.target);
+      buttons[(i + step + buttons.length) % buttons.length]?.focus();
+      return;
+    }
   }
   const terminalAction = terminalShortcut(e);
   if (terminalAction) {
@@ -6063,6 +6079,12 @@ document.addEventListener('keydown', (e) => {
   // Tab toggles focus zone
   if (e.key === 'Tab') {
     e.preventDefault();
+    // The terminal replaces the board, so it takes the board's place in the Tab cycle.
+    if (wantsTerminal()) {
+      if (focusZone === 'sidebar') focusTerminalPane();
+      else leaveTerminalPane();
+      return;
+    }
     if (focusZone === 'sidebar') {
       const hasCards = document.querySelector('.task-card');
       if (!hasCards) return;
@@ -9762,6 +9784,7 @@ function leaveTerminalPane() {
   termState.leaving = true;
   document.activeElement.blur();
   termState.leaving = false;
+  setFocusZone('sidebar');
 }
 
 function loadXterm() {
@@ -9970,18 +9993,18 @@ function setTerminalStatus(text) {
 
 function hideTerminalPrompt() {
   document.getElementById('terminal-prompt').classList.remove('visible');
-  document.getElementById('terminal-host').classList.remove('pending');
+  document.getElementById('terminal-pane').classList.remove('pending');
 }
 
-function showTerminalPrompt(sessionId, message, choices, hideTerm = false) {
-  document.getElementById('terminal-host').classList.toggle('pending', hideTerm);
+function showTerminalPrompt(sessionId, title, detail, choices, hideTerm = false) {
+  document.getElementById('terminal-pane').classList.toggle('pending', hideTerm);
   const el = document.getElementById('terminal-prompt');
-  el.innerHTML = `<div>${escapeHtml(message)}</div><div class="terminal-prompt-actions">${choices
+  el.innerHTML = `<div class="terminal-prompt-text"><div class="terminal-prompt-title">${escapeHtml(title)}</div><div>${escapeHtml(detail)}</div></div><div class="terminal-prompt-actions">${choices
     .map(
-      ([mode, label], i) =>
-        `<button type="button" class="btn ${i === 0 ? 'btn-primary' : 'btn-secondary'}" data-mode="${escapeHtml(mode)}">${escapeHtml(label)}</button>`,
+      ([mode, label]) =>
+        `<button type="button" class="btn btn-secondary" data-mode="${escapeHtml(mode)}">${escapeHtml(label)}</button>`,
     )
-    .join('')}</div>`;
+    .join('')}</div><div class="sp-hint"><kbd>Esc</kbd> hides the terminal</div>`;
   el.querySelectorAll('button[data-mode]').forEach((b) => {
     b.onclick = () => openTerminal(sessionId, b.dataset.mode);
   });
@@ -10006,6 +10029,14 @@ function syncCloseGuard() {
 
 window.addEventListener('beforeunload', (e) => {
   if (termState.closeGuard && !window.__HUB__?.enabled) e.preventDefault();
+});
+
+// The terminal stands in for the board, so it takes the board zone however focus arrives
+// (Tab, Alt+`, a click); leaveTerminalPane hands it back to the sidebar.
+document.getElementById('terminal-pane').addEventListener('focusin', () => {
+  if (focusZone !== 'sidebar') return;
+  clearKbSelection();
+  focusZone = 'board';
 });
 
 function detachTerminal() {
@@ -10079,7 +10110,8 @@ function onTerminalMessage(sessionId, msg) {
   } else if (msg.t === 'live') {
     showTerminalPrompt(
       sessionId,
-      'This session is running in another terminal. Resuming it here too makes both processes write to the same transcript.',
+      'Running in another terminal',
+      'Resuming it here too makes both processes write to the same transcript.',
       [
         ['fork', 'Fork'],
         ['resume', 'Resume anyway'],
@@ -10089,11 +10121,18 @@ function onTerminalMessage(sessionId, msg) {
     );
   } else if (msg.t === 'exit') {
     setTerminalAttached(false);
-    showTerminalPrompt(sessionId, `The shell exited (code ${msg.code}).`, [
-      ['resume', 'Resume'],
-      ['fork', 'Fork'],
-      ['shell', 'Shell'],
-    ]);
+    // A failed exit keeps its output on screen, so the cause stays readable.
+    showTerminalPrompt(
+      sessionId,
+      'The shell exited',
+      msg.code === 0 ? 'Choose how to start again.' : `Exit code ${msg.code}. Its last output is below.`,
+      [
+        ['resume', 'Resume'],
+        ['fork', 'Fork'],
+        ['shell', 'Shell'],
+      ],
+      msg.code === 0,
+    );
   } else if (msg.t === 'error') {
     setTerminalStatus(msg.msg || 'Terminal error');
   }

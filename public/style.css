@@ -586,7 +586,8 @@ body::before {
   background: var(--session-active-bg);
 }
 
-.session-item.kb-selected {
+.session-item.kb-selected,
+.terminal-prompt button:focus-visible {
   border-color: var(--accent);
   box-shadow:
     inset 0 0 0 1px var(--accent),
@@ -2539,6 +2540,7 @@ body::before {
 
 /* #region TERMINAL */
 .terminal-pane {
+  position: relative;
   flex: 1;
   display: none;
   flex-direction: column;
@@ -2573,7 +2575,7 @@ body::before {
   background: var(--bg-deep);
 }
 
-.terminal-host.pending .xterm {
+.terminal-pane.pending .xterm {
   visibility: hidden;
 }
 
@@ -2649,10 +2651,51 @@ body::before {
   display: flex;
 }
 
+.terminal-prompt-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  line-height: 1.5;
+}
+
+.terminal-prompt-title {
+  color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 600;
+}
+
 .terminal-prompt-actions {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.terminal-prompt button:focus-visible {
+  outline: none;
+}
+
+.terminal-host:focus-within {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/* With the old screen hidden the pane is empty, so the prompt takes its middle. */
+.terminal-pane.pending .terminal-prompt {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(440px, calc(100% - 32px));
+  align-items: center;
+  gap: 16px;
+  padding: 28px 28px 20px;
+  text-align: center;
+  border-radius: 12px;
+  box-shadow: 0 12px 32px -12px rgba(0, 0, 0, 0.25);
+}
+
+.terminal-pane.pending .terminal-prompt-actions {
+  justify-content: center;
 }
 
 #terminal-toggle.active {
