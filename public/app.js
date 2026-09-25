@@ -5308,6 +5308,16 @@ const SHORTCUT_PAIRS = [
       ],
     },
   ],
+  [
+    {
+      title: 'Terminal',
+      rows: [
+        { keys: ['Ctrl', '`'], combo: true, label: 'Show / hide terminal' },
+        { keys: ['Alt', '`'], combo: true, label: 'Focus terminal / page' },
+        { keys: ['Ctrl', 'Shift', '`'], combo: true, label: 'All terminals' },
+      ],
+    },
+  ],
 ];
 
 const EMPTY_GROUP = { title: '', rows: [] };
@@ -5927,11 +5937,10 @@ document.addEventListener('keydown', (e) => {
   }
 
   // Above the text-field guard: xterm's input is a textarea, and the toggle must work from it.
-  if (e.ctrlKey && !e.metaKey && e.code === 'Backquote') {
+  const terminalAction = terminalShortcut(e);
+  if (terminalAction) {
     e.preventDefault();
-    if (e.altKey) toggleTerminal();
-    else if (e.shiftKey) openTerminalManager();
-    else toggleTerminal(true);
+    terminalAction();
     return;
   }
 
@@ -9607,7 +9616,7 @@ function filterByOwner(value) {
 //#region TERMINAL
 // The kanban and the terminal share one slot: terminal mode hides #main-content and shows
 // the pane. The PTY lives on the server (lib/terminal.js) and outlives the pane, so
-// leaving terminal mode or switching sessions drops only the socket; coming back
+// leaving the session view or switching sessions drops only the socket; coming back
 // reattaches and the server replays the screen.
 const TERMINAL_TOKEN_KEY = 'terminal-token';
 const TERMINAL_MODES_KEY = 'terminal-sessions';
@@ -9623,6 +9632,7 @@ const termState = {
   sessionId: null,
   shown: false,
   attached: false,
+  closeGuard: false,
   leaving: false,
   ackPending: 0,
   ackTimer: null,
@@ -9666,17 +9676,24 @@ function wantsTerminal() {
   return terminalAvailable() && viewMode === 'session' && !!currentSessionId && terminalModes().has(currentSessionId);
 }
 
-// The shortcut focuses an open but unfocused terminal before it closes it. The button does not:
-// clicking it always moves focus off the terminal.
-function toggleTerminal(focusFirst = false) {
+function toggleTerminal() {
   if (!terminalAvailable() || viewMode !== 'session' || !currentSessionId) return;
-  if (focusFirst && wantsTerminal() && termState.term) {
-    if (document.getElementById('terminal-pane').contains(document.activeElement)) leaveTerminalPane();
-    else focusTerminalPane();
-    return;
-  }
   setTerminalMode(currentSessionId, !terminalModes().has(currentSessionId));
   syncTerminal();
+}
+
+function terminalShortcut(e) {
+  if (e.code !== 'Backquote' || e.metaKey) return null;
+  if (e.ctrlKey && !e.altKey) return e.shiftKey ? openTerminalManager : toggleTerminal;
+  if (e.altKey && !e.ctrlKey && !e.shiftKey) return toggleTerminalFocus;
+  return null;
+}
+
+// Esc belongs to Claude, so leaving the terminal without hiding it needs its own key.
+function toggleTerminalFocus() {
+  if (!wantsTerminal() || !termState.term) return toggleTerminal();
+  if (document.getElementById('terminal-pane').contains(document.activeElement)) leaveTerminalPane();
+  else focusTerminalPane();
 }
 
 // Idempotent: runs on every view change, so whichever path changed the view lands here.
@@ -9690,11 +9707,14 @@ function syncTerminal() {
   sessionView.classList.toggle('terminal-mode', on);
   if (!on) {
     termState.shown = false;
-    if (termState.sessionId) detachTerminal();
+    syncCloseGuard();
+    // Hiding keeps the socket, so Ctrl+` back is instant; only another session or view drops it.
+    if (termState.sessionId && (termState.sessionId !== currentSessionId || viewMode !== 'session')) detachTerminal();
     return;
   }
   const wasShown = termState.shown;
   termState.shown = true;
+  syncCloseGuard();
   if (termState.sessionId !== currentSessionId) openTerminal(currentSessionId, 'auto');
   else if (!wasShown) onTerminalShown();
 }
@@ -9762,9 +9782,9 @@ function terminalTheme() {
 function terminalThemeOptions() {
   return {
     theme: terminalTheme(),
-    // Claude Code draws its own UI in fixed 256/truecolor values picked for a dark background
-    // (inline code is #afd7ff), which no palette reaches; the floor pulls them readable on light.
-    minimumContrastRatio: isLightTheme() ? 4.5 : 1,
+    // Claude Code on a dark theme (pinned, or output from before it saw the OSC 11 reply) draws
+    // fixed 256/truecolor values no palette reaches; 3 keeps them readable and still blue.
+    minimumContrastRatio: isLightTheme() ? 3 : 1,
   };
 }
 
@@ -9773,7 +9793,7 @@ function terminalThemeOptions() {
 function terminalKeyFilter(e) {
   if (e.type !== 'keydown') return true;
   const ctrlOnly = e.ctrlKey && !e.altKey && !e.metaKey;
-  if (e.ctrlKey && !e.metaKey && e.code === 'Backquote') return false;
+  if (terminalShortcut(e)) return false;
   if (ctrlOnly && e.code === 'KeyC' && (e.shiftKey || termState.term.hasSelection())) {
     e.preventDefault();
     navigator.clipboard?.writeText(termState.term.getSelection()).catch(() => {});
@@ -9782,6 +9802,13 @@ function terminalKeyFilter(e) {
   }
   if (ctrlOnly && e.code === 'KeyV') return false;
   return !isHubKey(e);
+}
+
+function oscColor(hex) {
+  const m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(hex || '');
+  if (!m) return null;
+  const h = m[1].length === 3 ? [...m[1]].map((c) => c + c).join('') : m[1];
+  return `rgb:${[0, 2, 4].map((i) => h.slice(i, i + 2).repeat(2)).join('/')}`;
 }
 
 function ensureTerm() {
@@ -9820,6 +9847,19 @@ function ensureTerm() {
     .then(repaintTerminal)
     .catch(() => {});
   term.attachCustomKeyEventHandler(terminalKeyFilter);
+  // xterm leaves OSC 10/11 color queries unanswered, so apps that pick a palette from the
+  // background (Claude Code's Auto theme) assume dark even on a light theme.
+  for (const [code, key] of [
+    [10, 'foreground'],
+    [11, 'background'],
+  ]) {
+    term.parser.registerOscHandler(code, (data) => {
+      if (data !== '?') return false;
+      const rgb = oscColor(term.options.theme[key]);
+      if (rgb) terminalSend({ t: 'in', d: `\x1b]${code};${rgb}\x1b\\` });
+      return true;
+    });
+  }
   term.onData((d) => terminalSend({ t: 'in', d }));
   term.onResize(({ cols, rows }) => terminalSend({ t: 'resize', cols, rows }));
   // One fit per frame while a drag resizes the host. The atlas is rebuilt only when the host comes
@@ -9928,13 +9968,20 @@ function showTerminalPrompt(sessionId, message, choices, hideTerm = false) {
 // Closing the page leaves the PTY running, but Ctrl+W meant for the prompt closes the tab, so ask first.
 // Under the hub the top frame asks: browsers do not reliably show the dialog for a frame.
 function setTerminalAttached(on) {
-  if (termState.attached === on) return;
   termState.attached = on;
+  syncCloseGuard();
+}
+
+// A hidden pane stays attached, but Ctrl+W can only be meant for a terminal on screen.
+function syncCloseGuard() {
+  const on = termState.attached && termState.shown;
+  if (termState.closeGuard === on) return;
+  termState.closeGuard = on;
   hubPost({ type: 'hub:closeGuard', on });
 }
 
 window.addEventListener('beforeunload', (e) => {
-  if (termState.attached && !window.__HUB__?.enabled) e.preventDefault();
+  if (termState.closeGuard && !window.__HUB__?.enabled) e.preventDefault();
 });
 
 function detachTerminal() {
@@ -10035,6 +10082,8 @@ function endTerminalSession() {
 
 function openTerminalManager() {
   if (!terminalAvailable()) return;
+  // Esc typed in xterm goes to Claude, so the modal would not close on it.
+  if (document.getElementById('terminal-pane').contains(document.activeElement)) leaveTerminalPane();
   document.getElementById('terminal-manager-modal').classList.add('visible');
   renderTerminalManager();
 }
