@@ -9621,6 +9621,7 @@ const termState = {
   ws: null,
   sessionId: null,
   shown: false,
+  attached: false,
   ackPending: 0,
   ackTimer: null,
 };
@@ -9668,8 +9669,8 @@ function wantsTerminal() {
 function toggleTerminal(focusFirst = false) {
   if (!terminalAvailable() || viewMode !== 'session' || !currentSessionId) return;
   if (focusFirst && wantsTerminal() && termState.term) {
-    if (!document.getElementById('terminal-host').contains(document.activeElement)) {
-      termState.term.focus();
+    if (!document.getElementById('terminal-pane').contains(document.activeElement)) {
+      focusTerminalPane();
       return;
     }
   }
@@ -9701,8 +9702,14 @@ function onTerminalShown() {
   requestAnimationFrame(() => {
     fitTerminal();
     repaintTerminal();
-    termState.term?.focus();
+    focusTerminalPane();
   });
+}
+
+function focusTerminalPane() {
+  const prompt = document.getElementById('terminal-prompt');
+  if (prompt.classList.contains('visible')) prompt.querySelector('button')?.focus();
+  else termState.term?.focus();
 }
 
 function loadXterm() {
@@ -9842,6 +9849,7 @@ function terminalSend(msg) {
 }
 
 function ackTerminal(ws, n) {
+  if (termState.ws !== ws) return;
   termState.ackPending += n;
   const flush = () => {
     clearTimeout(termState.ackTimer);
@@ -9859,9 +9867,11 @@ function setTerminalStatus(text) {
 
 function hideTerminalPrompt() {
   document.getElementById('terminal-prompt').classList.remove('visible');
+  document.getElementById('terminal-host').classList.remove('pending');
 }
 
-function showTerminalPrompt(sessionId, message, choices) {
+function showTerminalPrompt(sessionId, message, choices, hideTerm = false) {
+  document.getElementById('terminal-host').classList.toggle('pending', hideTerm);
   const el = document.getElementById('terminal-prompt');
   el.innerHTML = `<div>${escapeHtml(message)}</div><div class="terminal-prompt-actions">${choices
     .map(
@@ -9876,10 +9886,26 @@ function showTerminalPrompt(sessionId, message, choices) {
   el.querySelector('button')?.focus();
 }
 
+// Closing the page leaves the PTY running, but Ctrl+W meant for the prompt closes the tab, so ask first.
+// Under the hub the top frame asks: browsers do not reliably show the dialog for a frame.
+function setTerminalAttached(on) {
+  if (termState.attached === on) return;
+  termState.attached = on;
+  hubPost({ type: 'hub:closeGuard', on });
+}
+
+window.addEventListener('beforeunload', (e) => {
+  if (termState.attached && !window.__HUB__?.enabled) e.preventDefault();
+});
+
 function detachTerminal() {
   const ws = termState.ws;
   termState.ws = null;
   termState.sessionId = null;
+  clearTimeout(termState.ackTimer);
+  termState.ackTimer = null;
+  termState.ackPending = 0;
+  setTerminalAttached(false);
   if (ws) {
     ws.onclose = null;
     ws.close();
@@ -9899,13 +9925,13 @@ async function openTerminal(sessionId, mode) {
   }
   if (termState.sessionId !== sessionId) return;
   const term = ensureTerm();
-  term.reset();
-  repaintTerminal();
+  // RIS through the write queue, not term.reset(): reset() runs at once, and output the previous
+  // session had already queued would still be drawn after it.
+  term.write('\x1bc', repaintTerminal);
   fitTerminal();
   const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/api/terminal/ws`);
   ws.binaryType = 'arraybuffer';
   termState.ws = ws;
-  termState.ackPending = 0;
   ws.onopen = () =>
     ws.send(
       JSON.stringify({ t: 'hello', token: terminalToken, id: sessionId, mode, cols: term.cols, rows: term.rows }),
@@ -9928,6 +9954,7 @@ async function openTerminal(sessionId, mode) {
   ws.onclose = () => {
     if (termState.ws !== ws) return;
     termState.ws = null;
+    setTerminalAttached(false);
     if (!document.getElementById('terminal-prompt').classList.contains('visible')) setTerminalStatus('Disconnected');
   };
 }
@@ -9936,6 +9963,7 @@ function onTerminalMessage(sessionId, msg) {
   if (msg.t === 'ready') {
     hideTerminalPrompt();
     setTerminalStatus('');
+    setTerminalAttached(true);
     terminalSend({ t: 'resize', cols: termState.term.cols, rows: termState.term.rows });
     termState.term.focus();
   } else if (msg.t === 'live') {
@@ -9947,8 +9975,10 @@ function onTerminalMessage(sessionId, msg) {
         ['resume', 'Resume anyway'],
         ['shell', 'Shell only'],
       ],
+      true,
     );
   } else if (msg.t === 'exit') {
+    setTerminalAttached(false);
     showTerminalPrompt(sessionId, `The shell exited (code ${msg.code}).`, [
       ['resume', 'Resume'],
       ['fork', 'Fork'],

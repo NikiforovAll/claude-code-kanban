@@ -2573,6 +2573,10 @@ body::before {
   background: var(--bg-deep);
 }
 
+.terminal-host.pending .xterm {
+  visibility: hidden;
+}
+
 .terminal-host .xterm {
   height: 100%;
 }
