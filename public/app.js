@@ -5937,6 +5937,11 @@ document.addEventListener('keydown', (e) => {
   }
 
   // Above the text-field guard: xterm's input is a textarea, and the toggle must work from it.
+  if (e.key === 'Escape' && document.getElementById('terminal-prompt').contains(e.target)) {
+    e.preventDefault();
+    toggleTerminal();
+    return;
+  }
   const terminalAction = terminalShortcut(e);
   if (terminalAction) {
     e.preventDefault();
@@ -7385,6 +7390,8 @@ let waitingDetailAutoOpened = false;
 function maybeAutoOpenWaiting() {
   if (!isWaitingAnswerable() || !isWaitingFresh()) return;
   if (currentWaiting.id === lastAutoOpenedWaitingId || isAnyModalOpen()) return;
+  // The terminal on screen shows the same ask; hiding it lets the next poll open the modal.
+  if (termState.shown) return;
   lastAutoOpenedWaitingId = currentWaiting.id;
   msgDetailFollowLatest = true;
   waitingDetailAutoOpened = true;
@@ -9691,7 +9698,10 @@ function terminalShortcut(e) {
 
 // Esc belongs to Claude, so leaving the terminal without hiding it needs its own key.
 function toggleTerminalFocus() {
-  if (!wantsTerminal() || !termState.term) return toggleTerminal();
+  if (!wantsTerminal()) {
+    toggleTerminal();
+    return;
+  }
   if (document.getElementById('terminal-pane').contains(document.activeElement)) leaveTerminalPane();
   else focusTerminalPane();
 }
@@ -9708,8 +9718,9 @@ function syncTerminal() {
   if (!on) {
     termState.shown = false;
     syncCloseGuard();
-    // Hiding keeps the socket, so Ctrl+` back is instant; only another session or view drops it.
-    if (termState.sessionId && (termState.sessionId !== currentSessionId || viewMode !== 'session')) detachTerminal();
+    // Hiding keeps the socket so Ctrl+` back is instant.
+    const keepSocket = termState.sessionId === currentSessionId && viewMode === 'session';
+    if (termState.sessionId && !keepSocket) detachTerminal();
     return;
   }
   const wasShown = termState.shown;
@@ -9805,10 +9816,9 @@ function terminalKeyFilter(e) {
 }
 
 function oscColor(hex) {
-  const m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(hex || '');
+  const m = /^#([0-9a-f]{6})$/i.exec(hex || '');
   if (!m) return null;
-  const h = m[1].length === 3 ? [...m[1]].map((c) => c + c).join('') : m[1];
-  return `rgb:${[0, 2, 4].map((i) => h.slice(i, i + 2).repeat(2)).join('/')}`;
+  return `rgb:${[0, 2, 4].map((i) => m[1].slice(i, i + 2).repeat(2)).join('/')}`;
 }
 
 function ensureTerm() {
