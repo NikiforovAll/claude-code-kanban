@@ -2,9 +2,10 @@ const { describe, it, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { spawn } = require('node:child_process');
 const { mkdtempSync, rmSync } = require('node:fs');
+const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
-const { shellArgs, readTerminalConfig } = require('../lib/terminal');
+const { shellArgs, readTerminalConfig, claudeArgsFor, parseNewSpec } = require('../lib/terminal');
 
 let WebSocket = null;
 let ptyAvailable = false;
@@ -39,15 +40,44 @@ function startServer(extraArgs) {
 function stopServer(s) {
   if (process.platform === 'win32') spawn('taskkill', ['/pid', String(s.child.pid), '/f', '/t'], { stdio: 'ignore' });
   else s.child.kill();
+  // A child that outlives the kill must not keep the test process alive through its pipes.
+  s.child.stdout.destroy();
+  s.child.stderr.destroy();
+  s.child.unref();
   try { rmSync(s.dir, { recursive: true, force: true }); } catch { /* locked by the dying child */ }
+}
+
+// A fresh connection per call: a pooled keep-alive socket can be closed by the server just as it is reused.
+function api(port, method, pathname, headers = {}) {
+  return new Promise((resolve, reject) => {
+    const req = http.request({ host: '127.0.0.1', port, method, path: pathname, headers, agent: false }, (res) => {
+      let body = '';
+      res.on('data', (d) => { body += d; });
+      res.on('end', () => resolve({ status: res.statusCode, json: body ? JSON.parse(body) : null }));
+    });
+    req.setTimeout(15000, () => req.destroy(new Error(`timeout: ${method} ${pathname}`)));
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+// Resolves with the first truthy result of `test(data, isBinary)` for a message on `ws`.
+function waitFor(ws, test, what) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`timeout: ${what}`)), 15000);
+    ws.on('message', (d, bin) => {
+      const hit = test(d, bin);
+      if (hit) { clearTimeout(timer); resolve(hit); }
+    });
+  });
 }
 
 function handshakeStatus(port, headers) {
   return new Promise((resolve) => {
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/api/terminal/ws`, { headers });
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/api/terminal/ws`, { headers, handshakeTimeout: 15000 });
     ws.on('unexpected-response', (_req, res) => { resolve(res.statusCode); ws.terminate(); });
     ws.on('open', () => { resolve(101); ws.close(); });
-    ws.on('error', () => resolve(-1));
+    ws.on('error', (e) => resolve(`${e.code || ''} ${e.message}`));
   });
 }
 
@@ -77,6 +107,29 @@ describe('shellArgs', () => {
   });
   it('starts a bare shell in shell mode', () => {
     assert.deepEqual(shellArgs('cmd.exe', null), []);
+  });
+  it('quotes an argument with a space for each shell family', () => {
+    const args = ['--name', 'Fix login'];
+    assert.equal(shellArgs('pwsh.exe', args)[3], "claude --name 'Fix login'");
+    assert.equal(shellArgs('cmd.exe', args)[1], 'claude --name "Fix login"');
+  });
+});
+
+describe('new session options', () => {
+  it('builds the claude flags, with the optional worktree value last', () => {
+    const spec = parseNewSpec({ cwd: '/p', name: ' Fix login ', worktree: 'fix-login', model: 'haiku' });
+    assert.deepEqual(claudeArgsFor('new', SESSION, spec),
+      ['--session-id', SESSION, '--name', 'Fix login', '--model', 'haiku', '-w', 'fix-login']);
+    assert.deepEqual(claudeArgsFor('new', SESSION, parseNewSpec({ cwd: '/p', worktree: true })), ['--session-id', SESSION, '-w']);
+    assert.deepEqual(claudeArgsFor('new', SESSION, parseNewSpec({ cwd: '/p' })), ['--session-id', SESSION]);
+  });
+  it('names the field that fails its charset', () => {
+    assert.equal(parseNewSpec({}), 'folder');
+    assert.equal(parseNewSpec({ cwd: '/p', name: "x'; rm -rf ~" }), 'name');
+    assert.equal(parseNewSpec({ cwd: '/p', name: '-x' }), 'name');
+    assert.equal(parseNewSpec({ cwd: '/p', worktree: '../up' }), 'worktree name');
+    assert.equal(parseNewSpec({ cwd: '/p', worktree: 1 }), 'worktree name');
+    assert.equal(parseNewSpec({ cwd: '/p', model: 'opus; x' }), 'model');
   });
 });
 
@@ -124,46 +177,51 @@ describe('terminal endpoint', { skip: !ptyAvailable }, () => {
     const got = await session(port, { id: SESSION, mode: 'resume' }, (g) => g.closeCode !== null);
     assert.equal(got.closeCode, 4004);
   });
+  it('refuses a new session in a folder it does not know', async () => {
+    const got = await session(port, { id: SESSION, mode: 'new', cwd: os.tmpdir() }, (g) => g.closeCode !== null);
+    assert.equal(got.closeCode, 4004);
+  });
+  it('refuses a new session with a bad name', async () => {
+    const got = await session(port, { id: SESSION, mode: 'new', cwd: os.tmpdir(), name: 'a"b' }, (g) => g.closeCode !== null);
+    assert.equal(got.closeCode, 4002);
+  });
+  it('opens the folder dialog only with the token', async () => {
+    const res = await api(port, 'POST', '/api/terminal/pick-folder', { origin: `http://localhost:${port}`, 'x-terminal-token': 'nope' });
+    assert.equal(res.status, 401);
+  });
 
   it('round-trips input, survives a reconnect, and ends on kill', async () => {
     const first = await session(port, { id: SESSION, mode: 'shell' }, (g) => g.control.some((m) => m.t === 'ready'));
     assert.equal(first.control[0].attached, false);
     first.ws.send(JSON.stringify({ t: 'in', d: 'echo cck-round-trip\r' }));
-    await new Promise((resolve) => {
-      first.ws.on('message', (d, bin) => { if (bin && (first.out += d.toString()).includes('cck-round-trip')) resolve(); });
-    });
+    await waitFor(first.ws, (d, bin) => bin && (first.out += d.toString()).includes('cck-round-trip'), 'echo');
     first.ws.close();
 
-    const list = await (await fetch(`http://127.0.0.1:${port}/api/terminals`)).json();
+    const list = (await api(port, 'GET', '/api/terminals')).json;
     assert.equal(list.sessions.length, 1);
 
     const second = await session(port, { id: SESSION, mode: 'auto' }, (g) => g.out.includes('cck-round-trip'));
     assert.equal(second.control[0].t, 'ready');
     assert.equal(second.control[0].attached, true);
 
+    const exited = waitFor(second.ws, (d, bin) => !bin && JSON.parse(d.toString()).t === 'exit', 'exit');
     second.ws.send(JSON.stringify({ t: 'kill' }));
-    await new Promise((resolve) => {
-      second.ws.on('message', (d, bin) => { if (!bin && JSON.parse(d.toString()).t === 'exit') resolve(); });
-    });
-    const after = await (await fetch(`http://127.0.0.1:${port}/api/terminals`)).json();
+    await exited;
+    const after = (await api(port, 'GET', '/api/terminals')).json;
     assert.equal(after.sessions.length, 0);
   });
 
   it('ends a terminal over HTTP only with the token', async () => {
     const got = await session(port, { id: SESSION, mode: 'shell' }, (g) => g.control.some((m) => m.t === 'ready'));
-    const exited = new Promise((resolve) => {
-      got.ws.on('message', (d, bin) => { if (!bin && JSON.parse(d.toString()).t === 'exit') resolve(); });
-    });
-    const del = (id, token) => fetch(`http://127.0.0.1:${port}/api/terminals/${id}`, {
-      method: 'DELETE',
-      headers: { origin: `http://localhost:${port}`, 'x-terminal-token': token },
-    });
+    const exited = waitFor(got.ws, (d, bin) => { const m = !bin && JSON.parse(d.toString()); return m.t === 'exit' && m; }, 'exit');
+    const del = (id, token) =>
+      api(port, 'DELETE', `/api/terminals/${id}`, { origin: `http://localhost:${port}`, 'x-terminal-token': token });
     assert.equal((await del(SESSION, 'nope')).status, 401);
     assert.equal((await del('00000000-0000-4000-8000-000000000000', TOKEN)).status, 404);
     assert.equal((await del(SESSION, TOKEN)).status, 204);
-    await exited;
-    const after = await (await fetch(`http://127.0.0.1:${port}/api/terminals`)).json();
+    const after = (await api(port, 'GET', '/api/terminals')).json;
     assert.equal(after.sessions.length, 0);
+    assert.equal((await exited).ended, true);
   });
 });
 

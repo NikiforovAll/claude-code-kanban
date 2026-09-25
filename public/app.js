@@ -231,7 +231,7 @@ async function fetchSessions(includeTasks = true) {
     }
     lastSessionsHash = sessionsHash;
 
-    sessions = newSessions;
+    sessions = mergePlaceholders(newSessions);
     renderSessions();
     renderActivityChip();
   } catch (error) {
@@ -3264,6 +3264,7 @@ function renderSessions() {
 
   // Helper to render a single session card
   const renderSessionCard = (session) => {
+    if (session.placeholder) return renderPlaceholderCard(session);
     const total = session.taskCount;
     const percent = total > 0 ? Math.round((session.completed / total) * 100) : 0;
     const isActive = session.id === currentSessionId && viewMode === 'session';
@@ -3414,6 +3415,7 @@ function renderSessions() {
               ${groupChevronSvg()}
               <span class="group-name">${escapeHtml(folderName)}</span>
               ${countHtml(projectSessions)}
+              ${terminalAvailable() ? `<span class="project-new-btn" data-project-path="${escapedPath}" title="New session in ${escapeHtml(folderName)}">${PLUS_SVG}</span>` : ''}
               <span class="project-view-btn" data-project-path="${escapedPath}" title="Open project view — combined tasks from all sessions">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
               </span>
@@ -4002,7 +4004,7 @@ async function onColumnDrop(e) {
 // windows the list), so membership is never garbage-collected on load.
 const SESSION_GROUPS_KEY = 'sessionGroups';
 const SG_ACTION_SELECTOR =
-  '.session-pin-btn, .team-info-btn, .plan-indicator, .scratchpad-badge, .bookmarks-badge, .linked-docs-badge, .project-view-btn, .group-path-toggle, .pinned-ungroup-btn, .sg-action';
+  '.session-pin-btn, .team-info-btn, .plan-indicator, .scratchpad-badge, .bookmarks-badge, .linked-docs-badge, .project-view-btn, .project-new-btn, .group-path-toggle, .pinned-ungroup-btn, .sg-action';
 
 // Collapse state shares the existing `collapsedGroups` key; this namespace keeps it from
 // colliding with a project path or the __ungrouped__ / __pinned_* sentinels.
@@ -5922,6 +5924,7 @@ const MODAL_CLOSERS = {
   'help-modal': () => closeHelpModal(),
   'session-picker-modal': () => closeSessionPicker(),
   'terminal-manager-modal': () => closeTerminalManager(),
+  'new-session-modal': () => closeNewSession(),
 };
 
 document.addEventListener('keydown', (e) => {
@@ -8172,6 +8175,13 @@ document.addEventListener('click', (e) => {
     return;
   }
 
+  const newBtn = e.target.closest('.project-new-btn');
+  if (newBtn) {
+    e.stopPropagation();
+    openNewSession(newBtn.dataset.projectPath);
+    return;
+  }
+
   const projectBtn = e.target.closest('.project-view-btn');
   if (projectBtn) {
     e.stopPropagation();
@@ -8230,14 +8240,8 @@ function filterByProject(project) {
 
 let projectsCache = null;
 
-async function updateProjectDropdown() {
-  const dropdown = document.getElementById('project-filter');
-
-  if (!projectsCacheDirty && projectsCache) {
-    renderProjectDropdown(dropdown, projectsCache);
-    return;
-  }
-
+async function loadProjects() {
+  if (!projectsCacheDirty && projectsCache) return projectsCache;
   let projects;
   try {
     const res = await fetch('/api/projects');
@@ -8247,10 +8251,20 @@ async function updateProjectDropdown() {
       .sort()
       .map((p) => ({ path: p, modifiedAt: null }));
   }
-
   projectsCache = projects;
   projectsCacheDirty = false;
+  return projects;
+}
 
+async function updateProjectDropdown() {
+  const dropdown = document.getElementById('project-filter');
+
+  if (!projectsCacheDirty && projectsCache) {
+    renderProjectDropdown(dropdown, projectsCache);
+    return;
+  }
+
+  const projects = await loadProjects();
   const cutoff = Date.now() - 24 * 60 * 60 * 1000;
   const prevRecent = recentProjects;
   recentProjects = new Set(
@@ -9715,6 +9729,9 @@ function toggleTerminal() {
 }
 
 function terminalShortcut(e) {
+  if (e.code === 'KeyN' && e.ctrlKey && e.altKey && !e.shiftKey && !e.metaKey && terminalAvailable()) {
+    return () => openNewSession();
+  }
   if (e.code !== 'Backquote' || e.metaKey) return null;
   if (e.ctrlKey && !e.altKey) return e.shiftKey ? openTerminalManager : toggleTerminal;
   if (e.altKey && !e.ctrlKey && !e.shiftKey) return toggleTerminalFocus;
@@ -9762,7 +9779,8 @@ function syncTerminal() {
   const wasShown = termState.shown;
   termState.shown = true;
   syncCloseGuard();
-  if (termState.sessionId !== currentSessionId) openTerminal(currentSessionId, 'auto');
+  if (termState.sessionId !== currentSessionId)
+    openTerminal(currentSessionId, newSpecs.has(currentSessionId) ? 'new' : 'auto');
   else if (!wasShown) onTerminalShown();
 }
 
@@ -9993,13 +10011,12 @@ function setTerminalStatus(text) {
 
 function hideTerminalPrompt() {
   document.getElementById('terminal-prompt').classList.remove('visible');
-  document.getElementById('terminal-pane').classList.remove('pending');
 }
 
-function showTerminalPrompt(sessionId, title, detail, choices, hideTerm = false) {
-  document.getElementById('terminal-pane').classList.toggle('pending', hideTerm);
+function showTerminalPrompt(sessionId, title, detail, choices, output = '') {
   const el = document.getElementById('terminal-prompt');
-  el.innerHTML = `<div class="terminal-prompt-text"><div class="terminal-prompt-title">${escapeHtml(title)}</div><div>${escapeHtml(detail)}</div></div><div class="terminal-prompt-actions">${choices
+  const tail = output ? `<pre class="${TINTED_PRE_CLASS} terminal-prompt-output">${escapeHtml(output)}</pre>` : '';
+  el.innerHTML = `<div class="terminal-prompt-text"><div class="terminal-prompt-title">${escapeHtml(title)}</div><div>${escapeHtml(detail)}</div></div>${tail}<div class="terminal-prompt-actions">${choices
     .map(
       ([mode, label]) =>
         `<button type="button" class="btn btn-secondary" data-mode="${escapeHtml(mode)}">${escapeHtml(label)}</button>`,
@@ -10010,6 +10027,17 @@ function showTerminalPrompt(sessionId, title, detail, choices, hideTerm = false)
   });
   el.classList.add('visible');
   el.querySelector('button')?.focus();
+}
+
+function terminalTail(count) {
+  const buf = termState.term?.buffer.active;
+  if (!buf) return '';
+  const lines = [];
+  for (let i = buf.length - 1; i >= 0 && lines.length < count; i--) {
+    const text = buf.getLine(i)?.translateToString(true) ?? '';
+    if (text.trim() || lines.length) lines.unshift(text);
+  }
+  return lines.join('\n');
 }
 
 // Closing the page leaves the PTY running, but Ctrl+W meant for the prompt closes the tab, so ask first.
@@ -10073,9 +10101,24 @@ async function openTerminal(sessionId, mode) {
   const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/api/terminal/ws`);
   ws.binaryType = 'arraybuffer';
   termState.ws = ws;
+  const spec = mode === 'new' ? newSpecs.get(sessionId) : null;
   ws.onopen = () =>
     ws.send(
-      JSON.stringify({ t: 'hello', token: terminalToken, id: sessionId, mode, cols: term.cols, rows: term.rows }),
+      JSON.stringify({
+        t: 'hello',
+        token: terminalToken,
+        id: sessionId,
+        mode,
+        cols: term.cols,
+        rows: term.rows,
+        ...(spec && {
+          cwd: spec.cwd,
+          name: spec.name,
+          worktree: spec.worktree,
+          model: spec.model,
+          prompt: spec.prompt,
+        }),
+      }),
     );
   ws.onmessage = (ev) => {
     if (termState.ws !== ws) return;
@@ -10102,6 +10145,9 @@ async function openTerminal(sessionId, mode) {
 
 function onTerminalMessage(sessionId, msg) {
   if (msg.t === 'ready') {
+    // The server has the prompt now; a later start of the same placeholder must not send it again.
+    const spec = newSpecs.get(sessionId);
+    if (spec) spec.prompt = null;
     hideTerminalPrompt();
     setTerminalStatus('');
     setTerminalAttached(true);
@@ -10117,21 +10163,28 @@ function onTerminalMessage(sessionId, msg) {
         ['fork', 'Fork'],
         ['shell', 'Shell only'],
       ],
-      true,
     );
   } else if (msg.t === 'exit') {
     setTerminalAttached(false);
-    // A failed exit keeps its output on screen, so the cause stays readable.
+    // A failed exit shows its last lines in the prompt, so the cause stays readable.
+    const clean = msg.code === 0 || msg.ended;
+    // With no first message there is no transcript to resume, only the same new session to start again.
+    const unsent = newSpecs.has(sessionId);
     showTerminalPrompt(
       sessionId,
-      'The shell exited',
-      msg.code === 0 ? 'Choose how to start again.' : `Exit code ${msg.code}. Its last output is below.`,
-      [
-        ['resume', 'Resume'],
-        ['fork', 'Fork'],
-        ['shell', 'Shell'],
-      ],
-      msg.code === 0,
+      msg.ended ? 'The terminal was ended' : 'The shell exited',
+      clean ? 'Choose how to start again.' : `Exit code ${msg.code}.`,
+      unsent
+        ? [
+            ['new', 'Start again'],
+            ['shell', 'Shell'],
+          ]
+        : [
+            ['resume', 'Resume'],
+            ['fork', 'Fork'],
+            ['shell', 'Shell'],
+          ],
+      clean ? '' : terminalTail(6),
     );
   } else if (msg.t === 'error') {
     setTerminalStatus(msg.msg || 'Terminal error');
@@ -10166,7 +10219,10 @@ async function renderTerminalManager() {
     return;
   }
   const max = appConfig.terminal?.maxSessions;
-  document.getElementById('terminal-manager-count').textContent = max ? `${list.length} / ${max}` : `${list.length}`;
+  document.getElementById('terminal-manager-count').textContent = max
+    ? `${list.length} of ${max} running`
+    : `${list.length} running`;
+  document.getElementById('terminal-manager-end-all').hidden = list.length < 2;
   if (!list.length) {
     body.innerHTML = '<div class="terminal-manager-empty">No terminals running</div>';
     return;
@@ -10176,15 +10232,23 @@ async function renderTerminalManager() {
     .map((t) => {
       const session = sessions.find((s) => s.id === t.id);
       const name = session ? sessionDisplayName(session) : t.id.slice(0, 8);
-      const here = t.id === termState.sessionId ? ' · this tab' : '';
-      const meta = `${t.mode} · pid ${t.pid} · up ${formatDuration(Date.now() - t.startedAt)} · ${t.clients} attached${here} · ${t.cwd}`;
-      return `<div class="terminal-manager-row">
+      const here = t.id === termState.sessionId ? '<span class="terminal-manager-here">this tab</span>' : '';
+      const attached = t.clients ? `${t.clients} attached` : 'detached';
+      return `<div class="terminal-manager-row${t.clients ? ' attached' : ''}">
+        <span class="terminal-manager-dot"></span>
         <div class="terminal-manager-info">
-          <div class="terminal-manager-name">${escapeHtml(name)}</div>
-          <div class="terminal-manager-meta" title="${escapeHtml(meta)}">${escapeHtml(meta)}</div>
+          <div class="terminal-manager-name"><span class="terminal-manager-title">${escapeHtml(name)}</span>${here}</div>
+          <div class="terminal-manager-meta">
+            <span class="terminal-manager-mode">${escapeHtml(t.mode)}</span>
+            <span title="${escapeHtml(`pid ${t.pid}`)}">up ${formatDuration(Date.now() - t.startedAt)}</span>
+            <span>${attached}</span>
+            <span class="terminal-manager-cwd" title="${escapeHtml(t.cwd)}">${escapeHtml(pathBasename(t.cwd))}</span>
+          </div>
         </div>
-        <button type="button" class="btn btn-secondary" data-open="${escapeHtml(t.id)}">Open</button>
-        <button type="button" class="btn btn-secondary" data-end="${escapeHtml(t.id)}">End</button>
+        <div class="terminal-manager-actions">
+          <button type="button" class="btn btn-secondary" data-open="${escapeHtml(t.id)}">Open</button>
+          <button type="button" class="btn btn-secondary terminal-manager-end" data-end="${escapeHtml(t.id)}">End</button>
+        </div>
       </div>`;
     })
     .join('');
@@ -10205,11 +10269,12 @@ async function renderTerminalManager() {
   });
 }
 
+function terminalFetch(url, method) {
+  return fetch(url, { method, headers: { 'X-Terminal-Token': terminalToken || '' } });
+}
+
 function endTerminal(id) {
-  return fetch(`/api/terminals/${encodeURIComponent(id)}`, {
-    method: 'DELETE',
-    headers: { 'X-Terminal-Token': terminalToken || '' },
-  }).catch(() => {});
+  return terminalFetch(`/api/terminals/${encodeURIComponent(id)}`, 'DELETE').catch(() => {});
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
@@ -10224,6 +10289,310 @@ window.addEventListener('message', (e) => {
   if (e.data?.type === 'hub:active' && e.data.active && wantsTerminal()) onTerminalShown();
 });
 
+//#endregion
+
+//#region NEW_SESSION
+// claude writes no transcript until the first message, so until then the sidebar shows a
+// placeholder built from the form. newSpecs holds one entry per such session; the entry
+// goes when the real session shows up in /api/sessions.
+const NEW_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,79}$/;
+const NEW_WORKTREE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+const NS_MAX_MATCHES = 8;
+const PLUS_SVG =
+  '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>';
+const newSpecs = new Map();
+const ns = { projects: [], picked: [], matches: [], idx: -1, folder: '', browsing: false };
+
+function placeholderSession(id, spec) {
+  return {
+    id,
+    placeholder: true,
+    name: spec.name || 'New session',
+    project: spec.cwd,
+    worktree: spec.worktree ? { repo: spec.cwd, name: spec.worktree === true ? 'new' : spec.worktree } : null,
+    modifiedAt: new Date(spec.startedAt).toISOString(),
+    hasMessages: true,
+    hasRecentActivity: true,
+    taskCount: 0,
+    completed: 0,
+  };
+}
+
+function mergePlaceholders(list) {
+  if (!newSpecs.size) return list;
+  const ids = new Set(list.map((s) => s.id));
+  for (const id of [...newSpecs.keys()]) if (ids.has(id)) newSpecs.delete(id);
+  return [...[...newSpecs].reverse().map(([id, spec]) => placeholderSession(id, spec)), ...list];
+}
+
+function renderPlaceholderCard(session) {
+  const isActive = session.id === currentSessionId && viewMode === 'session';
+  const projectHtml = renderProjectIdentity(session);
+  return `
+          <button onclick="fetchTasks('${escAttrJs(session.id)}')" data-session-id="${escapeHtml(session.id)}" class="session-item session-placeholder ${isActive ? 'active' : ''}" title="${escapeHtml(`${session.id} | ${session.project}`)}">
+            <div class="session-name">${escapeHtml(session.name)}</div>
+            ${projectHtml ? `<div class="session-secondary">${projectHtml}</div>` : ''}
+            <div class="session-waiting"><span class="pulse"></span>waiting for your first message</div>
+          </button>
+        `;
+}
+
+// After a reload the form is gone, but the PTY still runs; its hello options come back from the server.
+async function restorePendingSessions() {
+  document.getElementById('new-session-btn').hidden = !terminalAvailable();
+  if (!terminalAvailable()) return;
+  try {
+    const res = await fetch('/api/terminals', { cache: 'no-store' });
+    for (const t of (await res.json()).sessions || []) {
+      if (t.mode !== 'new' || newSpecs.has(t.id)) continue;
+      newSpecs.set(t.id, { cwd: t.cwd, name: t.name, worktree: t.worktree, startedAt: t.startedAt });
+    }
+  } catch (_) {}
+}
+
+function openNewSession(folder) {
+  if (!terminalAvailable() || document.getElementById('new-session-modal').classList.contains('visible')) return;
+  if (document.getElementById('terminal-pane').contains(document.activeElement)) leaveTerminalPane();
+  for (const id of ['ns-name', 'ns-wt-name', 'ns-prompt']) document.getElementById(id).value = '';
+  document.getElementById('ns-wt').checked = false;
+  document.getElementById('ns-model').value = '';
+  setNewSessionError('');
+  setNewSessionFolder(folder || '');
+  document.getElementById('new-session-modal').classList.add('visible');
+  const input = document.getElementById('ns-folder');
+  input.focus();
+  input.select();
+  loadProjects().then((list) => {
+    ns.projects = list
+      .filter((p) => !p.temp)
+      .sort((a, b) => (b.modifiedAt || '').localeCompare(a.modifiedAt || ''))
+      .map((p) => p.path);
+    if (!ns.folder) setNewSessionFolder(input.value, true);
+    if (folderListOpen()) renderFolderList();
+  });
+}
+
+function closeNewSession() {
+  hideModalOverlay('new-session-modal');
+  closeFolderList();
+}
+
+function knownFolders() {
+  return [...new Set([...ns.picked, ...ns.projects])];
+}
+
+// The field holds free text; a folder counts as chosen only when the text is a known project
+// or a folder the dialog returned, because those are the only ones the server accepts.
+// The sidebar's projects count too, so a prefilled folder is usable before /api/projects answers.
+function setNewSessionFolder(value, keepList) {
+  const input = document.getElementById('ns-folder');
+  input.value = value;
+  const known = knownFolders().includes(value) || sessions.some((s) => !s.placeholder && s.project === value);
+  ns.folder = value && known ? value : '';
+  if (!keepList) closeFolderList();
+  renderNewSessionForm();
+}
+
+function folderRank(path, q) {
+  const name = pathBasename(path).toLowerCase();
+  if (name === q) return 0;
+  if (name.startsWith(q)) return 1;
+  if (name.includes(q)) return 2;
+  return path.toLowerCase().includes(q) ? 3 : 4;
+}
+
+function rankFolders(paths, query) {
+  const q = query.toLowerCase();
+  return paths
+    .filter((p) => fuzzyMatch(p, query))
+    .map((p) => ({ p, r: folderRank(p, q) }))
+    .sort((a, b) => a.r - b.r)
+    .map((x) => x.p);
+}
+
+function renderFolderList() {
+  const input = document.getElementById('ns-folder');
+  const list = document.getElementById('ns-folder-list');
+  const query = input.value.trim();
+  const all = knownFolders();
+  ns.matches = (query && query !== ns.folder ? rankFolders(all, query) : all).slice(0, NS_MAX_MATCHES);
+  if (ns.idx >= ns.matches.length) ns.idx = ns.matches.length - 1;
+  list.innerHTML = ns.matches.length
+    ? ns.matches
+        .map(
+          (p, i) =>
+            `<div class="ns-option${i === ns.idx ? ' active' : ''}" role="option" data-idx="${i}" aria-selected="${i === ns.idx}"><span class="ns-option-name">${escapeHtml(pathBasename(p))}</span><span class="ns-option-path">${escapeHtml(p)}</span></div>`,
+        )
+        .join('')
+    : '<div class="ns-empty"><span>No project matches</span><button type="button" class="btn btn-secondary ns-browse" data-browse>Browse…</button></div>';
+  list.hidden = false;
+  input.setAttribute('aria-expanded', 'true');
+}
+
+function moveFolderHighlight(step) {
+  const n = ns.matches.length;
+  if (!n) return;
+  ns.idx = (ns.idx + step + n) % n;
+  for (const row of document.querySelectorAll('#ns-folder-list .ns-option')) {
+    const on = Number(row.dataset.idx) === ns.idx;
+    row.classList.toggle('active', on);
+    row.setAttribute('aria-selected', on);
+  }
+}
+
+function closeFolderList() {
+  document.getElementById('ns-folder-list').hidden = true;
+  document.getElementById('ns-folder').setAttribute('aria-expanded', 'false');
+  ns.idx = -1;
+}
+
+function folderListOpen() {
+  return !document.getElementById('ns-folder-list').hidden;
+}
+
+function newSessionValues() {
+  const wtOn = document.getElementById('ns-wt').checked;
+  const wtName = document.getElementById('ns-wt-name').value.trim();
+  return {
+    cwd: ns.folder,
+    name: document.getElementById('ns-name').value.trim() || null,
+    worktree: wtOn ? wtName || true : false,
+    model: document.getElementById('ns-model').value || null,
+    prompt: document.getElementById('ns-prompt').value.trim() || null,
+  };
+}
+
+function newSessionProblem(v) {
+  if (v.name && !NEW_NAME_RE.test(v.name))
+    return 'Name: use letters, digits, spaces and . _ -, starting with a letter or digit.';
+  if (typeof v.worktree === 'string' && !NEW_WORKTREE_RE.test(v.worktree))
+    return 'Worktree name: use letters, digits and . _ -, starting with a letter or digit.';
+  return '';
+}
+
+function setNewSessionError(text) {
+  const el = document.getElementById('ns-error');
+  el.textContent = text;
+  el.hidden = !text;
+}
+
+function renderNewSessionForm() {
+  const v = newSessionValues();
+  const wtOn = v.worktree !== false;
+  const wtInput = document.getElementById('ns-wt-name');
+  wtInput.disabled = !wtOn;
+  const hint = document.getElementById('ns-wt-hint');
+  hint.hidden = !wtOn;
+  hint.textContent = `.claude/worktrees/${typeof v.worktree === 'string' ? v.worktree : '<name chosen by Claude>'}`;
+  const problem = newSessionProblem(v);
+  setNewSessionError(problem);
+  const start = document.getElementById('ns-start');
+  start.disabled = !v.cwd || !!problem || ns.browsing;
+  start.textContent = v.cwd ? `Start in ${pathBasename(v.cwd)}` : 'Start';
+}
+
+async function browseNewSessionFolder() {
+  if (ns.browsing) return;
+  ns.browsing = true;
+  closeFolderList();
+  const btn = document.getElementById('ns-browse');
+  btn.textContent = 'Opening…';
+  renderNewSessionForm();
+  try {
+    const res = await terminalFetch('/api/terminal/pick-folder', 'POST');
+    const body = await res.json().catch(() => ({}));
+    if (res.status === 401) setNewSessionError('The terminal token is out of date. Reload the hub window.');
+    else if (!res.ok) setNewSessionError(body.error || `Folder dialog failed (${res.status})`);
+    else if (body.path) {
+      ns.picked = [body.path, ...ns.picked.filter((p) => p !== body.path)];
+      setNewSessionFolder(body.path);
+    }
+  } catch (e) {
+    setNewSessionError(e.message);
+  } finally {
+    ns.browsing = false;
+    btn.textContent = 'Browse…';
+    renderNewSessionForm();
+    document.getElementById(ns.folder ? 'ns-name' : 'ns-folder').focus();
+  }
+}
+
+function startNewSession() {
+  const v = newSessionValues();
+  if (!v.cwd || newSessionProblem(v) || ns.browsing) return;
+  const id = crypto.randomUUID();
+  newSpecs.set(id, { ...v, startedAt: Date.now() });
+  sessions = mergePlaceholders(sessions.filter((s) => !s.placeholder));
+  setTerminalMode(id, true);
+  closeNewSession();
+  fetchTasks(id).then(() => sessionsList.querySelector('.session-item.active')?.scrollIntoView({ block: 'nearest' }));
+}
+
+function pickFolderOption(i) {
+  const path = ns.matches[i];
+  if (!path) return;
+  setNewSessionFolder(path);
+  document.getElementById('ns-name').focus();
+}
+
+function initNewSession() {
+  const modal = document.getElementById('new-session-modal');
+  const input = document.getElementById('ns-folder');
+  const list = document.getElementById('ns-folder-list');
+  input.addEventListener('input', () => {
+    setNewSessionFolder(input.value, true);
+    if (ns.folder) return closeFolderList();
+    ns.idx = 0;
+    renderFolderList();
+  });
+  input.addEventListener('focus', () => {
+    if (!ns.folder) renderFolderList();
+  });
+  input.addEventListener('click', () => {
+    if (!folderListOpen()) renderFolderList();
+  });
+  input.addEventListener('blur', () =>
+    setTimeout(() => {
+      if (!list.contains(document.activeElement)) closeFolderList();
+    }, 0),
+  );
+  // mousedown, not click: the input's blur would close the list before a click lands.
+  list.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    if (e.target.closest('[data-browse]')) return browseNewSessionFolder();
+    const row = e.target.closest('.ns-option');
+    if (row) pickFolderOption(Number(row.dataset.idx));
+  });
+  document.getElementById('ns-wt').addEventListener('change', (e) => {
+    renderNewSessionForm();
+    if (e.target.checked) document.getElementById('ns-wt-name').focus();
+  });
+  for (const id of ['ns-name', 'ns-wt-name', 'ns-prompt', 'ns-model']) {
+    document.getElementById(id).addEventListener('input', renderNewSessionForm);
+  }
+  // Bound on the dialog: the global handler returns early on INPUT and TEXTAREA targets.
+  modal.addEventListener('keydown', (e) => {
+    const inFolder = e.target === input;
+    if (e.key === 'Escape') {
+      if (folderListOpen()) closeFolderList();
+      else closeNewSession();
+    } else if (inFolder && matchKey(e, 'ArrowDown')) {
+      if (!folderListOpen()) renderFolderList();
+      else moveFolderHighlight(1);
+    } else if (inFolder && matchKey(e, 'ArrowUp') && folderListOpen()) {
+      moveFolderHighlight(-1);
+    } else if (inFolder && e.key === 'Enter' && folderListOpen() && ns.idx >= 0 && ns.matches[ns.idx] !== ns.folder) {
+      pickFolderOption(ns.idx);
+    } else if (e.key === 'Enter' && (e.target.tagName !== 'TEXTAREA' || e.ctrlKey || e.metaKey)) {
+      if (e.target.tagName === 'BUTTON') return;
+      startNewSession();
+    } else return;
+    e.preventDefault();
+    e.stopPropagation();
+  });
+}
+
+initNewSession();
 //#endregion
 
 //#region PWA
@@ -10449,6 +10818,7 @@ Promise.all([
     })
     .catch(() => {}),
 ])
+  .then(restorePendingSessions)
   .then(() => fetchSessions())
   .then(async () => {
     if (urlState.projectView) {
@@ -10515,8 +10885,15 @@ function isHubKey(e) {
   if (!window.__HUB__?.enabled) return false;
   if (e.ctrlKey && e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) return true;
   // Own branch: the Alt+digit case below requires !ctrlKey. The hub owns the Ctrl+Alt+letter
-  // keymap and ignores unbound letters.
-  if (e.ctrlKey && e.altKey && !e.shiftKey && !e.metaKey && (/^[a-z]$/i.test(e.key) || /^Key[A-Z]$/.test(e.code))) {
+  // keymap and ignores unbound letters. Ctrl+Alt+N is the one letter cck keeps: New session.
+  if (
+    e.ctrlKey &&
+    e.altKey &&
+    !e.shiftKey &&
+    !e.metaKey &&
+    e.code !== 'KeyN' &&
+    (/^[a-z]$/i.test(e.key) || /^Key[A-Z]$/.test(e.code))
+  ) {
     return true;
   }
   return e.altKey && !e.ctrlKey && !e.shiftKey && !e.metaKey && (/^[1-9]$/.test(e.key) || /^Digit[1-9]$/.test(e.code));

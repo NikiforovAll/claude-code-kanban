@@ -4,7 +4,7 @@
 const express = require('express');
 const path = require('node:path');
 const fs = require('node:fs').promises;
-const { existsSync, readdirSync, readFileSync, writeFileSync, statSync, unlinkSync, mkdirSync, renameSync, openSync, readSync, closeSync } = require('node:fs');
+const { existsSync, readdirSync, readFileSync, writeFileSync, statSync, unlinkSync, mkdirSync, renameSync, openSync, readSync, closeSync, realpathSync } = require('node:fs');
 const _readline = require('node:readline');
 const chokidar = require('chokidar');
 const os = require('node:os');
@@ -39,6 +39,7 @@ const { inlineHtmlAssets, MIME_BY_EXT } = require('./lib/inline-assets');
 const { buildDecision, decisionFileName, isDecisionFile, approvalsFrom, boardRefusal } = require('./lib/approvals');
 const { getClaudeDir, getArgValue, storageNamespace, isDefaultClaudeDir } = require('./lib/claude-dir');
 const { createTerminalService, readTerminalConfig } = require('./lib/terminal');
+const { pickFolder } = require('./lib/folder-dialog');
 
 if (process.argv.includes("--install") || process.argv.includes("--uninstall")) {
   const { runInstall, runUninstall } = require("./install");
@@ -1538,6 +1539,15 @@ app.get('/api/sessions', async (req, res) => {
   }
 });
 
+// os.tmpdir() can be an 8.3 short path on Windows; transcripts record the long form.
+const TEMP_ROOT = (() => {
+  try { return realpathSync.native(os.tmpdir()); } catch { return os.tmpdir(); }
+})();
+function isTempPath(p) {
+  const rel = path.relative(TEMP_ROOT, p);
+  return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel);
+}
+
 // API: Get distinct project paths with last-modified timestamps
 app.get('/api/projects', (_req, res) => {
   res.setHeader('Cache-Control', 'no-store');
@@ -1551,7 +1561,11 @@ app.get('/api/projects', (_req, res) => {
     }
   }
   const projects = Object.entries(projectMap)
-    .map(([path, mtime]) => ({ path, modifiedAt: mtime ? new Date(mtime).toISOString() : null }))
+    .map(([path, mtime]) => ({
+      path,
+      modifiedAt: mtime ? new Date(mtime).toISOString() : null,
+      ...(isTempPath(path) && { temp: true }),
+    }))
     .sort((a, b) => a.path.localeCompare(b.path));
   res.json(projects);
 });
@@ -3090,6 +3104,15 @@ app.get('/api/config', (_req, res) => {
 // #endregion
 
 // #region TERMINAL
+// A new session may start only in a folder the user has already worked in, or one they
+// chose in the native dialog during this run. Anything else would let a page script pick
+// the directory claude runs in.
+const pickedFolders = new Set();
+function isAllowedFolder(dir) {
+  const known = pickedFolders.has(dir) || Object.values(loadSessionMetadata()).some((m) => m.project === dir);
+  try { return known && statSync(dir).isDirectory(); } catch { return false; }
+}
+
 const terminal = createTerminalService({
   config: readTerminalConfig({ getArgValue }),
   net,
@@ -3104,6 +3127,25 @@ const terminal = createTerminalService({
     const meta = loadSessionMetadata()[id];
     return meta ? meta.project || meta.cwd || null : null;
   },
+  isAllowedFolder,
+});
+
+let folderDialogOpen = false;
+app.post('/api/terminal/pick-folder', async (req, res) => {
+  const reason = terminal.unavailableReason();
+  if (reason) return res.status(403).json({ error: reason });
+  if (!terminal.authorized(req.get('x-terminal-token'))) return res.status(401).json({ error: 'invalid terminal token' });
+  if (folderDialogOpen) return res.status(409).json({ error: 'a folder dialog is already open' });
+  folderDialogOpen = true;
+  try {
+    const dir = await pickFolder(whichSync);
+    if (dir) pickedFolders.add(dir);
+    res.json({ path: dir });
+  } catch (e) {
+    res.status(501).json({ error: e.message });
+  } finally {
+    folderDialogOpen = false;
+  }
 });
 
 // The hub's eviction check reads this to keep a pool with live PTYs alive.
