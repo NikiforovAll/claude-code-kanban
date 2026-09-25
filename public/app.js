@@ -10113,8 +10113,8 @@ function onTerminalMessage(sessionId, msg) {
       'Running in another terminal',
       'Resuming it here too makes both processes write to the same transcript.',
       [
-        ['fork', 'Fork'],
         ['resume', 'Resume anyway'],
+        ['fork', 'Fork'],
         ['shell', 'Shell only'],
       ],
       true,
