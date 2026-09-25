@@ -9638,7 +9638,7 @@ const termState = {
   webgl: null,
   ws: null,
   sessionId: null,
-  syncedSession: null,
+  syncedView: null,
   panelHidden: false,
   shown: false,
   attached: false,
@@ -9714,9 +9714,11 @@ function syncTerminal() {
   const btn = document.getElementById('terminal-toggle');
   const on = wantsTerminal();
   const arrived = viewMode === 'session' ? currentSessionId : null;
-  if (arrived !== termState.syncedSession) {
-    termState.syncedSession = arrived;
-    // The terminal shows the same conversation, so the log panel only takes width; it comes back on the next session without one.
+  const view = `${arrived}:${on}`;
+  // Only on a change of session or terminal state, so a panel opened by hand over the terminal stays.
+  if (view !== termState.syncedView) {
+    termState.syncedView = view;
+    // The terminal shows the same conversation, so the log panel only takes width; it comes back when the terminal goes.
     if (on && messagePanelOpen) {
       toggleMessagePanel();
       termState.panelHidden = true;
