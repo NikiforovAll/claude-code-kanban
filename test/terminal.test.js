@@ -5,7 +5,7 @@ const { mkdtempSync, rmSync } = require('node:fs');
 const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
-const { shellArgs, readTerminalConfig, claudeArgsFor, parseNewSpec } = require('../lib/terminal');
+const { shellArgs, readTerminalConfig, resolveShell, claudeArgsFor, parseNewSpec } = require('../lib/terminal');
 
 let WebSocket = null;
 let ptyAvailable = false;
@@ -108,6 +108,11 @@ describe('shellArgs', () => {
   it('starts a bare shell in shell mode', () => {
     assert.deepEqual(shellArgs('cmd.exe', null), []);
   });
+  it('starts Git Bash as a login shell, before and after claude', () => {
+    const bash = 'C:/Program Files/Git/bin/bash.exe';
+    assert.deepEqual(shellArgs(bash, null), ['--login', '-i']);
+    assert.deepEqual(shellArgs(bash, ['--resume', SESSION]), ['--login', '-i', '-c', `claude --resume ${SESSION}; exec bash --login -i`]);
+  });
   it('quotes an argument with a space for each shell family', () => {
     const args = ['--name', 'Fix login'];
     assert.equal(shellArgs('pwsh.exe', args)[3], "claude --name 'Fix login'");
@@ -133,6 +138,23 @@ describe('new session options', () => {
   });
 });
 
+describe('resolveShell', () => {
+  const which = (tools) => (cmd) => tools[cmd] || null;
+  it('infers pwsh on Windows and $SHELL elsewhere', () => {
+    assert.equal(resolveShell(null, which({ pwsh: 'C:/pwsh.exe' }), 'win32', {}), 'C:/pwsh.exe');
+    assert.equal(resolveShell(null, which({ powershell: 'C:/ps.exe' }), 'win32', {}), 'C:/ps.exe');
+    assert.equal(resolveShell(null, which({}), 'linux', { SHELL: '/bin/zsh' }), '/bin/zsh');
+  });
+  it('finds Git Bash beside git on PATH', () => {
+    const git = path.join(__dirname, 'no-such-git', 'cmd', 'git.exe');
+    assert.throws(() => resolveShell('gitbash', which({ git }), 'win32', {}), /"gitbash" not found/);
+  });
+  it('looks a name up on PATH and fails loudly when it is missing', () => {
+    assert.equal(resolveShell('zsh', which({ zsh: '/usr/bin/zsh' }), 'linux', {}), '/usr/bin/zsh');
+    assert.throws(() => resolveShell('fish', which({}), 'linux', {}), /"fish" not found/);
+  });
+});
+
 describe('readTerminalConfig', () => {
   it('is off by default and turns on from the flag or the hub block', () => {
     assert.equal(readTerminalConfig({ argv: [], env: {} }).enabled, false);
@@ -141,6 +163,12 @@ describe('readTerminalConfig', () => {
     assert.equal(c.enabled, true);
     assert.equal(c.maxSessions, 2);
     assert.equal(c.noFlicker, false);
+  });
+  it('takes the shell from the flag, then the env var, then the hub block', () => {
+    const env = { CCK_TERMINAL: '{"shell":"pwsh"}', CCK_TERMINAL_SHELL: 'gitbash' };
+    assert.equal(readTerminalConfig({ argv: [], env }).shell, 'gitbash');
+    assert.equal(readTerminalConfig({ argv: [], env, getArgValue: () => 'cmd' }).shell, 'cmd');
+    assert.equal(readTerminalConfig({ argv: [], env: { CCK_TERMINAL: '{"shell":"pwsh"}' } }).shell, 'pwsh');
   });
   it('ignores a malformed block', () => {
     assert.equal(readTerminalConfig({ argv: [], env: { CCK_TERMINAL: '{' } }).enabled, false);

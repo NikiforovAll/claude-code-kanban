@@ -21,8 +21,8 @@ body.light .theme-swatch-nord { --sw-bg: #eceff4; --sw-accent: #5e81ac; --sw-ink
 body.light .theme-swatch-rose-pine { --sw-bg: #faf4ed; --sw-accent: #907aa9; --sw-ink: #575279; --sw-border: #dfdad9; }
 .theme-swatch-everforest { --sw-bg: #2d353b; --sw-accent: #a7c080; --sw-ink: #d3c6aa; --sw-border: #475258; }
 body.light .theme-swatch-everforest { --sw-bg: #fdf6e3; --sw-accent: #6f8352; --sw-ink: #4d5960; --sw-border: #d8d3ba; }
-.theme-swatch-kanagawa { --sw-bg: #1f1f28; --sw-accent: #7e9cd8; --sw-ink: #dcd7ba; --sw-border: #54546d; }
-body.light .theme-swatch-kanagawa { --sw-bg: #f2ecbc; --sw-accent: #4d699b; --sw-ink: #545464; --sw-border: #c7bf94; }
+.theme-swatch-kanagawa { --sw-bg: #1f1f28; --sw-accent: #7e9cd8; --sw-ink: #dcd7ba; --sw-border: #3a3a4e; }
+body.light .theme-swatch-kanagawa { --sw-bg: #f3f0e4; --sw-accent: #4d699b; --sw-ink: #545464; --sw-border: #d2ccb6; }
 .theme-swatch-one-dark { --sw-bg: #282c34; --sw-accent: #61afef; --sw-ink: #d7dae0; --sw-border: #4b5263; }
 body.light .theme-swatch-one-dark { --sw-bg: #fafafa; --sw-accent: #4078f2; --sw-ink: #383a42; --sw-border: #d4d4d6; }
 .theme-swatch-night-owl { --sw-bg: #0b2942; --sw-accent: #82aaff; --sw-ink: #d6deeb; --sw-border: #5f7e97; }
@@ -440,9 +440,9 @@ body[data-color-theme="kanagawa"]:not(.light) {
   --bg-surface: #1f1f28;
   --bg-elevated: #2a2a37;
   --bg-hover: #363646;
-  --border: #54546d;
+  --border: #3a3a4e;
   --text-primary: #dcd7ba;
-  --text-secondary: #c8c093;
+  --text-secondary: #bcb8a4;
   --text-tertiary: #a6a69c;
   --text-muted: #727169;
 }
@@ -451,11 +451,11 @@ body.light[data-color-theme="kanagawa"] {
   --accent-text: #38537f;
   --accent-dim: rgba(77,105,155,0.18);
   --accent-glow: rgba(77, 105, 155, 0.5);
-  --bg-deep: #e5ddb0;
-  --bg-surface: #f2ecbc;
-  --bg-elevated: #faf5d2;
-  --bg-hover: #dcd5ac;
-  --border: #c7bf94;
+  --bg-deep: #e9e5d6;
+  --bg-surface: #f3f0e4;
+  --bg-elevated: #faf8f1;
+  --bg-hover: #e2ddcb;
+  --border: #d2ccb6;
   --text-primary: #545464;
   --text-secondary: #66667a;
   --text-tertiary: #716e61;
@@ -467,11 +467,11 @@ body:not(.dark-forced)[data-color-theme="kanagawa"] {
   --accent-text: #38537f;
   --accent-dim: rgba(77,105,155,0.18);
   --accent-glow: rgba(77, 105, 155, 0.5);
-  --bg-deep: #e5ddb0;
-  --bg-surface: #f2ecbc;
-  --bg-elevated: #faf5d2;
-  --bg-hover: #dcd5ac;
-  --border: #c7bf94;
+  --bg-deep: #e9e5d6;
+  --bg-surface: #f3f0e4;
+  --bg-elevated: #faf8f1;
+  --bg-hover: #e2ddcb;
+  --border: #d2ccb6;
   --text-primary: #545464;
   --text-secondary: #66667a;
   --text-tertiary: #716e61;
