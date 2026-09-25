@@ -4,16 +4,11 @@
   font-display: swap;
 }
 
-/* body repeats :root so var()-derived tokens resolve against the theme vars set on body. */
-:root,
-body {
+:root {
   --bg-deep: #101114;
   --bg-surface: #16181c;
   --bg-elevated: #1e2025;
   --bg-hover: #282a30;
-  /* Selection reads as a recess against the darker surface here, but light theme's deep tone
-     sits within a shade of the sidebar, so there it has to rise instead. */
-  --session-active-bg: var(--bg-deep);
   --border: #363840;
   --text-primary: #f0f1f3;
   --text-secondary: #c2c4c9;
@@ -34,22 +29,18 @@ body {
   --team-dim: rgba(96, 165, 250, 0.18);
   --plan: #86a886;
   --plan-dim: rgba(134, 168, 134, 0.18);
-  --ansi-black: var(--text-muted);
   --ansi-red: #e06c66;
   --ansi-green: #3ecf8e;
   --ansi-yellow: #e0b04a;
   --ansi-blue: #60a5fa;
   --ansi-magenta: #c98ce0;
   --ansi-cyan: #4dc9c9;
-  --ansi-white: var(--text-secondary);
-  --ansi-bright-black: var(--text-tertiary);
   --ansi-bright-red: #ff8a84;
   --ansi-bright-green: #5ee3a8;
   --ansi-bright-yellow: #f0c56a;
   --ansi-bright-blue: #8bbdfb;
   --ansi-bright-magenta: #e0a8f0;
   --ansi-bright-cyan: #7ddede;
-  --ansi-bright-white: var(--text-primary);
   --mono: 'IBM Plex Mono', monospace;
   --serif: 'Playfair Display', serif;
   --card-gap: 7px;
@@ -61,6 +52,18 @@ body {
   --font-serif: var(--serif);
   /* reading-surface scale for the message-detail and preview modals (Ctrl +/-/0) */
   --modal-zoom: 1;
+}
+
+/* Tokens derived from theme colors live on body, where color themes set those colors;
+   on :root they would resolve to the defaults before a theme applies. */
+body {
+  /* Selection reads as a recess against the darker surface here, but light theme's deep tone
+     sits within a shade of the sidebar, so there it has to rise instead. */
+  --session-active-bg: var(--bg-deep);
+  --ansi-black: var(--text-muted);
+  --ansi-white: var(--text-secondary);
+  --ansi-bright-black: var(--text-tertiary);
+  --ansi-bright-white: var(--text-primary);
 }
 
 * {
@@ -117,7 +120,7 @@ body::before {
 /* #region SIDEBAR */
 .sidebar {
   width: var(--sidebar-width, 310px);
-  background: var(--bg-surface);
+  background: var(--sidebar-bg, var(--bg-surface));
   border-right: 1px solid color-mix(in srgb, var(--border) 35%, transparent);
   box-shadow: 1px 0 12px rgba(0, 0, 0, 0.04);
   display: flex;
@@ -604,7 +607,7 @@ body::before {
   width: 100%;
   padding: 13px 15px;
   margin-bottom: 6px;
-  background: transparent;
+  background: var(--sidebar-item-bg, transparent);
   border: 1px solid var(--border);
   border-radius: 9px;
   text-align: left;
@@ -4716,7 +4719,7 @@ body.light {
   --text-secondary: #444444;
   --text-tertiary: #666666;
   --text-muted: #888888;
-  --accent-text: #b85a20;
+  --accent-text: #a0501c;
   --accent-dim: rgba(232, 111, 51, 0.18);
   --accent-glow: rgba(232, 111, 51, 0.5);
   --gold: #a8842f;
@@ -4787,7 +4790,7 @@ body.light .msg-assistant .msg-text {
 .search-input {
   width: 100%;
   padding: 9px 32px 9px 12px;
-  background: var(--bg-deep);
+  background: var(--sidebar-item-bg, var(--bg-deep));
   border: 1px solid transparent;
   border-radius: 6px;
   color: var(--text-primary);
