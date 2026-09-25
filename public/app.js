@@ -10294,6 +10294,9 @@ function onTerminalMessage(sessionId, msg) {
     if (takeTerminalFocus(sessionId)) termState.term.focus();
   } else if (msg.t === 'rekey' && typeof msg.id === 'string') {
     adoptPickedSession(sessionId, msg.id);
+    if (msg.duplicate) showToast('That session is already open here, so this terminal switched to it', 'info');
+    else if (msg.elsewhere)
+      showToast('That session also runs in another terminal; both write the same transcript', 'error');
   } else if (msg.t === 'live') {
     showTerminalPrompt(
       sessionId,

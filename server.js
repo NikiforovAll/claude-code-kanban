@@ -456,9 +456,9 @@ function isRegistryIdle(sessionId) {
 }
 
 // A registry file outlives a crashed claude, so the pid is probed rather than trusted.
-function isSessionProcessAlive(sessionId) {
+function isSessionProcessAlive(sessionId, exceptPid = null) {
   return loadLiveSessions().some((s) => {
-    if (s.sessionId !== sessionId || !s.pid) return false;
+    if (s.sessionId !== sessionId || !s.pid || s.pid === exceptPid) return false;
     try { process.kill(s.pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }
   });
 }
