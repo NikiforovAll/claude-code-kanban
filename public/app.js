@@ -615,6 +615,7 @@ async function refreshProjectAgents() {
 function toggleMessagePanel() {
   const panel = document.getElementById('message-panel');
   messagePanelOpen = !messagePanelOpen;
+  termState.panelHidden = false;
   store.setItem('message-panel-open', messagePanelOpen);
   panel.classList.toggle('visible', messagePanelOpen);
   document.getElementById('message-toggle')?.classList.toggle('active', messagePanelOpen);
@@ -9637,6 +9638,8 @@ const termState = {
   webgl: null,
   ws: null,
   sessionId: null,
+  syncedSession: null,
+  panelHidden: false,
   shown: false,
   attached: false,
   closeGuard: false,
@@ -9710,6 +9713,15 @@ function toggleTerminalFocus() {
 function syncTerminal() {
   const btn = document.getElementById('terminal-toggle');
   const on = wantsTerminal();
+  const arrived = viewMode === 'session' ? currentSessionId : null;
+  if (arrived !== termState.syncedSession) {
+    termState.syncedSession = arrived;
+    // The terminal shows the same conversation, so the log panel only takes width; it comes back on the next session without one.
+    if (on && messagePanelOpen) {
+      toggleMessagePanel();
+      termState.panelHidden = true;
+    } else if (!on && arrived && termState.panelHidden) toggleMessagePanel();
+  }
   if (btn) {
     btn.style.display = terminalAvailable() && viewMode === 'session' && currentSessionId ? '' : 'none';
     btn.classList.toggle('active', on);
