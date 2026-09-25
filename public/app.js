@@ -24,6 +24,8 @@ const FILTER_DEFAULTS = { project: '__recent__', session: 'active', limit: '20' 
 
 let sessions = [];
 let currentSessionId = null;
+let lastSessionId = null;
+let previousSessionId = null;
 let currentTasks = [];
 let viewMode = 'session';
 let sessionFilter = FILTER_DEFAULTS.session;
@@ -450,6 +452,10 @@ async function fetchTasks(sessionId) {
       revealedStorageSessionId = null;
     }
     if (currentSessionId && currentSessionId !== sessionId) deferredPinPlacement.delete(currentSessionId);
+    if (lastSessionId !== sessionId) {
+      previousSessionId = lastSessionId;
+      lastSessionId = sessionId;
+    }
     currentSessionId = sessionId;
     currentPins = loadPins(sessionId);
     ownerFilter = '';
@@ -5331,6 +5337,7 @@ const SHORTCUT_PAIRS = [
       rows: [
         { keys: ['Ctrl', 'Alt', 'N'], combo: true, label: 'New session' },
         { keys: ['Ctrl', 'Alt', 'R'], combo: true, label: 'Resume session (claude -r)' },
+        { keys: ['Ctrl', 'Alt', 'S'], combo: true, label: 'Swap to previous session' },
       ],
     },
   ],
@@ -9702,8 +9709,9 @@ function filterByOwner(value) {
 // reattaches and the server replays the screen.
 const TERMINAL_TOKEN_KEY = 'terminal-token';
 const TERMINAL_TOKEN_RE = /^[0-9a-f]{64}$/;
-// Ctrl+Alt letters cck keeps instead of forwarding to the hub: New session and Resume session.
-const CCK_CTRL_ALT_KEYS = new Set(['KeyN', 'KeyR']);
+// Ctrl+Alt letters cck keeps instead of forwarding to the hub: New session, Resume session, and
+// Swap to the previous session.
+const CCK_CTRL_ALT_KEYS = new Set(['KeyN', 'KeyR', 'KeyS']);
 const TERMINAL_MODES_KEY = 'terminal-sessions';
 const ACK_BATCH_BYTES = 32 * 1024;
 const TERMINAL_RETRY_MS = [500, 1000, 2000, 4000, 8000];
@@ -9817,7 +9825,9 @@ function terminalPaneFocused() {
 }
 
 function terminalShortcut(e) {
-  if (CCK_CTRL_ALT_KEYS.has(e.code) && e.ctrlKey && e.altKey && !e.shiftKey && !e.metaKey && terminalAvailable()) {
+  const ctrlAlt = e.ctrlKey && e.altKey && !e.shiftKey && !e.metaKey;
+  if (ctrlAlt && e.code === 'KeyS') return swapToPreviousSession;
+  if (ctrlAlt && (e.code === 'KeyN' || e.code === 'KeyR') && terminalAvailable()) {
     return () => openNewSession(null, e.code === 'KeyR');
   }
   if (e.code !== 'Backquote' || e.metaKey) return null;
@@ -9825,6 +9835,13 @@ function terminalShortcut(e) {
   if (e.altKey && !e.ctrlKey && !e.shiftKey) return toggleTerminalFocus;
   if (e.altKey && e.shiftKey && !e.ctrlKey && termState.attached && wantsTerminal()) return closeTerminalSession;
   return null;
+}
+
+function swapToPreviousSession() {
+  const target = currentSessionId === lastSessionId ? previousSessionId : lastSessionId;
+  if (!target || target === currentSessionId) return;
+  if (terminalPaneFocused()) termState.focusNext = true;
+  fetchTasks(target);
 }
 
 // Esc belongs to Claude, so leaving the terminal without hiding it needs its own key.
@@ -10267,6 +10284,8 @@ function terminalOpenMode(sessionId) {
 // replays the same screen, and the placeholder gives way to the real card.
 function adoptPickedSession(oldId, id) {
   const focused = terminalPaneFocused();
+  if (lastSessionId === oldId) lastSessionId = id;
+  if (previousSessionId === oldId) previousSessionId = id;
   setTerminalMode(id, true);
   forgetPlaceholder(oldId);
   if (currentSessionId !== oldId || viewMode !== 'session') return renderSessions();
@@ -10516,6 +10535,8 @@ function forgetPlaceholder(id) {
   // Before the socket's close handler runs, or it would reconnect and start the session again.
   if (termState.sessionId === id) detachTerminal();
   sessions = sessions.filter((s) => s.id !== id);
+  if (previousSessionId === id) previousSessionId = null;
+  if (lastSessionId === id) lastSessionId = null;
   return true;
 }
 
