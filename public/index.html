@@ -175,7 +175,7 @@
               </div>
               <span id="progress-percent" class="progress-text">0%</span>
             </div>
-            <button id="terminal-toggle" class="icon-btn" onclick="event.shiftKey ? openTerminalManager() : toggleTerminal()" title="Show / hide terminal (Ctrl+`) · Focus (Alt+`) · Shift+click or Ctrl+Shift+` for all terminals" aria-label="Toggle terminal" style="display: none;">
+            <button id="terminal-toggle" class="icon-btn" onclick="event.shiftKey ? openTerminalManager() : toggleTerminal()" title="Show / hide terminal (Ctrl+`) · Focus (Alt+`) · End (Alt+Shift+`) · Shift+click or Ctrl+Shift+` for all terminals" aria-label="Toggle terminal" style="display: none;">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
               </svg>
@@ -259,7 +259,7 @@
         <div id="terminal-pane" class="terminal-pane">
           <div class="terminal-bar">
             <span id="terminal-status" class="terminal-status"></span>
-            <button class="icon-btn" onclick="endTerminalSession()" title="End session" aria-label="End terminal session">
+            <button class="icon-btn" onclick="endTerminalSession()" title="End session (Alt+Shift+`)" aria-label="End terminal session">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <rect x="6" y="6" width="12" height="12" rx="1"/>
               </svg>
@@ -681,13 +681,19 @@
             <div id="ns-folder-list" class="ns-dropdown" role="listbox" hidden></div>
           </div>
         </div>
-        <div class="ns-row">
+        <div class="ns-row ns-extra">
           <label class="ns-label" for="ns-name">Name</label>
           <div class="ns-field">
             <input type="text" id="ns-name" class="form-input" placeholder="Optional" maxlength="80" autocomplete="off" spellcheck="false">
           </div>
         </div>
-        <div class="ns-row">
+        <div class="ns-row ns-extra">
+          <label class="ns-label" for="ns-prompt">Prompt</label>
+          <div class="ns-field">
+            <textarea id="ns-prompt" class="form-input" rows="4" placeholder="Optional. Sent as the first message."></textarea>
+          </div>
+        </div>
+        <div class="ns-row ns-extra">
           <span class="ns-label">Worktree</span>
           <div class="ns-field">
             <div class="ns-inline">
@@ -697,13 +703,7 @@
             <div id="ns-wt-hint" class="ns-hint" hidden></div>
           </div>
         </div>
-        <div class="ns-row">
-          <label class="ns-label" for="ns-prompt">Prompt</label>
-          <div class="ns-field">
-            <textarea id="ns-prompt" class="form-input" rows="4" placeholder="Optional. Sent as the first message."></textarea>
-          </div>
-        </div>
-        <div class="ns-row">
+        <div class="ns-row ns-extra">
           <label class="ns-label" for="ns-model">Model</label>
           <div class="ns-field">
             <select id="ns-model" class="form-input">

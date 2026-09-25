@@ -5317,7 +5317,15 @@ const SHORTCUT_PAIRS = [
       rows: [
         { keys: ['Ctrl', '`'], combo: true, label: 'Show / hide terminal' },
         { keys: ['Alt', '`'], combo: true, label: 'Focus terminal / page' },
+        { keys: ['Alt', 'Shift', '`'], combo: true, label: 'End and close terminal' },
         { keys: ['Ctrl', 'Shift', '`'], combo: true, label: 'All terminals' },
+      ],
+    },
+    {
+      title: 'Sessions',
+      rows: [
+        { keys: ['Ctrl', 'Alt', 'N'], combo: true, label: 'New session' },
+        { keys: ['Ctrl', 'Alt', 'R'], combo: true, label: 'Resume session (claude -r)' },
       ],
     },
   ],
@@ -5460,6 +5468,25 @@ _scratchpadTextarea.addEventListener('input', () => {
     saveScratchpad();
     _scratchpadSaveTimer = null;
   }, 500);
+});
+
+// Bound on the textarea: the global handler returns early on TEXTAREA targets.
+_scratchpadTextarea.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeScratchpad();
+});
+
+// Vimium eats Escape inside a text field and only blurs it, so the page never sees the key.
+// A blur that no click in the modal caused, while the window keeps focus, is that Escape.
+let _scratchpadPointerDown = false;
+_scratchpadModal.addEventListener('mousedown', () => {
+  _scratchpadPointerDown = true;
+});
+document.addEventListener('mouseup', () => {
+  _scratchpadPointerDown = false;
+});
+_scratchpadTextarea.addEventListener('blur', () => {
+  if (!_scratchpadPointerDown && _scratchpadModal.classList.contains('visible') && document.hasFocus())
+    closeScratchpad();
 });
 
 //#endregion
@@ -9669,7 +9696,7 @@ const TERMINAL_RETRY_MS = [500, 1000, 2000, 4000, 8000];
 const TERMINAL_STABLE_MS = 5000;
 const STALE_TOKEN_MSG = 'The terminal token is out of date. Reload the hub window.';
 // Read at load, before the first updateUrl() rewrites the URL without the fragment.
-const terminalToken = readTerminalToken();
+let terminalToken = readTerminalToken();
 const termState = {
   loaded: null,
   term: null,
@@ -9683,6 +9710,7 @@ const termState = {
   attached: false,
   closeGuard: false,
   leaving: false,
+  focusNext: false,
   ackPending: 0,
   ackTimer: null,
   retryTimer: null,
@@ -9692,9 +9720,7 @@ const termState = {
 function readTerminalToken() {
   const m = /[#&]t=([0-9a-f]{64})/.exec(location.hash);
   if (m) {
-    try {
-      sessionStorage.setItem(TERMINAL_TOKEN_KEY, m[1]);
-    } catch (_) {}
+    storeTerminalToken(m[1]);
     history.replaceState(null, '', location.pathname + location.search);
     return m[1];
   }
@@ -9703,6 +9729,45 @@ function readTerminalToken() {
   } catch (_) {
     return null;
   }
+}
+
+function storeTerminalToken(token) {
+  try {
+    sessionStorage.setItem(TERMINAL_TOKEN_KEY, token);
+  } catch (_) {}
+}
+
+let tokenRefresh = null;
+
+// The hub mints a new token each run, and this page can outlive a hub restart. Resolves true only
+// for a token that differs from the one that just failed, so a caller retries at most once.
+function refreshTerminalToken() {
+  if (!window.__HUB__?.enabled) return Promise.resolve(false);
+  tokenRefresh ??= requestTerminalToken().finally(() => {
+    tokenRefresh = null;
+  });
+  return tokenRefresh;
+}
+
+function requestTerminalToken() {
+  return new Promise((resolve) => {
+    const done = (ok) => {
+      window.removeEventListener('message', onMessage);
+      clearTimeout(timer);
+      resolve(ok);
+    };
+    const onMessage = (e) => {
+      if (e.source !== window.parent || e.origin !== hubOrigin() || e.data?.type !== 'hub:terminalToken') return;
+      const token = e.data.token;
+      if (typeof token !== 'string' || !/^[0-9a-f]{64}$/.test(token) || token === terminalToken) return done(false);
+      terminalToken = token;
+      storeTerminalToken(token);
+      done(true);
+    };
+    const timer = setTimeout(() => done(false), 3000);
+    window.addEventListener('message', onMessage);
+    hubPost({ type: 'hub:terminalToken' });
+  });
 }
 
 function terminalAvailable() {
@@ -9729,16 +9794,23 @@ function wantsTerminal() {
 function toggleTerminal() {
   if (!terminalAvailable() || viewMode !== 'session' || !currentSessionId) return;
   setTerminalMode(currentSessionId, !terminalModes().has(currentSessionId));
+  termState.focusNext = true;
   syncTerminal();
 }
 
+function terminalPaneFocused() {
+  return document.getElementById('terminal-pane').contains(document.activeElement);
+}
+
 function terminalShortcut(e) {
-  if (e.code === 'KeyN' && e.ctrlKey && e.altKey && !e.shiftKey && !e.metaKey && terminalAvailable()) {
-    return () => openNewSession();
+  const newKey = e.code === 'KeyN' || e.code === 'KeyR';
+  if (newKey && e.ctrlKey && e.altKey && !e.shiftKey && !e.metaKey && terminalAvailable()) {
+    return () => openNewSession(null, e.code === 'KeyR');
   }
   if (e.code !== 'Backquote' || e.metaKey) return null;
   if (e.ctrlKey && !e.altKey) return e.shiftKey ? openTerminalManager : toggleTerminal;
   if (e.altKey && !e.ctrlKey && !e.shiftKey) return toggleTerminalFocus;
+  if (e.altKey && e.shiftKey && !e.ctrlKey && termState.attached && wantsTerminal()) return closeTerminalSession;
   return null;
 }
 
@@ -9748,7 +9820,7 @@ function toggleTerminalFocus() {
     toggleTerminal();
     return;
   }
-  if (document.getElementById('terminal-pane').contains(document.activeElement)) leaveTerminalPane();
+  if (terminalPaneFocused()) leaveTerminalPane();
   else focusTerminalPane();
 }
 
@@ -9774,6 +9846,7 @@ function syncTerminal() {
   sessionView.classList.toggle('terminal-mode', on);
   if (!on) {
     termState.shown = false;
+    termState.focusNext = false;
     syncCloseGuard();
     // Hiding keeps the socket so Ctrl+` back is instant.
     const keepSocket = termState.sessionId === currentSessionId && viewMode === 'session';
@@ -9784,14 +9857,21 @@ function syncTerminal() {
   termState.shown = true;
   syncCloseGuard();
   if (termState.sessionId !== currentSessionId) openTerminal(currentSessionId, terminalOpenMode(currentSessionId));
-  else if (!wasShown) onTerminalShown();
+  else if (!wasShown) onTerminalShown(takeTerminalFocus(currentSessionId));
 }
 
-function onTerminalShown() {
+// Selecting a session only shows its terminal; focus follows an explicit toggle or a new session.
+function takeTerminalFocus(sessionId) {
+  const focus = termState.focusNext || newSpecs.has(sessionId);
+  termState.focusNext = false;
+  return focus;
+}
+
+function onTerminalShown(focus = true) {
   requestAnimationFrame(() => {
     fitTerminal();
     repaintTerminal();
-    focusTerminalPane();
+    if (focus) focusTerminalPane();
   });
 }
 
@@ -10108,7 +10188,7 @@ async function openTerminal(sessionId, mode, attempt = 0) {
   const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/api/terminal/ws`);
   ws.binaryType = 'arraybuffer';
   termState.ws = ws;
-  const spec = mode === 'new' ? newSpecs.get(sessionId) : null;
+  const spec = newSpecs.get(sessionId);
   let readyAt = 0;
   let refused = false;
   ws.onopen = () =>
@@ -10120,7 +10200,7 @@ async function openTerminal(sessionId, mode, attempt = 0) {
         mode,
         cols: term.cols,
         rows: term.rows,
-        ...(spec && {
+        ...(spec?.mode === mode && {
           cwd: spec.cwd,
           name: spec.name,
           worktree: spec.worktree,
@@ -10148,11 +10228,18 @@ async function openTerminal(sessionId, mode, attempt = 0) {
     } else if (msg.t === 'error') refused = true;
     onTerminalMessage(sessionId, msg);
   };
-  ws.onclose = () => {
+  ws.onclose = (ev) => {
     if (termState.ws !== ws) return;
     termState.ws = null;
     setTerminalAttached(false);
-    // A refusal already shows the server's reason, and retrying would only repeat it.
+    // A refusal already shows the server's reason, and retrying would only repeat it, unless the
+    // reason was a token that the hub has since replaced (4001).
+    if (refused && ev.code === 4001) {
+      refreshTerminalToken().then((ok) => {
+        if (ok && termState.sessionId === sessionId) openTerminal(sessionId, mode, attempt + 1);
+      });
+      return;
+    }
     if (refused || document.getElementById('terminal-prompt').classList.contains('visible')) return;
     const stable = readyAt && Date.now() - readyAt > TERMINAL_STABLE_MS;
     retryTerminal(sessionId, stable ? 0 : attempt);
@@ -10160,7 +10247,18 @@ async function openTerminal(sessionId, mode, attempt = 0) {
 }
 
 function terminalOpenMode(sessionId) {
-  return newSpecs.has(sessionId) ? 'new' : 'auto';
+  return newSpecs.get(sessionId)?.mode ?? 'auto';
+}
+
+// The server moved the PTY to the session picked in `claude --resume`; reattaching under that id
+// replays the same screen, and the placeholder gives way to the real card.
+function adoptPickedSession(oldId, id) {
+  const focused = terminalPaneFocused();
+  setTerminalMode(id, true);
+  forgetPlaceholder(oldId);
+  if (currentSessionId !== oldId || viewMode !== 'session') return renderSessions();
+  termState.focusNext = focused;
+  fetchTasks(id);
 }
 
 // The PTY outlives the socket, so a dropped connection (cck restart, sleep, proxy hiccup) reattaches
@@ -10191,7 +10289,9 @@ function onTerminalMessage(sessionId, msg) {
     setTerminalStatus('');
     setTerminalAttached(true);
     terminalSend({ t: 'resize', cols: termState.term.cols, rows: termState.term.rows });
-    termState.term.focus();
+    if (takeTerminalFocus(sessionId)) termState.term.focus();
+  } else if (msg.t === 'rekey' && typeof msg.id === 'string') {
+    adoptPickedSession(sessionId, msg.id);
   } else if (msg.t === 'live') {
     showTerminalPrompt(
       sessionId,
@@ -10209,13 +10309,17 @@ function onTerminalMessage(sessionId, msg) {
     const clean = msg.code === 0 || msg.ended;
     // With no first message there is no transcript to resume, only the same new session to start again.
     const unsent = newSpecs.has(sessionId);
+    if (unsent && clean) {
+      dropPlaceholder(sessionId);
+      return;
+    }
     showTerminalPrompt(
       sessionId,
       msg.ended ? 'The terminal was ended' : 'The shell exited',
       clean ? 'Choose how to start again.' : `Exit code ${msg.code}.`,
       unsent
         ? [
-            ['new', 'Start again'],
+            [terminalOpenMode(sessionId), 'Start again'],
             ['shell', 'Shell'],
           ]
         : [
@@ -10235,10 +10339,20 @@ function endTerminalSession() {
   terminalSend({ t: 'kill' });
 }
 
+// Detaching first means no exit message reaches the pane, so no Resume prompt shows before the board.
+async function closeTerminalSession() {
+  const id = termState.sessionId;
+  if (terminalPaneFocused()) leaveTerminalPane();
+  detachTerminal();
+  setTerminalMode(id, false);
+  syncTerminal();
+  await endTerminal(id);
+}
+
 function openTerminalManager() {
   if (!terminalAvailable()) return;
   // Esc typed in xterm goes to Claude, so the modal would not close on it.
-  if (document.getElementById('terminal-pane').contains(document.activeElement)) leaveTerminalPane();
+  if (terminalPaneFocused()) leaveTerminalPane();
   document.getElementById('terminal-manager-modal').classList.add('visible');
   renderTerminalManager();
 }
@@ -10308,12 +10422,23 @@ async function renderTerminalManager() {
   });
 }
 
-function terminalFetch(url, method) {
-  return fetch(url, { method, headers: { 'X-Terminal-Token': terminalToken || '' } });
+async function terminalFetch(url, method, body) {
+  const send = () =>
+    fetch(url, {
+      method,
+      headers: {
+        'X-Terminal-Token': terminalToken || '',
+        ...(body && { 'Content-Type': 'application/json' }),
+      },
+      ...(body && { body: JSON.stringify(body) }),
+    });
+  const res = await send();
+  return res.status === 401 && (await refreshTerminalToken()) ? send() : res;
 }
 
-function endTerminal(id) {
-  return terminalFetch(`/api/terminals/${encodeURIComponent(id)}`, 'DELETE').catch(() => {});
+async function endTerminal(id) {
+  await terminalFetch(`/api/terminals/${encodeURIComponent(id)}`, 'DELETE').catch(() => {});
+  dropPlaceholder(id);
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
@@ -10340,13 +10465,14 @@ const NS_MAX_MATCHES = 8;
 const PLUS_SVG =
   '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>';
 const newSpecs = new Map();
-const ns = { projects: [], picked: [], matches: [], idx: -1, folder: '', browsing: false };
+const ns = { projects: [], picked: [], matches: [], idx: -1, folder: '', browsing: false, resume: false };
 
 function placeholderSession(id, spec) {
   return {
     id,
     placeholder: true,
-    name: spec.name || 'New session',
+    pick: spec.mode === 'pick',
+    name: spec.name || (spec.mode === 'pick' ? 'Resume session' : 'New session'),
     project: spec.cwd,
     worktree: spec.worktree ? { repo: spec.cwd, name: spec.worktree === true ? 'new' : spec.worktree } : null,
     modifiedAt: new Date(spec.startedAt).toISOString(),
@@ -10364,6 +10490,22 @@ function mergePlaceholders(list) {
   return [...[...newSpecs].reverse().map(([id, spec]) => placeholderSession(id, spec)), ...list];
 }
 
+// With no first message there is no transcript, so an ended placeholder leaves nothing to come back to.
+function dropPlaceholder(id) {
+  if (!forgetPlaceholder(id)) return;
+  if (currentSessionId === id && viewMode === 'session') showAllTasks();
+  else renderSessions();
+}
+
+function forgetPlaceholder(id) {
+  if (!newSpecs.delete(id)) return false;
+  setTerminalMode(id, false);
+  // Before the socket's close handler runs, or it would reconnect and start the session again.
+  if (termState.sessionId === id) detachTerminal();
+  sessions = sessions.filter((s) => s.id !== id);
+  return true;
+}
+
 function renderPlaceholderCard(session) {
   const isActive = session.id === currentSessionId && viewMode === 'session';
   const projectHtml = renderProjectIdentity(session);
@@ -10371,7 +10513,7 @@ function renderPlaceholderCard(session) {
           <button onclick="fetchTasks('${escAttrJs(session.id)}')" data-session-id="${escapeHtml(session.id)}" class="session-item session-placeholder ${isActive ? 'active' : ''}" title="${escapeHtml(`${session.id} | ${session.project}`)}">
             <div class="session-name">${escapeHtml(session.name)}</div>
             ${projectHtml ? `<div class="session-secondary">${projectHtml}</div>` : ''}
-            <div class="session-waiting"><span class="pulse"></span>waiting for your first message</div>
+            <div class="session-waiting"><span class="pulse"></span>${session.pick ? 'pick a session to resume' : 'waiting for your first message'}</div>
           </button>
         `;
 }
@@ -10383,20 +10525,24 @@ async function restorePendingSessions() {
   try {
     const res = await fetch('/api/terminals', { cache: 'no-store' });
     for (const t of (await res.json()).sessions || []) {
-      if (t.mode !== 'new' || newSpecs.has(t.id)) continue;
-      newSpecs.set(t.id, { cwd: t.cwd, name: t.name, worktree: t.worktree, startedAt: t.startedAt });
+      if ((t.mode !== 'new' && t.mode !== 'pick') || newSpecs.has(t.id)) continue;
+      newSpecs.set(t.id, { cwd: t.cwd, name: t.name, worktree: t.worktree, mode: t.mode, startedAt: t.startedAt });
     }
   } catch (_) {}
 }
 
-function openNewSession(folder) {
+function openNewSession(folder, resume = false) {
   if (!terminalAvailable() || document.getElementById('new-session-modal').classList.contains('visible')) return;
-  if (document.getElementById('terminal-pane').contains(document.activeElement)) leaveTerminalPane();
+  if (terminalPaneFocused()) leaveTerminalPane();
+  ns.resume = resume;
+  document.querySelector('.new-session-modal').classList.toggle('ns-resume', resume);
+  document.getElementById('ns-title').textContent = resume ? 'Resume session' : 'New session';
   for (const id of ['ns-name', 'ns-wt-name', 'ns-prompt']) document.getElementById(id).value = '';
   document.getElementById('ns-wt').checked = false;
   document.getElementById('ns-model').value = '';
   setNewSessionError('');
-  setNewSessionFolder(folder || '');
+  const current = viewMode === 'session' ? sessions.find((s) => s.id === currentSessionId)?.project : null;
+  setNewSessionFolder(folder || current || '');
   document.getElementById('new-session-modal').classList.add('visible');
   const input = document.getElementById('ns-folder');
   input.focus();
@@ -10527,7 +10673,8 @@ function renderNewSessionForm() {
   setNewSessionError(problem);
   const start = document.getElementById('ns-start');
   start.disabled = !v.cwd || !!problem || ns.browsing;
-  start.textContent = v.cwd ? `Start in ${pathBasename(v.cwd)}` : 'Start';
+  const verb = ns.resume ? 'Resume' : 'Start';
+  start.textContent = v.cwd ? `${verb} in ${pathBasename(v.cwd)}` : verb;
 }
 
 async function browseNewSessionFolder() {
@@ -10538,7 +10685,8 @@ async function browseNewSessionFolder() {
   btn.textContent = 'Opening…';
   renderNewSessionForm();
   try {
-    const res = await terminalFetch('/api/terminal/pick-folder', 'POST');
+    const start = ns.folder || ns.picked[0] || ns.projects[0];
+    const res = await terminalFetch('/api/terminal/pick-folder', 'POST', start ? { start } : null);
     const body = await res.json().catch(() => ({}));
     if (res.status === 401) setNewSessionError(STALE_TOKEN_MSG);
     else if (!res.ok) setNewSessionError(body.error || `Folder dialog failed (${res.status})`);
@@ -10552,15 +10700,22 @@ async function browseNewSessionFolder() {
     ns.browsing = false;
     btn.textContent = 'Browse…';
     renderNewSessionForm();
-    document.getElementById(ns.folder ? 'ns-name' : 'ns-folder').focus();
+    document.getElementById(ns.folder ? fieldAfterFolder() : 'ns-folder').focus();
   }
+}
+
+function fieldAfterFolder() {
+  return ns.resume ? 'ns-start' : 'ns-name';
 }
 
 function startNewSession() {
   const v = newSessionValues();
   if (!v.cwd || newSessionProblem(v) || ns.browsing) return;
   const id = crypto.randomUUID();
-  newSpecs.set(id, { ...v, startedAt: Date.now() });
+  newSpecs.set(
+    id,
+    ns.resume ? { cwd: v.cwd, mode: 'pick', startedAt: Date.now() } : { ...v, mode: 'new', startedAt: Date.now() },
+  );
   sessions = mergePlaceholders(sessions.filter((s) => !s.placeholder));
   setTerminalMode(id, true);
   closeNewSession();
@@ -10571,7 +10726,7 @@ function pickFolderOption(i) {
   const path = ns.matches[i];
   if (!path) return;
   setNewSessionFolder(path);
-  document.getElementById('ns-name').focus();
+  document.getElementById(fieldAfterFolder()).focus();
 }
 
 function initNewSession() {
@@ -10924,13 +11079,14 @@ function isHubKey(e) {
   if (!window.__HUB__?.enabled) return false;
   if (e.ctrlKey && e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) return true;
   // Own branch: the Alt+digit case below requires !ctrlKey. The hub owns the Ctrl+Alt+letter
-  // keymap and ignores unbound letters. Ctrl+Alt+N is the one letter cck keeps: New session.
+  // keymap and ignores unbound letters. cck keeps Ctrl+Alt+N (New session) and Ctrl+Alt+R (Resume session).
   if (
     e.ctrlKey &&
     e.altKey &&
     !e.shiftKey &&
     !e.metaKey &&
     e.code !== 'KeyN' &&
+    e.code !== 'KeyR' &&
     (/^[a-z]$/i.test(e.key) || /^Key[A-Z]$/.test(e.code))
   ) {
     return true;

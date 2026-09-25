@@ -5,7 +5,7 @@ const { mkdtempSync, rmSync } = require('node:fs');
 const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
-const { shellArgs, readTerminalConfig, resolveShell, claudeArgsFor, parseNewSpec } = require('../lib/terminal');
+const { shellArgs, readTerminalConfig, resolveShell, claudeArgsFor, parseNewSpec, findPickProcess } = require('../lib/terminal');
 
 let WebSocket = null;
 let ptyAvailable = false;
@@ -138,6 +138,25 @@ describe('new session options', () => {
   });
 });
 
+describe('resume picker', () => {
+  it('opens claude\'s own picker', () => {
+    assert.deepEqual(claudeArgsFor('pick', SESSION), ['--resume']);
+  });
+  it('finds the claude the PTY started by folder and start time, skipping claimed ones', () => {
+    const cwd = __dirname;
+    const pty = { cwd, startedAt: 10_000 };
+    const live = [
+      { pid: 1, cwd, startedAt: 1_000 },
+      { pid: 2, cwd: os.tmpdir(), startedAt: 11_000 },
+      { pid: 3, cwd: `${cwd}${path.sep}.`, startedAt: 11_000 },
+      { pid: 4, cwd, startedAt: 12_000 },
+    ];
+    assert.equal(findPickProcess(live, pty, new Set()), 3);
+    assert.equal(findPickProcess(live, pty, new Set([3])), 4);
+    assert.equal(findPickProcess(live, pty, new Set([3, 4])), undefined);
+  });
+});
+
 describe('resolveShell', () => {
   const which = (tools) => (cmd) => tools[cmd] || null;
   it('infers pwsh on Windows and $SHELL elsewhere', () => {
@@ -207,6 +226,10 @@ describe('terminal endpoint', { skip: !ptyAvailable }, () => {
   });
   it('refuses a new session in a folder it does not know', async () => {
     const got = await session(port, { id: SESSION, mode: 'new', cwd: os.tmpdir() }, (g) => g.closeCode !== null);
+    assert.equal(got.closeCode, 4004);
+  });
+  it('refuses a resume picker in a folder it does not know', async () => {
+    const got = await session(port, { id: SESSION, mode: 'pick', cwd: os.tmpdir() }, (g) => g.closeCode !== null);
     assert.equal(got.closeCode, 4004);
   });
   it('refuses a new session with a bad name', async () => {

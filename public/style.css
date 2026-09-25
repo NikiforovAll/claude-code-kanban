@@ -5657,6 +5657,10 @@ select.form-input option:checked {
   gap: 12px;
 }
 
+.new-session-modal.ns-resume .ns-extra {
+  display: none;
+}
+
 .ns-label {
   padding-top: 9px;
   font-size: 12px;

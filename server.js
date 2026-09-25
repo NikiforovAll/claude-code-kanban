@@ -424,9 +424,9 @@ let liveSessionsCache = null;
 let lastLiveSessionsScan = 0;
 const LIVE_SESSIONS_TTL = 5000;
 
-function loadLiveSessions() {
+function loadLiveSessions(fresh = false) {
   const now = Date.now();
-  if (liveSessionsCache && now - lastLiveSessionsScan < LIVE_SESSIONS_TTL) return liveSessionsCache;
+  if (!fresh && liveSessionsCache && now - lastLiveSessionsScan < LIVE_SESSIONS_TTL) return liveSessionsCache;
   const sessions = [];
   if (existsSync(SESSIONS_DIR)) {
     try {
@@ -3128,6 +3128,7 @@ const terminal = createTerminalService({
     return meta ? meta.project || meta.cwd || null : null;
   },
   isAllowedFolder,
+  liveSessions: () => loadLiveSessions(true),
 });
 
 let folderDialogOpen = false;
@@ -3138,7 +3139,7 @@ app.post('/api/terminal/pick-folder', async (req, res) => {
   if (folderDialogOpen) return res.status(409).json({ error: 'a folder dialog is already open' });
   folderDialogOpen = true;
   try {
-    const dir = await pickFolder(whichSync);
+    const dir = await pickFolder(whichSync, { start: req.body?.start });
     if (dir) pickedFolders.add(dir);
     res.json({ path: dir });
   } catch (e) {
