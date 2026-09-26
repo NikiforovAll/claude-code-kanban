@@ -1,0 +1,92 @@
+---
+title: Answer prompts from the board
+description: Answer permission asks, questions and plan approvals from the board, and turn this feature off or tune it.
+---
+
+import Shot from '../../../kit/Shot.astro';
+import Lightbox from '../../../kit/Lightbox.astro';
+
+When Claude Code stops to ask you something, the board shows the ask. You can answer it on the board or in the terminal. This works for every session the board sees, including sessions you started outside Claude Code Kanban.
+
+The board handles three kinds of ask:
+
+- A permission ask, such as a request to run a command.
+- A question from the `AskUserQuestion` tool.
+- A plan that waits for approval (`ExitPlanMode`).
+
+This feature needs the Claude Code Kanban plugin hooks. See [Getting started](/claude-code-kanban/getting-started/) to install them.
+
+<Shot themed="11-waiting-prompt" alt="A session log that ends with a waiting permission ask and its Allow and Deny buttons" />
+
+## What you see
+
+A session that waits for you gets an amber highlight in the sidebar. The "N waiting" chip at the top of the sidebar counts these sessions. Click it to list only them. The ask shows in three places:
+
+- The last entry of the session log. It has a pill with the kind of ask: "Awaiting permission", "Question pending" or "Plan awaiting approval". The tool name shows next to the pill.
+- A badge in the agent footer under the board. Click it to open the ask.
+- The detail modal, which opens when you click the log entry or the badge.
+
+For a permission ask, the title of the detail modal names the tool. The modal shows a short summary of the command or description. The full tool input is in a collapsible "Raw tool input" section. A plan shows in full Markdown.
+
+## Answer an ask
+
+The buttons depend on the kind of ask:
+
+- **Permission ask.** Click **Allow** or **Deny**. The buttons are on the log entry and in the detail modal.
+- **Plan.** Click **Approve** or **Reject**. In the detail modal you can type feedback before you reject. Claude Code gets the feedback as the reason.
+- **Question.** Open the detail modal. Pick an option for each question, or type text in "Or type your own answer". Questions that allow more than one choice let you pick several options. You can send before you answer all questions. The button then reads **Answer (n/m)**, where n is the number of questions you answered.
+
+In the detail modal, <kbd>Ctrl+Enter</kbd> allows a permission ask or approves a plan. It does not answer questions.
+
+The **x** on the log entry removes the ask from the board. It does not answer the ask. Claude Code still waits for your answer in the terminal.
+
+## The terminal stays live
+
+The prompt in the terminal stays open while the board waits. The first answer wins. If you answer in the terminal first, the ask usually leaves the board within about a second. If the hook cannot find the Claude Code session registry file, the ask can stay on the board until the session log shows new activity. If you then click a button on an old card, the board drops the card, and Claude Code gets no answer from the board.
+
+## When the buttons do not show
+
+The board shows buttons only when it can answer the ask. That is true when the plugin's `approval-gate.sh` hook sent the ask and the hook still waits for a decision. In other cases the entry says "answer in the terminal". This happens when:
+
+- The hook stopped waiting after `waitSeconds`.
+- You turned UI approvals off.
+- The ask is a question and `mode` is `"permission"`.
+
+The board hides an ask 30 minutes after it starts.
+
+## Auto-open
+
+When a new ask that the board can answer arrives in the selected session, the detail modal opens by itself. Each ask opens one time. If you close the modal, it does not open again for the same ask. The modal does not open when another modal is open, or when the [embedded terminal](/claude-code-kanban/guides/embedded-terminal/) is on screen, because the terminal already shows the ask.
+
+## Configure
+
+UI approvals are on by default. Each Claude config dir has its own settings, in the `approvals` section of `<config-dir>/.cck/config.json`. `<config-dir>` is `CLAUDE_CONFIG_DIR`, or `~/.claude` when that is not set. Create the file only if you want to change the defaults.
+
+To turn UI approvals off:
+
+```json
+{
+  "approvals": {
+    "enabled": false
+  }
+}
+```
+
+Set `mode` to `"permission"` to leave questions to the terminal. `waitSeconds` sets how long the hook waits for a board decision, up to 1800 (30 minutes). For all fields and defaults, see [UI approvals config](/claude-code-kanban/reference/configuration/#ui-approvals-config).
+
+With UI approvals off, the board still shows each ask and its amber highlight. You answer it in the terminal.
+
+## When the board cannot answer
+
+The hook never blocks a session because of a problem with the board. In these cases Claude Code asks in the terminal as usual:
+
+- The Claude Code Kanban server is not running.
+- UI approvals are off, or the ask is a question in `"permission"` mode.
+- The decision file is empty or not valid.
+- No one answered on the board within `waitSeconds`.
+
+If the server restarts while an ask waits, the hook checks again every 5 seconds and waits up to 15 seconds for the board to come back, on the same port or a new one. If the server stops normally, the hook stops waiting at once.
+
+See [Configuration](/claude-code-kanban/reference/configuration/) for other settings and [Keyboard shortcuts](/claude-code-kanban/reference/keyboard-shortcuts/) for all keys.
+
+<Lightbox />

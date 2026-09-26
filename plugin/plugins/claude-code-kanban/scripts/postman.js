@@ -26,6 +26,10 @@ const SERVER_INFO = path.join(CLAUDE_DIR, '.cck', 'server.json');
 // because an enqueue wakes the poll immediately.
 const WAIT_SEC = 120;
 const RETRY_MS = 15000;
+// `--topic dispatch` is the kanban-dispatch inbox: reports from sessions this one started.
+const TOPIC = process.argv.includes('--topic') ? process.argv[process.argv.indexOf('--topic') + 1] : null;
+// A dispatch report is a result, not an instruction, so a late attach still wants it.
+const KEEP_BACKLOG = process.argv.includes('--keep-backlog');
 
 if (!SESSION_ID) process.exit(0);
 
@@ -43,11 +47,12 @@ function serverUrl() {
 // Once per process, not once per poll: the grant means "follow the board from here on", so
 // the first attach throws away whatever queued up before it. A later reconnect must not
 // discard again -- by then the queue holds events the user is owed.
-let firstAttach = true;
+let firstAttach = !KEEP_BACKLOG;
 
 async function poll(base) {
   const first = firstAttach ? '&first=1' : '';
-  const url = `${base}/api/sessions/${encodeURIComponent(SESSION_ID)}/events?wait=${WAIT_SEC}${first}`;
+  const topic = TOPIC ? `&topic=${encodeURIComponent(TOPIC)}` : '';
+  const url = `${base}/api/sessions/${encodeURIComponent(SESSION_ID)}/events?wait=${WAIT_SEC}${first}${topic}`;
   const res = await fetch(url, { signal: AbortSignal.timeout((WAIT_SEC + 15) * 1000) });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   firstAttach = false;

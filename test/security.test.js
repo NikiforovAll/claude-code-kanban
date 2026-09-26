@@ -241,6 +241,26 @@ describe('isLoopbackAddress', { skip: !isLoopbackAddress }, () => {
   }
 });
 
+describe('upgradeVerdict', { skip: !netGuard?.createNetGuard }, () => {
+  const guard = netGuard?.createNetGuard();
+  const req = (host, origin) => ({ headers: origin === undefined ? { host } : { host, origin } });
+
+  it('accepts a loopback Host with a loopback Origin', () => {
+    assert.equal(guard.upgradeVerdict(req('localhost:3541', 'http://localhost:3541')), null);
+    assert.equal(guard.upgradeVerdict(req('127.0.0.1:3541', 'http://127.0.0.1:3541')), null);
+  });
+
+  it('rejects a rebinding Host', () => {
+    assert.match(guard.upgradeVerdict(req('evil.com:3541', 'http://evil.com:3541')), /Host/);
+  });
+
+  for (const origin of [undefined, 'null', '', 'http://evil.com', 'not a url']) {
+    it(`rejects Origin ${JSON.stringify(origin)}`, () => {
+      assert.match(guard.upgradeVerdict(req('localhost:3541', origin)), /Origin/);
+    });
+  }
+});
+
 describe('argv validators', { skip: !validate }, () => {
   const v = validate;
 

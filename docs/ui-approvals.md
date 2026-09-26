@@ -44,7 +44,7 @@ A new answerable ask in the selected session opens the waiting modal by itself, 
 
 The terminal prompt stays fully live while the hook waits. Whichever side answers first wins:
 
-- **Terminal answers first** — the tool runs (or is denied) immediately; the marker is cleared and the waiting gate exits silently. A board click after that returns 410 and just drops the card.
+- **Terminal answers first** — the tool runs (or is denied) immediately, and the waiting gate exits silently. The gate reads Claude Code's live-session registry (`<config dir>/sessions/<pid>.json`) on each poll: once its `status` has been `waiting`, any other value means the prompt was answered, so the gate clears the marker and the card drops within about a second, for allow and deny alike. The registry is undocumented; without it the marker is cleared by `PostToolUse` after the tool finishes (never on a deny). A board click after that returns 410 and just drops the card.
 - **Board answers first** — Claude Code applies the decision (the transcript shows "Allowed/Denied by PermissionRequest hook", with your deny message verbatim).
 - **Nobody answers within `waitSeconds`** — the gate gives up (exit 0) and everything proceeds exactly as if the feature were off: the terminal prompt remains, the badge stays until answered or expired.
 

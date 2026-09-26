@@ -24,6 +24,8 @@ const FILTER_DEFAULTS = { project: '__recent__', session: 'active', limit: '20' 
 
 let sessions = [];
 let currentSessionId = null;
+let lastSessionId = null;
+let previousSessionId = null;
 let currentTasks = [];
 let viewMode = 'session';
 let sessionFilter = FILTER_DEFAULTS.session;
@@ -58,12 +60,24 @@ let lastMessagesHash = '';
 let currentMessages = [];
 let agentDurationInterval = null;
 let agentPollInterval = null;
+// Inside the hub an inactive app is a display:none iframe whose document.hidden stays false,
+// so the hub tells us via hub:active. Standalone, or if that message is lost, cck stays active.
+let hubActive = true;
+let missedWhileHidden = false;
+const isOnScreen = () => hubActive && !document.hidden;
+function skipOffScreen() {
+  if (isOnScreen()) return false;
+  missedWhileHidden = true;
+  return true;
+}
+const METADATA_MAX_WAIT_MS = 5000;
 let selectedTaskId = null;
 let selectedSessionId = null;
 // Task stays selected (keyboard nav) but its white highlight is dimmed once the detail panel closes.
 let taskHighlightDimmed = false;
 let focusZone = 'board'; // 'board' | 'sidebar'
 let appConfig = { marketplaceUrl: null, costUrl: null, memoryUrl: null, scratchAvailable: false };
+let runningTerminals = new Set();
 let selectedSessionIdx = -1;
 let selectedSessionKbId = null;
 let sessionJustSelected = false;
@@ -117,6 +131,7 @@ function updateUrl() {
   const url = qs ? `?${qs}` : window.location.pathname;
   history.replaceState(null, '', url);
   persistLastView();
+  syncTerminal();
 }
 
 const LAST_VIEW_KEY = 'lastView';
@@ -230,7 +245,7 @@ async function fetchSessions(includeTasks = true) {
     }
     lastSessionsHash = sessionsHash;
 
-    sessions = newSessions;
+    sessions = mergePlaceholders(newSessions);
     renderSessions();
     renderActivityChip();
   } catch (error) {
@@ -448,6 +463,10 @@ async function fetchTasks(sessionId) {
       revealedStorageSessionId = null;
     }
     if (currentSessionId && currentSessionId !== sessionId) deferredPinPlacement.delete(currentSessionId);
+    if (lastSessionId !== sessionId) {
+      previousSessionId = lastSessionId;
+      lastSessionId = sessionId;
+    }
     currentSessionId = sessionId;
     currentPins = loadPins(sessionId);
     ownerFilter = '';
@@ -614,6 +633,7 @@ async function refreshProjectAgents() {
 function toggleMessagePanel() {
   const panel = document.getElementById('message-panel');
   messagePanelOpen = !messagePanelOpen;
+  termState.panelHidden = false;
   store.setItem('message-panel-open', messagePanelOpen);
   panel.classList.toggle('visible', messagePanelOpen);
   document.getElementById('message-toggle')?.classList.toggle('active', messagePanelOpen);
@@ -1503,6 +1523,8 @@ const ICON_AGENT_WAITING =
   '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
 const ICON_AGENT_ACTIVE =
   '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/><line x1="8" y1="16" x2="8" y2="16"/><line x1="16" y1="16" x2="16" y2="16"/></svg>';
+const ICON_TERMINAL =
+  '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>';
 const ICON_CHAT =
   '<svg class="msg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
 const TOOL_ICONS = {
@@ -2558,6 +2580,17 @@ function sanitizeOutputHtml(text) {
   return typeof text === 'string' ? ansiToHtml(stripLineNumbers(text)) : '';
 }
 
+function toolOutputHtml(text) {
+  if (typeof text === 'string' && text.length <= HLJS_MAX_CHARS && /^\s*[[{]/.test(text)) {
+    try {
+      const pretty = JSON.stringify(JSON.parse(text), null, 2);
+      if (typeof hljs === 'undefined' || !hljs.getLanguage('json')) return escapeHtml(pretty);
+      return `<code class="hljs language-json">${hljs.highlight(pretty, { language: 'json' }).value}</code>`;
+    } catch (_) {}
+  }
+  return sanitizeOutputHtml(text);
+}
+
 function highlightBash(escaped) {
   return escaped
     .replace(/^(\s*)(#.*)$/gm, '$1<span style="color:#6a9955">$2</span>')
@@ -2623,11 +2656,11 @@ function autoSizeModal(modal, body) {
 
 function renderToolResultHtml(toolResult, isTruncated, fullResult, toolUseId) {
   if (!toolResult) return '';
-  const escaped = sanitizeOutputHtml(toolResult);
+  const escaped = toolOutputHtml(toolResult);
   let truncLabel = '',
     fullBlock = '';
   if (isTruncated && fullResult) {
-    const toggle = makeExpandToggle(escaped, sanitizeOutputHtml(fullResult));
+    const toggle = makeExpandToggle(escaped, toolOutputHtml(fullResult));
     truncLabel = toggle.btn;
     fullBlock = toggle.full;
   } else if (isTruncated && toolUseId) {
@@ -2669,7 +2702,7 @@ async function _toggleToolResultExpand(btn) {
       );
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const { content } = await r.json();
-      f.innerHTML = sanitizeOutputHtml(content);
+      f.innerHTML = toolOutputHtml(content);
       btn.dataset.loaded = '1';
     } catch (_e) {
       btn.textContent = 'Show more';
@@ -2860,9 +2893,10 @@ function renderAgentFooter() {
 
   clearInterval(agentDurationInterval);
   if (visible.some((a) => a.status === 'active' || a.status === 'idle')) {
-    agentDurationInterval = setInterval(() => renderAgentFooter(), 1000);
+    agentDurationInterval = setInterval(() => isOnScreen() && renderAgentFooter(), 1000);
     if (!agentPollInterval) {
       agentPollInterval = setInterval(() => {
+        if (skipOffScreen()) return;
         if (viewMode === 'project' && currentProjectPath) {
           refreshProjectAgents();
         } else if (currentSessionId) {
@@ -2871,7 +2905,7 @@ function renderAgentFooter() {
       }, 3000);
     }
   } else {
-    agentDurationInterval = setInterval(() => renderAgentFooter(), 10000);
+    agentDurationInterval = setInterval(() => isOnScreen() && renderAgentFooter(), 10000);
     clearInterval(agentPollInterval);
     agentPollInterval = null;
   }
@@ -3130,11 +3164,12 @@ function getFilteredSessions() {
     filteredSessions = filteredSessions.filter((s) => {
       if (dismissedSessionIds.has(s.id)) return false;
       const isActive =
-        s.hasMessages &&
-        ((!s.sharedTaskList && (s.pending > 0 || s.inProgress > 0)) ||
-          s.hasActiveAgents ||
-          s.hasWaitingForUser ||
-          s.hasRecentActivity);
+        runningTerminals.has(s.id) ||
+        (s.hasMessages &&
+          ((!s.sharedTaskList && (s.pending > 0 || s.inProgress > 0)) ||
+            s.hasActiveAgents ||
+            s.hasWaitingForUser ||
+            s.hasRecentActivity));
       if (isActive) activeSessionIds.add(s.id);
       return isActive;
     });
@@ -3262,6 +3297,7 @@ function renderSessions() {
 
   // Helper to render a single session card
   const renderSessionCard = (session) => {
+    if (session.placeholder) return renderPlaceholderCard(session);
     const total = session.taskCount;
     const percent = total > 0 ? Math.round((session.completed / total) * 100) : 0;
     const isActive = session.id === currentSessionId && viewMode === 'session';
@@ -3290,11 +3326,11 @@ function renderSessions() {
     const showCtx = !!session.contextStatus && !zenMode;
     const linkedDocsCount = getSessionPreviewPaths(session.id).length;
     const bookmarksCount = loadPins(session.id).length;
-    const hasScratchpad = !!(store.getItem(_sessionScratchpadKey(session.id)) || '').trim();
+    const hasScratchpad = _hasScratchpad(_sessionScratchpadKey(session.id));
     const tempClass = session.hasRecentLog || session.inProgress || session.hasWaitingForUser ? 'warm' : 'stale';
     const sid = escAttrJs(session.id);
     return `
-          <button onclick="fetchTasks('${sid}')" draggable="true" data-session-id="${escapeHtml(session.id)}" class="session-item ${isActive ? 'active' : ''} ${session.hasWaitingForUser ? 'permission-pending' : ''} ${tempClass} ${showCtx ? 'has-context' : ''}" title="${escapeHtml(tooltip)}">
+          <button onclick="openSession('${sid}')" draggable="true" data-session-id="${escapeHtml(session.id)}" class="session-item ${isActive ? 'active' : ''} ${session.hasWaitingForUser ? 'permission-pending' : ''} ${tempClass} ${showCtx ? 'has-context' : ''}" title="${escapeHtml(tooltip)}">
             <span class="session-pin-btn${pinClass}" onclick="event.stopPropagation();toggleSessionPin('${sid}')" title="${pinTitle} session">${pinState === 'sticky' ? SESSION_STAR_SVG : SESSION_PIN_SVG}</span>
             <div class="session-name">${escapeHtml(sessionName)}</div>
             ${projectHtml ? `<div class="session-secondary">${projectHtml}</div>` : ''}
@@ -3313,6 +3349,7 @@ function renderSessions() {
                 ${session.hasPlan && !session.planSourceSessionId ? `<span class="plan-indicator" onclick="event.stopPropagation(); openPlanForSession('${sid}')" title="View plan">${ICON_PLAN}</span>` : ''}
                 ${session.planSourceSessionId ? `<span class="plan-indicator" title="Implements plan — click to reveal plan session" onclick="event.stopPropagation(); revealPlanSession('${escAttrJs(session.planSourceSessionId)}')">${ICON_PLAN}</span>` : ''}
                 ${session.sharedTaskList ? `<span class="shared-tasklist-badge" title="Shared task list: ${escapeHtml(session.sharedTaskList)}">${linkSvg(12)}</span>` : ''}
+                ${runningTerminals.has(session.id) ? `<span class="terminal-badge" onclick="event.stopPropagation(); showSessionTerminal('${escAttrJs(session.id)}')" title="Running in a terminal here">${ICON_TERMINAL}</span>` : ''}
                 ${session.hasWaitingForUser ? `<span class="agent-badge agent-badge-waiting" title="Waiting for user">${ICON_AGENT_WAITING}</span>` : ''}
                 ${session.hasRunningAgents && !session.hasWaitingForUser ? `<span class="agent-badge agent-badge-active" title="Agents running">${ICON_AGENT_ACTIVE}</span>` : ''}
                 ${isLive || session.hasRunningAgents ? `<span class="pulse" title="${isLive ? 'Live' : 'Active agents'}"></span>` : ''}
@@ -3331,7 +3368,7 @@ function renderSessions() {
   if (zenMode) {
     sessionsList.innerHTML = `${renderSessionCard(zenSession)}
       <div class="zen-panel">
-        ${renderContextDetail(zenSession.contextStatus) || '<div class="zen-panel-empty">No context data for this session</div>'}
+        ${renderContextDetail(zenSession.contextStatus, { tokens: false }) || '<div class="zen-panel-empty">No context data for this session</div>'}
         ${renderScratchpadRow(zenSession)}
         ${renderLinkedDocsHtml(zenSession.id)}
         ${renderArtifactsHtml(zenSession.id)}
@@ -3411,10 +3448,12 @@ function renderSessions() {
             <div class="project-group-header${isCollapsed ? ' collapsed' : ''}${nestedCls}" draggable="true" data-group-path="${escapedPath}" data-project-path="${escapedPath}">
               ${groupChevronSvg()}
               <span class="group-name">${escapeHtml(folderName)}</span>
-              ${countHtml(projectSessions)}
+              ${terminalAvailable() ? `<span class="project-new-btn" data-project-path="${escapedPath}" title="New session in ${escapeHtml(folderName)}">${PLUS_SVG}</span>` : ''}
+              ${headerPadBtnHtml(_projectScratchpadKey(projectPath), folderName)}
               <span class="project-view-btn" data-project-path="${escapedPath}" title="Open project view — combined tasks from all sessions">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
               </span>
+              ${countHtml(projectSessions)}
             </div>
             <div class="project-group-breadcrumb${nestedCls}" data-full-path="${escapedPath}" title="Click to copy path">${breadcrumbHtml}</div>
             <div class="project-group-sessions${isCollapsed ? ' collapsed' : ''}${nestedCls}" data-project-path="${escapedPath}">
@@ -3426,28 +3465,27 @@ function renderSessions() {
   // Named groups are a pure partition of the already-filtered list: whatever they don't claim
   // falls through to the project blocks below, which look exactly as they did before groups.
   const sgBuckets = new Map();
-  let sgRest = filteredSessions;
-  if (sessionGroups.length > 0) {
-    sgRest = [];
-    for (const session of filteredSessions) {
-      const group = sgGroupForSession(session);
-      if (group) {
-        if (!sgBuckets.has(group.id)) sgBuckets.set(group.id, []);
-        sgBuckets.get(group.id).push(session);
-      } else {
-        sgRest.push(session);
-      }
+  const sgRest = [];
+  for (const session of filteredSessions) {
+    const group = sgGroupForSession(session);
+    if (group) {
+      if (!sgBuckets.has(group.id)) sgBuckets.set(group.id, []);
+      sgBuckets.get(group.id).push(session);
+    } else {
+      sgRest.push(session);
     }
   }
+  for (const [name, g] of transientGroups) if (!sgBuckets.has(g.id)) transientGroups.delete(name);
   // A group emptied by a filter hides its header; a group the user just created (no filters)
   // shows its drop-here state instead of vanishing.
   const sgFiltering = !!searchQuery || activityFilter.size > 0 || (!!filterProject && filterProject !== '__recent__');
 
   // flat = the "All sessions" view, which has no project sub-blocks.
   const sgSectionHtml = (flat) => {
-    if (sessionGroups.length === 0) return '';
+    const transient = [...transientGroups.values()];
+    if (sessionGroups.length === 0 && transient.length === 0) return '';
     let out = '';
-    for (const group of sessionGroups) {
+    for (const group of [...sessionGroups, ...transient]) {
       const bucket = sgBuckets.get(group.id) || [];
       if (bucket.length === 0 && sgFiltering) continue;
       if (!groupPinned) bucket.sort(pinSort);
@@ -3455,6 +3493,17 @@ function renderSessions() {
       let body = '';
       if (flat) {
         body = bucket.map(renderSessionCard).join('');
+      } else if (group.transient) {
+        // Each session under its own project block, so a worktree session reads as its repo's.
+        const byProject = new Map();
+        for (const s of bucket) {
+          const key = s.project || '';
+          if (!byProject.has(key)) byProject.set(key, []);
+          byProject.get(key).push(s);
+        }
+        for (const [p, arr] of byProject) {
+          body += p ? projectBlock(p, arr, true) : renderGroupSessions(arr, `__pinned_group_${group.id}__`);
+        }
       } else {
         const loose = [];
         const byProject = new Map();
@@ -3486,8 +3535,9 @@ function renderSessions() {
         }
       }
       if (!body) body = '<div class="sg-empty">Drop a session or a project here</div>';
+      const idAttr = group.transient ? '' : ` data-group-id="${escapeHtml(group.id)}"`;
       out += sgHeaderHtml(group, countHtml(bucket));
-      out += `<div class="session-group-sessions${collapsed ? ' collapsed' : ''}" data-group-id="${escapeHtml(group.id)}">${body}</div>`;
+      out += `<div class="session-group-sessions${collapsed ? ' collapsed' : ''}"${idAttr}>${body}</div>`;
     }
     if (!out) return '';
     return sectionHtml(SECTION_GROUPS, 'Groups', false, out);
@@ -4000,7 +4050,7 @@ async function onColumnDrop(e) {
 // windows the list), so membership is never garbage-collected on load.
 const SESSION_GROUPS_KEY = 'sessionGroups';
 const SG_ACTION_SELECTOR =
-  '.session-pin-btn, .team-info-btn, .plan-indicator, .scratchpad-badge, .bookmarks-badge, .linked-docs-badge, .project-view-btn, .group-path-toggle, .pinned-ungroup-btn, .sg-action';
+  '.session-pin-btn, .team-info-btn, .plan-indicator, .scratchpad-badge, .bookmarks-badge, .linked-docs-badge, .project-view-btn, .project-new-btn, .header-pad-btn, .group-path-toggle, .pinned-ungroup-btn, .sg-action';
 
 // Collapse state shares the existing `collapsedGroups` key; this namespace keeps it from
 // colliding with a project path or the __ungrouped__ / __pinned_* sentinels.
@@ -4056,7 +4106,42 @@ function sgGroupOf(type, ref) {
 
 // An individually placed session wins over the placement of its project.
 function sgGroupForSession(session) {
+  return sgUserGroupFor(session) || sgDispatchGroupFor(session);
+}
+
+function sgUserGroupFor(session) {
   return sgGroupOf('session', session.id) || (session.project ? sgGroupOf('project', session.project) : null);
+}
+
+// Transient groups come from the server (`dispatch start --group`) and go when their sessions
+// end. They are never written to localStorage; the objects are cached only so collapse state,
+// keyed by id, survives a re-render.
+const transientGroups = new Map();
+
+function sgTransientGroup(name) {
+  let group = transientGroups.get(name);
+  if (!group) {
+    group = { id: `t_${name}`, name, transient: true };
+    transientGroups.set(name, group);
+  }
+  return group;
+}
+
+// A user group with the same name takes the session in, so Keep does not split a group in two.
+// With no group of its own, a started session follows its starter into the starter's named group.
+function sgDispatchGroupFor(session) {
+  const name = session.dispatchGroup;
+  if (name) return sessionGroups.find((g) => g.name.toLowerCase() === name) || sgTransientGroup(name);
+  const starter = session.startedBy && sessions.find((s) => s.id === session.startedBy);
+  return starter ? sgUserGroupFor(starter) : null;
+}
+
+function sgKeepTransient(name) {
+  const group = sgTransientGroup(name);
+  const members = sessions.filter((s) => sgGroupForSession(s) === group);
+  const kept = sgCreateGroup(name);
+  for (const s of members) kept.members.push({ type: 'session', ref: s.id });
+  persistSessionGroups();
 }
 
 function sgDetach(type, ref) {
@@ -4155,19 +4240,34 @@ function sgSearchMatchIds(query) {
   return ids;
 }
 
+const PAD_SVG =
+  '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg>';
+
+function headerPadBtnHtml(key, label) {
+  const has = _hasScratchpad(key);
+  return `<span class="header-pad-btn${has ? ' has-pad' : ''}" onclick="event.stopPropagation(); showScratchpad('${escAttrJs(key)}')" title="${has ? 'Open' : 'New'} scratchpad for ${escapeHtml(label)} (N)">${PAD_SVG}</span>`;
+}
+
 function sgHeaderHtml(group, countHtml) {
   const collapsed = collapsedProjectGroups.has(sgKey(group.id));
   const editing = sgEditingId === group.id;
   const nameHtml = editing
     ? `<input class="sg-name-input" type="text" value="${escapeHtml(group.name)}" aria-label="Group name" spellcheck="false">`
     : `<span class="group-name">${escapeHtml(group.name)}</span>`;
+  const attrs = group.transient
+    ? `class="session-group-header sg-transient${collapsed ? ' collapsed' : ''}" data-transient-group="${escapeHtml(group.name)}" title="${escapeHtml(group.name)} — goes when its sessions end"`
+    : `class="session-group-header${collapsed ? ' collapsed' : ''}" draggable="${editing ? 'false' : 'true'}" data-group-id="${escapeHtml(group.id)}" title="${escapeHtml(group.name)} — drop sessions or projects here"`;
+  const actions = group.transient
+    ? '<span class="sg-action sg-keep" title="Keep this group after its sessions end">Keep</span>'
+    : `${headerPadBtnHtml(_groupScratchpadKey(group.id), group.name)}
+          <span class="sg-action sg-rename" title="Rename group"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></span>
+          <span class="sg-action sg-delete" title="Delete group (members return to Projects)">&times;</span>`;
   return `
-        <div class="session-group-header${collapsed ? ' collapsed' : ''}" draggable="${editing ? 'false' : 'true'}" data-group-path="${escapeHtml(sgKey(group.id))}" data-group-id="${escapeHtml(group.id)}" title="${escapeHtml(group.name)} — drop sessions or projects here">
+        <div ${attrs} data-group-path="${escapeHtml(sgKey(group.id))}">
           ${groupChevronSvg()}
           ${nameHtml}
+          ${actions}
           ${countHtml}
-          <span class="sg-action sg-rename" title="Rename group"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></span>
-          <span class="sg-action sg-delete" title="Delete group (members return to Projects)">&times;</span>
         </div>`;
 }
 
@@ -4264,7 +4364,8 @@ function sgDropZone(target) {
     const targetSession = sessions.find((s) => s.id === targetSessionId);
     const targetGroup = targetSession ? sgGroupForSession(targetSession) : null;
     const targetGroupId = targetGroup?.id || null;
-    if (targetGroup) {
+    // A transient group holds no members to reorder or place under; a drop there pairs instead.
+    if (targetGroup && !targetGroup.transient) {
       // Stacking onto a card adopts that card's placement, project block included.
       const targetHost = sgHostOf(targetGroup, targetSession);
       if (targetHost) {
@@ -5258,6 +5359,7 @@ const SHORTCUT_PAIRS = [
         { keys: ['Shift', 'L'], combo: true, label: 'Toggle session log' },
         { keys: ['Shift', 'M'], combo: true, label: 'Open last message' },
         { keys: ['J', 'K'], label: 'Previous / next message in detail' },
+        { keys: ['Ctrl', 'Enter'], combo: true, label: 'Allow / approve the waiting prompt' },
       ],
     },
   ],
@@ -5267,7 +5369,7 @@ const SHORTCUT_PAIRS = [
       rows: [
         { keys: ['Enter'], label: 'Toggle task detail panel' },
         { keys: ['D'], label: 'Delete selected task' },
-        { keys: ['N'], label: 'Toggle scratchpad' },
+        { keys: ['N'], label: 'Toggle scratchpad (in the sidebar: the item under the cursor)' },
         { keys: ['R'], label: 'Refresh data' },
         { keys: ['Esc'], label: 'Close panel / clear selection' },
       ],
@@ -5304,6 +5406,25 @@ const SHORTCUT_PAIRS = [
         { keys: ['Ctrl', 'Alt', '←/→'], combo: true, label: 'Previous / next hub app' },
         { keys: ['Alt', '1…9'], combo: true, label: 'Jump to hub app by number' },
         { keys: ['Ctrl', 'Alt', 'P'], combo: true, label: 'Project picker' },
+      ],
+    },
+  ],
+  [
+    {
+      title: 'Terminal',
+      rows: [
+        { keys: ['Ctrl', '`'], combo: true, label: 'Show / hide terminal' },
+        { keys: ['Alt', '`'], combo: true, label: 'Focus terminal / page' },
+        { keys: ['Alt', 'Shift', '`'], combo: true, label: 'End and close terminal' },
+        { keys: ['Ctrl', 'Shift', '`'], combo: true, label: 'All terminals' },
+      ],
+    },
+    {
+      title: 'Sessions',
+      rows: [
+        { keys: ['Ctrl', 'Alt', 'N'], combo: true, label: 'New session' },
+        { keys: ['Ctrl', 'Alt', 'R'], combo: true, label: 'Resume session (claude -r)' },
+        { keys: ['Ctrl', 'Alt', 'S'], combo: true, label: 'Swap to previous session' },
       ],
     },
   ],
@@ -5375,18 +5496,52 @@ const _scratchpadCharcount = document.getElementById('scratchpad-charcount');
 
 let _scratchpadKeyOverride = null;
 
+const SESSION_PAD_PREFIX = 'scratchpad-';
+const PROJECT_PAD_PREFIX = `${SESSION_PAD_PREFIX}project:`;
+const GROUP_PAD_PREFIX = `${SESSION_PAD_PREFIX}group:`;
+
 function _sessionScratchpadKey(sessionId) {
-  return `scratchpad-${sessionId}`;
+  return SESSION_PAD_PREFIX + sessionId;
 }
 
-function _isSessionScratchpadKey(key) {
-  return key.startsWith('scratchpad-') && !key.startsWith('scratchpad-project:');
+function _projectScratchpadKey(projectPath) {
+  return PROJECT_PAD_PREFIX + projectPath;
+}
+
+function _groupScratchpadKey(groupId) {
+  return GROUP_PAD_PREFIX + groupId;
+}
+
+// Every kind shares the session prefix, so the longer prefixes are tested first.
+function _parsePadKey(key) {
+  for (const [kind, prefix] of [
+    ['group', GROUP_PAD_PREFIX],
+    ['project', PROJECT_PAD_PREFIX],
+    ['session', SESSION_PAD_PREFIX],
+  ]) {
+    if (key.startsWith(prefix)) return { kind, id: key.slice(prefix.length) };
+  }
+  return null;
+}
+
+function _hasScratchpad(key) {
+  return !!(store.getItem(key) || '').trim();
 }
 
 function _scratchpadKey() {
   if (_scratchpadKeyOverride) return _scratchpadKeyOverride;
   if (currentSessionId) return _sessionScratchpadKey(currentSessionId);
-  if (currentProjectPath) return `scratchpad-project:${currentProjectPath}`;
+  if (currentProjectPath) return _projectScratchpadKey(currentProjectPath);
+  return null;
+}
+
+function _scratchpadKeyOf(el) {
+  if (!el) return null;
+  if (el.dataset.sessionId) return _sessionScratchpadKey(el.dataset.sessionId);
+  if (el.classList.contains('session-group-header')) return _groupScratchpadKey(el.dataset.groupId);
+  if (el.classList.contains('project-group-header') && el.dataset.projectPath) {
+    return _projectScratchpadKey(el.dataset.projectPath);
+  }
   return null;
 }
 
@@ -5427,14 +5582,14 @@ function saveScratchpad() {
   const key = _scratchpadKey();
   if (!key) return;
   const val = _scratchpadTextarea.value;
-  const had = !!(store.getItem(key) || '').trim();
+  const had = _hasScratchpad(key);
   const has = !!val.trim();
   if (has) {
     store.setItem(key, val);
   } else {
     store.removeItem(key);
   }
-  if (had !== has && _isSessionScratchpadKey(key)) {
+  if (had !== has) {
     renderSessions();
   }
 }
@@ -5446,6 +5601,30 @@ _scratchpadTextarea.addEventListener('input', () => {
     saveScratchpad();
     _scratchpadSaveTimer = null;
   }, 500);
+});
+
+// Bound on the textarea: the global handler returns early on TEXTAREA targets.
+_scratchpadTextarea.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeScratchpad();
+});
+
+// Vimium eats Escape inside a text field and only blurs it, so the page never sees the key.
+// A blur that no click in the modal caused, while the window keeps focus, is that Escape.
+let _scratchpadPointerDown = false;
+_scratchpadModal.addEventListener('mousedown', () => {
+  _scratchpadPointerDown = true;
+});
+document.addEventListener('mouseup', () => {
+  _scratchpadPointerDown = false;
+});
+_scratchpadTextarea.addEventListener('blur', (e) => {
+  if (
+    !e.relatedTarget &&
+    !_scratchpadPointerDown &&
+    _scratchpadModal.classList.contains('visible') &&
+    document.hasFocus()
+  )
+    closeScratchpad();
 });
 
 //#endregion
@@ -5664,30 +5843,38 @@ function _storageUnpinMessage(sessionId, pinId) {
 function _renderStorageScratchpads() {
   const allItems = [];
   for (const key of store.keys()) {
-    if (!key.startsWith('scratchpad-')) continue;
-    const val = store.getItem(key) || '';
-    const isProject = key.startsWith('scratchpad-project:');
-    const id = isProject ? key.slice('scratchpad-project:'.length) : key.slice('scratchpad-'.length);
-    allItems.push({ key, id, isProject, chars: val.length });
+    const parsed = _parsePadKey(key);
+    if (!parsed) continue;
+    allItems.push({ key, ...parsed, chars: (store.getItem(key) || '').length });
   }
   if (!allItems.length) return '<div class="storage-empty">No scratchpads</div>';
 
-  const projectItems = allItems.filter((i) => i.isProject);
-  const sessionItems = allItems.filter((i) => !i.isProject);
+  const groupItems = allItems.filter((i) => i.kind === 'group');
+  const projectItems = allItems.filter((i) => i.kind === 'project');
+  const sessionItems = allItems.filter((i) => i.kind === 'session');
   const sessionIds = sessionItems.map((i) => i.id);
   const { groups: projectGroups, orphans } = _groupByProject(sessionIds);
   const scratchBySession = new Map(sessionItems.map((i) => [i.id, i]));
 
   function renderScratchItem(item) {
-    const session = !item.isProject ? sessions.find((s) => s.id === item.id) : null;
-    const typeBadge = item.isProject
-      ? '<span class="storage-item-badge">project</span>'
-      : '<span class="storage-item-badge">session</span>';
     const jsKey = escAttrJs(item.key);
-    const label = item.isProject ? escapeHtml(_projectLabel(item.id)) : _sessionLabel(session, item.id);
+    let label;
+    switch (item.kind) {
+      case 'group':
+        label = escapeHtml(sgGroupById(item.id)?.name ?? `${item.id} (deleted)`);
+        break;
+      case 'project':
+        label = escapeHtml(_projectLabel(item.id));
+        break;
+      default:
+        label = _sessionLabel(
+          sessions.find((s) => s.id === item.id),
+          item.id,
+        );
+    }
     return `<div class="storage-item">
       <span class="storage-item-id" title="${escapeHtml(item.id)}">${label}</span>
-      ${typeBadge}
+      <span class="storage-item-badge">${item.kind}</span>
       <span class="storage-item-meta">${item.chars} chars</span>
       <div class="storage-item-actions">
         <button onclick="_storagePreviewScratchpad('${jsKey}')">View</button>
@@ -5697,6 +5884,14 @@ function _renderStorageScratchpads() {
   }
 
   let html = '';
+
+  if (groupItems.length) {
+    html += _renderProjectGroup(
+      'Group Scratchpads',
+      `${groupItems.length}`,
+      groupItems.map(renderScratchItem).join(''),
+    );
+  }
 
   if (projectItems.length) {
     html += _renderProjectGroup(
@@ -5831,10 +6026,13 @@ function _findOrphanedKeys() {
   for (const id of pinnedSessionIds) if (!known.has(id)) orphaned.push(`__pinned__${id}`);
   for (const id of stickySessionIds) if (!known.has(id)) orphaned.push(`__sticky__${id}`);
   for (const key of store.keys()) {
-    if (key.startsWith('pinned-messages-')) {
+    const pad = _parsePadKey(key);
+    if (pad?.kind === 'group') {
+      if (!sgGroupById(pad.id)) orphaned.push(key);
+    } else if (key.startsWith('pinned-messages-')) {
       if (!known.has(key.slice('pinned-messages-'.length))) orphaned.push(key);
-    } else if (_isSessionScratchpadKey(key)) {
-      if (!known.has(key.slice('scratchpad-'.length))) orphaned.push(key);
+    } else if (pad?.kind === 'session') {
+      if (!known.has(pad.id)) orphaned.push(key);
     } else if (key.startsWith(PREVIEW_STORAGE_PREFIX)) {
       if (!known.has(key.slice(PREVIEW_STORAGE_PREFIX.length))) orphaned.push(key);
     } else if (key.startsWith(PAD_LINKED_PREFIX)) {
@@ -5909,6 +6107,8 @@ const MODAL_CLOSERS = {
   'agent-modal': () => closeAgentModal(),
   'help-modal': () => closeHelpModal(),
   'session-picker-modal': () => closeSessionPicker(),
+  'terminal-manager-modal': () => closeTerminalManager(),
+  'new-session-modal': () => closeNewSession(),
 };
 
 document.addEventListener('keydown', (e) => {
@@ -5922,6 +6122,35 @@ document.addEventListener('keydown', (e) => {
       adjustModalZoom(delta);
       return;
     }
+  }
+
+  // Above the text-field guard: xterm's input is a textarea, and the toggle must work from it.
+  const terminalPrompt = document.getElementById('terminal-prompt');
+  if (terminalPrompt.contains(e.target)) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      toggleTerminal();
+      return;
+    }
+    if (e.key === 'Enter' || e.key === ' ') return;
+    const step = matchKey(e, 'ArrowLeft', 'ArrowUp', 'KeyH', 'KeyK')
+      ? -1
+      : matchKey(e, 'ArrowRight', 'ArrowDown', 'KeyL', 'KeyJ')
+        ? 1
+        : 0;
+    if (step) {
+      e.preventDefault();
+      const buttons = [...terminalPrompt.querySelectorAll('button')];
+      const i = buttons.indexOf(e.target);
+      buttons[(i + step + buttons.length) % buttons.length]?.focus();
+      return;
+    }
+  }
+  const terminalAction = terminalShortcut(e);
+  if (terminalAction) {
+    e.preventDefault();
+    terminalAction();
+    return;
   }
 
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') {
@@ -5953,7 +6182,16 @@ document.addEventListener('keydown', (e) => {
       e.preventDefault();
       closeMsgDetailModal();
     } else if (document.getElementById('msg-detail-modal').classList.contains('visible')) {
-      if (matchKey(e, 'ArrowDown', 'KeyJ')) {
+      if (
+        e.key === 'Enter' &&
+        (e.ctrlKey || e.metaKey) &&
+        currentMsgDetailIdx === MSG_DETAIL_WAITING_IDX &&
+        isWaitingAnswerable() &&
+        currentWaiting.kind !== 'question'
+      ) {
+        e.preventDefault();
+        respondWaiting({ behavior: 'allow' });
+      } else if (matchKey(e, 'ArrowDown', 'KeyJ')) {
         e.preventDefault();
         if (currentMsgDetailIdx === MSG_DETAIL_WAITING_IDX) {
           msgDetailFollowLatest = true;
@@ -6037,6 +6275,12 @@ document.addEventListener('keydown', (e) => {
   // Tab toggles focus zone
   if (e.key === 'Tab') {
     e.preventDefault();
+    // The terminal replaces the board, so it takes the board's place in the Tab cycle.
+    if (wantsTerminal()) {
+      if (focusZone === 'sidebar') focusTerminalPane();
+      else leaveTerminalPane();
+      return;
+    }
     if (focusZone === 'sidebar') {
       const hasCards = document.querySelector('.task-card');
       if (!hasCards) return;
@@ -6135,10 +6379,9 @@ document.addEventListener('keydown', (e) => {
   }
 
   // Shared actions — work in both sidebar and board
+  const cursorEl = focusZone === 'sidebar' ? sessionsList.querySelector('.kb-selected') : null;
   const contextSid =
-    focusZone === 'sidebar'
-      ? sessionsList.querySelector('.kb-selected')?.dataset.sessionId || currentSessionId
-      : selectedSessionId || currentSessionId;
+    focusZone === 'sidebar' ? cursorEl?.dataset.sessionId || currentSessionId : selectedSessionId || currentSessionId;
   if (matchKey(e, 'KeyP') && !e.shiftKey) {
     e.preventDefault();
     if (contextSid) openPlanForSession(contextSid);
@@ -6151,7 +6394,9 @@ document.addEventListener('keydown', (e) => {
   }
   if (matchKey(e, 'KeyN') && !e.shiftKey) {
     e.preventDefault();
-    toggleScratchpad();
+    const cursorKey = _scratchpadKeyOf(cursorEl);
+    if (cursorKey) showScratchpad(cursorKey);
+    else toggleScratchpad();
     return;
   }
   if (e.key === '$' && !e.ctrlKey && !e.altKey && !e.metaKey) {
@@ -7057,6 +7302,24 @@ function setupEventSource() {
     failCount = 0;
   }
 
+  let taskRefreshTimer = null;
+  let metadataRefreshTimer = null;
+  let metadataDeadline = 0;
+  let agentRefreshTimer = null;
+  const pendingTaskSessionIds = new Set();
+  const pendingAgentSessionIds = new Set();
+
+  function refreshAllView() {
+    currentTasks = filterProject ? allTasksCache.filter((t) => matchesProjectFilter(t.project)) : allTasksCache;
+    renderAllTasks();
+    renderActivityChip();
+  }
+
+  async function refreshSessionDetail(sessionId) {
+    await fetchAgents(sessionId);
+    if (!agentLogMode) fetchMessages(sessionId);
+  }
+
   function connect() {
     eventSource = new EventSource('/api/events');
 
@@ -7065,6 +7328,10 @@ function setupEventSource() {
         console.warn('[SSE] Reconnected after drop — forcing full refresh');
         fetchSessions().catch(() => {});
         if (currentSessionId) fetchTasks(currentSessionId);
+        if (terminalAvailable())
+          loadTerminals()
+            .then(renderSessions)
+            .catch(() => {});
       }
       wasConnected = true;
       retryDelay = 1000;
@@ -7080,31 +7347,29 @@ function setupEventSource() {
       retryDelay = Math.min(retryDelay * 2, 30000);
     };
 
-    let taskRefreshTimer = null;
-    let metadataRefreshTimer = null;
-    let agentRefreshTimer = null;
-    const pendingTaskSessionIds = new Set();
-    const pendingAgentSessionIds = new Set();
-
     function debouncedRefresh(sessionId, isMetadata) {
       if (isMetadata) {
+        // Busy sessions emit events faster than the 2 s quiet period, so a pure debounce would
+        // never fire; the deadline caps how long a burst can hold the refresh back.
+        metadataDeadline ||= Date.now() + METADATA_MAX_WAIT_MS;
         clearTimeout(metadataRefreshTimer);
-        metadataRefreshTimer = setTimeout(async () => {
-          fetchSessions(false).catch((err) => console.error('[SSE] fetchSessions failed:', err));
-          if (currentSessionId) {
-            await fetchAgents(currentSessionId);
-            if (!agentLogMode) fetchMessages(currentSessionId);
-          }
-        }, 2000);
+        metadataRefreshTimer = setTimeout(
+          () => {
+            metadataDeadline = 0;
+            if (skipOffScreen()) return;
+            fetchSessions(false).catch((err) => console.error('[SSE] fetchSessions failed:', err));
+            if (currentSessionId) refreshSessionDetail(currentSessionId);
+          },
+          Math.min(2000, metadataDeadline - Date.now()),
+        );
       } else {
         pendingTaskSessionIds.add(sessionId);
         clearTimeout(taskRefreshTimer);
         taskRefreshTimer = setTimeout(async () => {
+          if (skipOffScreen()) return;
           await fetchSessions().catch((err) => console.error('[SSE] fetchSessions failed:', err));
           if (viewMode === 'all') {
-            currentTasks = filterProject ? allTasksCache.filter((t) => matchesProjectFilter(t.project)) : allTasksCache;
-            renderAllTasks();
-            renderActivityChip();
+            refreshAllView();
           } else if (viewMode === 'project' && currentProjectPath) {
             const hasUpdate = currentProjectSessionIds.some((id) => pendingTaskSessionIds.has(id));
             if (hasUpdate) fetchProjectView(currentProjectPath);
@@ -7124,23 +7389,27 @@ function setupEventSource() {
       }
 
       if (data.type === 'plan-update') {
-        refreshOpenPlan();
+        if (!skipOffScreen()) refreshOpenPlan();
       }
+
+      if (data.type === 'terminals-update' && Array.isArray(data.ids)) setRunningTerminals(data.ids);
+
+      if (data.type === 'dispatch-update') onDispatchUpdate();
 
       if (data.type === 'agent-update') {
         pendingAgentSessionIds.add(data.sessionId);
         clearTimeout(agentRefreshTimer);
         agentRefreshTimer = setTimeout(() => {
+          if (skipOffScreen()) return;
           fetchSessions(false).catch((err) => console.error('[SSE] fetchSessions failed:', err));
           if (viewMode === 'project' && currentProjectSessionIds.some((id) => pendingAgentSessionIds.has(id))) {
             refreshProjectAgents();
           } else if (currentSessionId && pendingAgentSessionIds.has(currentSessionId)) {
-            fetchAgents(currentSessionId);
             // An agent starting/stopping adds its Agent tool_use + completion rows to
             // the transcript. Refresh the message log on the same signal so they appear
             // at start, not only when an unrelated metadata/context refresh coincides
             // with completion.
-            if (!agentLogMode) fetchMessages(currentSessionId);
+            refreshSessionDetail(currentSessionId);
           }
           pendingAgentSessionIds.clear();
         }, 500);
@@ -7148,7 +7417,7 @@ function setupEventSource() {
 
       if (data.type === 'context-update') {
         debouncedRefresh(data.sessionId, true);
-        refreshRateLimits();
+        if (!skipOffScreen()) refreshRateLimits();
       }
 
       if (data.type === 'preview:open') {
@@ -7178,20 +7447,42 @@ function setupEventSource() {
     };
   }
 
-  // When the tab becomes visible after being hidden, catch up immediately
-  let _pollMissed = false;
-  document.addEventListener('visibilitychange', () => {
-    if (!document.hidden && _pollMissed) {
-      _pollMissed = false;
-      fetchSessions().catch(() => {});
-      if (currentSessionId) fetchTasks(currentSessionId).catch(() => {});
+  // When cck comes back on screen (tab visible or hub:active), catch up immediately
+  async function catchUp() {
+    if (!isOnScreen() || !missedWhileHidden) return;
+    missedWhileHidden = false;
+    // The full refresh below covers whatever the pending debounces would have fetched.
+    for (const t of [taskRefreshTimer, metadataRefreshTimer, agentRefreshTimer]) clearTimeout(t);
+    metadataDeadline = 0;
+    pendingTaskSessionIds.clear();
+    pendingAgentSessionIds.clear();
+    const sessionsLoaded = fetchSessions().catch(() => {});
+    if (viewMode === 'all') {
+      await sessionsLoaded;
+      refreshAllView();
+    } else if (viewMode === 'project' && currentProjectPath) {
+      await sessionsLoaded;
+      fetchProjectView(currentProjectPath);
+    } else if (currentSessionId) {
+      fetchTasks(currentSessionId).catch(() => {});
+      await refreshSessionDetail(currentSessionId);
     }
+    refreshOpenPlan();
+    refreshRateLimits();
+    renderAgentFooter();
+  }
+  document.addEventListener('visibilitychange', catchUp);
+  window.addEventListener('message', (e) => {
+    if (e.source !== window.parent || e.origin !== hubOrigin() || e.data?.type !== 'hub:active') return;
+    hubActive = !!e.data.active;
+    catchUp();
+    if (hubActive && wantsTerminal()) onTerminalShown();
   });
 
-  // Fallback poll every 30s in case SSE silently drops; skip when tab is hidden
+  // Fallback poll every 30s in case SSE silently drops; skip when not on screen
   setInterval(() => {
-    if (document.hidden) {
-      _pollMissed = true;
+    if (!isOnScreen()) {
+      if (eventSource?.readyState !== EventSource.OPEN) missedWhileHidden = true;
       return;
     }
     fetchSessions().catch(() => {});
@@ -7301,7 +7592,7 @@ function formatCost(usd) {
   return `$${usd.toFixed(2)}`;
 }
 
-function renderContextDetail(raw) {
+function renderContextDetail(raw, { tokens = true } = {}) {
   const ctx = getCtx(raw);
   if (!ctx) return '';
   const totalK = ctx.size / 1000;
@@ -7310,6 +7601,16 @@ function renderContextDetail(raw) {
   const cw = raw.context_window || {};
   const usage = cw.current_usage || {};
   const cost = raw.cost || {};
+  const tokenRows = tokens
+    ? `<div class="stat-item"><span class="stat-label">Cache read</span><span class="stat-value">${formatTokens((usage.cache_read_input_tokens || 0) / 1000)}</span></div>
+            <div class="stat-item"><span class="stat-label">Cache write</span><span class="stat-value">${formatTokens((usage.cache_creation_input_tokens || 0) / 1000)}</span></div>
+            <div class="stat-item"><span class="stat-label">Current input</span><span class="stat-value">${formatTokens((usage.input_tokens || 0) / 1000)}</span></div>
+            <div class="stat-item"><span class="stat-label">Current output</span><span class="stat-value">${formatTokens((usage.output_tokens || 0) / 1000)}</span></div>
+            <div class="stat-divider"></div>
+            <div class="stat-item"><span class="stat-label">Total input</span><span class="stat-value">${formatTokens(ctx.inputTokens / 1000)}</span></div>
+            <div class="stat-item"><span class="stat-label">Total output</span><span class="stat-value">${formatTokens(ctx.outputTokens / 1000)}</span></div>
+            <div class="stat-divider"></div>`
+    : '';
 
   return `
         <div class="detail-context">
@@ -7325,14 +7626,7 @@ function renderContextDetail(raw) {
             <span>${formatTokens((ctx.pct / 100) * totalK)} / ${formatTokens(totalK)}</span>
           </div>
           <div class="detail-context-stats">
-            <div class="stat-item"><span class="stat-label">Cache read</span><span class="stat-value">${formatTokens((usage.cache_read_input_tokens || 0) / 1000)}</span></div>
-            <div class="stat-item"><span class="stat-label">Cache write</span><span class="stat-value">${formatTokens((usage.cache_creation_input_tokens || 0) / 1000)}</span></div>
-            <div class="stat-item"><span class="stat-label">Current input</span><span class="stat-value">${formatTokens((usage.input_tokens || 0) / 1000)}</span></div>
-            <div class="stat-item"><span class="stat-label">Current output</span><span class="stat-value">${formatTokens((usage.output_tokens || 0) / 1000)}</span></div>
-            <div class="stat-divider"></div>
-            <div class="stat-item"><span class="stat-label">Total input</span><span class="stat-value">${formatTokens(ctx.inputTokens / 1000)}</span></div>
-            <div class="stat-item"><span class="stat-label">Total output</span><span class="stat-value">${formatTokens(ctx.outputTokens / 1000)}</span></div>
-            <div class="stat-divider"></div>
+            ${tokenRows}
             <div class="stat-item"><span class="stat-label">Cost</span><span class="stat-value" style="color:${getCostColor(cost.total_cost_usd)}">${formatCost(cost.total_cost_usd)}</span></div>
             <div class="stat-item"><span class="stat-label">Duration</span><span class="stat-value">${formatDuration(cost.total_duration_ms)}</span></div>
             <div class="stat-item"><span class="stat-label">API time</span><span class="stat-value">${formatDuration(cost.total_api_duration_ms)}</span></div>
@@ -7365,6 +7659,8 @@ let waitingDetailAutoOpened = false;
 function maybeAutoOpenWaiting() {
   if (!isWaitingAnswerable() || !isWaitingFresh()) return;
   if (currentWaiting.id === lastAutoOpenedWaitingId || isAnyModalOpen()) return;
+  // The terminal on screen shows the same ask; hiding it lets the next poll open the modal.
+  if (termState.shown) return;
   lastAutoOpenedWaitingId = currentWaiting.id;
   msgDetailFollowLatest = true;
   waitingDetailAutoOpened = true;
@@ -7762,6 +8058,10 @@ function stripTeammateWrapper(text) {
 // escaping is explicit here.
 const HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '`': '&#96;' };
 
+function pickRandom(items) {
+  return items[Math.floor(Math.random() * items.length)];
+}
+
 function escapeHtml(text) {
   if (text == null) return '';
   return String(text).replace(/[&<>"'`]/g, (c) => HTML_ESCAPES[c]);
@@ -8122,6 +8422,13 @@ document.addEventListener('click', (e) => {
     return;
   }
 
+  const newBtn = e.target.closest('.project-new-btn');
+  if (newBtn) {
+    e.stopPropagation();
+    openNewSession(newBtn.dataset.projectPath);
+    return;
+  }
+
   const projectBtn = e.target.closest('.project-view-btn');
   if (projectBtn) {
     e.stopPropagation();
@@ -8147,20 +8454,26 @@ document.addEventListener('click', (e) => {
   if (sgHeader) {
     if (e.target.closest('.sg-name-input')) return;
     e.stopPropagation();
+    if (e.target.closest('.sg-keep')) {
+      sgKeepTransient(sgHeader.dataset.transientGroup);
+      renderSessions();
+      return;
+    }
     const groupId = sgHeader.dataset.groupId;
     const group = sgGroupById(groupId);
-    if (!group) return;
-    if (e.target.closest('.sg-rename')) {
-      sgBeginRename(groupId);
-      return;
-    }
-    if (e.target.closest('.sg-delete')) {
-      if (confirm(`Delete group “${group.name}”? Its sessions and projects go back to Projects.`)) {
-        sgDeleteGroup(groupId);
-        renderSessions();
+    if (group) {
+      if (e.target.closest('.sg-rename')) {
+        sgBeginRename(groupId);
+        return;
       }
-      return;
-    }
+      if (e.target.closest('.sg-delete')) {
+        if (confirm(`Delete group “${group.name}”? Its sessions and projects go back to Projects.`)) {
+          sgDeleteGroup(groupId);
+          renderSessions();
+        }
+        return;
+      }
+    } else if (!sgHeader.dataset.transientGroup) return;
   }
 
   const header = e.target.closest(COLLAPSIBLE_HEADER_SELECTOR);
@@ -8180,14 +8493,8 @@ function filterByProject(project) {
 
 let projectsCache = null;
 
-async function updateProjectDropdown() {
-  const dropdown = document.getElementById('project-filter');
-
-  if (!projectsCacheDirty && projectsCache) {
-    renderProjectDropdown(dropdown, projectsCache);
-    return;
-  }
-
+async function loadProjects() {
+  if (!projectsCacheDirty && projectsCache) return projectsCache;
   let projects;
   try {
     const res = await fetch('/api/projects');
@@ -8197,10 +8504,20 @@ async function updateProjectDropdown() {
       .sort()
       .map((p) => ({ path: p, modifiedAt: null }));
   }
-
   projectsCache = projects;
   projectsCacheDirty = false;
+  return projects;
+}
 
+async function updateProjectDropdown() {
+  const dropdown = document.getElementById('project-filter');
+
+  if (!projectsCacheDirty && projectsCache) {
+    renderProjectDropdown(dropdown, projectsCache);
+    return;
+  }
+
+  const projects = await loadProjects();
   const cutoff = Date.now() - 24 * 60 * 60 * 1000;
   const prevRecent = recentProjects;
   recentProjects = new Set(
@@ -9593,6 +9910,1274 @@ function filterByOwner(value) {
 
 //#endregion
 
+//#region TERMINAL
+// The kanban and the terminal share one slot: terminal mode hides #main-content and shows
+// the pane. The PTY lives on the server (lib/terminal.js) and outlives the pane, so
+// leaving the session view or switching sessions drops only the socket; coming back
+// reattaches and the server replays the screen.
+const TERMINAL_TOKEN_KEY = 'terminal-token';
+const TERMINAL_TOKEN_RE = /^[0-9a-f]{64}$/;
+// Ctrl+Alt letters cck keeps instead of forwarding to the hub: New session, Resume session, and
+// Swap to the previous session.
+const CCK_CTRL_ALT_KEYS = new Set(['KeyN', 'KeyR', 'KeyS']);
+const TERMINAL_MODES_KEY = 'terminal-sessions';
+const ACK_BATCH_BYTES = 32 * 1024;
+const TERMINAL_RETRY_MS = [500, 1000, 2000, 4000, 8000];
+const TERMINAL_STABLE_MS = 5000;
+const STALE_TOKEN_MSG = 'The terminal token is out of date. Reload the hub window.';
+// Read at load, before the first updateUrl() rewrites the URL without the fragment.
+let terminalToken = readTerminalToken();
+const termState = {
+  loaded: null,
+  term: null,
+  fit: null,
+  webgl: null,
+  ws: null,
+  sessionId: null,
+  syncedView: null,
+  panelHidden: false,
+  shown: false,
+  attached: false,
+  closeGuard: false,
+  leaving: false,
+  focusNext: false,
+  openedByUser: null,
+  ackPending: 0,
+  ackTimer: null,
+  retryTimer: null,
+};
+
+// The hub passes the token in the fragment, which is never sent to a server or logged.
+function readTerminalToken() {
+  const m = /[#&]t=([^&]*)/.exec(location.hash);
+  if (m && TERMINAL_TOKEN_RE.test(m[1])) {
+    storeTerminalToken(m[1]);
+    history.replaceState(null, '', location.pathname + location.search);
+    return m[1];
+  }
+  try {
+    return sessionStorage.getItem(TERMINAL_TOKEN_KEY);
+  } catch (_) {
+    return null;
+  }
+}
+
+function storeTerminalToken(token) {
+  try {
+    sessionStorage.setItem(TERMINAL_TOKEN_KEY, token);
+  } catch (_) {}
+}
+
+let tokenRefresh = null;
+
+// The hub mints a new token each run, and this page can outlive a hub restart. Resolves true only
+// for a token that differs from the one that just failed, so a caller retries at most once.
+function refreshTerminalToken() {
+  if (!window.__HUB__?.enabled) return Promise.resolve(false);
+  tokenRefresh ??= requestTerminalToken().finally(() => {
+    tokenRefresh = null;
+  });
+  return tokenRefresh;
+}
+
+function requestTerminalToken() {
+  return new Promise((resolve) => {
+    const done = (ok) => {
+      window.removeEventListener('message', onMessage);
+      clearTimeout(timer);
+      resolve(ok);
+    };
+    const onMessage = (e) => {
+      if (e.source !== window.parent || e.origin !== hubOrigin() || e.data?.type !== 'hub:terminalToken') return;
+      const token = e.data.token;
+      if (typeof token !== 'string' || !TERMINAL_TOKEN_RE.test(token) || token === terminalToken) return done(false);
+      terminalToken = token;
+      storeTerminalToken(token);
+      done(true);
+    };
+    const timer = setTimeout(() => done(false), 3000);
+    window.addEventListener('message', onMessage);
+    hubPost({ type: 'hub:terminalToken' });
+  });
+}
+
+function terminalAvailable() {
+  return !!appConfig.terminal?.available && !!terminalToken;
+}
+
+function terminalModes() {
+  return new Set(readStoredList(TERMINAL_MODES_KEY));
+}
+
+function setTerminalMode(sessionId, on) {
+  const modes = terminalModes();
+  if (on) modes.add(sessionId);
+  else modes.delete(sessionId);
+  try {
+    store.setItem(TERMINAL_MODES_KEY, JSON.stringify([...modes].slice(-50)));
+  } catch (_) {}
+}
+
+function wantsTerminal() {
+  return terminalAvailable() && viewMode === 'session' && !!currentSessionId && terminalModes().has(currentSessionId);
+}
+
+function toggleTerminal() {
+  if (!terminalAvailable() || viewMode !== 'session' || !currentSessionId) return;
+  setTerminalMode(currentSessionId, !terminalModes().has(currentSessionId));
+  termState.focusNext = true;
+  syncTerminal();
+}
+
+function terminalPaneFocused() {
+  return document.getElementById('terminal-pane').contains(document.activeElement);
+}
+
+function terminalShortcut(e) {
+  const ctrlAlt = e.ctrlKey && e.altKey && !e.shiftKey && !e.metaKey;
+  if (ctrlAlt && e.code === 'KeyS') return swapToPreviousSession;
+  if (ctrlAlt && (e.code === 'KeyN' || e.code === 'KeyR') && terminalAvailable()) {
+    return () => openNewSession(null, e.code === 'KeyR');
+  }
+  if (e.code !== 'Backquote' || e.metaKey) return null;
+  if (e.ctrlKey && !e.altKey) return e.shiftKey ? openTerminalManager : toggleTerminal;
+  if (e.altKey && !e.ctrlKey && !e.shiftKey) return toggleTerminalFocus;
+  if (!e.altKey || !e.shiftKey || e.ctrlKey) return null;
+  if (termState.attached && wantsTerminal()) return () => closeTerminalSession();
+  if (viewMode === 'session' && runningTerminals.has(currentSessionId)) {
+    return () => closeTerminalSession(currentSessionId);
+  }
+  return null;
+}
+
+function swapToPreviousSession() {
+  const target = currentSessionId === lastSessionId ? previousSessionId : lastSessionId;
+  if (!target || target === currentSessionId) return;
+  if (terminalPaneFocused()) termState.focusNext = true;
+  openSession(target);
+}
+
+// Esc belongs to Claude, so leaving the terminal without hiding it needs its own key.
+function toggleTerminalFocus() {
+  if (!wantsTerminal()) {
+    toggleTerminal();
+    return;
+  }
+  if (terminalPaneFocused()) leaveTerminalPane();
+  else focusTerminalPane();
+}
+
+// Idempotent: runs on every view change, so whichever path changed the view lands here.
+function syncTerminal() {
+  const btn = document.getElementById('terminal-toggle');
+  const on = wantsTerminal();
+  const arrived = viewMode === 'session' ? currentSessionId : null;
+  const view = `${arrived}:${on}`;
+  // Only on a change of session or terminal state, so a panel opened by hand over the terminal stays.
+  if (view !== termState.syncedView) {
+    termState.syncedView = view;
+    // The terminal shows the same conversation, so the log panel only takes width; it comes back when the terminal goes.
+    if (on && messagePanelOpen) {
+      toggleMessagePanel();
+      termState.panelHidden = true;
+    } else if (!on && arrived && termState.panelHidden) toggleMessagePanel();
+  }
+  if (btn) {
+    btn.style.display = terminalAvailable() && viewMode === 'session' && currentSessionId ? '' : 'none';
+    btn.classList.toggle('active', on);
+  }
+  sessionView.classList.toggle('terminal-mode', on);
+  if (!on) {
+    termState.shown = false;
+    termState.focusNext = false;
+    termState.openedByUser = null;
+    syncCloseGuard();
+    // Hiding keeps the socket so Ctrl+` back is instant.
+    const keepSocket = termState.sessionId === currentSessionId && viewMode === 'session';
+    if (termState.sessionId && !keepSocket) detachTerminal();
+    return;
+  }
+  const wasShown = termState.shown;
+  termState.shown = true;
+  syncCloseGuard();
+  if (termState.sessionId !== currentSessionId) openTerminal(currentSessionId, terminalOpenMode(currentSessionId));
+  else if (!wasShown) onTerminalShown(takeTerminalFocus(currentSessionId));
+}
+
+// Only paths the user drives call this; restores, deep links and refreshes call fetchTasks, so they never take focus.
+function openSession(sessionId) {
+  const alreadyOpen = sessionId === currentSessionId && viewMode === 'session' && termState.shown;
+  if (!alreadyOpen) termState.openedByUser = sessionId;
+  else if (termState.attached && promptAwaitsUser(sessionId)) focusTerminalPane();
+  return fetchTasks(sessionId);
+}
+
+// Selecting a session only shows its terminal; focus follows an explicit toggle, a new session, or
+// the user opening a session that waits on a prompt, since answering it is why they opened it.
+function takeTerminalFocus(sessionId) {
+  const opened = termState.openedByUser === sessionId;
+  termState.openedByUser = null;
+  const focus = termState.focusNext || newSpecs.has(sessionId) || (opened && promptAwaitsUser(sessionId));
+  termState.focusNext = false;
+  return focus;
+}
+
+// The terminal attaches asynchronously; by then the user may be typing elsewhere or reading a modal.
+function promptAwaitsUser(sessionId) {
+  if (!sessions.find((s) => s.id === sessionId)?.hasWaitingForUser || isAnyModalOpen()) return false;
+  return !document.activeElement?.matches('input, textarea, select, [contenteditable]');
+}
+
+function onTerminalShown(focus = true) {
+  requestAnimationFrame(() => {
+    fitTerminal();
+    repaintTerminal();
+    if (focus) focusTerminalPane();
+  });
+}
+
+function focusTerminalPane() {
+  const prompt = document.getElementById('terminal-prompt');
+  if (prompt.classList.contains('visible')) prompt.querySelector('button')?.focus();
+  else termState.term?.focus();
+}
+
+function leaveTerminalPane() {
+  termState.leaving = true;
+  document.activeElement.blur();
+  termState.leaving = false;
+  setFocusZone('sidebar');
+}
+
+function loadXterm() {
+  if (termState.loaded) return termState.loaded;
+  const css = document.createElement('link');
+  css.rel = 'stylesheet';
+  css.href = '/vendor/xterm/xterm.css';
+  document.head.appendChild(css);
+  const script = (src) =>
+    new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = src;
+      s.onload = resolve;
+      s.onerror = () => reject(new Error(`failed to load ${src}`));
+      document.head.appendChild(s);
+    });
+  termState.loaded = script('/vendor/xterm/xterm.js').then(() =>
+    Promise.all(['addon-fit', 'addon-webgl', 'addon-unicode11'].map((n) => script(`/vendor/xterm/${n}.js`))),
+  );
+  termState.loaded.catch(() => {
+    termState.loaded = null;
+  });
+  return termState.loaded;
+}
+
+function terminalTheme() {
+  const css = getComputedStyle(document.body);
+  const v = (name) => css.getPropertyValue(name).trim();
+  const theme = {
+    background: v('--bg-deep'),
+    foreground: v('--text-primary'),
+    cursor: v('--accent'),
+    cursorAccent: v('--bg-deep'),
+    selectionBackground: v('--accent-dim'),
+  };
+  for (const name of ANSI_COLOR_NAMES) {
+    theme[name] = v(`--ansi-${name}`);
+    theme[`bright${name[0].toUpperCase()}${name.slice(1)}`] = v(`--ansi-bright-${name}`);
+  }
+  return theme;
+}
+
+function terminalThemeOptions() {
+  return {
+    theme: terminalTheme(),
+    // Claude Code on a dark theme (pinned, or output from before it saw the OSC 11 reply) draws
+    // fixed 256/truecolor values no palette reaches; 3 keeps them readable and still blue.
+    minimumContrastRatio: isLightTheme() ? 3 : 1,
+  };
+}
+
+// Returning false hands the key back to the page: xterm skips it and the document
+// listeners (the toggle, hub forwarding, native paste) see it instead.
+function terminalKeyFilter(e) {
+  if (e.type !== 'keydown') return true;
+  const ctrlOnly = e.ctrlKey && !e.altKey && !e.metaKey;
+  if (terminalShortcut(e)) return false;
+  if (ctrlOnly && e.code === 'KeyC' && (e.shiftKey || termState.term.hasSelection())) {
+    e.preventDefault();
+    navigator.clipboard?.writeText(termState.term.getSelection()).catch(() => {});
+    termState.term.clearSelection();
+    return false;
+  }
+  if (ctrlOnly && e.code === 'KeyV') return false;
+  return !isHubKey(e);
+}
+
+function oscColor(hex) {
+  const m = /^#([0-9a-f]{6})$/i.exec(hex || '');
+  if (!m) return null;
+  return `rgb:${[0, 2, 4].map((i) => m[1].slice(i, i + 2).repeat(2)).join('/')}`;
+}
+
+function ensureTerm() {
+  if (termState.term) return termState.term;
+  const cfg = appConfig.terminal;
+  const host = document.getElementById('terminal-host');
+  const fontFamily =
+    cfg.fontFamily || getComputedStyle(document.body).getPropertyValue('--font-mono').trim() || 'monospace';
+  const term = new window.Terminal({
+    fontFamily,
+    fontSize: cfg.fontSize,
+    scrollback: cfg.scrollback,
+    cursorBlink: true,
+    allowProposedApi: true,
+    ...terminalThemeOptions(),
+  });
+  termState.fit = new window.FitAddon.FitAddon();
+  term.loadAddon(termState.fit);
+  term.loadAddon(new window.Unicode11Addon.Unicode11Addon());
+  term.unicode.activeVersion = '11';
+  term.open(host);
+  try {
+    const gl = new window.WebglAddon.WebglAddon();
+    gl.onContextLoss(() => {
+      gl.dispose();
+      termState.webgl = null;
+      repaintTerminal();
+    });
+    term.loadAddon(gl);
+    termState.webgl = gl;
+  } catch (_) {
+    // No WebGL: xterm falls back to its DOM renderer.
+  }
+  document.fonts
+    ?.load(`${cfg.fontSize}px ${fontFamily}`)
+    .then(repaintTerminal)
+    .catch(() => {});
+  term.attachCustomKeyEventHandler(terminalKeyFilter);
+  // xterm leaves OSC 10/11 color queries unanswered, so apps that pick a palette from the
+  // background (Claude Code's Auto theme) assume dark even on a light theme.
+  for (const [code, key] of [
+    [10, 'foreground'],
+    [11, 'background'],
+  ]) {
+    term.parser.registerOscHandler(code, (data) => {
+      if (data !== '?') return false;
+      const rgb = oscColor(term.options.theme[key]);
+      if (rgb) terminalSend({ t: 'in', d: `\x1b]${code};${rgb}\x1b\\` });
+      return true;
+    });
+  }
+  term.onData((d) => terminalSend({ t: 'in', d }));
+  term.onResize(({ cols, rows }) => terminalSend({ t: 'resize', cols, rows }));
+  // One fit per frame while a drag resizes the host. The atlas is rebuilt only when the host comes
+  // back from 0×0, which is also how a hidden hub iframe or pane shows again.
+  let frame = 0;
+  let visible = false;
+  new ResizeObserver(() => {
+    if (frame) return;
+    frame = requestAnimationFrame(() => {
+      frame = 0;
+      const nowVisible = host.offsetWidth > 0;
+      fitTerminal();
+      if (nowVisible && !visible) repaintTerminal();
+      visible = nowVisible;
+    });
+  }).observe(host);
+  const themeKey = () => `${isLightTheme()}|${document.body.dataset.colorTheme || ''}`;
+  let appliedTheme = themeKey();
+  new MutationObserver(() => {
+    if (themeKey() === appliedTheme) return;
+    appliedTheme = themeKey();
+    Object.assign(term.options, terminalThemeOptions());
+    repaintTerminal();
+  }).observe(document.body, { attributes: true, attributeFilter: ['class', 'data-color-theme'] });
+  // Vimium eats Escape inside a text field and only blurs it, so the key never reaches Claude.
+  // A blur no click caused, while the pane stays shown and the window keeps focus, is that Escape.
+  let pointerDown = false;
+  document.addEventListener('mousedown', () => (pointerDown = true), true);
+  document.addEventListener('mouseup', () => (pointerDown = false), true);
+  term.textarea.addEventListener('blur', () => {
+    if (pointerDown || termState.leaving) return;
+    requestAnimationFrame(() => {
+      if (!termState.attached || !host.offsetWidth) return;
+      if (!document.hasFocus() || document.activeElement !== document.body) return;
+      terminalSend({ t: 'in', d: '\x1b' });
+      term.focus();
+    });
+  });
+  termState.term = term;
+  return term;
+}
+
+// The WebGL renderer keeps its last frame and glyph atlas while the pane (or the hub's iframe) is
+// display:none, and comes back showing stale cells or backgrounds with no text. xterm does not
+// repaint on its own when the canvas is shown again.
+function repaintTerminal() {
+  const term = termState.term;
+  if (!term) return;
+  try {
+    termState.webgl?.clearTextureAtlas();
+  } catch (_) {}
+  term.refresh(0, term.rows - 1);
+}
+
+// The fit addon measures 0×0 while the pane (or the hub's iframe) is display:none.
+function fitTerminal() {
+  const host = document.getElementById('terminal-host');
+  if (!termState.fit || !host.offsetWidth || !host.offsetHeight) return;
+  try {
+    termState.fit.fit();
+  } catch (_) {}
+}
+
+function terminalSend(msg) {
+  if (termState.ws?.readyState === WebSocket.OPEN) termState.ws.send(JSON.stringify(msg));
+}
+
+function ackTerminal(ws, n) {
+  if (termState.ws !== ws) return;
+  termState.ackPending += n;
+  const flush = () => {
+    clearTimeout(termState.ackTimer);
+    termState.ackTimer = null;
+    if (termState.ws === ws && termState.ackPending) terminalSend({ t: 'ack', n: termState.ackPending });
+    termState.ackPending = 0;
+  };
+  if (termState.ackPending >= ACK_BATCH_BYTES) flush();
+  else if (!termState.ackTimer) termState.ackTimer = setTimeout(flush, 50);
+}
+
+function setTerminalStatus(text) {
+  document.getElementById('terminal-status').textContent = text;
+}
+
+function hideTerminalPrompt() {
+  document.getElementById('terminal-prompt').classList.remove('visible');
+}
+
+const TERMINAL_BOOT_VERBS = ['Waking Claude…', 'Clawding…', 'Warming up the terminal…', 'Summoning the session…'];
+const TERMINAL_BOOT_MAX_MS = 15000;
+let terminalBootTimer = null;
+
+// A new PTY shows only a blinking cursor until Claude draws its first frame.
+function showTerminalBoot() {
+  document.getElementById('terminal-boot-verb').textContent = pickRandom(TERMINAL_BOOT_VERBS);
+  document.getElementById('terminal-boot').classList.add('visible');
+  clearTimeout(terminalBootTimer);
+  terminalBootTimer = setTimeout(hideTerminalBoot, TERMINAL_BOOT_MAX_MS);
+}
+
+function hideTerminalBoot() {
+  clearTimeout(terminalBootTimer);
+  terminalBootTimer = null;
+  document.getElementById('terminal-boot').classList.remove('visible');
+}
+
+function showTerminalPrompt(sessionId, title, detail, choices, output = '') {
+  const el = document.getElementById('terminal-prompt');
+  const tail = output ? `<pre class="${TINTED_PRE_CLASS} terminal-prompt-output">${escapeHtml(output)}</pre>` : '';
+  el.innerHTML = `<div class="terminal-prompt-text"><div class="terminal-prompt-title">${escapeHtml(title)}</div><div>${escapeHtml(detail)}</div></div>${tail}<div class="terminal-prompt-actions">${choices
+    .map(
+      ([mode, label]) =>
+        `<button type="button" class="btn btn-secondary" data-mode="${escapeHtml(mode)}">${escapeHtml(label)}</button>`,
+    )
+    .join('')}</div><div class="sp-hint"><kbd>Esc</kbd> hides the terminal</div>`;
+  hideTerminalBoot();
+  el.querySelectorAll('button[data-mode]').forEach((b) => {
+    b.onclick = () => openTerminal(sessionId, b.dataset.mode);
+  });
+  el.classList.add('visible');
+  el.querySelector('button')?.focus();
+}
+
+function terminalTail(count) {
+  const buf = termState.term?.buffer.active;
+  if (!buf) return '';
+  const lines = [];
+  for (let i = buf.length - 1; i >= 0 && lines.length < count; i--) {
+    const text = buf.getLine(i)?.translateToString(true) ?? '';
+    if (text.trim() || lines.length) lines.unshift(text);
+  }
+  return lines.join('\n');
+}
+
+// Closing the page leaves the PTY running, but Ctrl+W meant for the prompt closes the tab, so ask first.
+// Under the hub the top frame asks: browsers do not reliably show the dialog for a frame.
+function setTerminalAttached(on) {
+  termState.attached = on;
+  syncCloseGuard();
+}
+
+// A hidden pane stays attached, but Ctrl+W can only be meant for a terminal on screen.
+function syncCloseGuard() {
+  const on = termState.attached && termState.shown;
+  if (termState.closeGuard === on) return;
+  termState.closeGuard = on;
+  hubPost({ type: 'hub:closeGuard', on });
+}
+
+window.addEventListener('beforeunload', (e) => {
+  if (termState.closeGuard && !window.__HUB__?.enabled) e.preventDefault();
+});
+
+// The terminal stands in for the board, so it takes the board zone however focus arrives
+// (Tab, Alt+`, a click); leaveTerminalPane hands it back to the sidebar.
+document.getElementById('terminal-pane').addEventListener('focusin', () => {
+  if (focusZone !== 'sidebar') return;
+  clearKbSelection();
+  focusZone = 'board';
+});
+
+function detachTerminal() {
+  const ws = termState.ws;
+  termState.ws = null;
+  termState.sessionId = null;
+  clearTimeout(termState.ackTimer);
+  termState.ackTimer = null;
+  termState.ackPending = 0;
+  clearTimeout(termState.retryTimer);
+  termState.retryTimer = null;
+  setTerminalAttached(false);
+  if (ws) {
+    ws.onclose = null;
+    ws.close();
+  }
+  hideTerminalPrompt();
+  hideTerminalBoot();
+}
+
+async function openTerminal(sessionId, mode, attempt = 0) {
+  detachTerminal();
+  termState.sessionId = sessionId;
+  if (!attempt) setTerminalStatus('');
+  try {
+    await loadXterm();
+  } catch (e) {
+    setTerminalStatus(e.message);
+    return;
+  }
+  if (termState.sessionId !== sessionId) return;
+  const term = ensureTerm();
+  if (!attempt) showTerminalBoot();
+  // RIS through the write queue, not term.reset(): reset() runs at once, and output the previous
+  // session had already queued would still be drawn after it. A retry keeps the last screen
+  // until the replay arrives.
+  const reset = () => term.write('\x1bc', repaintTerminal);
+  if (!attempt) reset();
+  fitTerminal();
+  const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/api/terminal/ws`);
+  ws.binaryType = 'arraybuffer';
+  termState.ws = ws;
+  const spec = newSpecs.get(sessionId);
+  let readyAt = 0;
+  let refused = false;
+  ws.onopen = () =>
+    ws.send(
+      JSON.stringify({
+        t: 'hello',
+        token: terminalToken,
+        id: sessionId,
+        mode,
+        cols: term.cols,
+        rows: term.rows,
+        ...(spec?.mode === mode && {
+          cwd: spec.cwd,
+          name: spec.name,
+          worktree: spec.worktree,
+          model: spec.model,
+          prompt: spec.prompt,
+        }),
+      }),
+    );
+  ws.onmessage = (ev) => {
+    if (termState.ws !== ws) return;
+    if (typeof ev.data !== 'string') {
+      const bytes = new Uint8Array(ev.data);
+      term.write(bytes, () => {
+        ackTerminal(ws, bytes.length);
+        if (terminalBootTimer && termState.ws === ws && terminalTail(1)) hideTerminalBoot();
+      });
+      return;
+    }
+    let msg;
+    try {
+      msg = JSON.parse(ev.data);
+    } catch (_) {
+      return;
+    }
+    if (msg.t === 'ready') {
+      readyAt = Date.now();
+      if (attempt) reset();
+    } else if (msg.t === 'error') refused = true;
+    onTerminalMessage(sessionId, msg);
+  };
+  ws.onclose = (ev) => {
+    if (termState.ws !== ws) return;
+    termState.ws = null;
+    setTerminalAttached(false);
+    // A refusal already shows the server's reason, and retrying would only repeat it, unless the
+    // reason was a token that the hub has since replaced (4001).
+    if (refused && ev.code === 4001) {
+      refreshTerminalToken().then((ok) => {
+        if (ok && termState.sessionId === sessionId) openTerminal(sessionId, mode, attempt + 1);
+      });
+      return;
+    }
+    if (refused || document.getElementById('terminal-prompt').classList.contains('visible')) return;
+    const stable = readyAt && Date.now() - readyAt > TERMINAL_STABLE_MS;
+    retryTerminal(sessionId, stable ? 0 : attempt);
+  };
+}
+
+function terminalOpenMode(sessionId) {
+  return newSpecs.get(sessionId)?.mode ?? 'auto';
+}
+
+// The server moved the PTY to the session picked in `claude --resume`; reattaching under that id
+// replays the same screen, and the placeholder gives way to the real card.
+function adoptPickedSession(oldId, id) {
+  const focused = terminalPaneFocused();
+  if (lastSessionId === oldId) lastSessionId = id;
+  if (previousSessionId === oldId) previousSessionId = id;
+  setTerminalMode(id, true);
+  forgetPlaceholder(oldId);
+  if (currentSessionId !== oldId || viewMode !== 'session') return renderSessions();
+  termState.focusNext = focused;
+  fetchTasks(id);
+}
+
+// The PTY outlives the socket, so a dropped connection (cck restart, sleep, proxy hiccup) reattaches
+// to the same screen. Only a socket that stayed up resets the backoff, so a server that accepts and
+// then drops every socket still runs out of attempts.
+function retryTerminal(sessionId, attempt) {
+  const delay = TERMINAL_RETRY_MS[attempt];
+  if (delay === undefined) {
+    setTerminalStatus('');
+    showTerminalPrompt(sessionId, 'Disconnected', 'The connection to the terminal was lost.', [
+      [terminalOpenMode(sessionId), 'Reconnect'],
+    ]);
+    return;
+  }
+  setTerminalStatus('Reconnecting…');
+  termState.retryTimer = setTimeout(() => {
+    termState.retryTimer = null;
+    if (termState.sessionId === sessionId) openTerminal(sessionId, terminalOpenMode(sessionId), attempt + 1);
+  }, delay);
+}
+
+function onTerminalMessage(sessionId, msg) {
+  if (msg.t === 'ready') {
+    // The server has the prompt now; a later start of the same placeholder must not send it again.
+    const spec = newSpecs.get(sessionId);
+    if (spec) spec.prompt = null;
+    hideTerminalPrompt();
+    setTerminalStatus('');
+    setTerminalAttached(true);
+    terminalSend({ t: 'resize', cols: termState.term.cols, rows: termState.term.rows });
+    if (takeTerminalFocus(sessionId)) termState.term.focus();
+  } else if (msg.t === 'rekey' && typeof msg.id === 'string') {
+    adoptPickedSession(sessionId, msg.id);
+    if (msg.duplicate) showToast('That session is already open here, so this terminal switched to it', 'info');
+    else if (msg.elsewhere)
+      showToast('That session also runs in another terminal; both write the same transcript', 'error');
+  } else if (msg.t === 'live') {
+    showTerminalPrompt(
+      sessionId,
+      'Running in another terminal',
+      'Resuming it here too makes both processes write to the same transcript.',
+      [
+        ['resume', 'Resume anyway'],
+        ['fork', 'Fork'],
+        ['shell', 'Shell only'],
+      ],
+    );
+  } else if (msg.t === 'exit') {
+    setTerminalAttached(false);
+    // A failed exit shows its last lines in the prompt, so the cause stays readable.
+    const clean = msg.code === 0 || msg.ended;
+    // With no first message there is no transcript to resume, only the same new session to start again.
+    const unsent = newSpecs.has(sessionId);
+    if (unsent && clean) {
+      dropPlaceholder(sessionId);
+      return;
+    }
+    showTerminalPrompt(
+      sessionId,
+      msg.ended ? 'The terminal was ended' : 'The shell exited',
+      clean ? 'Choose how to start again.' : `Exit code ${msg.code}.`,
+      unsent
+        ? [
+            [terminalOpenMode(sessionId), 'Start again'],
+            ['shell', 'Shell'],
+          ]
+        : [
+            ['resume', 'Resume'],
+            ['fork', 'Fork'],
+            ['shell', 'Shell'],
+          ],
+      clean ? '' : terminalTail(6),
+    );
+  } else if (msg.t === 'error') {
+    hideTerminalBoot();
+    setTerminalStatus(msg.msg || 'Terminal error');
+  }
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+function endTerminalSession() {
+  terminalSend({ t: 'kill' });
+}
+
+// Detaching first means no exit message reaches the pane, so no Resume prompt shows before the board.
+function closeTerminalSession(id = termState.sessionId) {
+  if (id === termState.sessionId) {
+    if (terminalPaneFocused()) leaveTerminalPane();
+    detachTerminal();
+  }
+  setTerminalMode(id, false);
+  syncTerminal();
+  return endTerminal(id);
+}
+
+function openTerminalManager() {
+  if (!terminalAvailable()) return;
+  // Esc typed in xterm goes to Claude, so the modal would not close on it.
+  if (terminalPaneFocused()) leaveTerminalPane();
+  document.getElementById('terminal-manager-modal').classList.add('visible');
+  renderTerminalManager();
+}
+
+function closeTerminalManager() {
+  hideModalOverlay('terminal-manager-modal');
+}
+
+async function renderTerminalManager() {
+  const body = document.getElementById('terminal-manager-body');
+  let list = [];
+  try {
+    list = await loadTerminals();
+  } catch (e) {
+    body.innerHTML = `<div class="terminal-manager-empty">${escapeHtml(e.message)}</div>`;
+    return;
+  }
+  const max = appConfig.terminal?.maxSessions;
+  document.getElementById('terminal-manager-count').textContent = max
+    ? `${list.length} of ${max} running`
+    : `${list.length} running`;
+  document.getElementById('terminal-manager-end-all').hidden = list.length < 2;
+  if (!list.length) {
+    body.innerHTML = '<div class="terminal-manager-empty">No terminals running</div>';
+    return;
+  }
+  list.sort((a, b) => b.startedAt - a.startedAt);
+  body.innerHTML = list
+    .map((t) => {
+      const session = sessions.find((s) => s.id === t.id);
+      const name = session ? sessionDisplayName(session) : t.id.slice(0, 8);
+      const here = t.id === termState.sessionId ? '<span class="terminal-manager-here">this tab</span>' : '';
+      const attached = t.clients ? `${t.clients} attached` : 'detached';
+      return `<div class="terminal-manager-row${t.clients ? ' attached' : ''}">
+        <span class="terminal-manager-dot"></span>
+        <div class="terminal-manager-info">
+          <div class="terminal-manager-name"><span class="terminal-manager-title">${escapeHtml(name)}</span>${here}</div>
+          <div class="terminal-manager-meta">
+            <span class="terminal-manager-mode">${escapeHtml(t.mode)}</span>
+            <span title="${escapeHtml(`pid ${t.pid}`)}">up ${formatDuration(Date.now() - t.startedAt)}</span>
+            <span>${attached}</span>
+            <span class="terminal-manager-cwd" title="${escapeHtml(t.cwd)}">${escapeHtml(pathBasename(t.cwd))}</span>
+          </div>
+        </div>
+        <div class="terminal-manager-actions">
+          <button type="button" class="btn btn-secondary" data-open="${escapeHtml(t.id)}">Open</button>
+          <button type="button" class="btn btn-secondary terminal-manager-end" data-end="${escapeHtml(t.id)}">End</button>
+        </div>
+      </div>`;
+    })
+    .join('');
+  body.querySelectorAll('[data-open]').forEach((b) => {
+    b.onclick = () => {
+      closeTerminalManager();
+      showSessionTerminal(b.dataset.open);
+    };
+  });
+  body.querySelectorAll('[data-end]').forEach((b) => {
+    b.onclick = async () => {
+      b.disabled = true;
+      await endTerminal(b.dataset.end);
+      renderTerminalManager();
+    };
+  });
+}
+
+async function terminalFetch(url, method, body) {
+  const send = () =>
+    fetch(url, {
+      method,
+      headers: {
+        'X-Terminal-Token': terminalToken || '',
+        ...(body && { 'Content-Type': 'application/json' }),
+      },
+      ...(body && { body: JSON.stringify(body) }),
+    });
+  const res = await send();
+  return res.status === 401 && (await refreshTerminalToken()) ? send() : res;
+}
+
+async function endTerminal(id) {
+  await terminalFetch(`/api/terminals/${encodeURIComponent(id)}`, 'DELETE').catch(() => {});
+  dropPlaceholder(id);
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+async function endAllTerminals() {
+  const buttons = document.querySelectorAll('#terminal-manager-body [data-end]');
+  await Promise.all([...buttons].map((b) => endTerminal(b.dataset.end)));
+  renderTerminalManager();
+}
+
+//#endregion
+
+//#region NEW_SESSION
+// claude writes no transcript until the first message, so until then the sidebar shows a
+// placeholder built from the form. newSpecs holds one entry per such session; the entry
+// goes when the real session shows up in /api/sessions.
+const NEW_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,79}$/;
+const NEW_WORKTREE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+const NS_MAX_MATCHES = 8;
+const PLUS_SVG =
+  '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>';
+const newSpecs = new Map();
+// Sessions another session started (`dispatch start`), shown where they will stay until
+// their transcript appears. Kept apart from newSpecs: their prompt is already sent.
+const dispatchSpecs = new Map();
+const ns = { projects: [], picked: [], matches: [], idx: -1, folder: '', browsing: false, resume: false };
+
+const PLACEHOLDER_NAMES = { pick: 'Resume session', dispatch: 'Started session', new: 'New session' };
+const PLACEHOLDER_HINTS = {
+  pick: 'pick a session to resume',
+  dispatch: 'starting',
+  new: 'waiting for your first message',
+};
+
+function placeholderSession(id, spec) {
+  return {
+    id,
+    placeholder: true,
+    mode: spec.mode,
+    name: spec.name || PLACEHOLDER_NAMES[spec.mode] || PLACEHOLDER_NAMES.new,
+    dispatchGroup: spec.group || undefined,
+    startedBy: spec.startedBy || undefined,
+    project: spec.cwd,
+    worktree: spec.worktree ? { repo: spec.cwd, name: spec.worktree === true ? 'new' : spec.worktree } : null,
+    modifiedAt: new Date(spec.startedAt).toISOString(),
+    hasMessages: true,
+    hasRecentActivity: true,
+    taskCount: 0,
+    completed: 0,
+  };
+}
+
+function mergePlaceholders(list) {
+  if (!newSpecs.size && !dispatchSpecs.size) return list;
+  const ids = new Set(list.map((s) => s.id));
+  for (const specs of [newSpecs, dispatchSpecs]) {
+    for (const id of [...specs.keys()]) if (ids.has(id)) specs.delete(id);
+  }
+  const pending = [...newSpecs, ...dispatchSpecs].sort((a, b) => b[1].startedAt - a[1].startedAt);
+  return [...pending.map(([id, spec]) => placeholderSession(id, spec)), ...list];
+}
+
+async function loadDispatches() {
+  try {
+    const res = await fetch('/api/dispatch', { cache: 'no-store' });
+    const { running = [] } = await res.json();
+    dispatchSpecs.clear();
+    for (const r of running) {
+      if (!r.session || sessions.some((s) => s.id === r.session && !s.placeholder)) continue;
+      dispatchSpecs.set(r.session, {
+        mode: 'dispatch',
+        cwd: r.cwd,
+        name: r.name,
+        worktree: r.worktree,
+        group: r.group,
+        startedBy: r.parent,
+        startedAt: r.startedAt,
+      });
+    }
+  } catch (_) {}
+}
+
+async function onDispatchUpdate() {
+  await loadDispatches();
+  sessions = mergePlaceholders(sessions.filter((s) => !s.placeholder));
+  renderSessions();
+  fetchSessions(false).catch(() => {});
+}
+
+// With no first message there is no transcript, so an ended placeholder leaves nothing to come back to.
+function dropPlaceholder(id) {
+  if (!forgetPlaceholder(id)) return;
+  if (currentSessionId === id && viewMode === 'session') showAllTasks();
+  else renderSessions();
+}
+
+function forgetPlaceholder(id) {
+  if (!newSpecs.delete(id)) return false;
+  setTerminalMode(id, false);
+  // Before the socket's close handler runs, or it would reconnect and start the session again.
+  if (termState.sessionId === id) detachTerminal();
+  sessions = sessions.filter((s) => s.id !== id);
+  if (previousSessionId === id) previousSessionId = null;
+  if (lastSessionId === id) lastSessionId = null;
+  return true;
+}
+
+function renderPlaceholderCard(session) {
+  const isActive = session.id === currentSessionId && viewMode === 'session';
+  const projectHtml = renderProjectIdentity(session);
+  return `
+          <button onclick="fetchTasks('${escAttrJs(session.id)}')" data-session-id="${escapeHtml(session.id)}" class="session-item session-placeholder ${isActive ? 'active' : ''}" title="${escapeHtml(`${session.id} | ${session.project}`)}">
+            <div class="session-name">${escapeHtml(session.name)}</div>
+            ${projectHtml ? `<div class="session-secondary">${projectHtml}</div>` : ''}
+            <div class="session-waiting"><span class="pulse"></span>${PLACEHOLDER_HINTS[session.mode] || PLACEHOLDER_HINTS.new}</div>
+          </button>
+        `;
+}
+
+// After a reload the form is gone, but the PTY still runs; its hello options come back from the server.
+async function restorePendingSessions() {
+  document.getElementById('new-session-btn').hidden = !terminalAvailable();
+  const terminals = terminalAvailable() ? loadTerminals() : null;
+  await loadDispatches();
+  if (!terminals) return;
+  try {
+    for (const t of await terminals) {
+      if ((t.mode !== 'new' && t.mode !== 'pick') || newSpecs.has(t.id) || dispatchSpecs.has(t.id)) continue;
+      newSpecs.set(t.id, { cwd: t.cwd, name: t.name, worktree: t.worktree, mode: t.mode, startedAt: t.startedAt });
+    }
+  } catch (_) {}
+}
+
+async function loadTerminals() {
+  const res = await fetch('/api/terminals', { cache: 'no-store' });
+  const list = (await res.json()).sessions || [];
+  runningTerminals = new Set(list.map((t) => t.id));
+  return list;
+}
+
+function setRunningTerminals(ids) {
+  runningTerminals = new Set(ids);
+  if (ids.some((id) => !sessions.some((s) => s.id === id))) fetchSessions(false).catch(() => {});
+  else renderSessions();
+}
+
+function showSessionTerminal(sessionId) {
+  setTerminalMode(sessionId, true);
+  if (currentSessionId === sessionId && viewMode === 'session') syncTerminal();
+  else fetchTasks(sessionId);
+}
+
+function openNewSession(folder, resume = false) {
+  if (!terminalAvailable() || document.getElementById('new-session-modal').classList.contains('visible')) return;
+  if (terminalPaneFocused()) leaveTerminalPane();
+  ns.resume = resume;
+  document.querySelector('.new-session-modal').classList.toggle('ns-resume', resume);
+  document.getElementById('ns-title').textContent = resume ? 'Resume session' : 'New session';
+  for (const id of ['ns-name', 'ns-wt-name', 'ns-prompt']) document.getElementById(id).value = '';
+  document.getElementById('ns-wt').checked = false;
+  document.getElementById('ns-model').value = '';
+  setNewSessionError('');
+  const current = viewMode === 'session' ? sessions.find((s) => s.id === currentSessionId)?.project : null;
+  setNewSessionFolder(folder || current || '');
+  document.getElementById('new-session-modal').classList.add('visible');
+  const input = document.getElementById('ns-folder');
+  input.focus();
+  input.select();
+  loadProjects().then((list) => {
+    ns.projects = list
+      .filter((p) => !p.temp)
+      .sort((a, b) => (b.modifiedAt || '').localeCompare(a.modifiedAt || ''))
+      .map((p) => p.path);
+    if (!ns.folder) setNewSessionFolder(input.value, true);
+    if (folderListOpen()) renderFolderList();
+  });
+}
+
+function closeNewSession() {
+  hideModalOverlay('new-session-modal');
+  closeFolderList();
+  promptVoice.rec?.abort();
+}
+
+function knownFolders() {
+  return [...new Set([...ns.picked, ...ns.projects])];
+}
+
+// The field holds free text; a folder counts as chosen only when the text is a known project
+// or a folder the dialog returned, because those are the only ones the server accepts.
+// The sidebar's projects count too, so a prefilled folder is usable before /api/projects answers.
+function setNewSessionFolder(value, keepList) {
+  const input = document.getElementById('ns-folder');
+  input.value = value;
+  const known = knownFolders().includes(value) || sessions.some((s) => !s.placeholder && s.project === value);
+  ns.folder = value && known ? value : '';
+  if (!keepList) closeFolderList();
+  renderNewSessionForm();
+}
+
+function folderRank(path, q) {
+  const name = pathBasename(path).toLowerCase();
+  if (name === q) return 0;
+  if (name.startsWith(q)) return 1;
+  if (name.includes(q)) return 2;
+  return path.toLowerCase().includes(q) ? 3 : 4;
+}
+
+function rankFolders(paths, query) {
+  const q = query.toLowerCase();
+  return paths
+    .filter((p) => fuzzyMatch(p, query))
+    .map((p) => ({ p, r: folderRank(p, q) }))
+    .sort((a, b) => a.r - b.r)
+    .map((x) => x.p);
+}
+
+function renderFolderList() {
+  const input = document.getElementById('ns-folder');
+  const list = document.getElementById('ns-folder-list');
+  const query = input.value.trim();
+  const all = knownFolders();
+  ns.matches = (query && query !== ns.folder ? rankFolders(all, query) : all).slice(0, NS_MAX_MATCHES);
+  if (ns.idx >= ns.matches.length) ns.idx = ns.matches.length - 1;
+  list.innerHTML = ns.matches.length
+    ? ns.matches
+        .map(
+          (p, i) =>
+            `<div class="ns-option${i === ns.idx ? ' active' : ''}" role="option" data-idx="${i}" aria-selected="${i === ns.idx}"><span class="ns-option-name">${escapeHtml(pathBasename(p))}</span><span class="ns-option-path">${escapeHtml(p)}</span></div>`,
+        )
+        .join('')
+    : '<div class="ns-empty"><span>No project matches</span><button type="button" class="btn btn-secondary ns-browse" data-browse>Browse…</button></div>';
+  list.hidden = false;
+  input.setAttribute('aria-expanded', 'true');
+}
+
+function moveFolderHighlight(step) {
+  const n = ns.matches.length;
+  if (!n) return;
+  ns.idx = (ns.idx + step + n) % n;
+  for (const row of document.querySelectorAll('#ns-folder-list .ns-option')) {
+    const on = Number(row.dataset.idx) === ns.idx;
+    row.classList.toggle('active', on);
+    row.setAttribute('aria-selected', on);
+  }
+}
+
+function closeFolderList() {
+  document.getElementById('ns-folder-list').hidden = true;
+  document.getElementById('ns-folder').setAttribute('aria-expanded', 'false');
+  ns.idx = -1;
+}
+
+function folderListOpen() {
+  return !document.getElementById('ns-folder-list').hidden;
+}
+
+function newSessionValues() {
+  const wtOn = document.getElementById('ns-wt').checked;
+  const wtName = document.getElementById('ns-wt-name').value.trim();
+  return {
+    cwd: ns.folder,
+    name: document.getElementById('ns-name').value.trim() || null,
+    worktree: wtOn ? wtName || true : false,
+    model: document.getElementById('ns-model').value || null,
+    prompt: document.getElementById('ns-prompt').value.trim() || null,
+  };
+}
+
+function newSessionProblem(v) {
+  if (v.name && !NEW_NAME_RE.test(v.name))
+    return 'Name: use letters, digits, spaces and . _ -, starting with a letter or digit.';
+  if (typeof v.worktree === 'string' && !NEW_WORKTREE_RE.test(v.worktree))
+    return 'Worktree name: use letters, digits and . _ -, starting with a letter or digit.';
+  return '';
+}
+
+function setNewSessionError(text) {
+  const el = document.getElementById('ns-error');
+  el.textContent = text;
+  el.hidden = !text;
+}
+
+function renderNewSessionForm() {
+  const v = newSessionValues();
+  const wtOn = v.worktree !== false;
+  const wtInput = document.getElementById('ns-wt-name');
+  wtInput.disabled = !wtOn;
+  const hint = document.getElementById('ns-wt-hint');
+  hint.hidden = !wtOn;
+  hint.textContent = `.claude/worktrees/${typeof v.worktree === 'string' ? v.worktree : '<name chosen by Claude>'}`;
+  const problem = newSessionProblem(v);
+  setNewSessionError(problem);
+  const start = document.getElementById('ns-start');
+  start.disabled = !v.cwd || !!problem || ns.browsing;
+  const verb = ns.resume ? 'Resume' : 'Start';
+  start.textContent = v.cwd ? `${verb} in ${pathBasename(v.cwd)}` : verb;
+}
+
+async function browseNewSessionFolder() {
+  if (ns.browsing) return;
+  ns.browsing = true;
+  closeFolderList();
+  const btn = document.getElementById('ns-browse');
+  btn.textContent = 'Opening…';
+  renderNewSessionForm();
+  try {
+    const start = ns.folder || ns.picked[0] || ns.projects[0];
+    const res = await terminalFetch('/api/terminal/pick-folder', 'POST', start ? { start } : null);
+    const body = await res.json().catch(() => ({}));
+    if (res.status === 401) setNewSessionError(STALE_TOKEN_MSG);
+    else if (!res.ok) setNewSessionError(body.error || `Folder dialog failed (${res.status})`);
+    else if (body.path) {
+      ns.picked = [body.path, ...ns.picked.filter((p) => p !== body.path)];
+      setNewSessionFolder(body.path);
+    }
+  } catch (e) {
+    setNewSessionError(e.message);
+  } finally {
+    ns.browsing = false;
+    btn.textContent = 'Browse…';
+    renderNewSessionForm();
+    document.getElementById(ns.folder ? fieldAfterFolder() : 'ns-folder').focus();
+  }
+}
+
+function fieldAfterFolder() {
+  return ns.resume ? 'ns-start' : 'ns-name';
+}
+
+function startNewSession() {
+  const v = newSessionValues();
+  if (!v.cwd || newSessionProblem(v) || ns.browsing) return;
+  const id = crypto.randomUUID();
+  newSpecs.set(id, { ...(ns.resume ? { cwd: v.cwd } : v), mode: ns.resume ? 'pick' : 'new', startedAt: Date.now() });
+  sessions = mergePlaceholders(sessions.filter((s) => !s.placeholder));
+  setTerminalMode(id, true);
+  closeNewSession();
+  fetchTasks(id).then(() => sessionsList.querySelector('.session-item.active')?.scrollIntoView({ block: 'nearest' }));
+}
+
+const SpeechRecognitionApi = window.SpeechRecognition || window.webkitSpeechRecognition;
+const promptVoice = { rec: null };
+
+// Replaces the selection the field had when dictation began, so interim results rewrite
+// themselves in place instead of piling up.
+function togglePromptVoice() {
+  if (promptVoice.rec) return promptVoice.rec.stop();
+  const field = document.getElementById('ns-prompt');
+  const btn = document.getElementById('ns-mic');
+  const before = field.value.slice(0, field.selectionStart);
+  const after = field.value.slice(field.selectionEnd);
+  const lead = before && !/\s$/.test(before) ? ' ' : '';
+  const rec = new SpeechRecognitionApi();
+  rec.lang = navigator.language;
+  rec.interimResults = true;
+  rec.onresult = (e) => {
+    const text = Array.from(e.results, (r) => r[0].transcript).join('');
+    field.value = before + lead + text + after;
+    const caret = before.length + lead.length + text.length;
+    field.setSelectionRange(caret, caret);
+  };
+  rec.onerror = (e) => {
+    if (e.error === 'not-allowed' || e.error === 'service-not-allowed')
+      setNewSessionError('Microphone access is blocked for this page.');
+    else if (e.error !== 'no-speech' && e.error !== 'aborted') setNewSessionError(`Dictation failed: ${e.error}`);
+  };
+  rec.onend = () => {
+    promptVoice.rec = null;
+    btn.setAttribute('aria-pressed', 'false');
+  };
+  promptVoice.rec = rec;
+  btn.setAttribute('aria-pressed', 'true');
+  field.focus();
+  rec.start();
+}
+
+function pickFolderOption(i) {
+  const path = ns.matches[i];
+  if (!path) return;
+  setNewSessionFolder(path);
+  document.getElementById(fieldAfterFolder()).focus();
+}
+
+function initNewSession() {
+  const modal = document.getElementById('new-session-modal');
+  const input = document.getElementById('ns-folder');
+  const list = document.getElementById('ns-folder-list');
+  input.addEventListener('input', () => {
+    setNewSessionFolder(input.value, true);
+    if (ns.folder) return closeFolderList();
+    ns.idx = 0;
+    renderFolderList();
+  });
+  input.addEventListener('focus', () => {
+    if (!ns.folder) renderFolderList();
+  });
+  input.addEventListener('click', () => {
+    if (!folderListOpen()) renderFolderList();
+  });
+  input.addEventListener('blur', () =>
+    setTimeout(() => {
+      if (!list.contains(document.activeElement)) closeFolderList();
+    }, 0),
+  );
+  // mousedown, not click: the input's blur would close the list before a click lands.
+  list.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    if (e.target.closest('[data-browse]')) return browseNewSessionFolder();
+    const row = e.target.closest('.ns-option');
+    if (row) pickFolderOption(Number(row.dataset.idx));
+  });
+  document.getElementById('ns-wt').addEventListener('change', (e) => {
+    renderNewSessionForm();
+    if (e.target.checked) document.getElementById('ns-wt-name').focus();
+  });
+  for (const id of ['ns-name', 'ns-wt-name', 'ns-prompt', 'ns-model']) {
+    document.getElementById(id).addEventListener('input', renderNewSessionForm);
+  }
+  if (SpeechRecognitionApi) {
+    const mic = document.getElementById('ns-mic');
+    mic.hidden = false;
+    // mousedown would blur the textarea and lose the caret the dictation inserts at.
+    mic.addEventListener('mousedown', (e) => e.preventDefault());
+    mic.addEventListener('click', togglePromptVoice);
+  }
+  // Bound on the dialog: the global handler returns early on INPUT and TEXTAREA targets.
+  modal.addEventListener('keydown', (e) => {
+    const inFolder = e.target === input;
+    if (e.key === 'Escape') {
+      if (folderListOpen()) closeFolderList();
+      else closeNewSession();
+    } else if (inFolder && matchKey(e, 'ArrowDown')) {
+      if (!folderListOpen()) renderFolderList();
+      else moveFolderHighlight(1);
+    } else if (inFolder && matchKey(e, 'ArrowUp') && folderListOpen()) {
+      moveFolderHighlight(-1);
+    } else if (inFolder && e.key === 'Enter' && folderListOpen() && ns.idx >= 0 && ns.matches[ns.idx] !== ns.folder) {
+      pickFolderOption(ns.idx);
+    } else if (e.key === 'Enter' && (e.target.tagName !== 'TEXTAREA' || e.ctrlKey || e.metaKey)) {
+      if (e.target.tagName === 'BUTTON') return;
+      startNewSession();
+    } else return;
+    e.preventDefault();
+    e.stopPropagation();
+  });
+}
+
+initNewSession();
+//#endregion
+
 //#region PWA
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js');
@@ -9801,6 +11386,11 @@ if (urlState.search) {
   document.getElementById('search-clear-btn').classList.add('visible');
 }
 
+{
+  const verbs = ['Clawding…', 'Shuffling cards…', 'Herding tasks…', 'Waking sessions…', 'Sorting the board…'];
+  document.getElementById('boot-verb').textContent = pickRandom(verbs);
+}
+
 Promise.all([
   fetch('/hub-config')
     .then((r) => r.json())
@@ -9816,6 +11406,7 @@ Promise.all([
     })
     .catch(() => {}),
 ])
+  .then(restorePendingSessions)
   .then(() => fetchSessions())
   .then(async () => {
     if (urlState.projectView) {
@@ -9849,6 +11440,10 @@ Promise.all([
         if (currentMessages.length) renderMessages(currentMessages);
       });
     }
+  })
+  .finally(() => {
+    document.body.classList.remove('booting');
+    sessionsList.removeAttribute('aria-busy');
   });
 
 window.addEventListener('popstate', () => {
@@ -9878,23 +11473,28 @@ window.addEventListener('popstate', () => {
 // e.code travels with e.key because macOS composes Option+<key> into a character (Option+P is
 // 'π'), so the key alone cannot identify the binding. The hub owns the keymap and normalizes;
 // these tests only decide whether a press is the hub's to handle.
-document.addEventListener('keydown', (e) => {
-  if (!window.__HUB__?.enabled) return;
-  const fwd = () => {
-    e.preventDefault();
-    hubPost({ type: 'hub:keydown', key: e.key, code: e.code, ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey });
-  };
-  if (e.ctrlKey && e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
-    fwd();
-  }
+function isHubKey(e) {
+  if (!window.__HUB__?.enabled) return false;
+  if (e.ctrlKey && e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) return true;
   // Own branch: the Alt+digit case below requires !ctrlKey. The hub owns the Ctrl+Alt+letter
   // keymap and ignores unbound letters.
-  if (e.ctrlKey && e.altKey && !e.shiftKey && !e.metaKey && (/^[a-z]$/i.test(e.key) || /^Key[A-Z]$/.test(e.code))) {
-    fwd();
+  if (
+    e.ctrlKey &&
+    e.altKey &&
+    !e.shiftKey &&
+    !e.metaKey &&
+    !CCK_CTRL_ALT_KEYS.has(e.code) &&
+    (/^[a-z]$/i.test(e.key) || /^Key[A-Z]$/.test(e.code))
+  ) {
+    return true;
   }
-  if (e.altKey && !e.ctrlKey && !e.shiftKey && !e.metaKey && (/^[1-9]$/.test(e.key) || /^Digit[1-9]$/.test(e.code))) {
-    fwd();
-  }
+  return e.altKey && !e.ctrlKey && !e.shiftKey && !e.metaKey && (/^[1-9]$/.test(e.key) || /^Digit[1-9]$/.test(e.code));
+}
+
+document.addEventListener('keydown', (e) => {
+  if (!isHubKey(e)) return;
+  e.preventDefault();
+  hubPost({ type: 'hub:keydown', key: e.key, code: e.code, ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey });
 });
 
 document.addEventListener('click', (e) => {

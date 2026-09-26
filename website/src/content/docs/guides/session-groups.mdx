@@ -1,0 +1,74 @@
+---
+title: Session groups
+description: Put sessions and projects from different folders into one named group in the sidebar.
+---
+
+import Shot from '../../../kit/Shot.astro';
+import Lightbox from '../../../kit/Lightbox.astro';
+
+By default, the sidebar puts each session under its project. A group lets you keep related work together when it spans more than one folder. For example, you can keep a backend repo and a frontend repo together when you change both for the same feature.
+
+A group can hold whole projects and single sessions. Groups show in a **Groups** section above the **Projects** section. In the **All Sessions** view, the section below the groups is called **Sessions**.
+
+<Shot themed="08-groups" alt="Sidebar with a Groups section that holds two projects and a single session, above the Projects section" />
+
+## Create a group
+
+Use one of these methods:
+
+- Drag a session or a project onto another session or project that is not in a group. Claude Code Kanban makes a new group that holds both.
+- Right-click a session card or a project header and choose **+ New group…**. On a touch screen, press and hold for about half a second to open the same menu.
+
+The name field of the new group opens in place. Type a name and press <kbd>Enter</kbd>.
+
+The same menu also lists your other groups, so you can move an item to one of them. If the item is already in a group, the menu has a **Remove from** entry for that group.
+
+## Manage a group
+
+The group header has these controls:
+
+- **Scratchpad** opens a note for the group. See [Session log and details](/claude-code-kanban/guides/session-details/).
+- **Rename** (pencil icon) opens the name field in place.
+- **Delete** (the × button) removes the group after you confirm. Its sessions and projects go back to **Projects**.
+
+To change the order of groups, drag a group header onto another group header.
+
+To take an item out of a group, drag it onto the **Projects** or **Sessions** section label.
+
+A group with no items shows the hint "Drop a session or a project here". When a filter is on, an empty group does not show.
+
+## Where groups are saved
+
+Claude Code Kanban saves your groups in the browser's local storage, under the key `sessionGroups` (with a prefix for each config dir other than the default one). Each browser has its own groups. Each Claude config dir also has its own groups, so groups you make for one config dir do not show for another.
+
+Groups hold references to sessions and projects. A session that the sidebar filter hides stays in its group.
+
+## Groups from dispatch
+
+When a session starts another session with `dispatch start --group <name>`, the board shows a temporary group with that name. The name must be kebab-case and 64 characters or fewer, for example `site-docs`. See [Dispatch tasks to other sessions](/claude-code-kanban/guides/dispatch/).
+
+A temporary group works like this:
+
+- It holds the started session. It also holds the starting session, unless that session is already in a group.
+- The server saves it in `<config-dir>/.cck/dispatch-groups.json`, so it is not stored in the browser.
+- It stays while the Claude process of any member runs, and for 60 seconds after the last one stops.
+- After that, only pinned members stay in the group. The other sessions go back to their project block. Because pinned members stay, a group with a pinned session is still there after a server restart.
+
+A temporary group header has a **Keep** button and no rename or delete controls. **Keep** makes a named group with the same name and the same sessions. Later dispatches with that `--group` name go into the named group.
+
+If a named group already has the same name as a temporary group, the named group takes its sessions.
+
+### Where a started session goes
+
+Claude Code Kanban picks the place for a started session when it starts, so the card does not move after it shows. It uses the first match in this list:
+
+1. The group given with `--group`.
+2. The temporary group of the starting session.
+3. The named group of the starting session.
+4. The project block of the started session.
+
+Until the first transcript line arrives, the board shows a "starting" placeholder card in that place.
+
+A session or project that you put in a named group stays there. A dispatch group does not move it.
+
+<Lightbox />

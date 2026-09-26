@@ -1,0 +1,158 @@
+---
+import { palettes } from './palettes';
+
+interface Props {
+  compact?: boolean;
+}
+const { compact = false } = Astro.props;
+---
+
+<theme-dial class:list={['dial', { compact }]}>
+  {
+    compact ? (
+      <details class="dial-pop">
+        <summary aria-label="Theme">
+          <span class="swatch current" aria-hidden="true" />
+        </summary>
+        <div class="dial-menu">
+          <div class="chips" role="group" aria-label="Color theme">
+            {palettes.map((p) => (
+              <button
+                type="button"
+                class="chip"
+                data-palette={p.id}
+                aria-pressed="false"
+                style={`--lf:${p.light.field};--la:${p.light.ember};--df:${p.dark.field};--da:${p.dark.ember}`}
+              >
+                <span class="swatch" aria-hidden="true" />
+                {p.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </details>
+    ) : (
+      <div class="chips" role="group" aria-label="Color theme">
+        {palettes.map((p) => (
+          <button
+            type="button"
+            class="chip"
+            data-palette={p.id}
+            aria-pressed="false"
+            style={`--lf:${p.light.field};--la:${p.light.ember};--df:${p.dark.field};--da:${p.dark.ember}`}
+          >
+            <span class="swatch" aria-hidden="true" />
+            {p.label}
+          </button>
+        ))}
+      </div>
+    )
+  }
+</theme-dial>
+
+<script>
+  class ThemeDial extends HTMLElement {
+    connectedCallback() {
+      this.addEventListener('click', (e) => {
+        const target = e.target as HTMLElement;
+        const chip = target.closest<HTMLElement>('[data-palette]');
+        if (chip) window.siteTheme.set(chip.dataset.palette);
+      });
+      document.addEventListener('site-theme', () => this.sync());
+      this.sync();
+    }
+    sync() {
+      for (const chip of this.querySelectorAll<HTMLElement>('[data-palette]')) {
+        chip.setAttribute('aria-pressed', String(chip.dataset.palette === window.siteTheme.palette));
+      }
+    }
+  }
+  customElements.define('theme-dial', ThemeDial);
+</script>
+
+<style>
+  .dial {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem 1.25rem;
+  }
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.375rem;
+  }
+  .chip {
+    font: 500 0.8125rem/1 var(--font-mono);
+    color: var(--c-ink2);
+    background: transparent;
+    border: 1px solid var(--c-border);
+    border-radius: 999px;
+    padding: 0.4375rem 0.75rem 0.4375rem 0.4375rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4375rem;
+    cursor: pointer;
+  }
+  .chip:hover {
+    background: var(--c-hover);
+    color: var(--c-ink1);
+  }
+  .chip[aria-pressed='true'] {
+    color: var(--c-ink1);
+    border-color: var(--c-accent);
+    box-shadow: inset 0 0 0 1px var(--c-accent);
+  }
+  .chip:focus-visible,
+  summary:focus-visible {
+    outline: 2px solid var(--c-accent);
+    outline-offset: 2px;
+  }
+  .swatch {
+    width: 1rem;
+    height: 1rem;
+    border-radius: 50%;
+    flex: none;
+    background: linear-gradient(135deg, var(--lf) 50%, var(--la) 50%);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c-ink1) 20%, transparent);
+  }
+  :global([data-theme='dark']) .swatch {
+    background: linear-gradient(135deg, var(--df) 50%, var(--da) 50%);
+  }
+  .swatch.current {
+    background: linear-gradient(135deg, var(--c-field) 50%, var(--c-accent) 50%);
+  }
+  .dial-pop {
+    position: relative;
+  }
+  .dial-pop summary {
+    list-style: none;
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 50%;
+  }
+  .dial-pop summary::-webkit-details-marker {
+    display: none;
+  }
+  .dial-pop summary .swatch {
+    width: 1.25rem;
+    height: 1.25rem;
+  }
+  .dial-menu {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 0.5rem);
+    z-index: 20;
+    width: min(22rem, calc(100vw - 2rem));
+    padding: 0.75rem;
+    display: grid;
+    gap: 0.75rem;
+    background: var(--c-elevated);
+    border: 1px solid var(--c-border);
+    border-radius: 0.75rem;
+    box-shadow: 0 12px 32px color-mix(in srgb, var(--c-ink1) 14%, transparent);
+  }
+</style>

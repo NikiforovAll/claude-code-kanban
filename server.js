@@ -4,7 +4,7 @@
 const express = require('express');
 const path = require('node:path');
 const fs = require('node:fs').promises;
-const { existsSync, readdirSync, readFileSync, writeFileSync, statSync, unlinkSync, mkdirSync, renameSync, openSync, readSync, closeSync } = require('node:fs');
+const { existsSync, readdirSync, readFileSync, writeFileSync, statSync, unlinkSync, mkdirSync, renameSync, openSync, readSync, closeSync, realpathSync } = require('node:fs');
 const _readline = require('node:readline');
 const chokidar = require('chokidar');
 const os = require('node:os');
@@ -37,7 +37,11 @@ const {
 } = require('./lib/parsers');
 const { inlineHtmlAssets, MIME_BY_EXT } = require('./lib/inline-assets');
 const { buildDecision, decisionFileName, isDecisionFile, approvalsFrom, boardRefusal } = require('./lib/approvals');
-const { getClaudeDir, getArgValue, storageNamespace } = require('./lib/claude-dir');
+const { getClaudeDir, getArgValue, storageNamespace, isDefaultClaudeDir } = require('./lib/claude-dir');
+const { createTerminalService, readTerminalConfig } = require('./lib/terminal');
+const { createDispatchRegistry, formatPreamble, formatDispatchLine } = require('./lib/dispatch');
+const { createGroupStore, isGroupName, suggestGroupName } = require('./lib/dispatch-groups');
+const { pickFolder } = require('./lib/folder-dialog');
 
 if (process.argv.includes("--install") || process.argv.includes("--uninstall")) {
   const { runInstall, runUninstall } = require("./install");
@@ -77,7 +81,9 @@ const CCK_DIR = path.join(CLAUDE_DIR, '.cck');
 const AGENT_ACTIVITY_DIR = path.join(CCK_DIR, 'agent-activity');
 const CONTEXT_STATUS_DIR = path.join(CCK_DIR, 'context-status');
 const PINS_FILE = path.join(CCK_DIR, 'pins.json');
+const DISPATCH_GROUPS_FILE = path.join(CCK_DIR, 'dispatch-groups.json');
 const SERVER_INFO_FILE = path.join(CCK_DIR, 'server.json');
+const TERMINAL_TOKEN_FILE = path.join(CCK_DIR, 'terminal-token.json');
 // Harness-owned scratchpad root; the per-session dir under it is created lazily.
 const SCRATCHPAD_ROOT = path.join(os.tmpdir(), 'claude');
 
@@ -93,11 +99,11 @@ function readPins() {
   return {};
 }
 
-function writeJsonAtomic(file, obj) {
+function writeJsonAtomic(file, obj, mode) {
   try {
     mkdirSync(CCK_DIR, { recursive: true });
     const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
-    writeFileSync(tmp, JSON.stringify(obj, null, 2), 'utf8');
+    writeFileSync(tmp, JSON.stringify(obj, null, 2), { encoding: 'utf8', mode });
     renameSync(tmp, file);
   } catch (e) {
     console.error(`Failed to write ${path.basename(file)}:`, e.message);
@@ -113,6 +119,14 @@ function writePins(pins) {
 // a crashed one.
 function writeServerInfo(port) {
   writeJsonAtomic(SERVER_INFO_FILE, { port, pid: process.pid });
+  writeTerminalToken();
+}
+
+// For `dispatch start`: a local process as the same user can already run claude itself,
+// so handing it the token adds little. A browser still cannot read the file.
+function writeTerminalToken() {
+  if (terminal.unavailableReason()) return;
+  writeJsonAtomic(TERMINAL_TOKEN_FILE, { pid: process.pid, token: terminal.token }, 0o600);
 }
 
 // A beacon that outlives its server disarms UI approvals silently: approval-gate.sh
@@ -121,10 +135,22 @@ function writeServerInfo(port) {
 // the way out. Only when the file is still ours: a newer server on the same config
 // dir has already claimed it.
 function removeServerInfo() {
+  for (const file of [SERVER_INFO_FILE, TERMINAL_TOKEN_FILE]) {
+    try {
+      const info = JSON.parse(readFileSync(file, 'utf8'));
+      if (info.pid === process.pid) unlinkSync(file);
+    } catch (_) { /* gone, unreadable, or not ours */ }
+  }
+}
+
+// A second server on the same config dir (a test hub, say) takes the beacon and removes it on
+// exit, which leaves this live server undiscoverable. A newer live owner keeps it.
+function reclaimServerInfo(port) {
   try {
-    const info = JSON.parse(readFileSync(SERVER_INFO_FILE, 'utf8'));
-    if (info.pid === process.pid) unlinkSync(SERVER_INFO_FILE);
-  } catch (_) { /* gone, unreadable, or not ours */ }
+    const { pid } = JSON.parse(readFileSync(SERVER_INFO_FILE, 'utf8'));
+    if (pid === process.pid || isPidAlive(pid)) return;
+  } catch (_) { /* missing or unreadable beacon */ }
+  writeServerInfo(port);
 }
 
 process.on('exit', removeServerInfo);
@@ -422,9 +448,9 @@ let liveSessionsCache = null;
 let lastLiveSessionsScan = 0;
 const LIVE_SESSIONS_TTL = 5000;
 
-function loadLiveSessions() {
+function loadLiveSessions(fresh = false) {
   const now = Date.now();
-  if (liveSessionsCache && now - lastLiveSessionsScan < LIVE_SESSIONS_TTL) return liveSessionsCache;
+  if (!fresh && liveSessionsCache && now - lastLiveSessionsScan < LIVE_SESSIONS_TTL) return liveSessionsCache;
   const sessions = [];
   if (existsSync(SESSIONS_DIR)) {
     try {
@@ -432,7 +458,7 @@ function loadLiveSessions() {
         try {
           const s = JSON.parse(readFileSync(path.join(SESSIONS_DIR, file), 'utf8'));
           if (s?.sessionId && s.kind === 'interactive') {
-            sessions.push({ sessionId: s.sessionId, cwd: s.cwd || null, startedAt: s.startedAt || 0, status: s.status || null });
+            sessions.push({ sessionId: s.sessionId, pid: s.pid || null, cwd: s.cwd || null, startedAt: s.startedAt || 0, status: s.status || null });
           }
         } catch (_) { /* skip invalid */ }
       }
@@ -451,6 +477,19 @@ function loadLiveSessions() {
 function isRegistryIdle(sessionId) {
   const live = loadLiveSessions().find(s => s.sessionId === sessionId);
   return live?.status === 'idle';
+}
+
+// A registry file outlives a crashed claude, so the pid is probed rather than trusted.
+function isSessionProcessAlive(sessionId, exceptPid = null) {
+  return loadLiveSessions().some((s) => {
+    if (s.sessionId !== sessionId || !s.pid || s.pid === exceptPid) return false;
+    return isPidAlive(s.pid);
+  });
+}
+
+// EPERM means the process exists but belongs to someone else.
+function isPidAlive(pid) {
+  try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }
 }
 
 function hasRecentLogActivity(sessionId, logAge) {
@@ -1165,6 +1204,7 @@ app.get('/api/sessions', async (req, res) => {
     const pinnedIds = pinnedParam ? new Set(pinnedParam.split(',').filter(Boolean)) : new Set();
     for (const id of includeIds) pinnedIds.add(id);
     const activeFilter = req.query.filter === 'active';
+    const terminalIds = activeFilter ? new Set(terminal.list().map((t) => t.id)) : new Set();
 
     const metadata = loadSessionMetadata();
     const sessionsMap = new Map();
@@ -1194,7 +1234,7 @@ app.get('/api/sessions', async (req, res) => {
 
           // Cheap-probe: when filter=active, skip expensive enrichment for inactive non-pinned sessions.
           // Mirrors the post-filter predicate using only signals already computed above.
-          if (activeFilter && !pinnedIds.has(entry.name)) {
+          if (activeFilter && !pinnedIds.has(entry.name) && !terminalIds.has(entry.name)) {
             const cheaplyActive = logStat.hasMessages && (
               hasVisibleLogActivity(entry.name, logAge)
               || agentStatus.hasActive
@@ -1294,7 +1334,7 @@ app.get('/api/sessions', async (req, res) => {
         const metaAgentStatus = checkAgentStatus(metaAgentDir, stale, logMtime, metaIsTeam);
 
         // Cheap-probe: no tasks here (metadata-only), so active = recent log OR live agent.
-        if (activeFilter && !pinnedIds.has(sessionId)) {
+        if (activeFilter && !pinnedIds.has(sessionId) && !terminalIds.has(sessionId)) {
           const cheaplyActive = logStat.hasMessages && (
             hasVisibleLogActivity(sessionId, logAge) || metaAgentStatus.hasActive || !!metaAgentStatus.waitingForUser
           );
@@ -1495,7 +1535,7 @@ app.get('/api/sessions', async (req, res) => {
           || s.hasRecentActivity
         );
       for (const [id, s] of sessionsMap) {
-        if (pinnedIds.has(id)) continue;
+        if (pinnedIds.has(id) || terminalIds.has(id)) continue;
         if (!isActive(s)) sessionsMap.delete(id);
       }
     }
@@ -1522,12 +1562,21 @@ app.get('/api/sessions', async (req, res) => {
       sessions = [...top, ...missingPinned];
     }
 
-    res.json(sessions);
+    res.json(withDispatchPlacement(sessions));
   } catch (error) {
     console.error('Error listing sessions:', error);
     res.status(500).json({ error: 'Failed to list sessions' });
   }
 });
+
+// os.tmpdir() can be an 8.3 short path on Windows; transcripts record the long form.
+const TEMP_ROOT = (() => {
+  try { return realpathSync.native(os.tmpdir()); } catch { return os.tmpdir(); }
+})();
+function isTempPath(p) {
+  const rel = path.relative(TEMP_ROOT, p);
+  return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel);
+}
 
 // API: Get distinct project paths with last-modified timestamps
 app.get('/api/projects', (_req, res) => {
@@ -1542,7 +1591,11 @@ app.get('/api/projects', (_req, res) => {
     }
   }
   const projects = Object.entries(projectMap)
-    .map(([path, mtime]) => ({ path, modifiedAt: mtime ? new Date(mtime).toISOString() : null }))
+    .map(([path, mtime]) => ({
+      path,
+      modifiedAt: mtime ? new Date(mtime).toISOString() : null,
+      ...(isTempPath(path) && { temp: true }),
+    }))
     .sort((a, b) => a.path.localeCompare(b.path));
   res.json(projects);
 });
@@ -3074,9 +3127,168 @@ app.get('/api/config', (_req, res) => {
     costUrl: COST_URL,
     memoryUrl: MEMORY_URL,
     scratchAvailable: !!whichSync('scratch'),
+    terminal: terminal.clientConfig(),
   });
 });
 
+// #endregion
+
+// #region TERMINAL
+// A new session may start only in a folder the user has already worked in, or one they
+// chose in the native dialog during this run. Anything else would let a page script pick
+// the directory claude runs in.
+const pickedFolders = new Set();
+function isAllowedFolder(dir) {
+  const known = pickedFolders.has(dir) || Object.values(loadSessionMetadata()).some((m) => m.project === dir);
+  try { return known && statSync(dir).isDirectory(); } catch { return false; }
+}
+
+const terminal = createTerminalService({
+  config: readTerminalConfig({ getArgValue }),
+  net,
+  claudeDir: CLAUDE_DIR,
+  isDefaultDir: isDefaultClaudeDir(CLAUDE_DIR),
+  token: process.env.CCK_TERMINAL_TOKEN,
+  which: whichSync,
+  isLiveElsewhere: isSessionProcessAlive,
+  // The project, not the last cwd: `claude --resume` finds a session under the
+  // project dir it started in, and cwd drifts into subdirectories.
+  resolveCwd: (id) => {
+    const meta = loadSessionMetadata()[id];
+    return meta ? meta.project || meta.cwd || null : null;
+  },
+  isAllowedFolder,
+  liveSessions: () => loadLiveSessions(true),
+  onChange: () => broadcast({ type: 'terminals-update', ids: terminal.list().map((t) => t.id) }),
+  onExit: (id) => dispatches.sessionExited(id),
+});
+
+let folderDialogOpen = false;
+app.post('/api/terminal/pick-folder', async (req, res) => {
+  const reason = terminal.unavailableReason();
+  if (reason) return res.status(403).json({ error: reason });
+  if (!terminal.authorized(req.get('x-terminal-token'))) return res.status(401).json({ error: 'invalid terminal token' });
+  if (folderDialogOpen) return res.status(409).json({ error: 'a folder dialog is already open' });
+  folderDialogOpen = true;
+  try {
+    const dir = await pickFolder(whichSync, { start: req.body?.start });
+    if (dir) pickedFolders.add(dir);
+    res.json({ path: dir });
+  } catch (e) {
+    res.status(501).json({ error: e.message });
+  } finally {
+    folderDialogOpen = false;
+  }
+});
+
+// The hub's eviction check reads this to keep a pool with live PTYs alive.
+app.get('/api/terminals', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ sessions: terminal.list() });
+});
+
+app.delete('/api/terminals/:id', (req, res) => {
+  const err = terminal.end(req.params.id, req.get('x-terminal-token'));
+  if (err === 'auth') return res.status(401).json({ error: 'invalid terminal token' });
+  if (err === 'not-found') return res.status(404).json({ error: 'no such terminal' });
+  res.status(204).end();
+});
+
+// Served from node_modules, never a CDN: any script on this page can use the token.
+const XTERM_FILES = {
+  'xterm.js': '@xterm/xterm/lib/xterm.js',
+  'xterm.css': '@xterm/xterm/css/xterm.css',
+  'addon-fit.js': '@xterm/addon-fit/lib/addon-fit.js',
+  'addon-webgl.js': '@xterm/addon-webgl/lib/addon-webgl.js',
+  'addon-unicode11.js': '@xterm/addon-unicode11/lib/addon-unicode11.js',
+};
+app.get('/vendor/xterm/:file', (req, res) => {
+  const rel = Object.hasOwn(XTERM_FILES, req.params.file) ? XTERM_FILES[req.params.file] : null;
+  if (!rel) return res.status(404).end();
+  let file;
+  try { file = require.resolve(rel); } catch { return res.status(404).end(); }
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.sendFile(file);
+});
+// #endregion
+
+// #region DISPATCH
+const dispatches = createDispatchRegistry({
+  onSettle: (r) => {
+    if (r.parent && r.report) enqueueSessionEvent(topicKey('dispatch', r.parent), formatDispatchLine(r));
+    broadcast({ type: 'dispatch-update' });
+  },
+});
+
+const dispatchGroups = createGroupStore({
+  load: () => {
+    try { return JSON.parse(readFileSync(DISPATCH_GROUPS_FILE, 'utf8')); } catch { return null; }
+  },
+  save: (data) => writeJsonAtomic(DISPATCH_GROUPS_FILE, data),
+  isAlive: (id) => terminal.isRunning(id) || isSessionProcessAlive(id),
+  pinnedIds: () => new Set(Object.keys(readPins())),
+});
+
+// The board places a session from these alone, so it never has to move it later.
+// `startedBy` lets it follow a starter the user put in a named group, which only the
+// browser knows; it goes once the dispatch settles.
+function withDispatchPlacement(sessions) {
+  const groups = dispatchGroups.snapshot();
+  const starters = new Map(
+    dispatches.list().filter((r) => r.status === 'running' && r.parent && r.session).map((r) => [r.session, r.parent]),
+  );
+  if (!groups.size && !starters.size) return sessions;
+  return sessions.map((s) => {
+    const dispatchGroup = groups.get(s.id);
+    const startedBy = starters.get(s.id);
+    return dispatchGroup || startedBy ? { ...s, dispatchGroup, startedBy } : s;
+  });
+}
+
+// Starting a session needs the terminal token, as the browser does; the CLI reads it from
+// TERMINAL_TOKEN_FILE. The child gets only its dispatch capability through the preamble.
+app.post('/api/dispatch', (req, res) => {
+  if (!terminal.authorized(req.get('x-terminal-token'))) return res.status(401).json({ error: 'invalid terminal token' });
+  const { cwd, spec, name, model, worktree, parent, group, report } = req.body || {};
+  if (typeof spec !== 'string' || !spec.trim()) return res.status(400).json({ error: 'spec is required' });
+  if (parent != null && !(typeof parent === 'string' && isUUID(parent))) return res.status(400).json({ error: 'invalid parent' });
+  if (group != null && !isGroupName(group)) {
+    return res.status(400).json({ error: `group must be kebab-case, e.g. ${suggestGroupName(group) || 'my-group'}` });
+  }
+  const starterGroup = parent ? dispatchGroups.groupOf(parent) : null;
+  const target = group || starterGroup;
+  const r = dispatches.create({ parent, name, spec: spec.trim(), report: report === true, group: target, worktree });
+  const env = { CCK_DISPATCH_ID: r.id, ...(parent && { PARENT_SESSION_ID: parent }) };
+  const started = terminal.startNew({ cwd, name, model, worktree, prompt: formatPreamble(r) }, env);
+  if (started.error) {
+    dispatches.discard(r.id);
+    return res.status(started.status).json({ error: started.error });
+  }
+  dispatches.attach(r.id, { session: started.id, cwd: started.cwd });
+  // A starter already in a group stays where it is: moving it would jump it under the user.
+  if (target) dispatchGroups.join(target, [starterGroup ? null : parent, started.id]);
+  broadcast({ type: 'dispatch-update' });
+  res.status(201).json({ dispatch: r.id, session: started.id, cwd: started.cwd, group: target });
+});
+
+app.post('/api/dispatch/:id/done', (req, res) => {
+  const { cap, outcome, summary } = req.body || {};
+  const err = dispatches.settle(req.params.id, cap, outcome, summary);
+  if (err) return res.status(err.status).json({ error: err.error });
+  res.status(204).end();
+});
+
+app.get('/api/dispatch', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const ids = typeof req.query.ids === 'string' && req.query.ids ? req.query.ids.split(',') : null;
+  const parent = typeof req.query.parent === 'string' && req.query.parent ? req.query.parent : null;
+  // res, not req: a GET's request stream can close before the response is sent.
+  const out = await dispatches.wait({ ids, parent }, req.query.wait, (stop) => {
+    res.on('close', stop);
+    return () => res.off('close', stop);
+  });
+  if (!res.writableEnded) res.json(out);
+});
 // #endregion
 
 // #region TASK_ROUTES
@@ -3134,7 +3346,7 @@ app.get('/api/tasks/all', async (_req, res) => {
   }
 });
 
-const { enqueueSessionEvent, formatTaskMoved, handleSessionEvents } = require('./lib/session-events');
+const { enqueueSessionEvent, formatTaskMoved, handleSessionEvents, topicKey } = require('./lib/session-events');
 app.get('/api/sessions/:sessionId/events', handleSessionEvents);
 
 // API: Create a task
@@ -3891,9 +4103,16 @@ async function prewarmCaches() {
     // The port is configurable and falls back to a random one when taken, so the postman
     // monitor cannot assume it -- publish the live one where it can read it.
     writeServerInfo(actualPort);
+    setInterval(() => reclaimServerInfo(actualPort), 30000).unref();
     migrateLegacyApprovalsConfig();
     const warning = net.exposureWarning();
     if (warning) console.log(warning);
+    const terminalReason = terminal.unavailableReason();
+    if (terminalReason && terminalReason !== 'disabled') console.log(`Terminal unavailable: ${terminalReason}`);
+    // Under the hub the hub owns the token and hands it to the iframe itself.
+    if (!terminalReason && !process.env.CLAUDE_HUB) {
+      console.log(`Terminal enabled - open http://localhost:${actualPort}/#t=${terminal.token}`);
+    }
 
     if (process.argv.includes('--open')) {
       import('open').then(open => open.default(`http://localhost:${actualPort}`));
@@ -3901,12 +4120,14 @@ async function prewarmCaches() {
     setImmediate(prewarmCaches);
   };
 
-  const server = net.listenLoopback(app, PORT, onReady);
+  const listenOpts = { onUpgrade: terminal.handleUpgrade };
+  const server = net.listenLoopback(app, PORT, onReady, listenOpts);
+  process.on('exit', terminal.shutdown);
 
   server.on('error', (err) => {
     if (err.code === 'EADDRINUSE') {
       console.log(`Port ${PORT} in use, trying random port...`);
-      net.listenLoopback(app, 0, onReady);
+      net.listenLoopback(app, 0, onReady, listenOpts);
     } else {
       throw err;
     }

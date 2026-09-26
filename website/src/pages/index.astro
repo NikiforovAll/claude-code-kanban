@@ -1,0 +1,536 @@
+---
+import SiteLayout from '../kit/SiteLayout.astro';
+import Shot from '../kit/Shot.astro';
+import Keys from '../kit/Keys.astro';
+import ModeToggle from '../kit/ModeToggle.astro';
+import ThemeDial from '../kit/ThemeDial.astro';
+import Lightbox from '../kit/Lightbox.astro';
+import FamilyFooter from '../kit/FamilyFooter.astro';
+import { family, url } from '../kit/family';
+
+const GITHUB = 'https://github.com/NikiforovAll/claude-code-kanban';
+const NPM = 'https://www.npmjs.com/package/claude-code-kanban';
+const INSTALL = 'npx claude-code-kanban --open';
+
+const watch = [
+  {
+    title: 'Tasks move as Claude works',
+    body: 'Pending, in progress, completed. The session log beside the board shows every prompt, reply, and tool call in order.',
+    shot: 'board',
+    alt: 'Board with three columns of tasks and the session log open on the right',
+  },
+  {
+    title: 'Read what each subagent was asked',
+    body: 'The agent log lists every subagent with its model, status, and run time. Open one to read its prompt and what it sent back.',
+    shot: '02-subagent-preview',
+    alt: 'Subagent preview showing the prompt and the result of one agent',
+  },
+  {
+    title: 'Know what blocks what',
+    body: 'The task panel shows what a task waits on and what it blocks. You can edit the title, description, and notes in place.',
+    shot: '03-task-deps',
+    alt: 'Task detail panel with blocked-by and blocks dependencies',
+  },
+  {
+    title: 'Keep the important messages in view',
+    body: 'Pin a plan, a decision, or an error, and it stays above the log while the session moves on. [Shift+M] follows the newest message.',
+    shot: '05-pinned-messages',
+    alt: 'Pinned messages above the session log',
+  },
+  {
+    title: 'See what a session costs and touches',
+    body: 'Each session shows its model, branch, context window use, and cost. Tool stats list which tools ran and which files changed.',
+    shot: '06-session-info',
+    alt: 'Session info modal with model, branch, context use, and cost',
+  },
+  {
+    title: 'Focus on one session',
+    body: '[Shift+Z] switches to zen mode. The sidebar drops every other session and shows the one you are on, with its context use, cost, and linked files.',
+    shot: '08b-zen-mode',
+    alt: 'Zen mode: one session in the sidebar next to its task board',
+  },
+];
+
+const drive = [
+  {
+    title: 'A terminal next to the tasks',
+    body: 'Open a real Claude Code terminal for any session. [Ctrl+Alt+R] resumes a past session. [Ctrl+Alt+S] goes back to the one before. [Shift+Z] hides everything but the terminal and a narrow sidebar.',
+    shot: 'terminal',
+    alt: 'Zen mode: a Claude Code terminal beside a narrow session sidebar',
+  },
+  {
+    title: 'Start a session in any project',
+    body: 'Pick a folder, name the session, and add a worktree if you want one. Type the first prompt or say it out loud. [Ctrl+Alt+N] opens the dialog.',
+    shot: '09-new-session',
+    alt: 'New session dialog with folder, name, worktree, and prompt fields',
+  },
+  {
+    title: 'Answer prompts from the board',
+    body: 'When Claude asks for permission or asks a question, the card shows Allow and Deny, or an answer form. The terminal prompt stays open, and the first answer wins.',
+    shot: '11-waiting-prompt',
+    alt: 'A permission prompt for a Bash command with Allow and Deny buttons',
+  },
+  {
+    title: 'Keep your hands on the keyboard',
+    body: 'Arrow keys move through tasks, [Tab] switches between the sidebar and the board, [Ctrl+Alt+N] starts a session, and [Ctrl+`] opens its terminal. Inside Claude Code Hub, [Ctrl+Alt+Left] and [Ctrl+Alt+Right] switch apps. Press [?] for the full list.',
+    shot: '12-shortcuts',
+    alt: 'Keyboard shortcuts help, grouped by navigate, board, session, view, terminal, and hub',
+    width: 1600,
+    height: 1200,
+  },
+];
+
+const setup = [
+  {
+    title: 'Install the hooks',
+    cmd: 'npx claude-code-kanban --install',
+    body: 'The hooks report subagents, waiting prompts, and live activity. Your existing settings stay as they are.',
+  },
+  { title: 'Start the board', cmd: INSTALL },
+  { title: 'Use Claude Code as usual', cmd: 'claude', body: 'Tasks, agents, and messages appear on the board.' },
+];
+---
+
+<SiteLayout
+  title="Claude Code Kanban: orchestrate Claude Code agents from one board"
+  description="Start, watch, and answer Claude Code sessions from one live board, with a terminal built in."
+  image="og.png"
+>
+  <div class="page">
+    <header class="nav">
+      <a class="mark" href={url()}>Claude Code Kanban</a>
+      <nav aria-label="Site">
+        <a href={url('getting-started/')}>Docs</a>
+        <a href={GITHUB}>GitHub</a>
+        <details class="family">
+          <summary>Apps</summary>
+          <ul>
+            {family.map((s) => <li><a href={s.href} aria-current={s.id === 'kanban' ? 'page' : undefined}>{s.name}</a></li>)}
+          </ul>
+        </details>
+        <ModeToggle />
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero">
+        <h1>Orchestrate Claude Code agents from one board.</h1>
+        <p class="lede">
+          Start sessions in any project. Watch their tasks and subagents move across the columns. Answer the ones that stop to ask, and let one agent start new sessions for work it
+          hands off.
+        </p>
+        <div class="actions">
+          <div class="cmd">
+            <code><span aria-hidden="true">$ </span>{INSTALL}</code>
+            <button type="button" class="copy" data-copy={INSTALL}>Copy</button>
+          </div>
+          <a class="button" href={url('getting-started/')}>Read the docs</a>
+        </div>
+
+        <figure class="hero-shot">
+          <Shot
+            themed="board"
+            alt="The Claude Code Kanban board: session sidebar, task columns, agent log, and session log"
+            eager
+          />
+          <figcaption>
+            <ThemeDial />
+            <p>The 17 themes the app ships with, in light and dark. Pick one and the page follows.</p>
+          </figcaption>
+        </figure>
+      </section>
+
+      <section class="half" aria-labelledby="watch">
+        <div class="half-head">
+          <h2 id="watch">Watch</h2>
+          <p>
+            Claude Code writes task files and transcripts as it works. The board watches those files and pushes each change
+            to your browser. Nothing to configure per project.
+          </p>
+        </div>
+        <div class="items">
+          {
+            watch.map((it) => (
+              <article class="item">
+                <div class="item-text">
+                  <h3>{it.title}</h3>
+                  <p><Keys text={it.body} /></p>
+                </div>
+                <Shot themed={it.shot} alt={it.alt} />
+              </article>
+            ))
+          }
+        </div>
+      </section>
+
+      <section class="half" aria-labelledby="drive">
+        <div class="half-head">
+          <h2 id="drive">Drive</h2>
+          <p>Watching is half of it. From the same board you can start sessions, answer prompts, and hand work to an agent.</p>
+          <p class="aside">
+            The terminal is on by default in Claude Code Hub. On its own, start the board with <code>--enable-terminal</code>.
+          </p>
+        </div>
+        <div class="items">
+          {
+            drive.map((it) => (
+              <article class="item">
+                <div class="item-text">
+                  <h3>{it.title}</h3>
+                  <p><Keys text={it.body} /></p>
+                </div>
+                <Shot themed={it.shot} alt={it.alt} width={it.width} height={it.height} />
+              </article>
+            ))
+          }
+        </div>
+      </section>
+
+      <section class="groups" aria-labelledby="groups">
+        <div class="groups-text">
+          <h2 id="groups">Group sessions across projects</h2>
+          <p>
+            Each session sits under its project by default. Ten sessions in three repos gets noisy, so make a group for
+            the work that belongs together and fold the rest away.
+          </p>
+        </div>
+        <Shot themed="08-groups" alt="Sidebar with a named group expanded and other projects folded" />
+      </section>
+
+      <section class="setup" aria-labelledby="setup">
+        <h2 id="setup">Set up in three steps</h2>
+        <ol>
+          {
+            setup.map((s) => (
+              <li>
+                <h3>{s.title}</h3>
+                <code class="step-cmd">{s.cmd}</code>
+                {s.body && <p><Keys text={s.body} /></p>}
+              </li>
+            ))
+          }
+        </ol>
+      </section>
+    </main>
+
+    <FamilyFooter
+      current="kanban"
+      links={[
+        { label: 'MIT license', href: `${GITHUB}/blob/main/LICENSE` },
+        { label: 'npm', href: NPM },
+        { label: 'GitHub', href: GITHUB },
+      ]}
+    />
+  </div>
+  <Lightbox />
+</SiteLayout>
+
+<script>
+  for (const btn of document.querySelectorAll<HTMLButtonElement>('[data-copy]')) {
+    btn.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(btn.dataset.copy!);
+        btn.textContent = 'Copied';
+      } catch {
+        btn.textContent = 'Press Ctrl+C';
+      }
+      setTimeout(() => (btn.textContent = 'Copy'), 1600);
+    });
+  }
+</script>
+
+<style>
+  .page {
+    width: min(100% - 2rem, 78rem);
+    margin-inline: auto;
+  }
+
+  .nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding-block: 1.25rem;
+  }
+  .mark {
+    font: 600 1.25rem/1 var(--font-display);
+    color: var(--c-ink1);
+    text-decoration: none;
+  }
+  .nav nav {
+    display: flex;
+    align-items: center;
+    gap: 1.25rem;
+    font: 500 0.875rem var(--font-mono);
+  }
+  .nav nav a,
+  .family summary {
+    color: var(--c-ink2);
+    text-decoration: none;
+    cursor: pointer;
+  }
+  .nav nav a:hover,
+  .family summary:hover {
+    color: var(--c-ink1);
+  }
+  .family {
+    position: relative;
+  }
+  .family summary {
+    list-style: none;
+  }
+  .family summary::-webkit-details-marker {
+    display: none;
+  }
+  .family summary::after {
+    content: ' ▾';
+  }
+  .family ul {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 0.5rem);
+    z-index: 10;
+    margin: 0;
+    padding: 0.375rem;
+    list-style: none;
+    min-width: 11rem;
+    background: var(--c-elevated);
+    border: 1px solid var(--c-border);
+    border-radius: 0.5rem;
+  }
+  .family li a {
+    display: block;
+    padding: 0.5rem 0.75rem;
+    border-radius: 0.375rem;
+  }
+  .family li a:hover {
+    background: var(--c-hover);
+  }
+  .family li a[aria-current='page'] {
+    color: var(--c-accent-ink);
+  }
+
+  .hero {
+    padding-block: clamp(2.5rem, 7vw, 6rem) 0;
+  }
+  h1 {
+    margin: 0;
+    font: 600 clamp(2.5rem, 6.4vw, 5.75rem) / 0.98 var(--font-display);
+    letter-spacing: -0.025em;
+    max-width: 22ch;
+  }
+  .lede {
+    margin: 1.75rem 0 0;
+    max-width: 38rem;
+    font-size: 1.1875rem;
+    color: var(--c-ink2);
+  }
+  .actions {
+    margin-top: 2rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+  }
+  .cmd {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.375rem 0.375rem 0.375rem 1rem;
+    background: var(--c-elevated);
+    border: 1px solid var(--c-border);
+    border-radius: 0.5rem;
+    max-width: 100%;
+  }
+  .cmd code {
+    font-size: 0.9375rem;
+    white-space: nowrap;
+    overflow-x: auto;
+  }
+  .cmd code span {
+    color: var(--c-muted);
+  }
+  .copy,
+  .button {
+    font: 500 0.875rem/1 var(--font-mono);
+    padding: 0.625rem 0.875rem;
+    border-radius: 0.375rem;
+    cursor: pointer;
+    text-decoration: none;
+  }
+  .copy {
+    color: var(--c-ink2);
+    background: transparent;
+    border: 1px solid transparent;
+    min-width: 5.5rem;
+  }
+  .copy:hover {
+    background: var(--c-hover);
+  }
+  .button {
+    display: inline-flex;
+    align-items: center;
+    color: var(--c-field);
+    background: var(--c-ink1);
+    border: 1px solid var(--c-ink1);
+  }
+  .button:hover {
+    background: var(--c-accent-ink);
+    border-color: var(--c-accent-ink);
+  }
+  .copy:focus-visible,
+  .button:focus-visible,
+  .nav a:focus-visible,
+  .family summary:focus-visible {
+    outline: 2px solid var(--c-accent);
+    outline-offset: 2px;
+  }
+
+  .hero-shot {
+    margin: clamp(2.5rem, 5vw, 4rem) 0 0;
+  }
+  .hero-shot figcaption {
+    margin-top: 1.25rem;
+    display: grid;
+    gap: 0.75rem;
+  }
+  .hero-shot figcaption p {
+    margin: 0;
+    font-size: 0.9375rem;
+    color: var(--c-ink3);
+  }
+
+  .half {
+    margin-top: clamp(5rem, 10vw, 9rem);
+    display: grid;
+    grid-template-columns: minmax(14rem, 18rem) 1fr;
+    gap: 2rem clamp(2rem, 5vw, 4.5rem);
+    align-items: start;
+  }
+  .half-head {
+    position: sticky;
+    top: 2rem;
+  }
+  .half-head h2 {
+    margin: 0 0 1rem;
+    font: 600 clamp(3.5rem, 8vw, 6rem) / 0.9 var(--font-display);
+    letter-spacing: -0.03em;
+    color: var(--c-accent-ink);
+  }
+  .half-head p {
+    margin: 0 0 1rem;
+    color: var(--c-ink2);
+  }
+  .aside {
+    font-size: 0.9375rem;
+    color: var(--c-ink3);
+  }
+  .aside code,
+  .item-text code {
+    font-size: 0.875em;
+    padding: 0.1em 0.35em;
+    margin: 0 0.15em;
+    background: var(--c-surface);
+    border: 1px solid var(--c-border);
+    border-radius: 0.3em;
+    white-space: nowrap;
+  }
+  @media (max-width: 360px) {
+    .aside code,
+    .item-text code {
+      white-space: normal;
+      overflow-wrap: anywhere;
+      box-decoration-break: clone;
+    }
+  }
+  .items {
+    display: grid;
+    gap: clamp(3.5rem, 6vw, 5.5rem);
+  }
+  .item {
+    display: grid;
+    gap: 1.25rem;
+  }
+  .item-text {
+    max-width: 40rem;
+  }
+  .item h3,
+  .setup h3 {
+    margin: 0 0 0.5rem;
+    font: 600 1.625rem/1.2 var(--font-display);
+    letter-spacing: -0.01em;
+  }
+  .item p {
+    margin: 0;
+    color: var(--c-ink2);
+  }
+  .groups {
+    margin-top: clamp(5rem, 10vw, 9rem);
+    display: grid;
+    grid-template-columns: minmax(14rem, 22rem) 1fr;
+    gap: 2rem clamp(2rem, 5vw, 4.5rem);
+    align-items: center;
+  }
+  h2 {
+    margin: 0 0 1rem;
+    font: 600 clamp(2rem, 4vw, 2.75rem) / 1.08 var(--font-display);
+    letter-spacing: -0.02em;
+  }
+  .groups p {
+    margin: 0;
+    color: var(--c-ink2);
+  }
+
+  .setup {
+    margin-block: clamp(5rem, 10vw, 9rem) clamp(4rem, 8vw, 6rem);
+  }
+  .setup ol {
+    margin: 2rem 0;
+    padding: 0;
+    list-style: none;
+    counter-reset: step;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+    gap: 1.5rem;
+  }
+  .setup li {
+    counter-increment: step;
+    padding-top: 1.25rem;
+    border-top: 2px solid var(--c-ink1);
+  }
+  .setup li::before {
+    content: counter(step);
+    display: block;
+    font: 600 1rem var(--font-mono);
+    color: var(--c-accent-ink);
+    margin-bottom: 0.5rem;
+  }
+  .step-cmd {
+    display: block;
+    margin: 0.75rem 0;
+    padding: 0.625rem 0.875rem;
+    background: var(--c-elevated);
+    border: 1px solid var(--c-border);
+    border-radius: 0.375rem;
+    font-size: 0.875rem;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+  .setup li p {
+    margin: 0;
+    color: var(--c-ink2);
+    font-size: 0.9375rem;
+  }
+
+  @media (max-width: 52rem) {
+    .half,
+    .groups {
+      grid-template-columns: 1fr;
+    }
+    .half-head {
+      position: static;
+    }
+    .nav nav {
+      gap: 0.875rem;
+    }
+  }
+</style>

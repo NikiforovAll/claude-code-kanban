@@ -1,0 +1,187 @@
+---
+title: Keyboard shortcuts
+description: Every keyboard shortcut in Claude Code Kanban, grouped the same way as the in-app help.
+---
+
+import Shot from '../../../kit/Shot.astro';
+import Lightbox from '../../../kit/Lightbox.astro';
+
+Press <kbd>?</kbd> (or <kbd>Shift+/</kbd>) to open the **Keyboard Shortcuts** help. Press <kbd>?</kbd> or <kbd>Esc</kbd> to close it. The help does not open while the cursor is in a text field, a text area or a select.
+
+<Shot themed="12-shortcuts" alt="The Keyboard Shortcuts help with the Navigate, Session, Board, View, Copy, Hub, Terminal and Sessions groups" />
+
+Plain letter keys work only when you press no modifier. For example, <kbd>J</kbd> moves down, and <kbd>Ctrl+J</kbd> does nothing in Claude Code Kanban. Letter keys do nothing while you type in a field.
+
+## Navigate
+
+| Keys | Action |
+| --- | --- |
+| <kbd>↓</kbd> or <kbd>J</kbd> | Next item |
+| <kbd>↑</kbd> or <kbd>K</kbd> | Previous item |
+| <kbd>←</kbd> or <kbd>H</kbd> | Left column, or collapse a group in the sidebar |
+| <kbd>→</kbd> or <kbd>L</kbd> | Right column, or expand a group in the sidebar |
+| <kbd>Tab</kbd> | Move focus between the sidebar and the board |
+| <kbd>Enter</kbd> or <kbd>Space</kbd> | Open the selected item |
+
+When the [embedded terminal](/claude-code-kanban/guides/embedded-terminal/) replaces the board, <kbd>Tab</kbd> moves focus between the sidebar and the terminal. If the board has no task cards, <kbd>Tab</kbd> from the sidebar does nothing.
+
+## Session
+
+These keys act on the session under the sidebar cursor, or on the open session.
+
+| Keys | Action |
+| --- | --- |
+| <kbd>P</kbd> | Open the session plan |
+| <kbd>Shift+P</kbd> | Open the session picker. <kbd>Ctrl+Shift+P</kbd> stays with the browser. |
+| <kbd>I</kbd> | Open session info |
+| <kbd>.</kbd> | Pin or unpin the session |
+| <kbd>&gt;</kbd> | Make the session sticky, or remove sticky |
+| <kbd>Ctrl+D</kbd> | Dismiss the session |
+| <kbd>Shift+L</kbd> | Show or hide the session log |
+| <kbd>Shift+M</kbd> | Open the last message in follow mode. If a waiting prompt is fresh, open that prompt. If the message detail is open, close it. |
+
+The session log button tooltip says <kbd>L</kbd>. The real shortcut is <kbd>Shift+L</kbd>, because plain <kbd>L</kbd> moves right on the board.
+
+### Message detail
+
+These keys work in the message detail window. See [Session log and details](/claude-code-kanban/guides/session-details/).
+
+| Keys | Action |
+| --- | --- |
+| <kbd>↓</kbd> or <kbd>J</kbd> | Next message. After the last message, show the waiting prompt if there is one. |
+| <kbd>↑</kbd> or <kbd>K</kbd> | Previous message |
+| <kbd>Ctrl+Enter</kbd> | Allow the waiting permission prompt, or approve the waiting plan |
+
+<kbd>Ctrl+Enter</kbd> works only when the waiting prompt is on screen and you can answer it from the board. It does not answer questions. On macOS, <kbd>Cmd+Enter</kbd> also works. See [Answer prompts from the board](/claude-code-kanban/guides/waiting-prompts/).
+
+## Board
+
+| Keys | Action |
+| --- | --- |
+| <kbd>Enter</kbd> or <kbd>Space</kbd> | Open or close the task detail panel for the selected card |
+| <kbd>D</kbd> | Delete the selected task, after you confirm |
+| <kbd>N</kbd> | Open or close the scratchpad. In the sidebar, open the scratchpad of the item under the cursor. |
+| <kbd>R</kbd> | Refresh sessions, the open session's tasks and the rate limits. A "Data refreshed" message shows when it is done. |
+| <kbd>Esc</kbd> | Close the next open item, in this order |
+
+<kbd>Esc</kbd> on the board closes one item each time you press it:
+
+1. The task detail panel.
+2. The agent log in the session log panel.
+3. The session log panel.
+4. If nothing is open, it clears the task selection.
+
+In the sidebar, <kbd>Esc</kbd> removes the keyboard cursor.
+
+## View
+
+| Keys | Action |
+| --- | --- |
+| <kbd>[</kbd> | Show or hide the sidebar |
+| <kbd>T</kbd> | Switch between light and dark theme |
+| <kbd>Shift+S</kbd> | Open the storage manager |
+| <kbd>Shift+Z</kbd> | Turn zen mode on or off (current session only) |
+| <kbd>Ctrl++</kbd> | Larger text in the open window |
+| <kbd>Ctrl+-</kbd> | Smaller text in the open window |
+| <kbd>Ctrl+0</kbd> | Reset the text size in the open window |
+| <kbd>?</kbd> | Show the help |
+
+The text size keys work only when a window with readable content is open, such as a message, a plan or a preview. They also accept <kbd>Ctrl+=</kbd>, <kbd>Ctrl+_</kbd> and the numeric keypad keys, and they work with the cursor in a field. On macOS, <kbd>Cmd</kbd> also works. With no such window open, the browser zooms the page as usual.
+
+## Copy
+
+| Keys | Action |
+| --- | --- |
+| <kbd>Shift+C</kbd> | Copy the session id |
+| <kbd>Ctrl+Shift+C</kbd> | Copy the resume command `claude -r <id>` |
+
+If no session is selected, a "No session selected" message shows.
+
+## Hub
+
+These keys work only when Claude Code Kanban runs inside [Claude Code Hub](/claude-code-kanban/guides/claude-code-hub/). When Claude Code Kanban runs alone, the help hides this group.
+
+| Keys | Action |
+| --- | --- |
+| <kbd>M</kbd> | Go to Marketplace, scoped to the session's project |
+| <kbd>$</kbd> | Go to Cost, on the session detail view |
+| <kbd>Ctrl+M</kbd> | Go to Memory, scoped to the session's project |
+| <kbd>Ctrl+Alt+←</kbd> or <kbd>Ctrl+Alt+→</kbd> | Previous or next hub app |
+| <kbd>Alt+1</kbd> to <kbd>Alt+9</kbd> | Go to a hub app by its number |
+| <kbd>Ctrl+Alt+P</kbd> | Open the project picker |
+
+The hub also binds <kbd>Ctrl+Alt+W</kbd> to open the config dir picker. The in-app help does not list it.
+
+## Terminal
+
+These keys work anywhere on the page, also from inside the terminal. See [Embedded terminal](/claude-code-kanban/guides/embedded-terminal/).
+
+| Keys | Action |
+| --- | --- |
+| <kbd>Ctrl+&#96;</kbd> | Show or hide the terminal |
+| <kbd>Alt+&#96;</kbd> | Move focus between the terminal and the page. If the terminal is hidden, show it. |
+| <kbd>Alt+Shift+&#96;</kbd> | End the terminal session and close it. This works in the session view whenever the session has a running terminal, also when the terminal is hidden. |
+| <kbd>Ctrl+Shift+&#96;</kbd> | Open the Terminals manager |
+
+These keys use the physical key left of <kbd>1</kbd>. They do nothing when you also hold <kbd>Cmd</kbd>.
+
+Inside the terminal:
+
+- <kbd>Ctrl+C</kbd> copies when text is selected. With no selection, it goes to the terminal as usual.
+- <kbd>Ctrl+Shift+C</kbd> always copies the selection.
+- <kbd>Ctrl+V</kbd> pastes from the clipboard.
+
+## Sessions
+
+| Keys | Action |
+| --- | --- |
+| <kbd>Ctrl+Alt+N</kbd> | Start a new session |
+| <kbd>Ctrl+Alt+R</kbd> | Resume a session with the `claude --resume` picker |
+| <kbd>Ctrl+Alt+S</kbd> | Swap to the previous session |
+
+<kbd>Ctrl+Alt+N</kbd> and <kbd>Ctrl+Alt+R</kbd> work only when the terminal is available. <kbd>Ctrl+Alt+S</kbd> switches between the last two sessions you opened. If the terminal has focus, it keeps focus after the swap. Inside Claude Code Hub, Claude Code Kanban keeps these three keys and does not send them to the hub.
+
+## Dialog keys
+
+### New session dialog
+
+| Keys | Action |
+| --- | --- |
+| <kbd>↓</kbd> or <kbd>↑</kbd> | Move in the folder list |
+| <kbd>Enter</kbd> | Pick the highlighted folder, or start the session |
+| <kbd>Ctrl+Enter</kbd> | Start the session from the prompt field (<kbd>Cmd+Enter</kbd> on macOS) |
+| <kbd>Esc</kbd> | Close the folder list. Press again to close the dialog. |
+
+### Session picker
+
+| Keys | Action |
+| --- | --- |
+| <kbd>↓</kbd> or <kbd>Ctrl+N</kbd> | Next session |
+| <kbd>↑</kbd> or <kbd>Ctrl+P</kbd> | Previous session |
+| <kbd>Enter</kbd> | Open the session |
+| <kbd>Ctrl+Space</kbd> | Turn peeking on or off |
+| <kbd>Esc</kbd> | Close the picker |
+
+### Terminal prompt buttons
+
+The terminal shows buttons when a session runs in another terminal, when Claude exits, or when the connection drops.
+
+| Keys | Action |
+| --- | --- |
+| <kbd>←</kbd>, <kbd>↑</kbd>, <kbd>H</kbd> or <kbd>K</kbd> | Previous button |
+| <kbd>→</kbd>, <kbd>↓</kbd>, <kbd>L</kbd> or <kbd>J</kbd> | Next button |
+| <kbd>Enter</kbd> or <kbd>Space</kbd> | Press the button |
+| <kbd>Esc</kbd> | Show or hide the terminal |
+
+## Keys while a window is open
+
+When a window is open, most shortcuts stop. These keys go through:
+
+- <kbd>Esc</kbd> closes the top window only. If the scratchpad is open, it closes first.
+- <kbd>?</kbd> closes the help.
+- <kbd>Shift+M</kbd> closes the message detail.
+- The [message detail keys](#message-detail) work in the message detail.
+
+The terminal keys, the Sessions keys and the text size keys also work while a window is open. Inside Claude Code Hub, <kbd>Ctrl+Alt+←</kbd>, <kbd>Ctrl+Alt+→</kbd>, <kbd>Alt+1</kbd> to <kbd>Alt+9</kbd> and <kbd>Ctrl+Alt+P</kbd> also work.
+
+<Lightbox />

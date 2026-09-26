@@ -258,6 +258,37 @@ wait "$HELPER" 2>/dev/null || true
 assert_eq "$OUT" "" "no output when displaced"
 [ "$ELAPSED" -le 5 ] && pass "exits promptly on id change" || fail "displacement exit" "took ${ELAPSED}s"
 
+# ─── Registry leaves "waiting": terminal answered, marker cleared ─
+echo "Registry answer clears marker:"
+
+SESS_DIR="$TMPDIR/.claude/sessions"
+mkdir -p "$SESS_DIR"
+printf '%s' '{"pid":1,"sessionId":"other","status":"waiting"}' > "$SESS_DIR/1.json"
+printf '%s' '{"pid":2,"sessionId":"s-reg","kind":"interactive","status":"waiting","waitingFor":"permission prompt"}' > "$SESS_DIR/2.json"
+reset_session s-reg
+(
+  M="$(marker s-reg)"
+  for _ in $(seq 1 40); do
+    [ -f "$M" ] && { sleep 1.5; printf '%s' '{"pid":2,"sessionId":"s-reg","kind":"interactive","status":"busy"}' > "$SESS_DIR/2.json"; exit 0; }
+    sleep 0.25
+  done
+) &
+HELPER=$!
+START=$(date +%s)
+OUT=$(run_hook "${PERM_INPUT/SID/s-reg}")
+ELAPSED=$(( $(date +%s) - START ))
+wait "$HELPER" 2>/dev/null || true
+assert_eq "$OUT" "" "no output when answered in the terminal"
+assert_no_file "$(marker s-reg)" "marker removed on registry answer"
+[ "$ELAPSED" -le 6 ] && pass "exits promptly on registry answer" || fail "registry exit" "took ${ELAPSED}s"
+
+# Never seen "waiting" (prompt not rendered yet): a busy registry must not clear
+reset_session s-busy
+printf '%s' '{"pid":3,"sessionId":"s-busy","kind":"interactive","status":"busy"}' > "$SESS_DIR/3.json"
+OUT=$(run_hook_with_decision "${PERM_INPUT/SID/s-busy}" "$(marker s-busy)" '{"behavior":"allow"}')
+assert_eq "$(echo "$OUT" | jq -r '.hookSpecificOutput.decision.behavior')" "allow" "busy-only registry still waits for the board"
+rm -rf "$SESS_DIR"
+
 # ─── waitSeconds lapse ───────────────────────────────────────────
 echo "waitSeconds lapse (D4):"
 

@@ -1,0 +1,17 @@
+---
+import ModeToggle from '../kit/ModeToggle.astro';
+import ThemeDial from '../kit/ThemeDial.astro';
+---
+
+<div class="theme-select">
+  <ThemeDial compact />
+  <ModeToggle />
+</div>
+
+<style>
+  .theme-select {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+</style>

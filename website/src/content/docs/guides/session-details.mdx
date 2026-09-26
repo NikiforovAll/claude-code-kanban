@@ -1,0 +1,129 @@
+---
+title: Session log and details
+description: Read one session in depth with the session log, pinned messages, session info, tool stats, the plan, linked documents and the scratchpad.
+---
+
+import Shot from '../../../kit/Shot.astro';
+import Lightbox from '../../../kit/Lightbox.astro';
+
+The board shows the tasks of a session. This page covers the panels and dialogs that show the rest: what Claude said, which tools it ran, its plan, and your own notes and files for the session.
+
+## Session log
+
+Press <kbd>Shift+L</kbd> or click the session log button above the board to open the Session Log panel on the right. The button tooltip says <kbd>L</kbd>, but plain <kbd>L</kbd> moves one column right on the board. Use <kbd>Shift+L</kbd>.
+
+<Shot src="shots/01-board-session-log.webp" alt="The board with the Session Log panel open on the right, listing the latest tool calls and messages of the session" />
+
+The panel loads the latest 15 messages. Scroll up to load older ones. Pinned messages and agents stay in a section at the top of the panel.
+
+Click a message to open it in the message dialog. In the dialog:
+
+- <kbd>↓</kbd> or <kbd>J</kbd> goes to the next message, and <kbd>↑</kbd> or <kbd>K</kbd> goes to the previous one. If the session waits for an answer, stepping past the last message shows the waiting prompt.
+- The header buttons are View Agent (for a message from a subagent), Pin, Copy, Open in editor and fullscreen.
+- <kbd>Ctrl++</kbd> and <kbd>Ctrl+-</kbd> make the text larger or smaller, from 0.7x to 2x. <kbd>Ctrl+0</kbd> resets it. The zoom works in every dialog that shows long text.
+
+### Follow the latest message
+
+Press <kbd>Shift+M</kbd> or click the clock button in the panel to open the latest message in follow mode. While follow mode is on, the dialog moves to each new message as Claude writes it. If the session waits for an answer, it shows the waiting prompt instead. Press <kbd>Shift+M</kbd> again to close the dialog. Stepping back with <kbd>↑</kbd> or <kbd>K</kbd> turns follow mode off. Pressing <kbd>↓</kbd> or <kbd>J</kbd> on the last message turns it on again.
+
+For waiting prompts, see [Answer prompts from the board](/claude-code-kanban/guides/waiting-prompts/).
+
+## Pinned messages
+
+Click the bookmark icon in the message dialog or the agent dialog to pin that message or agent. Pinned items show at the top of the session log. The session card in the sidebar shows a badge with the count of pinned items. Click the badge to open the log.
+
+Pins are stored per session in the browser's localStorage. A different browser or a private window does not see them.
+
+<Shot themed="05-pinned-messages" alt="Session log panel with pinned messages at the top and a bookmarks badge on the session card" />
+
+## Session info
+
+Press <kbd>I</kbd> or click the info icon on a session card to open the session info dialog. Each path row has a copy button, and most have an Open in editor button.
+
+| Row | What it shows |
+| --- | --- |
+| Session | The session id. Open in editor opens the session transcript. |
+| Continued from, Forked from | The earlier session, when this one continues or forks it. Click it to open that session. |
+| Slug | The session slug. Open in editor opens the plan file. |
+| Description | The session description, when it has one. |
+| Project, Path, CWD | The project folder and the working directory. |
+| Branch | The git branch. |
+| Tasks Dir | The folder that holds the task files. |
+| Scratchpad | The scratchpad folder that Claude Code uses for the session. |
+| Shared Tasks | The shared task list, when the session uses one. |
+| Team Config | The team config file, for team sessions. |
+
+Below the rows the dialog shows the session goal, context use, a plan card, linked documents, artifacts and team members, when the session has them.
+
+The footer has three buttons:
+
+- **Dismiss** hides the session from the Active Only list. <kbd>Ctrl+D</kbd> does the same. For a dismissed session the button reads **Restore**.
+- **Tool Stats** opens the tool statistics.
+- **Close** closes the dialog.
+
+The header has a Sticky button. Inside [Claude Code Hub](/claude-code-kanban/guides/claude-code-hub/), it also has buttons that open the session in Cost, Marketplace and Memory.
+
+<Shot themed="06-session-info" alt="Session info dialog with session, project, path and branch rows, context use and a plan card" />
+
+### Context use
+
+Context bars, token counts, cost and the model come from the context-status statusLine script. The installer sets it up when you answer yes to the statusLine question. Without it, the board has no context data to show. See [Getting started](/claude-code-kanban/getting-started/).
+
+## Tool stats
+
+Click **Tool Stats** in the session info dialog. The Tool Statistics dialog shows totals for calls, unique tools, failed calls and rejected calls. A table lists each tool with its calls, successes, failures, rejections and impact. Impact is the share of all tool output, by character count. Click a column header to sort by it.
+
+<Shot src="shots/07-tool-stats.webp" alt="Tool Statistics dialog with totals and a table of tools sorted by call count" />
+
+## Plan
+
+Press <kbd>P</kbd> to open the plan of the selected session, or click the plan card in the session info dialog. The plan dialog has Open in editor, Copy and fullscreen buttons.
+
+## Linked documents
+
+Link files to a session to keep them one click away. The Linked documents section is in the session info dialog and in the zen mode panel. A session keeps up to 20 links. The newest link is first.
+
+- Click **+** and type an absolute path, a `file://` URL or a path relative to the session working directory. Press <kbd>Enter</kbd> to link it.
+- Click a Markdown, HTML, text or image file to open it in the Preview dialog. HTML renders in a sandboxed frame.
+- A `scratchpad.json` file opens in the scratch viewer when it is installed.
+- Other files open in your editor.
+- Each row has a copy path button and an unlink button.
+
+The Preview dialog has a **Link to current session** toggle, an Open in editor button and a fullscreen button. Use the toggle to link or unlink the file you are reading.
+
+Links are stored in the browser's localStorage, so `link-doc` changes them only through an open board tab. `preview-doc` opens a file in the Preview dialog of open tabs and does not link it. See the [CLI reference](/claude-code-kanban/reference/cli/).
+
+## Scratchpad
+
+Press <kbd>N</kbd> to open the scratchpad of the selected session. In the sidebar, <kbd>N</kbd> opens the scratchpad of the item under the cursor. Project headers and group headers have a scratchpad button for a project note or a group note.
+
+The note saves itself 500 ms after you stop typing. It is stored in the browser's localStorage. A session card shows a scratchpad badge when its note has text.
+
+This note is different from the Scratchpad row in session info. That row is the folder Claude Code uses for temporary files.
+
+## Storage manager
+
+Pins, links, notes and groups live in your browser. Press <kbd>Shift+S</kbd> to open the Storage Manager and review pins, notes and links. It has three tabs: Sessions, Scratchpads and Linked Docs. **Clean Orphaned** removes the data of sessions that no longer exist. The button shows how many items it will remove.
+
+## Session picker
+
+Press <kbd>Shift+P</kbd> to open the session picker and jump to a session.
+
+- <kbd>↓</kbd> or <kbd>Ctrl+N</kbd> moves down, and <kbd>↑</kbd> or <kbd>Ctrl+P</kbd> moves up.
+- <kbd>Enter</kbd> opens the session.
+- <kbd>Ctrl+Space</kbd> peeks at the recent messages of the selected session.
+- <kbd>Esc</kbd> closes the picker.
+
+The picker lists the sessions the sidebar shows. To open a session outside the current filter, type its full session id.
+
+## Choose the editor
+
+Every Open in editor button runs the command in the `EDITOR` environment variable of the server. The default is `code`. Set it before you start the server:
+
+```bash
+EDITOR="code -w" npx claude-code-kanban
+```
+
+For all keys, see [Keyboard shortcuts](/claude-code-kanban/reference/keyboard-shortcuts/).
+
+<Lightbox />

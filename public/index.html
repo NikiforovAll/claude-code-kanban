@@ -21,24 +21,35 @@
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Playfair+Display:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/style.css">
   <link rel="stylesheet" href="/themes.css">
-  <script defer src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-  <script defer src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/styles/github-dark.min.css" id="hljs-theme-dark">
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/styles/github.min.css" id="hljs-theme-light" disabled>
-  <script defer src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/highlight.min.js"></script>
-  <script defer src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js" integrity="sha384-948ahk4ZmxYVYOc+rxN1H2gM1EJ2Duhp7uHtZ4WSLkV4Vtx5MUqnV+l7u9B+jFv+" crossorigin="anonymous"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/dompurify@3.4.16/dist/purify.min.js" integrity="sha384-a7SzOxErzJ3ZpQz0zJ32d67dSitNzPcbfybc/ykU9KJhMgZkwqfSxlhhdJRS+XGL" crossorigin="anonymous"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.12.0/build/styles/github-dark.min.css" integrity="sha384-wH75j6z1lH97ZOpMOInqhgKzFkAInZPPSPlZpYKYTOqsaizPvhQZmAtLcPKXpLyH" crossorigin="anonymous" id="hljs-theme-dark">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.12.0/build/styles/github.min.css" integrity="sha384-eFTL69TLRZTkNfYZOLM+G04821K1qZao/4QLJbet1pP4tcF+fdXq/9CdqAbWRl/L" crossorigin="anonymous" id="hljs-theme-light" disabled>
+  <script defer src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.12.0/build/highlight.min.js" integrity="sha384-wjfDDhOPPdjtva8vWBhWeVprSpmxisEu5aYT3q1JyACqXpdKpo3PWZTMVq24MBix" crossorigin="anonymous"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/mermaid@12.0.0/dist/mermaid.min.js" integrity="sha384-xzghz1GQ5u9HCpVskeDPqMsdogD1yvuMQbEK53+wi+G70+6J1AG0L2cfi9PHjDWI" crossorigin="anonymous"></script>
   <script>window.__STORAGE_NS__ = null;</script>
   <script defer src="/app.js"></script>
 </head>
-<body>
+<body class="booting">
   <div id="offline-overlay" class="offline-overlay">
     <div class="offline-card">
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-        <rect width="512" height="512" rx="96" fill="#1a1a1a"/>
-        <rect x="64" y="96" width="112" height="320" rx="32" fill="#e8927c"/>
-        <rect x="208" y="96" width="112" height="224" rx="32" fill="#e8927c"/>
-        <rect x="352" y="96" width="112" height="128" rx="32" fill="#e8927c"/>
-      </svg>
+      <div class="clawd-sleep" aria-hidden="true">
+        <svg class="clawd clawd-asleep" viewBox="1 0 16 10" shape-rendering="crispEdges">
+          <rect x="3" y="0" width="12" height="2"/>
+          <rect x="3" y="2" width="2" height="2"/>
+          <rect x="5" y="2" width="1" height="1"/>
+          <rect x="6" y="2" width="6" height="2"/>
+          <rect x="12" y="2" width="1" height="1"/>
+          <rect x="13" y="2" width="2" height="2"/>
+          <rect x="1" y="4" width="16" height="2"/>
+          <rect x="3" y="6" width="12" height="2"/>
+          <rect x="4" y="8" width="1" height="2"/>
+          <rect x="6" y="8" width="1" height="2"/>
+          <rect x="11" y="8" width="1" height="2"/>
+          <rect x="13" y="8" width="1" height="2"/>
+        </svg>
+        <span class="clawd-zzz">z</span>
+      </div>
       <h2>Server Not Running</h2>
       <p>The dashboard needs the Claude Code Kanban server to stream live task data. Start it with:</p>
       <code>npx claude-code-kanban</code>
@@ -52,6 +63,7 @@
     <aside class="sidebar">
       <header class="sidebar-header">
         <div id="activity-chips" class="activity-chips"></div>
+        <button id="new-session-btn" class="new-session-pill" onclick="openNewSession()" title="New session (Ctrl+Alt+N)" hidden>+ New</button>
         <button id="sidebar-toggle" class="sidebar-toggle-btn" onclick="toggleSidebar()" title="Toggle sidebar" aria-label="Toggle sidebar">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M15 18l-6-6 6-6"/>
@@ -145,7 +157,12 @@
             </button>
           </div>
         </div>
-        <div id="sessions-list" class="sessions-list"></div>
+        <div id="sessions-list" class="sessions-list" aria-busy="true">
+          <div class="session-skeleton"><span></span><span></span></div>
+          <div class="session-skeleton"><span></span><span></span></div>
+          <div class="session-skeleton"><span></span><span></span></div>
+          <div class="session-skeleton"><span></span><span></span></div>
+        </div>
       </div>
 
       <div class="sidebar-footer" id="sidebar-footer"></div>
@@ -154,6 +171,23 @@
 
     <!-- Main -->
     <main class="main">
+      <div class="boot-splash" aria-hidden="true">
+        <svg class="clawd clawd-jump" viewBox="1 0 16 10" shape-rendering="crispEdges">
+          <g id="clawd-shape">
+            <rect x="3" y="0" width="12" height="2"/>
+            <rect x="3" y="2" width="2" height="2"/>
+            <rect x="6" y="2" width="6" height="2"/>
+            <rect x="13" y="2" width="2" height="2"/>
+            <rect x="1" y="4" width="16" height="2"/>
+            <rect x="3" y="6" width="12" height="2"/>
+            <rect x="4" y="8" width="1" height="2"/>
+            <rect x="6" y="8" width="1" height="2"/>
+            <rect x="11" y="8" width="1" height="2"/>
+            <rect x="13" y="8" width="1" height="2"/>
+          </g>
+        </svg>
+        <p id="boot-verb">Clawding…</p>
+      </div>
       <div id="no-session" class="empty-state">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
           <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
@@ -174,6 +208,11 @@
               </div>
               <span id="progress-percent" class="progress-text">0%</span>
             </div>
+            <button id="terminal-toggle" class="icon-btn" onclick="event.shiftKey ? openTerminalManager() : toggleTerminal()" title="Show / hide terminal (Ctrl+`) · Focus (Alt+`) · End (Alt+Shift+`) · Shift+click or Ctrl+Shift+` for all terminals" aria-label="Toggle terminal" style="display: none;">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
+              </svg>
+            </button>
             <button id="message-toggle" class="icon-btn" onclick="toggleMessagePanel()" title="Session log (L)" aria-label="Toggle session log">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
@@ -249,6 +288,22 @@
             </div>
             <div id="completed-tasks" class="column-tasks" role="list" data-status="completed" ondragover="onColumnDragOver(event)" ondragleave="onColumnDragLeave(event)" ondrop="onColumnDrop(event)"></div>
           </div>
+        </div>
+        <div id="terminal-pane" class="terminal-pane">
+          <div class="terminal-bar">
+            <span id="terminal-status" class="terminal-status"></span>
+            <button class="icon-btn" onclick="endTerminalSession()" title="End session (Alt+Shift+`)" aria-label="End terminal session">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="6" y="6" width="12" height="12" rx="1"/>
+              </svg>
+            </button>
+          </div>
+          <div id="terminal-prompt" class="terminal-prompt"></div>
+          <div id="terminal-boot" class="terminal-boot" aria-hidden="true">
+            <svg class="clawd clawd-jump" viewBox="1 0 16 10" shape-rendering="crispEdges"><use href="#clawd-shape"/></svg>
+            <p id="terminal-boot-verb"></p>
+          </div>
+          <div id="terminal-host" class="terminal-host"></div>
         </div>
         <div id="agent-footer" class="agent-footer">
           <div class="agent-footer-header" onclick="toggleAgentFooter()">
@@ -624,6 +679,87 @@
       <div class="modal-footer">
         <button id="storage-cleanup-btn" class="btn btn-secondary" onclick="cleanupOrphanedStorage()">Clean Orphaned</button>
         <button class="btn btn-secondary" onclick="closeStorageManager()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="terminal-manager-modal" class="modal-overlay" onclick="closeTerminalManager()">
+    <div class="modal terminal-manager-modal" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <h3 class="modal-title">Terminals</h3>
+        <button class="modal-close" aria-label="Close dialog" onclick="closeTerminalManager()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div class="modal-body" id="terminal-manager-body"></div>
+      <div class="modal-footer terminal-manager-footer">
+        <span id="terminal-manager-count" class="terminal-manager-count"></span>
+        <button id="terminal-manager-end-all" class="btn btn-secondary terminal-manager-end" onclick="endAllTerminals()">End all</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="new-session-modal" class="modal-overlay top-aligned" onclick="closeNewSession()">
+    <div class="modal new-session-modal" onclick="event.stopPropagation()" role="dialog" aria-labelledby="ns-title">
+      <div class="modal-header">
+        <h3 class="modal-title" id="ns-title">New session</h3>
+        <button class="modal-close" aria-label="Close dialog" onclick="closeNewSession()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div class="modal-body ns-body">
+        <div class="ns-row">
+          <label class="ns-label" for="ns-folder">Folder</label>
+          <div class="ns-field ns-folder-field">
+            <div class="ns-inline">
+              <input type="text" id="ns-folder" class="form-input" placeholder="Type to find a project" autocomplete="off" spellcheck="false" role="combobox" aria-expanded="false" aria-controls="ns-folder-list">
+              <button type="button" id="ns-browse" class="btn btn-secondary ns-browse" onclick="browseNewSessionFolder()">Browse…</button>
+            </div>
+            <div id="ns-folder-list" class="ns-dropdown" role="listbox" hidden></div>
+          </div>
+        </div>
+        <div class="ns-row ns-extra">
+          <label class="ns-label" for="ns-name">Name</label>
+          <div class="ns-field">
+            <input type="text" id="ns-name" class="form-input" placeholder="Optional" maxlength="80" autocomplete="off" spellcheck="false">
+          </div>
+        </div>
+        <div class="ns-row ns-extra">
+          <label class="ns-label" for="ns-prompt">Prompt</label>
+          <div class="ns-field ns-prompt-field">
+            <textarea id="ns-prompt" class="form-input" rows="4" placeholder="Optional. Sent as the first message."></textarea>
+            <button type="button" id="ns-mic" class="ns-mic" title="Dictate" aria-label="Dictate" aria-pressed="false" hidden>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v5"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="ns-row ns-extra">
+          <span class="ns-label">Worktree</span>
+          <div class="ns-field">
+            <div class="ns-inline">
+              <label class="ns-check"><input type="checkbox" id="ns-wt"> New worktree</label>
+              <input type="text" id="ns-wt-name" class="form-input" placeholder="Name (optional)" maxlength="64" autocomplete="off" spellcheck="false" disabled aria-label="Worktree name">
+            </div>
+            <div id="ns-wt-hint" class="ns-hint" hidden></div>
+          </div>
+        </div>
+        <div class="ns-row ns-extra">
+          <label class="ns-label" for="ns-model">Model</label>
+          <div class="ns-field">
+            <select id="ns-model" class="form-input">
+              <option value="">Default</option>
+              <option value="fable">Fable</option>
+              <option value="opus">Opus</option>
+              <option value="sonnet">Sonnet</option>
+              <option value="haiku">Haiku</option>
+            </select>
+          </div>
+        </div>
+        <div id="ns-error" class="ns-error" hidden></div>
+      </div>
+      <div class="modal-footer ns-footer">
+        <button type="button" class="btn btn-secondary" onclick="closeNewSession()">Cancel</button>
+        <button type="button" id="ns-start" class="btn btn-primary" onclick="startNewSession()" disabled>Start</button>
       </div>
     </div>
   </div>
