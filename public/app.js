@@ -2580,6 +2580,17 @@ function sanitizeOutputHtml(text) {
   return typeof text === 'string' ? ansiToHtml(stripLineNumbers(text)) : '';
 }
 
+function toolOutputHtml(text) {
+  if (typeof text === 'string' && text.length <= HLJS_MAX_CHARS && /^\s*[[{]/.test(text)) {
+    try {
+      const pretty = JSON.stringify(JSON.parse(text), null, 2);
+      if (typeof hljs === 'undefined' || !hljs.getLanguage('json')) return escapeHtml(pretty);
+      return `<code class="hljs language-json">${hljs.highlight(pretty, { language: 'json' }).value}</code>`;
+    } catch (_) {}
+  }
+  return sanitizeOutputHtml(text);
+}
+
 function highlightBash(escaped) {
   return escaped
     .replace(/^(\s*)(#.*)$/gm, '$1<span style="color:#6a9955">$2</span>')
@@ -2645,11 +2656,11 @@ function autoSizeModal(modal, body) {
 
 function renderToolResultHtml(toolResult, isTruncated, fullResult, toolUseId) {
   if (!toolResult) return '';
-  const escaped = sanitizeOutputHtml(toolResult);
+  const escaped = toolOutputHtml(toolResult);
   let truncLabel = '',
     fullBlock = '';
   if (isTruncated && fullResult) {
-    const toggle = makeExpandToggle(escaped, sanitizeOutputHtml(fullResult));
+    const toggle = makeExpandToggle(escaped, toolOutputHtml(fullResult));
     truncLabel = toggle.btn;
     fullBlock = toggle.full;
   } else if (isTruncated && toolUseId) {
@@ -2691,7 +2702,7 @@ async function _toggleToolResultExpand(btn) {
       );
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const { content } = await r.json();
-      f.innerHTML = sanitizeOutputHtml(content);
+      f.innerHTML = toolOutputHtml(content);
       btn.dataset.loaded = '1';
     } catch (_e) {
       btn.textContent = 'Show more';

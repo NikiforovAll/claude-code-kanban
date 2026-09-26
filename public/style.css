@@ -3476,6 +3476,10 @@ body.booting .boot-splash {
   font-family: var(--font-mono);
   font-size: 0.85rem;
 }
+.msg-detail-pre code.hljs {
+  background: transparent;
+  padding: 0;
+}
 .msg-detail-pre-tinted {
   background: color-mix(in srgb, var(--text-muted) 8%, transparent);
   border: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
