@@ -354,11 +354,51 @@ body::before {
   border: 1px solid var(--border);
   border-radius: 12px;
 }
-.offline-card svg {
-  width: 56px;
-  height: 56px;
-  opacity: 0.4;
+.clawd-sleep {
+  position: relative;
+  display: inline-block;
   margin-bottom: 1.5rem;
+}
+
+.clawd-asleep {
+  display: block;
+  animation: clawd-breathe 3s ease-in-out infinite;
+}
+
+.clawd-zzz {
+  position: absolute;
+  top: -6px;
+  right: -14px;
+  color: var(--text-muted);
+  font: 600 13px var(--mono, monospace);
+  animation: clawd-zzz 3s ease-out infinite;
+}
+
+@keyframes clawd-breathe {
+  50% {
+    transform: scaleY(0.93);
+  }
+}
+
+@keyframes clawd-zzz {
+  from {
+    opacity: 0;
+    transform: translate(0, 6px);
+  }
+  30% {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+    transform: translate(6px, -10px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .clawd-asleep,
+  .clawd-zzz {
+    animation: none;
+  }
 }
 .offline-card h2 {
   font-size: 1.15rem;
@@ -613,6 +653,96 @@ body::before {
   text-align: left;
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.session-skeleton {
+  display: none;
+  flex-direction: column;
+  gap: 9px;
+  padding: 15px;
+  margin-bottom: 6px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+}
+
+body.booting .session-skeleton {
+  display: flex;
+}
+
+.session-skeleton span {
+  height: 9px;
+  width: 70%;
+  border-radius: 4px;
+  background: var(--border);
+  animation: breathe 1.4s ease-in-out infinite;
+}
+
+.session-skeleton span + span {
+  width: 40%;
+}
+
+body.booting #no-session {
+  display: none;
+}
+
+.boot-splash {
+  display: none;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+body.booting .boot-splash {
+  display: flex;
+  animation: boot-fade 0.3s ease-out 0.15s both;
+}
+
+.clawd {
+  width: 64px;
+  height: 40px;
+  fill: #d97757;
+  overflow: visible;
+  transform-origin: 50% 100%;
+}
+
+.clawd-jump {
+  animation: clawd-jump 0.9s ease-in-out infinite;
+}
+
+@keyframes clawd-jump {
+  0%,
+  100% {
+    transform: translateY(0) scale(1, 1);
+  }
+  15% {
+    transform: translateY(0) scale(1.1, 0.85);
+  }
+  45% {
+    transform: translateY(-14px) scale(0.95, 1.05);
+  }
+  70% {
+    transform: translateY(0) scale(1.08, 0.9);
+  }
+  85% {
+    transform: translateY(0) scale(1, 1);
+  }
+}
+
+@keyframes boot-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .session-skeleton span,
+  .clawd-jump {
+    animation: none;
+  }
 }
 
 /* `.active` is the open session, `.kb-selected` the keyboard cursor. They own different
@@ -6432,6 +6562,7 @@ pre.mermaid svg {
 
 .project-group-header .group-name,
 .session-group-header .group-name {
+  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -6442,7 +6573,8 @@ pre.mermaid svg {
 }
 
 .project-view-btn,
-.project-new-btn {
+.project-new-btn,
+.header-pad-btn {
   color: var(--text-muted);
   cursor: pointer;
   display: flex;
@@ -6453,16 +6585,30 @@ pre.mermaid svg {
 }
 
 .project-view-btn:hover,
-.project-new-btn:hover {
+.project-new-btn:hover,
+.header-pad-btn:hover {
   color: var(--accent);
 }
 
-.project-new-btn {
+.project-new-btn,
+.header-pad-btn {
   opacity: 0;
 }
 
 .project-group-header:hover .project-new-btn,
 .project-group-header.kb-selected .project-new-btn {
+  opacity: 1;
+}
+
+.header-pad-btn.has-pad {
+  color: var(--accent);
+}
+
+.header-pad-btn.has-pad,
+.project-group-header:hover .header-pad-btn,
+.project-group-header.kb-selected .header-pad-btn,
+.session-group-header:hover .header-pad-btn,
+.session-group-header.kb-selected .header-pad-btn {
   opacity: 1;
 }
 

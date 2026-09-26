@@ -60,6 +60,17 @@ let lastMessagesHash = '';
 let currentMessages = [];
 let agentDurationInterval = null;
 let agentPollInterval = null;
+// Inside the hub an inactive app is a display:none iframe whose document.hidden stays false,
+// so the hub tells us via hub:active. Standalone, or if that message is lost, cck stays active.
+let hubActive = true;
+let missedWhileHidden = false;
+const isOnScreen = () => hubActive && !document.hidden;
+function skipOffScreen() {
+  if (isOnScreen()) return false;
+  missedWhileHidden = true;
+  return true;
+}
+const METADATA_MAX_WAIT_MS = 5000;
 let selectedTaskId = null;
 let selectedSessionId = null;
 // Task stays selected (keyboard nav) but its white highlight is dimmed once the detail panel closes.
@@ -2871,9 +2882,10 @@ function renderAgentFooter() {
 
   clearInterval(agentDurationInterval);
   if (visible.some((a) => a.status === 'active' || a.status === 'idle')) {
-    agentDurationInterval = setInterval(() => renderAgentFooter(), 1000);
+    agentDurationInterval = setInterval(() => isOnScreen() && renderAgentFooter(), 1000);
     if (!agentPollInterval) {
       agentPollInterval = setInterval(() => {
+        if (skipOffScreen()) return;
         if (viewMode === 'project' && currentProjectPath) {
           refreshProjectAgents();
         } else if (currentSessionId) {
@@ -2882,7 +2894,7 @@ function renderAgentFooter() {
       }, 3000);
     }
   } else {
-    agentDurationInterval = setInterval(() => renderAgentFooter(), 10000);
+    agentDurationInterval = setInterval(() => isOnScreen() && renderAgentFooter(), 10000);
     clearInterval(agentPollInterval);
     agentPollInterval = null;
   }
@@ -3303,7 +3315,7 @@ function renderSessions() {
     const showCtx = !!session.contextStatus && !zenMode;
     const linkedDocsCount = getSessionPreviewPaths(session.id).length;
     const bookmarksCount = loadPins(session.id).length;
-    const hasScratchpad = !!(store.getItem(_sessionScratchpadKey(session.id)) || '').trim();
+    const hasScratchpad = _hasScratchpad(_sessionScratchpadKey(session.id));
     const tempClass = session.hasRecentLog || session.inProgress || session.hasWaitingForUser ? 'warm' : 'stale';
     const sid = escAttrJs(session.id);
     return `
@@ -3425,11 +3437,12 @@ function renderSessions() {
             <div class="project-group-header${isCollapsed ? ' collapsed' : ''}${nestedCls}" draggable="true" data-group-path="${escapedPath}" data-project-path="${escapedPath}">
               ${groupChevronSvg()}
               <span class="group-name">${escapeHtml(folderName)}</span>
-              ${countHtml(projectSessions)}
               ${terminalAvailable() ? `<span class="project-new-btn" data-project-path="${escapedPath}" title="New session in ${escapeHtml(folderName)}">${PLUS_SVG}</span>` : ''}
+              ${headerPadBtnHtml(_projectScratchpadKey(projectPath), folderName)}
               <span class="project-view-btn" data-project-path="${escapedPath}" title="Open project view — combined tasks from all sessions">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
               </span>
+              ${countHtml(projectSessions)}
             </div>
             <div class="project-group-breadcrumb${nestedCls}" data-full-path="${escapedPath}" title="Click to copy path">${breadcrumbHtml}</div>
             <div class="project-group-sessions${isCollapsed ? ' collapsed' : ''}${nestedCls}" data-project-path="${escapedPath}">
@@ -4015,7 +4028,7 @@ async function onColumnDrop(e) {
 // windows the list), so membership is never garbage-collected on load.
 const SESSION_GROUPS_KEY = 'sessionGroups';
 const SG_ACTION_SELECTOR =
-  '.session-pin-btn, .team-info-btn, .plan-indicator, .scratchpad-badge, .bookmarks-badge, .linked-docs-badge, .project-view-btn, .project-new-btn, .group-path-toggle, .pinned-ungroup-btn, .sg-action';
+  '.session-pin-btn, .team-info-btn, .plan-indicator, .scratchpad-badge, .bookmarks-badge, .linked-docs-badge, .project-view-btn, .project-new-btn, .header-pad-btn, .group-path-toggle, .pinned-ungroup-btn, .sg-action';
 
 // Collapse state shares the existing `collapsedGroups` key; this namespace keeps it from
 // colliding with a project path or the __ungrouped__ / __pinned_* sentinels.
@@ -4170,6 +4183,14 @@ function sgSearchMatchIds(query) {
   return ids;
 }
 
+const PAD_SVG =
+  '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg>';
+
+function headerPadBtnHtml(key, label) {
+  const has = _hasScratchpad(key);
+  return `<span class="header-pad-btn${has ? ' has-pad' : ''}" onclick="event.stopPropagation(); showScratchpad('${escAttrJs(key)}')" title="${has ? 'Open' : 'New'} scratchpad for ${escapeHtml(label)} (N)">${PAD_SVG}</span>`;
+}
+
 function sgHeaderHtml(group, countHtml) {
   const collapsed = collapsedProjectGroups.has(sgKey(group.id));
   const editing = sgEditingId === group.id;
@@ -4180,9 +4201,10 @@ function sgHeaderHtml(group, countHtml) {
         <div class="session-group-header${collapsed ? ' collapsed' : ''}" draggable="${editing ? 'false' : 'true'}" data-group-path="${escapeHtml(sgKey(group.id))}" data-group-id="${escapeHtml(group.id)}" title="${escapeHtml(group.name)} — drop sessions or projects here">
           ${groupChevronSvg()}
           ${nameHtml}
-          ${countHtml}
+          ${headerPadBtnHtml(_groupScratchpadKey(group.id), group.name)}
           <span class="sg-action sg-rename" title="Rename group"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></span>
           <span class="sg-action sg-delete" title="Delete group (members return to Projects)">&times;</span>
+          ${countHtml}
         </div>`;
 }
 
@@ -5282,7 +5304,7 @@ const SHORTCUT_PAIRS = [
       rows: [
         { keys: ['Enter'], label: 'Toggle task detail panel' },
         { keys: ['D'], label: 'Delete selected task' },
-        { keys: ['N'], label: 'Toggle scratchpad' },
+        { keys: ['N'], label: 'Toggle scratchpad (in the sidebar: the item under the cursor)' },
         { keys: ['R'], label: 'Refresh data' },
         { keys: ['Esc'], label: 'Close panel / clear selection' },
       ],
@@ -5409,18 +5431,52 @@ const _scratchpadCharcount = document.getElementById('scratchpad-charcount');
 
 let _scratchpadKeyOverride = null;
 
+const SESSION_PAD_PREFIX = 'scratchpad-';
+const PROJECT_PAD_PREFIX = `${SESSION_PAD_PREFIX}project:`;
+const GROUP_PAD_PREFIX = `${SESSION_PAD_PREFIX}group:`;
+
 function _sessionScratchpadKey(sessionId) {
-  return `scratchpad-${sessionId}`;
+  return SESSION_PAD_PREFIX + sessionId;
 }
 
-function _isSessionScratchpadKey(key) {
-  return key.startsWith('scratchpad-') && !key.startsWith('scratchpad-project:');
+function _projectScratchpadKey(projectPath) {
+  return PROJECT_PAD_PREFIX + projectPath;
+}
+
+function _groupScratchpadKey(groupId) {
+  return GROUP_PAD_PREFIX + groupId;
+}
+
+// Every kind shares the session prefix, so the longer prefixes are tested first.
+function _parsePadKey(key) {
+  for (const [kind, prefix] of [
+    ['group', GROUP_PAD_PREFIX],
+    ['project', PROJECT_PAD_PREFIX],
+    ['session', SESSION_PAD_PREFIX],
+  ]) {
+    if (key.startsWith(prefix)) return { kind, id: key.slice(prefix.length) };
+  }
+  return null;
+}
+
+function _hasScratchpad(key) {
+  return !!(store.getItem(key) || '').trim();
 }
 
 function _scratchpadKey() {
   if (_scratchpadKeyOverride) return _scratchpadKeyOverride;
   if (currentSessionId) return _sessionScratchpadKey(currentSessionId);
-  if (currentProjectPath) return `scratchpad-project:${currentProjectPath}`;
+  if (currentProjectPath) return _projectScratchpadKey(currentProjectPath);
+  return null;
+}
+
+function _scratchpadKeyOf(el) {
+  if (!el) return null;
+  if (el.dataset.sessionId) return _sessionScratchpadKey(el.dataset.sessionId);
+  if (el.classList.contains('session-group-header')) return _groupScratchpadKey(el.dataset.groupId);
+  if (el.classList.contains('project-group-header') && el.dataset.projectPath) {
+    return _projectScratchpadKey(el.dataset.projectPath);
+  }
   return null;
 }
 
@@ -5461,14 +5517,14 @@ function saveScratchpad() {
   const key = _scratchpadKey();
   if (!key) return;
   const val = _scratchpadTextarea.value;
-  const had = !!(store.getItem(key) || '').trim();
+  const had = _hasScratchpad(key);
   const has = !!val.trim();
   if (has) {
     store.setItem(key, val);
   } else {
     store.removeItem(key);
   }
-  if (had !== has && _isSessionScratchpadKey(key)) {
+  if (had !== has) {
     renderSessions();
   }
 }
@@ -5485,6 +5541,11 @@ _scratchpadTextarea.addEventListener('input', () => {
 // Bound on the textarea: the global handler returns early on TEXTAREA targets.
 _scratchpadTextarea.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') closeScratchpad();
+  // execCommand keeps the edit on the undo stack and fires `input`, so the autosave still runs.
+  if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+    e.preventDefault();
+    document.execCommand('insertText', false, '\t');
+  }
 });
 
 // Vimium eats Escape inside a text field and only blurs it, so the page never sees the key.
@@ -5496,8 +5557,13 @@ _scratchpadModal.addEventListener('mousedown', () => {
 document.addEventListener('mouseup', () => {
   _scratchpadPointerDown = false;
 });
-_scratchpadTextarea.addEventListener('blur', () => {
-  if (!_scratchpadPointerDown && _scratchpadModal.classList.contains('visible') && document.hasFocus())
+_scratchpadTextarea.addEventListener('blur', (e) => {
+  if (
+    !e.relatedTarget &&
+    !_scratchpadPointerDown &&
+    _scratchpadModal.classList.contains('visible') &&
+    document.hasFocus()
+  )
     closeScratchpad();
 });
 
@@ -5717,30 +5783,38 @@ function _storageUnpinMessage(sessionId, pinId) {
 function _renderStorageScratchpads() {
   const allItems = [];
   for (const key of store.keys()) {
-    if (!key.startsWith('scratchpad-')) continue;
-    const val = store.getItem(key) || '';
-    const isProject = key.startsWith('scratchpad-project:');
-    const id = isProject ? key.slice('scratchpad-project:'.length) : key.slice('scratchpad-'.length);
-    allItems.push({ key, id, isProject, chars: val.length });
+    const parsed = _parsePadKey(key);
+    if (!parsed) continue;
+    allItems.push({ key, ...parsed, chars: (store.getItem(key) || '').length });
   }
   if (!allItems.length) return '<div class="storage-empty">No scratchpads</div>';
 
-  const projectItems = allItems.filter((i) => i.isProject);
-  const sessionItems = allItems.filter((i) => !i.isProject);
+  const groupItems = allItems.filter((i) => i.kind === 'group');
+  const projectItems = allItems.filter((i) => i.kind === 'project');
+  const sessionItems = allItems.filter((i) => i.kind === 'session');
   const sessionIds = sessionItems.map((i) => i.id);
   const { groups: projectGroups, orphans } = _groupByProject(sessionIds);
   const scratchBySession = new Map(sessionItems.map((i) => [i.id, i]));
 
   function renderScratchItem(item) {
-    const session = !item.isProject ? sessions.find((s) => s.id === item.id) : null;
-    const typeBadge = item.isProject
-      ? '<span class="storage-item-badge">project</span>'
-      : '<span class="storage-item-badge">session</span>';
     const jsKey = escAttrJs(item.key);
-    const label = item.isProject ? escapeHtml(_projectLabel(item.id)) : _sessionLabel(session, item.id);
+    let label;
+    switch (item.kind) {
+      case 'group':
+        label = escapeHtml(sgGroupById(item.id)?.name ?? `${item.id} (deleted)`);
+        break;
+      case 'project':
+        label = escapeHtml(_projectLabel(item.id));
+        break;
+      default:
+        label = _sessionLabel(
+          sessions.find((s) => s.id === item.id),
+          item.id,
+        );
+    }
     return `<div class="storage-item">
       <span class="storage-item-id" title="${escapeHtml(item.id)}">${label}</span>
-      ${typeBadge}
+      <span class="storage-item-badge">${item.kind}</span>
       <span class="storage-item-meta">${item.chars} chars</span>
       <div class="storage-item-actions">
         <button onclick="_storagePreviewScratchpad('${jsKey}')">View</button>
@@ -5750,6 +5824,14 @@ function _renderStorageScratchpads() {
   }
 
   let html = '';
+
+  if (groupItems.length) {
+    html += _renderProjectGroup(
+      'Group Scratchpads',
+      `${groupItems.length}`,
+      groupItems.map(renderScratchItem).join(''),
+    );
+  }
 
   if (projectItems.length) {
     html += _renderProjectGroup(
@@ -5884,10 +5966,13 @@ function _findOrphanedKeys() {
   for (const id of pinnedSessionIds) if (!known.has(id)) orphaned.push(`__pinned__${id}`);
   for (const id of stickySessionIds) if (!known.has(id)) orphaned.push(`__sticky__${id}`);
   for (const key of store.keys()) {
-    if (key.startsWith('pinned-messages-')) {
+    const pad = _parsePadKey(key);
+    if (pad?.kind === 'group') {
+      if (!sgGroupById(pad.id)) orphaned.push(key);
+    } else if (key.startsWith('pinned-messages-')) {
       if (!known.has(key.slice('pinned-messages-'.length))) orphaned.push(key);
-    } else if (_isSessionScratchpadKey(key)) {
-      if (!known.has(key.slice('scratchpad-'.length))) orphaned.push(key);
+    } else if (pad?.kind === 'session') {
+      if (!known.has(pad.id)) orphaned.push(key);
     } else if (key.startsWith(PREVIEW_STORAGE_PREFIX)) {
       if (!known.has(key.slice(PREVIEW_STORAGE_PREFIX.length))) orphaned.push(key);
     } else if (key.startsWith(PAD_LINKED_PREFIX)) {
@@ -6225,10 +6310,9 @@ document.addEventListener('keydown', (e) => {
   }
 
   // Shared actions — work in both sidebar and board
+  const cursorEl = focusZone === 'sidebar' ? sessionsList.querySelector('.kb-selected') : null;
   const contextSid =
-    focusZone === 'sidebar'
-      ? sessionsList.querySelector('.kb-selected')?.dataset.sessionId || currentSessionId
-      : selectedSessionId || currentSessionId;
+    focusZone === 'sidebar' ? cursorEl?.dataset.sessionId || currentSessionId : selectedSessionId || currentSessionId;
   if (matchKey(e, 'KeyP') && !e.shiftKey) {
     e.preventDefault();
     if (contextSid) openPlanForSession(contextSid);
@@ -6241,7 +6325,9 @@ document.addEventListener('keydown', (e) => {
   }
   if (matchKey(e, 'KeyN') && !e.shiftKey) {
     e.preventDefault();
-    toggleScratchpad();
+    const cursorKey = _scratchpadKeyOf(cursorEl);
+    if (cursorKey) showScratchpad(cursorKey);
+    else toggleScratchpad();
     return;
   }
   if (e.key === '$' && !e.ctrlKey && !e.altKey && !e.metaKey) {
@@ -7147,6 +7233,24 @@ function setupEventSource() {
     failCount = 0;
   }
 
+  let taskRefreshTimer = null;
+  let metadataRefreshTimer = null;
+  let metadataDeadline = 0;
+  let agentRefreshTimer = null;
+  const pendingTaskSessionIds = new Set();
+  const pendingAgentSessionIds = new Set();
+
+  function refreshAllView() {
+    currentTasks = filterProject ? allTasksCache.filter((t) => matchesProjectFilter(t.project)) : allTasksCache;
+    renderAllTasks();
+    renderActivityChip();
+  }
+
+  async function refreshSessionDetail(sessionId) {
+    await fetchAgents(sessionId);
+    if (!agentLogMode) fetchMessages(sessionId);
+  }
+
   function connect() {
     eventSource = new EventSource('/api/events');
 
@@ -7174,31 +7278,29 @@ function setupEventSource() {
       retryDelay = Math.min(retryDelay * 2, 30000);
     };
 
-    let taskRefreshTimer = null;
-    let metadataRefreshTimer = null;
-    let agentRefreshTimer = null;
-    const pendingTaskSessionIds = new Set();
-    const pendingAgentSessionIds = new Set();
-
     function debouncedRefresh(sessionId, isMetadata) {
       if (isMetadata) {
+        // Busy sessions emit events faster than the 2 s quiet period, so a pure debounce would
+        // never fire; the deadline caps how long a burst can hold the refresh back.
+        metadataDeadline ||= Date.now() + METADATA_MAX_WAIT_MS;
         clearTimeout(metadataRefreshTimer);
-        metadataRefreshTimer = setTimeout(async () => {
-          fetchSessions(false).catch((err) => console.error('[SSE] fetchSessions failed:', err));
-          if (currentSessionId) {
-            await fetchAgents(currentSessionId);
-            if (!agentLogMode) fetchMessages(currentSessionId);
-          }
-        }, 2000);
+        metadataRefreshTimer = setTimeout(
+          () => {
+            metadataDeadline = 0;
+            if (skipOffScreen()) return;
+            fetchSessions(false).catch((err) => console.error('[SSE] fetchSessions failed:', err));
+            if (currentSessionId) refreshSessionDetail(currentSessionId);
+          },
+          Math.min(2000, metadataDeadline - Date.now()),
+        );
       } else {
         pendingTaskSessionIds.add(sessionId);
         clearTimeout(taskRefreshTimer);
         taskRefreshTimer = setTimeout(async () => {
+          if (skipOffScreen()) return;
           await fetchSessions().catch((err) => console.error('[SSE] fetchSessions failed:', err));
           if (viewMode === 'all') {
-            currentTasks = filterProject ? allTasksCache.filter((t) => matchesProjectFilter(t.project)) : allTasksCache;
-            renderAllTasks();
-            renderActivityChip();
+            refreshAllView();
           } else if (viewMode === 'project' && currentProjectPath) {
             const hasUpdate = currentProjectSessionIds.some((id) => pendingTaskSessionIds.has(id));
             if (hasUpdate) fetchProjectView(currentProjectPath);
@@ -7218,7 +7320,7 @@ function setupEventSource() {
       }
 
       if (data.type === 'plan-update') {
-        refreshOpenPlan();
+        if (!skipOffScreen()) refreshOpenPlan();
       }
 
       if (data.type === 'terminals-update' && Array.isArray(data.ids)) setRunningTerminals(data.ids);
@@ -7227,16 +7329,16 @@ function setupEventSource() {
         pendingAgentSessionIds.add(data.sessionId);
         clearTimeout(agentRefreshTimer);
         agentRefreshTimer = setTimeout(() => {
+          if (skipOffScreen()) return;
           fetchSessions(false).catch((err) => console.error('[SSE] fetchSessions failed:', err));
           if (viewMode === 'project' && currentProjectSessionIds.some((id) => pendingAgentSessionIds.has(id))) {
             refreshProjectAgents();
           } else if (currentSessionId && pendingAgentSessionIds.has(currentSessionId)) {
-            fetchAgents(currentSessionId);
             // An agent starting/stopping adds its Agent tool_use + completion rows to
             // the transcript. Refresh the message log on the same signal so they appear
             // at start, not only when an unrelated metadata/context refresh coincides
             // with completion.
-            if (!agentLogMode) fetchMessages(currentSessionId);
+            refreshSessionDetail(currentSessionId);
           }
           pendingAgentSessionIds.clear();
         }, 500);
@@ -7244,7 +7346,7 @@ function setupEventSource() {
 
       if (data.type === 'context-update') {
         debouncedRefresh(data.sessionId, true);
-        refreshRateLimits();
+        if (!skipOffScreen()) refreshRateLimits();
       }
 
       if (data.type === 'preview:open') {
@@ -7274,20 +7376,42 @@ function setupEventSource() {
     };
   }
 
-  // When the tab becomes visible after being hidden, catch up immediately
-  let _pollMissed = false;
-  document.addEventListener('visibilitychange', () => {
-    if (!document.hidden && _pollMissed) {
-      _pollMissed = false;
-      fetchSessions().catch(() => {});
-      if (currentSessionId) fetchTasks(currentSessionId).catch(() => {});
+  // When cck comes back on screen (tab visible or hub:active), catch up immediately
+  async function catchUp() {
+    if (!isOnScreen() || !missedWhileHidden) return;
+    missedWhileHidden = false;
+    // The full refresh below covers whatever the pending debounces would have fetched.
+    for (const t of [taskRefreshTimer, metadataRefreshTimer, agentRefreshTimer]) clearTimeout(t);
+    metadataDeadline = 0;
+    pendingTaskSessionIds.clear();
+    pendingAgentSessionIds.clear();
+    const sessionsLoaded = fetchSessions().catch(() => {});
+    if (viewMode === 'all') {
+      await sessionsLoaded;
+      refreshAllView();
+    } else if (viewMode === 'project' && currentProjectPath) {
+      await sessionsLoaded;
+      fetchProjectView(currentProjectPath);
+    } else if (currentSessionId) {
+      fetchTasks(currentSessionId).catch(() => {});
+      await refreshSessionDetail(currentSessionId);
     }
+    refreshOpenPlan();
+    refreshRateLimits();
+    renderAgentFooter();
+  }
+  document.addEventListener('visibilitychange', catchUp);
+  window.addEventListener('message', (e) => {
+    if (e.source !== window.parent || e.origin !== hubOrigin() || e.data?.type !== 'hub:active') return;
+    hubActive = !!e.data.active;
+    catchUp();
+    if (hubActive && wantsTerminal()) onTerminalShown();
   });
 
-  // Fallback poll every 30s in case SSE silently drops; skip when tab is hidden
+  // Fallback poll every 30s in case SSE silently drops; skip when not on screen
   setInterval(() => {
-    if (document.hidden) {
-      _pollMissed = true;
+    if (!isOnScreen()) {
+      if (eventSource?.readyState !== EventSource.OPEN) missedWhileHidden = true;
       return;
     }
     fetchSessions().catch(() => {});
@@ -10483,11 +10607,6 @@ async function endAllTerminals() {
   renderTerminalManager();
 }
 
-window.addEventListener('message', (e) => {
-  if (e.source !== window.parent || e.origin !== hubOrigin()) return;
-  if (e.data?.type === 'hub:active' && e.data.active && wantsTerminal()) onTerminalShown();
-});
-
 //#endregion
 
 //#region NEW_SESSION
@@ -11049,6 +11168,11 @@ if (urlState.search) {
   document.getElementById('search-clear-btn').classList.add('visible');
 }
 
+{
+  const verbs = ['Clawding…', 'Shuffling cards…', 'Herding tasks…', 'Waking sessions…', 'Sorting the board…'];
+  document.getElementById('boot-verb').textContent = verbs[Math.floor(Math.random() * verbs.length)];
+}
+
 Promise.all([
   fetch('/hub-config')
     .then((r) => r.json())
@@ -11098,6 +11222,10 @@ Promise.all([
         if (currentMessages.length) renderMessages(currentMessages);
       });
     }
+  })
+  .finally(() => {
+    document.body.classList.remove('booting');
+    sessionsList.removeAttribute('aria-busy');
   });
 
 window.addEventListener('popstate', () => {

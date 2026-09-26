@@ -138,12 +138,15 @@ No timer enumerates projects or sessions.
 
 ### 5. Client-side polling
 
-`public/app.js` is largely SSE-driven, with one polling exception:
+`public/app.js` is largely SSE-driven, with these timers:
 
-- `agentPollInterval` — refreshes the agent footer for the active project (`app.js:2225`). Stopped when no project is focused.
-- `agentDurationInterval` — re-renders elapsed time in the agent footer every 1 s (10 s when idle); pure render, no fetch.
+- `agentPollInterval` — every 3 s, while any footer agent is active or idle, refetches agents for the focused session, or for every session in project view (`renderAgentFooter`). It catches status changes that come only from the server's TTL checks and write no file.
+- `agentDurationInterval` — re-renders elapsed time in the agent footer every 1 s (10 s when no agent is active or idle); pure render, no fetch.
+- Fallback poll — `fetchSessions()` every 30 s in case SSE drops silently (`setupEventSource`).
 
-Session list updates arrive via SSE (`metadata-update`, `agent-update`, …), debounced in the SSE dispatcher (500 ms for tasks, 2 s for metadata).
+Session list updates arrive via SSE (`metadata-update`, `agent-update`, …), debounced in the SSE dispatcher: 500 ms for tasks, 2 s for metadata. The metadata debounce is capped at 5 s (`METADATA_MAX_WAIT_MS`), because busy sessions emit events faster than the 2 s quiet period and a pure debounce would never fire.
+
+All of the above do no work while cck is off screen: the browser tab is hidden, or the hub has sent `hub:active` false. They call `skipOffScreen()`, which sets `missedWhileHidden`. When cck is back on screen, `catchUp()` cancels the pending debounces and runs one refresh for the current view. The fallback poll marks a miss only when SSE is not open. Other SSE events, such as the CLI commands, are still handled while hidden.
 
 ## Loop activity scan (`updateLoopInfo`)
 

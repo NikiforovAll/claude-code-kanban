@@ -33,7 +33,7 @@ lib/session-events.js  Session event doorbell: queue, long-poll handler, line fo
 
 **Server:** 3 chokidar watchers (tasks/teams/projects) · SSE broadcasts · REST API · session cache (10s TTL) · port fallback
 
-**Frontend:** sidebar (sessions, filters, live feed) · kanban board · task detail panel · SSE debounced (500ms tasks, 2s metadata)
+**Frontend:** sidebar (sessions, filters, live feed) · kanban board · task detail panel · SSE debounced (500ms tasks, 2s metadata capped at 5s) · paused while off screen (`hub:active`, see `docs/session-scanning.md`)
 
 **CDN deps:** marked.js, DOMPurify, highlight.js, Google Fonts
 
