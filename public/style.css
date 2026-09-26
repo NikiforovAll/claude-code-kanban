@@ -119,7 +119,7 @@ body::before {
 
 /* #region SIDEBAR */
 .sidebar {
-  width: var(--sidebar-width, 310px);
+  width: var(--sidebar-width, 415px);
   background: var(--sidebar-bg, var(--bg-surface));
   border-right: 1px solid color-mix(in srgb, var(--border) 35%, transparent);
   box-shadow: 1px 0 12px rgba(0, 0, 0, 0.04);
