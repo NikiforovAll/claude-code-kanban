@@ -3330,7 +3330,7 @@ function renderSessions() {
     const tempClass = session.hasRecentLog || session.inProgress || session.hasWaitingForUser ? 'warm' : 'stale';
     const sid = escAttrJs(session.id);
     return `
-          <button onclick="fetchTasks('${sid}')" draggable="true" data-session-id="${escapeHtml(session.id)}" class="session-item ${isActive ? 'active' : ''} ${session.hasWaitingForUser ? 'permission-pending' : ''} ${tempClass} ${showCtx ? 'has-context' : ''}" title="${escapeHtml(tooltip)}">
+          <button onclick="openSession('${sid}')" draggable="true" data-session-id="${escapeHtml(session.id)}" class="session-item ${isActive ? 'active' : ''} ${session.hasWaitingForUser ? 'permission-pending' : ''} ${tempClass} ${showCtx ? 'has-context' : ''}" title="${escapeHtml(tooltip)}">
             <span class="session-pin-btn${pinClass}" onclick="event.stopPropagation();toggleSessionPin('${sid}')" title="${pinTitle} session">${pinState === 'sticky' ? SESSION_STAR_SVG : SESSION_PIN_SVG}</span>
             <div class="session-name">${escapeHtml(sessionName)}</div>
             ${projectHtml ? `<div class="session-secondary">${projectHtml}</div>` : ''}
@@ -9946,6 +9946,7 @@ const termState = {
   closeGuard: false,
   leaving: false,
   focusNext: false,
+  openedByUser: null,
   ackPending: 0,
   ackTimer: null,
   retryTimer: null,
@@ -10054,7 +10055,7 @@ function swapToPreviousSession() {
   const target = currentSessionId === lastSessionId ? previousSessionId : lastSessionId;
   if (!target || target === currentSessionId) return;
   if (terminalPaneFocused()) termState.focusNext = true;
-  fetchTasks(target);
+  openSession(target);
 }
 
 // Esc belongs to Claude, so leaving the terminal without hiding it needs its own key.
@@ -10090,6 +10091,7 @@ function syncTerminal() {
   if (!on) {
     termState.shown = false;
     termState.focusNext = false;
+    termState.openedByUser = null;
     syncCloseGuard();
     // Hiding keeps the socket so Ctrl+` back is instant.
     const keepSocket = termState.sessionId === currentSessionId && viewMode === 'session';
@@ -10103,11 +10105,28 @@ function syncTerminal() {
   else if (!wasShown) onTerminalShown(takeTerminalFocus(currentSessionId));
 }
 
-// Selecting a session only shows its terminal; focus follows an explicit toggle or a new session.
+// Only paths the user drives call this; restores, deep links and refreshes call fetchTasks, so they never take focus.
+function openSession(sessionId) {
+  const alreadyOpen = sessionId === currentSessionId && viewMode === 'session' && termState.shown;
+  if (!alreadyOpen) termState.openedByUser = sessionId;
+  else if (termState.attached && promptAwaitsUser(sessionId)) focusTerminalPane();
+  return fetchTasks(sessionId);
+}
+
+// Selecting a session only shows its terminal; focus follows an explicit toggle, a new session, or
+// the user opening a session that waits on a prompt, since answering it is why they opened it.
 function takeTerminalFocus(sessionId) {
-  const focus = termState.focusNext || newSpecs.has(sessionId);
+  const opened = termState.openedByUser === sessionId;
+  termState.openedByUser = null;
+  const focus = termState.focusNext || newSpecs.has(sessionId) || (opened && promptAwaitsUser(sessionId));
   termState.focusNext = false;
   return focus;
+}
+
+// The terminal attaches asynchronously; by then the user may be typing elsewhere or reading a modal.
+function promptAwaitsUser(sessionId) {
+  if (!sessions.find((s) => s.id === sessionId)?.hasWaitingForUser || isAnyModalOpen()) return false;
+  return !document.activeElement?.matches('input, textarea, select, [contenteditable]');
 }
 
 function onTerminalShown(focus = true) {
