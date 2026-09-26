@@ -1,49 +1,26 @@
-# Starlight Starter Kit: Basics
+# Claude Code Kanban website
 
-[![Built with Starlight](https://astro.badg.es/v2/built-with-starlight/tiny.svg)](https://starlight.astro.build)
+The landing page and docs for Claude Code Kanban, published at https://nikiforovall.blog/claude-code-kanban/. Built with Astro and Starlight.
 
-```
-npm create astro@latest -- --template starlight
-```
+## Commands
 
-> 🧑‍🚀 **Seasoned astronaut?** Delete this file. Have fun!
+Run from this folder. Node 22.12 or later.
 
-## 🚀 Project Structure
+| Command | Action |
+| --- | --- |
+| `npm install` | Install dependencies |
+| `npm run dev` | Start the dev server with hot reload. It prints the local URL. |
+| `npm run build` | Build the site to `dist/` |
+| `npm run preview` | Serve the built site |
 
-Inside of your Astro + Starlight project, you'll see the following folders and files:
+## Layout
 
-```
-.
-├── public/
-├── src/
-│   ├── assets/
-│   ├── content/
-│   │   └── docs/
-│   └── content.config.ts
-├── astro.config.mjs
-├── package.json
-└── tsconfig.json
-```
+- `src/pages/index.astro` is the landing page.
+- `src/content/docs/` holds the docs pages. Add each new page to the `sidebar` in `astro.config.mjs`.
+- `src/kit/` and `src/components/` are the design kit: layout, themes, `Shot`, `Lightbox`, `Keys`. The same kit is in the Marketplace, Cost and Memory sites. Keep the copies the same.
+- `public/shots/` holds the screenshots. Theme shots are named `themes/<palette>-<view>-<mode>.webp`, and pages find them by that name. To update a shot, replace the file and keep its name.
+- `public/og.png` is the 1200×630 image for link previews.
 
-Starlight looks for `.md` or `.mdx` files in the `src/content/docs/` directory. Each file is exposed as a route based on its file name.
+## Deploy
 
-Images can be added to `src/assets/` and embedded in Markdown with a relative link.
-
-Static assets, like favicons, can be placed in the `public/` directory.
-
-## 🧞 Commands
-
-All commands are run from the root of the project, from a terminal:
-
-| Command                   | Action                                           |
-| :------------------------ | :----------------------------------------------- |
-| `npm install`             | Installs dependencies                            |
-| `npm run dev`             | Starts local dev server at `localhost:4321`      |
-| `npm run build`           | Build your production site to `./dist/`          |
-| `npm run preview`         | Preview your build locally, before deploying     |
-| `npm run astro ...`       | Run CLI commands like `astro add`, `astro check` |
-| `npm run astro -- --help` | Get help using the Astro CLI                     |
-
-## 👀 Want to learn more?
-
-Check out [Starlight’s docs](https://starlight.astro.build/), read [the Astro documentation](https://docs.astro.build), or jump into the [Astro Discord server](https://astro.build/chat).
+`.github/workflows/pages.yml` builds and deploys the site to GitHub Pages on each push to `main` that changes `website/`.

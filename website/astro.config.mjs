@@ -11,6 +11,10 @@ export default defineConfig({
 			title: 'Claude Code Kanban',
 			description: 'A live board for every Claude Code session on your machine, with a terminal built in.',
 			favicon: '/favicon.svg',
+			head: [
+				{ tag: 'meta', attrs: { property: 'og:image', content: 'https://nikiforovall.blog/claude-code-kanban/og.png' } },
+				{ tag: 'meta', attrs: { name: 'twitter:image', content: 'https://nikiforovall.blog/claude-code-kanban/og.png' } },
+			],
 			social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/NikiforovAll/claude-code-kanban' }],
 			editLink: { baseUrl: 'https://github.com/NikiforovAll/claude-code-kanban/edit/main/website/' },
 			customCss: ['./src/kit/kit.css'],
