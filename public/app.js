@@ -5606,11 +5606,6 @@ _scratchpadTextarea.addEventListener('input', () => {
 // Bound on the textarea: the global handler returns early on TEXTAREA targets.
 _scratchpadTextarea.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') closeScratchpad();
-  // execCommand keeps the edit on the undo stack and fires `input`, so the autosave still runs.
-  if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
-    e.preventDefault();
-    document.execCommand('insertText', false, '\t');
-  }
 });
 
 // Vimium eats Escape inside a text field and only blurs it, so the page never sees the key.
