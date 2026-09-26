@@ -10,8 +10,8 @@
 #   config    config.json {approvals: {enabled, mode, waitSeconds}}  (on by default; absent = defaults)
 #   liveness  server.json {port, pid}                       (D1: a dead board costs nothing)
 #
-# First writer wins (D5): a terminal answer deletes the marker via PostToolUse
-# and this gate exits silently; a decision arriving after the tool already ran
+# First writer wins (D5): a terminal answer deletes the marker (this gate, via
+# the session registry, or PostToolUse) and this gate exits silently; a decision arriving after the tool already ran
 # is discarded by Claude Code, so a losing write on either side is harmless.
 
 INPUT=$(cat)
@@ -114,6 +114,24 @@ BOARD_GRACE_SECONDS=15
 NEXT_PROBE=0
 UNREACHABLE_SINCE=0
 
+# Claude Code's live-session registry flips from "waiting" the moment the
+# terminal prompt is answered, while PostToolUse waits for the tool to finish
+# and never fires on a deny. Undocumented, so a missing file or field leaves
+# PostToolUse in charge, as before.
+SESSIONS_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/sessions"
+REGISTRY=""
+SEEN_WAITING=0
+find_registry() {
+  local f raw
+  for f in "$SESSIONS_DIR"/*.json; do
+    [ -f "$f" ] || continue
+    raw=""
+    IFS= read -r raw 2>/dev/null < "$f"
+    case "$raw" in *"\"sessionId\":\"$SESSION_ID\""*) REGISTRY=$f; return 0 ;; esac
+  done
+  return 1
+}
+
 while :; do
   if [ -f "$DECISION" ]; then
     PAYLOAD=$(cat "$DECISION" 2>/dev/null)
@@ -157,8 +175,22 @@ while :; do
   IFS= read -r CUR_MARKER < "$MARKER" 2>/dev/null || exit 0
   case "$CUR_MARKER" in *"\"id\":\"$REQ_ID\""*) ;; *) exit 0 ;; esac
 
+  if [ -n "$REGISTRY" ]; then
+    REG_RAW=""
+    IFS= read -r REG_RAW 2>/dev/null < "$REGISTRY"
+    if [[ $REG_RAW =~ \"status\":\"([a-z]+)\" ]]; then
+      if [ "${BASH_REMATCH[1]}" = "waiting" ]; then
+        SEEN_WAITING=1
+      elif [ "$SEEN_WAITING" -eq 1 ]; then
+        rm -f "$MARKER"
+        exit 0
+      fi
+    fi
+  fi
+
   if [ "$EPOCHSECONDS" -ge "$NEXT_PROBE" ]; then
     NEXT_PROBE=$((EPOCHSECONDS + BOARD_PROBE_SECONDS))
+    [ -n "$REGISTRY" ] || find_registry
     # No beacon at all = no board on this config dir, now or a moment ago: give
     # up at once, exactly as before. A beacon whose port is closed is the
     # restart window instead, so that one gets the grace.
