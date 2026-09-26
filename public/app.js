@@ -10889,6 +10889,7 @@ function openNewSession(folder, resume = false) {
 function closeNewSession() {
   hideModalOverlay('new-session-modal');
   closeFolderList();
+  promptVoice.rec?.abort();
 }
 
 function knownFolders() {
@@ -11048,6 +11049,42 @@ function startNewSession() {
   fetchTasks(id).then(() => sessionsList.querySelector('.session-item.active')?.scrollIntoView({ block: 'nearest' }));
 }
 
+const SpeechRecognitionApi = window.SpeechRecognition || window.webkitSpeechRecognition;
+const promptVoice = { rec: null };
+
+// Replaces the selection the field had when dictation began, so interim results rewrite
+// themselves in place instead of piling up.
+function togglePromptVoice() {
+  if (promptVoice.rec) return promptVoice.rec.stop();
+  const field = document.getElementById('ns-prompt');
+  const btn = document.getElementById('ns-mic');
+  const before = field.value.slice(0, field.selectionStart);
+  const after = field.value.slice(field.selectionEnd);
+  const lead = before && !/\s$/.test(before) ? ' ' : '';
+  const rec = new SpeechRecognitionApi();
+  rec.lang = navigator.language;
+  rec.interimResults = true;
+  rec.onresult = (e) => {
+    const text = Array.from(e.results, (r) => r[0].transcript).join('');
+    field.value = before + lead + text + after;
+    const caret = before.length + lead.length + text.length;
+    field.setSelectionRange(caret, caret);
+  };
+  rec.onerror = (e) => {
+    if (e.error === 'not-allowed' || e.error === 'service-not-allowed')
+      setNewSessionError('Microphone access is blocked for this page.');
+    else if (e.error !== 'no-speech' && e.error !== 'aborted') setNewSessionError(`Dictation failed: ${e.error}`);
+  };
+  rec.onend = () => {
+    promptVoice.rec = null;
+    btn.setAttribute('aria-pressed', 'false');
+  };
+  promptVoice.rec = rec;
+  btn.setAttribute('aria-pressed', 'true');
+  field.focus();
+  rec.start();
+}
+
 function pickFolderOption(i) {
   const path = ns.matches[i];
   if (!path) return;
@@ -11089,6 +11126,13 @@ function initNewSession() {
   });
   for (const id of ['ns-name', 'ns-wt-name', 'ns-prompt', 'ns-model']) {
     document.getElementById(id).addEventListener('input', renderNewSessionForm);
+  }
+  if (SpeechRecognitionApi) {
+    const mic = document.getElementById('ns-mic');
+    mic.hidden = false;
+    // mousedown would blur the textarea and lose the caret the dictation inserts at.
+    mic.addEventListener('mousedown', (e) => e.preventDefault());
+    mic.addEventListener('click', togglePromptVoice);
   }
   // Bound on the dialog: the global handler returns early on INPUT and TEXTAREA targets.
   modal.addEventListener('keydown', (e) => {

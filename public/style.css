@@ -5946,6 +5946,62 @@ select.form-input option:checked {
   min-height: 0;
 }
 
+.ns-prompt-field {
+  position: relative;
+}
+
+.ns-prompt-field:has(.ns-mic:not([hidden])) textarea {
+  padding-right: 36px;
+}
+
+.ns-mic {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.ns-mic[hidden] {
+  display: none;
+}
+
+.ns-mic svg {
+  width: 15px;
+  height: 15px;
+}
+
+.ns-mic:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.ns-mic[aria-pressed='true'] {
+  color: var(--danger);
+  animation: ns-mic-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes ns-mic-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ns-mic[aria-pressed='true'] {
+    animation: none;
+  }
+}
+
 .ns-error {
   font-size: 12px;
   color: var(--danger);
