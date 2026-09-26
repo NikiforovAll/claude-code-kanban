@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { getClaudeDir, displayPath } = require('./lib/claude-dir');
+const { isGroupName, suggestGroupName } = require('./lib/dispatch-groups');
 
 // Help is auto-generated from this table — keep flags/usage in sync with `run` behavior.
 const COMMANDS = {
@@ -90,12 +91,14 @@ const COMMANDS = {
     verbs: {
       start: {
         summary: 'Start a session with a task; prints the dispatch id',
-        usage: 'claude-code-kanban dispatch start --cwd <dir> (--spec <text> | --spec-file <path>) [--name <n>] [--model <m>] [--worktree [name]] [--json]',
+        usage: 'claude-code-kanban dispatch start --cwd <dir> (--spec <text> | --spec-file <path>) [--name <n>] [--group <g>] [--report] [--model <m>] [--worktree [name]] [--json]',
         flags: {
           '--cwd <dir>': 'Folder to run in (a known project, default: current dir)',
           '--spec <text>': 'The task, self-contained',
           '--spec-file <path>': 'Read the task from a file',
           '--name <n>': 'Session name',
+          '--group <g>': 'Show it with this session in a kebab-case group (default: this session\'s group)',
+          '--report': 'Ask it to report its outcome back to this session',
           '--model <m>': 'fable, opus, sonnet or haiku',
           '--worktree [name]': 'Run in a new git worktree',
           '--json': 'Output JSON',
@@ -715,6 +718,13 @@ async function runDispatchStartCli(args) {
     printLeafHelp('dispatch start', COMMANDS.dispatch.verbs.start);
     return 1;
   }
+  const hasGroup = args.some(a => a === '--group' || a.startsWith('--group='));
+  const group = hasGroup ? getArgValue(args, 'group') || '' : null;
+  if (hasGroup && !isGroupName(group)) {
+    const hint = suggestGroupName(group);
+    console.error(`Group names are kebab-case${hint ? `: try --group ${hint}` : ', e.g. auth-refactor'}`);
+    return 1;
+  }
   const worktree = args.includes('--worktree') ? getArgValue(args, 'worktree') || true : false;
   const body = {
     cwd: canonicalDir(getArgValue(args, 'cwd') || '.'),
@@ -722,13 +732,15 @@ async function runDispatchStartCli(args) {
     name: getArgValue(args, 'name'),
     model: getArgValue(args, 'model'),
     worktree,
+    group,
+    report: args.includes('--report'),
     parent: process.env.CLAUDE_CODE_SESSION_ID || null,
   };
   try {
     const out = await cliPostJson('/api/dispatch', body, 'Dispatch', { 'x-terminal-token': token });
     if (!out) return 1;
     if (args.includes('--json')) console.log(JSON.stringify(out, null, 2));
-    else console.log(`Started ${out.dispatch} (session ${out.session}) in ${out.cwd}`);
+    else console.log(`Started ${out.dispatch} (session ${out.session}) in ${out.cwd}${out.group ? ` [${out.group}]` : ''}`);
     return 0;
   } catch (e) { reportCliError(e); return 1; }
 }

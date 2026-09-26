@@ -25,9 +25,18 @@ describe('dispatch registry', () => {
 
   it('never exposes the capability', () => {
     const reg = createDispatchRegistry();
-    const r = start(reg);
+    const r = start(reg, { ...SPEC, report: true });
     assert.equal(reg.list()[0].cap, undefined);
     assert.match(formatPreamble(r), new RegExp(`--cap ${r.cap}`));
+  });
+
+  it('puts the done command in the preamble only with report', () => {
+    const reg = createDispatchRegistry();
+    const quiet = start(reg);
+    assert.equal(formatPreamble(quiet), 'Fix the bug');
+    const loud = start(reg, { ...SPEC, report: true }, 's-2');
+    assert.match(formatPreamble(loud), /dispatch done d_[0-9a-f]{12} --cap /);
+    assert.ok(formatPreamble(loud).endsWith('Fix the bug'));
   });
 
   it('refuses unknown and malformed ids', () => {

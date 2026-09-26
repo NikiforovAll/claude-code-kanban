@@ -3465,28 +3465,27 @@ function renderSessions() {
   // Named groups are a pure partition of the already-filtered list: whatever they don't claim
   // falls through to the project blocks below, which look exactly as they did before groups.
   const sgBuckets = new Map();
-  let sgRest = filteredSessions;
-  if (sessionGroups.length > 0) {
-    sgRest = [];
-    for (const session of filteredSessions) {
-      const group = sgGroupForSession(session);
-      if (group) {
-        if (!sgBuckets.has(group.id)) sgBuckets.set(group.id, []);
-        sgBuckets.get(group.id).push(session);
-      } else {
-        sgRest.push(session);
-      }
+  const sgRest = [];
+  for (const session of filteredSessions) {
+    const group = sgGroupForSession(session);
+    if (group) {
+      if (!sgBuckets.has(group.id)) sgBuckets.set(group.id, []);
+      sgBuckets.get(group.id).push(session);
+    } else {
+      sgRest.push(session);
     }
   }
+  for (const [name, g] of transientGroups) if (!sgBuckets.has(g.id)) transientGroups.delete(name);
   // A group emptied by a filter hides its header; a group the user just created (no filters)
   // shows its drop-here state instead of vanishing.
   const sgFiltering = !!searchQuery || activityFilter.size > 0 || (!!filterProject && filterProject !== '__recent__');
 
   // flat = the "All sessions" view, which has no project sub-blocks.
   const sgSectionHtml = (flat) => {
-    if (sessionGroups.length === 0) return '';
+    const transient = [...transientGroups.values()];
+    if (sessionGroups.length === 0 && transient.length === 0) return '';
     let out = '';
-    for (const group of sessionGroups) {
+    for (const group of [...sessionGroups, ...transient]) {
       const bucket = sgBuckets.get(group.id) || [];
       if (bucket.length === 0 && sgFiltering) continue;
       if (!groupPinned) bucket.sort(pinSort);
@@ -3494,6 +3493,17 @@ function renderSessions() {
       let body = '';
       if (flat) {
         body = bucket.map(renderSessionCard).join('');
+      } else if (group.transient) {
+        // Each session under its own project block, so a worktree session reads as its repo's.
+        const byProject = new Map();
+        for (const s of bucket) {
+          const key = s.project || '';
+          if (!byProject.has(key)) byProject.set(key, []);
+          byProject.get(key).push(s);
+        }
+        for (const [p, arr] of byProject) {
+          body += p ? projectBlock(p, arr, true) : renderGroupSessions(arr, `__pinned_group_${group.id}__`);
+        }
       } else {
         const loose = [];
         const byProject = new Map();
@@ -3525,8 +3535,9 @@ function renderSessions() {
         }
       }
       if (!body) body = '<div class="sg-empty">Drop a session or a project here</div>';
+      const idAttr = group.transient ? '' : ` data-group-id="${escapeHtml(group.id)}"`;
       out += sgHeaderHtml(group, countHtml(bucket));
-      out += `<div class="session-group-sessions${collapsed ? ' collapsed' : ''}" data-group-id="${escapeHtml(group.id)}">${body}</div>`;
+      out += `<div class="session-group-sessions${collapsed ? ' collapsed' : ''}"${idAttr}>${body}</div>`;
     }
     if (!out) return '';
     return sectionHtml(SECTION_GROUPS, 'Groups', false, out);
@@ -4095,7 +4106,42 @@ function sgGroupOf(type, ref) {
 
 // An individually placed session wins over the placement of its project.
 function sgGroupForSession(session) {
+  return sgUserGroupFor(session) || sgDispatchGroupFor(session);
+}
+
+function sgUserGroupFor(session) {
   return sgGroupOf('session', session.id) || (session.project ? sgGroupOf('project', session.project) : null);
+}
+
+// Transient groups come from the server (`dispatch start --group`) and go when their sessions
+// end. They are never written to localStorage; the objects are cached only so collapse state,
+// keyed by id, survives a re-render.
+const transientGroups = new Map();
+
+function sgTransientGroup(name) {
+  let group = transientGroups.get(name);
+  if (!group) {
+    group = { id: `t_${name}`, name, transient: true };
+    transientGroups.set(name, group);
+  }
+  return group;
+}
+
+// A user group with the same name takes the session in, so Keep does not split a group in two.
+// With no group of its own, a started session follows its starter into the starter's named group.
+function sgDispatchGroupFor(session) {
+  const name = session.dispatchGroup;
+  if (name) return sessionGroups.find((g) => g.name.toLowerCase() === name) || sgTransientGroup(name);
+  const starter = session.startedBy && sessions.find((s) => s.id === session.startedBy);
+  return starter ? sgUserGroupFor(starter) : null;
+}
+
+function sgKeepTransient(name) {
+  const group = sgTransientGroup(name);
+  const members = sessions.filter((s) => sgGroupForSession(s) === group);
+  const kept = sgCreateGroup(name);
+  for (const s of members) kept.members.push({ type: 'session', ref: s.id });
+  persistSessionGroups();
 }
 
 function sgDetach(type, ref) {
@@ -4208,13 +4254,19 @@ function sgHeaderHtml(group, countHtml) {
   const nameHtml = editing
     ? `<input class="sg-name-input" type="text" value="${escapeHtml(group.name)}" aria-label="Group name" spellcheck="false">`
     : `<span class="group-name">${escapeHtml(group.name)}</span>`;
+  const attrs = group.transient
+    ? `class="session-group-header sg-transient${collapsed ? ' collapsed' : ''}" data-transient-group="${escapeHtml(group.name)}" title="${escapeHtml(group.name)} — goes when its sessions end"`
+    : `class="session-group-header${collapsed ? ' collapsed' : ''}" draggable="${editing ? 'false' : 'true'}" data-group-id="${escapeHtml(group.id)}" title="${escapeHtml(group.name)} — drop sessions or projects here"`;
+  const actions = group.transient
+    ? '<span class="sg-action sg-keep" title="Keep this group after its sessions end">Keep</span>'
+    : `${headerPadBtnHtml(_groupScratchpadKey(group.id), group.name)}
+          <span class="sg-action sg-rename" title="Rename group"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></span>
+          <span class="sg-action sg-delete" title="Delete group (members return to Projects)">&times;</span>`;
   return `
-        <div class="session-group-header${collapsed ? ' collapsed' : ''}" draggable="${editing ? 'false' : 'true'}" data-group-path="${escapeHtml(sgKey(group.id))}" data-group-id="${escapeHtml(group.id)}" title="${escapeHtml(group.name)} — drop sessions or projects here">
+        <div ${attrs} data-group-path="${escapeHtml(sgKey(group.id))}">
           ${groupChevronSvg()}
           ${nameHtml}
-          ${headerPadBtnHtml(_groupScratchpadKey(group.id), group.name)}
-          <span class="sg-action sg-rename" title="Rename group"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></span>
-          <span class="sg-action sg-delete" title="Delete group (members return to Projects)">&times;</span>
+          ${actions}
           ${countHtml}
         </div>`;
 }
@@ -4312,7 +4364,8 @@ function sgDropZone(target) {
     const targetSession = sessions.find((s) => s.id === targetSessionId);
     const targetGroup = targetSession ? sgGroupForSession(targetSession) : null;
     const targetGroupId = targetGroup?.id || null;
-    if (targetGroup) {
+    // A transient group holds no members to reorder or place under; a drop there pairs instead.
+    if (targetGroup && !targetGroup.transient) {
       // Stacking onto a card adopts that card's placement, project block included.
       const targetHost = sgHostOf(targetGroup, targetSession);
       if (targetHost) {
@@ -7336,6 +7389,8 @@ function setupEventSource() {
 
       if (data.type === 'terminals-update' && Array.isArray(data.ids)) setRunningTerminals(data.ids);
 
+      if (data.type === 'dispatch-update') onDispatchUpdate();
+
       if (data.type === 'agent-update') {
         pendingAgentSessionIds.add(data.sessionId);
         clearTimeout(agentRefreshTimer);
@@ -7998,6 +8053,10 @@ function stripTeammateWrapper(text) {
 // escaping is explicit here.
 const HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '`': '&#96;' };
 
+function pickRandom(items) {
+  return items[Math.floor(Math.random() * items.length)];
+}
+
 function escapeHtml(text) {
   if (text == null) return '';
   return String(text).replace(/[&<>"'`]/g, (c) => HTML_ESCAPES[c]);
@@ -8390,20 +8449,26 @@ document.addEventListener('click', (e) => {
   if (sgHeader) {
     if (e.target.closest('.sg-name-input')) return;
     e.stopPropagation();
+    if (e.target.closest('.sg-keep')) {
+      sgKeepTransient(sgHeader.dataset.transientGroup);
+      renderSessions();
+      return;
+    }
     const groupId = sgHeader.dataset.groupId;
     const group = sgGroupById(groupId);
-    if (!group) return;
-    if (e.target.closest('.sg-rename')) {
-      sgBeginRename(groupId);
-      return;
-    }
-    if (e.target.closest('.sg-delete')) {
-      if (confirm(`Delete group “${group.name}”? Its sessions and projects go back to Projects.`)) {
-        sgDeleteGroup(groupId);
-        renderSessions();
+    if (group) {
+      if (e.target.closest('.sg-rename')) {
+        sgBeginRename(groupId);
+        return;
       }
-      return;
-    }
+      if (e.target.closest('.sg-delete')) {
+        if (confirm(`Delete group “${group.name}”? Its sessions and projects go back to Projects.`)) {
+          sgDeleteGroup(groupId);
+          renderSessions();
+        }
+        return;
+      }
+    } else if (!sgHeader.dataset.transientGroup) return;
   }
 
   const header = e.target.closest(COLLAPSIBLE_HEADER_SELECTOR);
@@ -10264,6 +10329,24 @@ function hideTerminalPrompt() {
   document.getElementById('terminal-prompt').classList.remove('visible');
 }
 
+const TERMINAL_BOOT_VERBS = ['Waking Claude…', 'Clawding…', 'Warming up the terminal…', 'Summoning the session…'];
+const TERMINAL_BOOT_MAX_MS = 15000;
+let terminalBootTimer = null;
+
+// A new PTY shows only a blinking cursor until Claude draws its first frame.
+function showTerminalBoot() {
+  document.getElementById('terminal-boot-verb').textContent = pickRandom(TERMINAL_BOOT_VERBS);
+  document.getElementById('terminal-boot').classList.add('visible');
+  clearTimeout(terminalBootTimer);
+  terminalBootTimer = setTimeout(hideTerminalBoot, TERMINAL_BOOT_MAX_MS);
+}
+
+function hideTerminalBoot() {
+  clearTimeout(terminalBootTimer);
+  terminalBootTimer = null;
+  document.getElementById('terminal-boot').classList.remove('visible');
+}
+
 function showTerminalPrompt(sessionId, title, detail, choices, output = '') {
   const el = document.getElementById('terminal-prompt');
   const tail = output ? `<pre class="${TINTED_PRE_CLASS} terminal-prompt-output">${escapeHtml(output)}</pre>` : '';
@@ -10273,6 +10356,7 @@ function showTerminalPrompt(sessionId, title, detail, choices, output = '') {
         `<button type="button" class="btn btn-secondary" data-mode="${escapeHtml(mode)}">${escapeHtml(label)}</button>`,
     )
     .join('')}</div><div class="sp-hint"><kbd>Esc</kbd> hides the terminal</div>`;
+  hideTerminalBoot();
   el.querySelectorAll('button[data-mode]').forEach((b) => {
     b.onclick = () => openTerminal(sessionId, b.dataset.mode);
   });
@@ -10333,6 +10417,7 @@ function detachTerminal() {
     ws.close();
   }
   hideTerminalPrompt();
+  hideTerminalBoot();
 }
 
 async function openTerminal(sessionId, mode, attempt = 0) {
@@ -10347,6 +10432,7 @@ async function openTerminal(sessionId, mode, attempt = 0) {
   }
   if (termState.sessionId !== sessionId) return;
   const term = ensureTerm();
+  if (!attempt) showTerminalBoot();
   // RIS through the write queue, not term.reset(): reset() runs at once, and output the previous
   // session had already queued would still be drawn after it. A retry keeps the last screen
   // until the replay arrives.
@@ -10381,7 +10467,10 @@ async function openTerminal(sessionId, mode, attempt = 0) {
     if (termState.ws !== ws) return;
     if (typeof ev.data !== 'string') {
       const bytes = new Uint8Array(ev.data);
-      term.write(bytes, () => ackTerminal(ws, bytes.length));
+      term.write(bytes, () => {
+        ackTerminal(ws, bytes.length);
+        if (terminalBootTimer && termState.ws === ws && terminalTail(1)) hideTerminalBoot();
+      });
       return;
     }
     let msg;
@@ -10503,6 +10592,7 @@ function onTerminalMessage(sessionId, msg) {
       clean ? '' : terminalTail(6),
     );
   } else if (msg.t === 'error') {
+    hideTerminalBoot();
     setTerminalStatus(msg.msg || 'Terminal error');
   }
 }
@@ -10630,14 +10720,26 @@ const NS_MAX_MATCHES = 8;
 const PLUS_SVG =
   '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>';
 const newSpecs = new Map();
+// Sessions another session started (`dispatch start`), shown where they will stay until
+// their transcript appears. Kept apart from newSpecs: their prompt is already sent.
+const dispatchSpecs = new Map();
 const ns = { projects: [], picked: [], matches: [], idx: -1, folder: '', browsing: false, resume: false };
+
+const PLACEHOLDER_NAMES = { pick: 'Resume session', dispatch: 'Started session', new: 'New session' };
+const PLACEHOLDER_HINTS = {
+  pick: 'pick a session to resume',
+  dispatch: 'starting',
+  new: 'waiting for your first message',
+};
 
 function placeholderSession(id, spec) {
   return {
     id,
     placeholder: true,
     mode: spec.mode,
-    name: spec.name || (spec.mode === 'pick' ? 'Resume session' : 'New session'),
+    name: spec.name || PLACEHOLDER_NAMES[spec.mode] || PLACEHOLDER_NAMES.new,
+    dispatchGroup: spec.group || undefined,
+    startedBy: spec.startedBy || undefined,
     project: spec.cwd,
     worktree: spec.worktree ? { repo: spec.cwd, name: spec.worktree === true ? 'new' : spec.worktree } : null,
     modifiedAt: new Date(spec.startedAt).toISOString(),
@@ -10649,10 +10751,40 @@ function placeholderSession(id, spec) {
 }
 
 function mergePlaceholders(list) {
-  if (!newSpecs.size) return list;
+  if (!newSpecs.size && !dispatchSpecs.size) return list;
   const ids = new Set(list.map((s) => s.id));
-  for (const id of [...newSpecs.keys()]) if (ids.has(id)) newSpecs.delete(id);
-  return [...[...newSpecs].reverse().map(([id, spec]) => placeholderSession(id, spec)), ...list];
+  for (const specs of [newSpecs, dispatchSpecs]) {
+    for (const id of [...specs.keys()]) if (ids.has(id)) specs.delete(id);
+  }
+  const pending = [...newSpecs, ...dispatchSpecs].sort((a, b) => b[1].startedAt - a[1].startedAt);
+  return [...pending.map(([id, spec]) => placeholderSession(id, spec)), ...list];
+}
+
+async function loadDispatches() {
+  try {
+    const res = await fetch('/api/dispatch', { cache: 'no-store' });
+    const { running = [] } = await res.json();
+    dispatchSpecs.clear();
+    for (const r of running) {
+      if (!r.session || sessions.some((s) => s.id === r.session && !s.placeholder)) continue;
+      dispatchSpecs.set(r.session, {
+        mode: 'dispatch',
+        cwd: r.cwd,
+        name: r.name,
+        worktree: r.worktree,
+        group: r.group,
+        startedBy: r.parent,
+        startedAt: r.startedAt,
+      });
+    }
+  } catch (_) {}
+}
+
+async function onDispatchUpdate() {
+  await loadDispatches();
+  sessions = mergePlaceholders(sessions.filter((s) => !s.placeholder));
+  renderSessions();
+  fetchSessions(false).catch(() => {});
 }
 
 // With no first message there is no transcript, so an ended placeholder leaves nothing to come back to.
@@ -10680,7 +10812,7 @@ function renderPlaceholderCard(session) {
           <button onclick="fetchTasks('${escAttrJs(session.id)}')" data-session-id="${escapeHtml(session.id)}" class="session-item session-placeholder ${isActive ? 'active' : ''}" title="${escapeHtml(`${session.id} | ${session.project}`)}">
             <div class="session-name">${escapeHtml(session.name)}</div>
             ${projectHtml ? `<div class="session-secondary">${projectHtml}</div>` : ''}
-            <div class="session-waiting"><span class="pulse"></span>${session.mode === 'pick' ? 'pick a session to resume' : 'waiting for your first message'}</div>
+            <div class="session-waiting"><span class="pulse"></span>${PLACEHOLDER_HINTS[session.mode] || PLACEHOLDER_HINTS.new}</div>
           </button>
         `;
 }
@@ -10688,10 +10820,12 @@ function renderPlaceholderCard(session) {
 // After a reload the form is gone, but the PTY still runs; its hello options come back from the server.
 async function restorePendingSessions() {
   document.getElementById('new-session-btn').hidden = !terminalAvailable();
-  if (!terminalAvailable()) return;
+  const terminals = terminalAvailable() ? loadTerminals() : null;
+  await loadDispatches();
+  if (!terminals) return;
   try {
-    for (const t of await loadTerminals()) {
-      if ((t.mode !== 'new' && t.mode !== 'pick') || newSpecs.has(t.id)) continue;
+    for (const t of await terminals) {
+      if ((t.mode !== 'new' && t.mode !== 'pick') || newSpecs.has(t.id) || dispatchSpecs.has(t.id)) continue;
       newSpecs.set(t.id, { cwd: t.cwd, name: t.name, worktree: t.worktree, mode: t.mode, startedAt: t.startedAt });
     }
   } catch (_) {}
@@ -11181,7 +11315,7 @@ if (urlState.search) {
 
 {
   const verbs = ['Clawding…', 'Shuffling cards…', 'Herding tasks…', 'Waking sessions…', 'Sorting the board…'];
-  document.getElementById('boot-verb').textContent = verbs[Math.floor(Math.random() * verbs.length)];
+  document.getElementById('boot-verb').textContent = pickRandom(verbs);
 }
 
 Promise.all([

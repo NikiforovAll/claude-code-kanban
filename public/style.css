@@ -688,6 +688,10 @@ body.booting #no-session {
 .boot-splash {
   display: none;
   flex: 1;
+}
+
+.boot-splash,
+.terminal-boot {
   flex-direction: column;
   align-items: center;
   justify-content: center;
@@ -2885,6 +2889,24 @@ body.booting .boot-splash {
   color: var(--text-muted);
   padding: 24px 0;
   text-align: center;
+}
+
+.terminal-boot {
+  display: none;
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  pointer-events: none;
+}
+
+.terminal-boot.visible {
+  display: flex;
+  animation: boot-fade 0.3s ease-out 0.2s both;
+}
+
+/* Opacity, not visibility: a hidden textarea drops focus, and the terminal must keep it. */
+.terminal-pane:has(.terminal-boot.visible) .xterm {
+  opacity: 0;
 }
 
 .terminal-prompt {
@@ -6743,6 +6765,16 @@ pre.mermaid svg {
 .pinned-ungroup-btn:hover,
 .sg-action:hover {
   color: var(--accent);
+}
+
+.sg-transient .group-name {
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.sg-keep {
+  font-size: 10px;
+  font-weight: 500;
 }
 
 .pinned-sub-items.collapsed {

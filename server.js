@@ -40,6 +40,7 @@ const { buildDecision, decisionFileName, isDecisionFile, approvalsFrom, boardRef
 const { getClaudeDir, getArgValue, storageNamespace, isDefaultClaudeDir } = require('./lib/claude-dir');
 const { createTerminalService, readTerminalConfig } = require('./lib/terminal');
 const { createDispatchRegistry, formatPreamble, formatDispatchLine } = require('./lib/dispatch');
+const { createGroupStore, isGroupName, suggestGroupName } = require('./lib/dispatch-groups');
 const { pickFolder } = require('./lib/folder-dialog');
 
 if (process.argv.includes("--install") || process.argv.includes("--uninstall")) {
@@ -80,6 +81,7 @@ const CCK_DIR = path.join(CLAUDE_DIR, '.cck');
 const AGENT_ACTIVITY_DIR = path.join(CCK_DIR, 'agent-activity');
 const CONTEXT_STATUS_DIR = path.join(CCK_DIR, 'context-status');
 const PINS_FILE = path.join(CCK_DIR, 'pins.json');
+const DISPATCH_GROUPS_FILE = path.join(CCK_DIR, 'dispatch-groups.json');
 const SERVER_INFO_FILE = path.join(CCK_DIR, 'server.json');
 const TERMINAL_TOKEN_FILE = path.join(CCK_DIR, 'terminal-token.json');
 // Harness-owned scratchpad root; the per-session dir under it is created lazily.
@@ -1560,7 +1562,7 @@ app.get('/api/sessions', async (req, res) => {
       sessions = [...top, ...missingPinned];
     }
 
-    res.json(sessions);
+    res.json(withDispatchPlacement(sessions));
   } catch (error) {
     console.error('Error listing sessions:', error);
     res.status(500).json({ error: 'Failed to list sessions' });
@@ -3213,19 +3215,49 @@ app.get('/vendor/xterm/:file', (req, res) => {
 // #region DISPATCH
 const dispatches = createDispatchRegistry({
   onSettle: (r) => {
-    if (r.parent) enqueueSessionEvent(topicKey('dispatch', r.parent), formatDispatchLine(r));
+    if (r.parent && r.report) enqueueSessionEvent(topicKey('dispatch', r.parent), formatDispatchLine(r));
     broadcast({ type: 'dispatch-update' });
   },
 });
+
+const dispatchGroups = createGroupStore({
+  load: () => {
+    try { return JSON.parse(readFileSync(DISPATCH_GROUPS_FILE, 'utf8')); } catch { return null; }
+  },
+  save: (data) => writeJsonAtomic(DISPATCH_GROUPS_FILE, data),
+  isAlive: (id) => terminal.isRunning(id) || isSessionProcessAlive(id),
+  pinnedIds: () => new Set(Object.keys(readPins())),
+});
+
+// The board places a session from these alone, so it never has to move it later.
+// `startedBy` lets it follow a starter the user put in a named group, which only the
+// browser knows; it goes once the dispatch settles.
+function withDispatchPlacement(sessions) {
+  const groups = dispatchGroups.snapshot();
+  const starters = new Map(
+    dispatches.list().filter((r) => r.status === 'running' && r.parent && r.session).map((r) => [r.session, r.parent]),
+  );
+  if (!groups.size && !starters.size) return sessions;
+  return sessions.map((s) => {
+    const dispatchGroup = groups.get(s.id);
+    const startedBy = starters.get(s.id);
+    return dispatchGroup || startedBy ? { ...s, dispatchGroup, startedBy } : s;
+  });
+}
 
 // Starting a session needs the terminal token, as the browser does; the CLI reads it from
 // TERMINAL_TOKEN_FILE. The child gets only its dispatch capability through the preamble.
 app.post('/api/dispatch', (req, res) => {
   if (!terminal.authorized(req.get('x-terminal-token'))) return res.status(401).json({ error: 'invalid terminal token' });
-  const { cwd, spec, name, model, worktree, parent } = req.body || {};
+  const { cwd, spec, name, model, worktree, parent, group, report } = req.body || {};
   if (typeof spec !== 'string' || !spec.trim()) return res.status(400).json({ error: 'spec is required' });
   if (parent != null && !(typeof parent === 'string' && isUUID(parent))) return res.status(400).json({ error: 'invalid parent' });
-  const r = dispatches.create({ parent, name, spec: spec.trim() });
+  if (group != null && !isGroupName(group)) {
+    return res.status(400).json({ error: `group must be kebab-case, e.g. ${suggestGroupName(group) || 'my-group'}` });
+  }
+  const starterGroup = parent ? dispatchGroups.groupOf(parent) : null;
+  const target = group || starterGroup;
+  const r = dispatches.create({ parent, name, spec: spec.trim(), report: report === true, group: target, worktree });
   const env = { CCK_DISPATCH_ID: r.id, ...(parent && { PARENT_SESSION_ID: parent }) };
   const started = terminal.startNew({ cwd, name, model, worktree, prompt: formatPreamble(r) }, env);
   if (started.error) {
@@ -3233,8 +3265,10 @@ app.post('/api/dispatch', (req, res) => {
     return res.status(started.status).json({ error: started.error });
   }
   dispatches.attach(r.id, { session: started.id, cwd: started.cwd });
+  // A starter already in a group stays where it is: moving it would jump it under the user.
+  if (target) dispatchGroups.join(target, [starterGroup ? null : parent, started.id]);
   broadcast({ type: 'dispatch-update' });
-  res.status(201).json({ dispatch: r.id, session: started.id, cwd: started.cwd });
+  res.status(201).json({ dispatch: r.id, session: started.id, cwd: started.cwd, group: target });
 });
 
 app.post('/api/dispatch/:id/done', (req, res) => {
