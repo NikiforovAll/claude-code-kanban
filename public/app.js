@@ -10042,7 +10042,11 @@ function terminalShortcut(e) {
   if (e.code !== 'Backquote' || e.metaKey) return null;
   if (e.ctrlKey && !e.altKey) return e.shiftKey ? openTerminalManager : toggleTerminal;
   if (e.altKey && !e.ctrlKey && !e.shiftKey) return toggleTerminalFocus;
-  if (e.altKey && e.shiftKey && !e.ctrlKey && termState.attached && wantsTerminal()) return closeTerminalSession;
+  if (!e.altKey || !e.shiftKey || e.ctrlKey) return null;
+  if (termState.attached && wantsTerminal()) return () => closeTerminalSession();
+  if (viewMode === 'session' && runningTerminals.has(currentSessionId)) {
+    return () => closeTerminalSession(currentSessionId);
+  }
   return null;
 }
 
@@ -10627,10 +10631,11 @@ function endTerminalSession() {
 }
 
 // Detaching first means no exit message reaches the pane, so no Resume prompt shows before the board.
-function closeTerminalSession() {
-  const id = termState.sessionId;
-  if (terminalPaneFocused()) leaveTerminalPane();
-  detachTerminal();
+function closeTerminalSession(id = termState.sessionId) {
+  if (id === termState.sessionId) {
+    if (terminalPaneFocused()) leaveTerminalPane();
+    detachTerminal();
+  }
   setTerminalMode(id, false);
   syncTerminal();
   return endTerminal(id);
