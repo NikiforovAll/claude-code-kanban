@@ -5359,6 +5359,7 @@ const SHORTCUT_PAIRS = [
         { keys: ['Shift', 'L'], combo: true, label: 'Toggle session log' },
         { keys: ['Shift', 'M'], combo: true, label: 'Open last message' },
         { keys: ['J', 'K'], label: 'Previous / next message in detail' },
+        { keys: ['Ctrl', 'Enter'], combo: true, label: 'Allow / approve the waiting prompt' },
       ],
     },
   ],
@@ -6186,7 +6187,16 @@ document.addEventListener('keydown', (e) => {
       e.preventDefault();
       closeMsgDetailModal();
     } else if (document.getElementById('msg-detail-modal').classList.contains('visible')) {
-      if (matchKey(e, 'ArrowDown', 'KeyJ')) {
+      if (
+        e.key === 'Enter' &&
+        (e.ctrlKey || e.metaKey) &&
+        currentMsgDetailIdx === MSG_DETAIL_WAITING_IDX &&
+        isWaitingAnswerable() &&
+        currentWaiting.kind !== 'question'
+      ) {
+        e.preventDefault();
+        respondWaiting({ behavior: 'allow' });
+      } else if (matchKey(e, 'ArrowDown', 'KeyJ')) {
         e.preventDefault();
         if (currentMsgDetailIdx === MSG_DETAIL_WAITING_IDX) {
           msgDetailFollowLatest = true;
