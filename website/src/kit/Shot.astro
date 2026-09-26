@@ -1,0 +1,81 @@
+---
+import { url } from './family';
+import { DEFAULT_MODE, DEFAULT_PALETTE } from './palettes';
+
+interface Props {
+  alt: string;
+  src?: string;
+  /** Gallery view name: the image is shots/themes/<palette>-<view>-<mode>.webp and follows the site theme. */
+  themed?: string;
+  eager?: boolean;
+  width?: number;
+  height?: number;
+}
+const { alt, src, themed, eager = false, width = 2400, height = 1350 } = Astro.props;
+const initial = url(themed ? `shots/themes/${DEFAULT_PALETTE}-${themed}-${DEFAULT_MODE}.webp` : src!);
+// A themed image gets its src from an inline script. A src in the markup is fetched before the
+// swap script runs (by the preload scanner, and by Chrome's lazy loading up to ~2500px below the
+// fold), so a reader with a stored theme would download the default image as well.
+const deferSrc = Boolean(themed);
+---
+
+<button type="button" class="shot" data-lightbox aria-label={`Enlarge: ${alt}`}>
+  <img
+    src={deferSrc ? undefined : initial}
+    alt={alt}
+    data-themed={themed}
+    data-dir={themed && url('shots/themes/')}
+    width={width}
+    height={height}
+    loading={eager ? 'eager' : 'lazy'}
+    fetchpriority={eager ? 'high' : undefined}
+    decoding="async"
+  />
+  {
+    deferSrc && (
+      <script is:inline>
+        {`(() => {
+          const img = document.currentScript.previousElementSibling;
+          const { palette, mode } = window.siteTheme;
+          img.src = img.dataset.dir + palette + '-' + img.dataset.themed + '-' + mode + '.webp';
+        })();`}
+      </script>
+    )
+  }
+  {deferSrc && <noscript><img src={initial} alt={alt} width={width} height={height} /></noscript>}
+</button>
+
+<script>
+  const swap = () => {
+    const { palette, mode } = window.siteTheme;
+    for (const img of document.querySelectorAll<HTMLImageElement>('img[data-themed]')) {
+      const next = new URL(`${img.dataset.dir}${palette}-${img.dataset.themed}-${mode}.webp`, location.href).href;
+      if (img.src !== next) img.src = next;
+    }
+  };
+  document.addEventListener('site-theme', swap);
+  swap();
+</script>
+
+<style>
+  .shot {
+    display: block;
+    width: 100%;
+    padding: 0;
+    border: 1px solid var(--c-border);
+    border-radius: 0.625rem;
+    overflow: hidden;
+    background: var(--c-surface);
+    cursor: zoom-in;
+    box-shadow: 0 1px 2px color-mix(in srgb, var(--c-ink1) 6%, transparent),
+      0 18px 40px -24px color-mix(in srgb, var(--c-ink1) 30%, transparent);
+  }
+  .shot:focus-visible {
+    outline: 2px solid var(--c-accent);
+    outline-offset: 3px;
+  }
+  img {
+    width: 100%;
+    height: auto;
+  }
+</style>

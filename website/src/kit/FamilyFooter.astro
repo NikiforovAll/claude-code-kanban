@@ -1,0 +1,89 @@
+---
+import { family, type SiteId } from './family';
+
+interface Props {
+  current: SiteId;
+  note?: string;
+  links: { label: string; href: string }[];
+}
+const { current, note, links } = Astro.props;
+---
+
+<footer class="family-footer">
+  {note && <p class="note">{note}</p>}
+  <nav aria-label="Claude Code Hub apps">
+    <ul>
+      {
+        family.map((s) => (
+          <li>
+            <a href={s.href} aria-current={s.id === current ? 'page' : undefined}>
+              <span class="name">{s.name}</span>
+              <span class="blurb">{s.blurb}</span>
+            </a>
+          </li>
+        ))
+      }
+    </ul>
+  </nav>
+  <p class="links">
+    {links.map((l) => <a href={l.href}>{l.label}</a>)}
+  </p>
+</footer>
+
+<style>
+  .family-footer {
+    border-top: 1px solid var(--c-border);
+    padding-block: 3rem 4rem;
+    display: grid;
+    gap: 2rem;
+  }
+  .note {
+    margin: 0;
+    max-width: 38rem;
+    color: var(--c-ink2);
+  }
+  ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+    gap: 0.5rem;
+  }
+  ul a {
+    display: grid;
+    gap: 0.25rem;
+    padding: 0.875rem 1rem;
+    border: 1px solid var(--c-border);
+    border-radius: 0.5rem;
+    text-decoration: none;
+    color: var(--c-ink1);
+  }
+  ul a:hover {
+    background: var(--c-hover);
+  }
+  ul a[aria-current='page'] {
+    border-color: var(--c-accent);
+  }
+  .name {
+    font: 600 1.125rem/1.2 var(--font-display);
+  }
+  .blurb {
+    font-size: 0.875rem;
+    color: var(--c-ink3);
+  }
+  .links {
+    margin: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.5rem;
+    font: 0.8125rem var(--font-mono);
+  }
+  .links a {
+    color: var(--c-ink3);
+  }
+  a:focus-visible {
+    outline: 2px solid var(--c-accent);
+    outline-offset: 2px;
+  }
+</style>

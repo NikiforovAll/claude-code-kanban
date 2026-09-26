@@ -1,0 +1,38 @@
+:root {
+  --font-display: 'Playfair Display', Georgia, serif;
+  --font-sans: 'IBM Plex Sans', -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, Consolas, monospace;
+  --sl-font: var(--font-sans);
+  --sl-font-mono: var(--font-mono);
+}
+
+body {
+  background: var(--c-field);
+}
+
+/* Starlight docs: the app's display serif for page titles and section headings. */
+h1#_top,
+.sl-markdown-content :is(h1, h2, h3) {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+header .site-title {
+  font-size: var(--sl-text-lg);
+}
+
+.sl-markdown-content img {
+  border: 1px solid var(--c-border);
+  border-radius: 0.5rem;
+}
+
+kbd {
+  font: 500 0.8125em/1 var(--font-mono);
+  white-space: nowrap;
+  padding: 0.15em 0.4em;
+  border: 1px solid var(--c-border);
+  border-bottom-width: 2px;
+  border-radius: 0.3em;
+  background: var(--c-elevated);
+}

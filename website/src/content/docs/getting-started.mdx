@@ -1,0 +1,135 @@
+---
+title: Getting started
+description: Install the Claude Code integration, start the board, and see your first session live.
+---
+
+import Shot from '../../kit/Shot.astro';
+import Lightbox from '../../kit/Lightbox.astro';
+
+Claude Code Kanban shows your Claude Code sessions in the browser. Each session gets a board with Pending, In Progress and Completed columns, a session log, and a list of its subagents. This page takes you from a clean machine to a live board.
+
+<Shot themed="board" alt="The board with the Sessions sidebar on the left and the Pending, In Progress and Completed columns of one session" eager />
+
+## Requirements
+
+- **Node.js 20 or later.**
+- **The `claude` CLI.** The installer runs `claude --version` first. If the command fails, the installer prints `claude CLI not found` and stops.
+- **`jq`.** The hook scripts use `jq` to parse JSON. If `jq` is missing, the installer shows a warning and continues, but the hooks cannot work until you install it.
+- **`@lydell/node-pty` (optional).** The embedded terminal needs this package. npm installs it as an optional dependency. If you turn on the terminal and the package does not load, the server prints `Terminal unavailable: <reason>`. The board works without it.
+
+## Install the integration
+
+Run the installer once:
+
+```bash
+npx claude-code-kanban --install
+```
+
+The integration is a Claude Code plugin. The installer copies it to `<config-dir>/.cck/plugin`, registers that folder with `claude plugin marketplace add`, and then runs `claude plugin install claude-code-kanban@claude-code-kanban`. If the plugin is already installed, it runs `claude plugin update claude-code-kanban` instead. The config dir is `~/.claude` by default.
+
+The installer asks `[Y/n]` before it changes something. It skips a step with no prompt when that part is already up to date. If you skip the context spy, it also skips the statusLine step. Press <kbd>Enter</kbd> or type any answer other than `n` to say yes.
+
+1. **Plugin.** Installs or updates the plugin.
+2. **Context spy.** Copies `context-status.sh` to `<config-dir>/hooks/`. The statusLine setting is not part of a plugin, so this script lives outside the plugin folder.
+3. **StatusLine.** If `settings.json` has no `statusLine`, the installer sets it to the `context-status.sh` command. If you already have one, the installer puts the script in front of it as `context-status.sh | <your command>`. The script passes its input through, so your statusline keeps working. If `settings.json` is not valid JSON, the installer skips this step.
+
+The installer keeps all your other settings.
+
+### Installer options
+
+| Option | What it does |
+| --- | --- |
+| `--plugin-only` | With `--install`, refreshes only the plugin. No prompt. Skips the context spy and the statusLine. |
+| `--dir=<path>` | Uses another Claude config dir. `CLAUDE_CONFIG_DIR` does the same. The plugin, hook script and statusLine go into that dir. |
+| `--uninstall` | Removes the plugin and its marketplace entry, the plugin copy and `hooks/context-status.sh`. It removes the script from `statusLine` and puts back your earlier command, or deletes `statusLine` when nothing is left. |
+
+If you use `--dir` for the install, use the same `--dir` for `--uninstall` and when you start the board.
+
+### What the hooks give you
+
+The plugin adds two hook scripts:
+
+- `agent-spy.sh` runs on `SessionStart`, `SubagentStart`, `SubagentStop`, `TeammateIdle` and `PostToolUse`. It records subagents and session activity.
+- `approval-gate.sh` runs on `PermissionRequest`. It lets you answer permission prompts from the board.
+
+Without the hooks, the board shows tasks only. You get no agent log and no live activity indicators.
+
+## Start the board
+
+```bash
+npx claude-code-kanban --open
+```
+
+To install the command globally:
+
+```bash
+npm install -g claude-code-kanban
+claude-code-kanban --open
+```
+
+`--open` opens your browser after the server starts. The server prints:
+
+```text
+Claude Task Kanban running at http://localhost:3541
+```
+
+The default port is 3541. To use another port, set the `PORT` environment variable:
+
+```bash
+PORT=8080 npx claude-code-kanban
+```
+
+The `--port` flag in `--help` has no effect. If the port is busy, it prints `Port 3541 in use, trying random port...` and uses a random free port. The banner shows the port it got.
+
+The server listens on `127.0.0.1` only. For network access and other settings, see [Configuration](/claude-code-kanban/reference/configuration/).
+
+## Run your first session
+
+Run `claude` as usual, in any project. You do not configure anything per project.
+
+Claude Code writes task files and session transcripts to the config dir. The board watches these files and sends changes to the browser over server-sent events (SSE). Your session appears in the Sessions sidebar. Select it to see its tasks move from Pending to In Progress to Completed.
+
+:::tip[Empty board?]
+If Claude does not write tasks, the board stays empty. To turn on the task tools, add this to the `env` block of Claude Code `settings.json`:
+
+```json
+{
+  "env": {
+    "CLAUDE_CODE_ENABLE_TODO_TOOLS": "true"
+  }
+}
+```
+
+Then restart Claude Code. You can also add a task by hand. Select a session, click **Add task** in the Pending column, type a subject and press <kbd>Enter</kbd>.
+:::
+
+## Turn on the embedded terminal (optional)
+
+When Claude Code Kanban runs by itself, the embedded terminal is off. Start the server with `--enable-terminal` to run Claude Code sessions inside the board:
+
+```bash
+npx claude-code-kanban --enable-terminal
+```
+
+The server then prints a second line:
+
+```text
+Terminal enabled - open http://localhost:3541/#t=<token>
+```
+
+Open that link. The terminal needs the token in the link. A tab that `--open` opens has no token, so the terminal does not work in it. See [Embedded terminal](/claude-code-kanban/guides/embedded-terminal/) for details.
+
+## Next steps
+
+- [Sessions and the board](/claude-code-kanban/guides/sessions-and-board/): the sidebar, filters, and task cards.
+- [Session log and details](/claude-code-kanban/guides/session-details/): messages, pins, session info and tool stats.
+- [Subagents](/claude-code-kanban/guides/subagents/): follow the agents a session starts.
+- [Answer prompts from the board](/claude-code-kanban/guides/waiting-prompts/): allow or deny permission asks and answer questions.
+- [Embedded terminal](/claude-code-kanban/guides/embedded-terminal/): start, resume and swap sessions in the browser.
+- [Session groups](/claude-code-kanban/guides/session-groups/): put sessions and projects into named groups.
+- [Dispatch tasks to other sessions](/claude-code-kanban/guides/dispatch/): start a session with a task and get a report back.
+- [Claude Code plugin skills](/claude-code-kanban/guides/plugin-skills/): `kanban`, `kanban-follow` and `kanban-dispatch`.
+- [Run inside Claude Code Hub](/claude-code-kanban/guides/claude-code-hub/): use the board next to the other hub apps.
+- [Keyboard shortcuts](/claude-code-kanban/reference/keyboard-shortcuts/), [CLI reference](/claude-code-kanban/reference/cli/), [Configuration](/claude-code-kanban/reference/configuration/) and [Troubleshooting](/claude-code-kanban/troubleshooting/).
+
+<Lightbox />

@@ -1,0 +1,134 @@
+---
+title: Embedded terminal
+description: Run Claude Code in a terminal inside the board, and start, resume and swap sessions without leaving it.
+---
+
+import Shot from '../../../kit/Shot.astro';
+import Lightbox from '../../../kit/Lightbox.astro';
+
+The embedded terminal runs a real Claude Code process for a session, in the same place as its task board. You can start new sessions, resume old ones and move between them from the browser.
+
+<Shot themed="terminal" alt="A Claude Code terminal next to a narrow session sidebar" />
+
+## Turn the terminal on
+
+When you run Claude Code Kanban alone, the terminal is off. Start the server with `--enable-terminal`:
+
+```bash
+npx claude-code-kanban --enable-terminal
+```
+
+You can also set it in the `CCK_TERMINAL` environment variable, as JSON:
+
+```bash
+CCK_TERMINAL='{"enabled":true}' npx claude-code-kanban
+```
+
+At start, the server prints a line like this:
+
+```text
+Terminal enabled - open http://localhost:3541/#t=<token>
+```
+
+Open that URL. The token in it lets the page connect to the terminal, and it changes each time the server starts.
+
+Inside [Claude Code Hub](/claude-code-kanban/guides/claude-code-hub/) the terminal is on by default, and the hub gives the page its token.
+
+The terminal has these limits:
+
+- It needs the optional package `@lydell/node-pty`. If that package does not load, the terminal is not available and the server logs the reason.
+- The server refuses the terminal when it listens on an address other than loopback, for example with `--host 0.0.0.0`.
+
+## Show and hide the terminal
+
+Open a session, then click the terminal button in the board header or press <kbd>Ctrl+&#96;</kbd>. The terminal takes the place of the board and hides the Session Log. Press <kbd>Ctrl+&#96;</kbd> again to go back to the board.
+
+The terminal process runs on the server. When you switch sessions or reload the page, it keeps running. Come back to the session and the page attaches to the same screen again.
+
+| Key | Action |
+| --- | --- |
+| <kbd>Ctrl+&#96;</kbd> | Show or hide the terminal |
+| <kbd>Alt+&#96;</kbd> | Move focus between the terminal and the page |
+| <kbd>Alt+Shift+&#96;</kbd> | End the terminal and close it |
+| <kbd>Ctrl+Shift+&#96;</kbd> | Open the Terminals manager. <kbd>Shift</kbd>+click on the terminal button does the same. |
+| <kbd>Tab</kbd> | Move focus from the sidebar to the terminal. In the terminal, <kbd>Tab</kbd> goes to Claude Code. Use <kbd>Alt+&#96;</kbd> to go back to the page. |
+
+In the terminal, <kbd>Ctrl+C</kbd> copies when you have a selection. With no selection it goes to the process as usual. <kbd>Ctrl+Shift+C</kbd> always copies the selection, and <kbd>Ctrl+V</kbd> pastes.
+
+## Open a session in the terminal
+
+When you show the terminal for a session, Claude Code Kanban resumes that session with `claude --resume`.
+
+If the session already runs in another terminal, a prompt asks what to do, because two processes on one session write to the same transcript:
+
+- **Resume anyway** resumes it here too.
+- **Fork** starts a new session from its history.
+- **Shell only** opens a shell with no Claude Code process.
+
+When Claude Code exits, the terminal stays open as a shell. When the shell exits or you end the terminal, a prompt offers **Resume**, **Fork** and **Shell**. For a new session that has no first message yet, the prompt offers **Start again** and **Shell**.
+
+If the connection drops, the page tries to connect again five times, from 0.5 to 8 seconds apart. After that it shows a **Reconnect** button.
+
+## Start a new session
+
+Press <kbd>Ctrl+Alt+N</kbd>, click the **+ New** pill at the top of the sidebar, or click **+** on a project header. The New session dialog opens. The **+** on a project header fills in that project's folder.
+
+<Shot themed="09-new-session" alt="The New session dialog with Folder, Name, Prompt, Worktree and Model fields" />
+
+- **Folder.** Type to filter the projects you have used before, or click **Browse…** to pick a folder in the system dialog. Only a known project folder or a folder you picked in the dialog is accepted.
+- **Name.** Optional. Letters, digits, spaces, `.`, `_` and `-`, up to 80 characters. It must start with a letter or digit.
+- **Prompt.** Optional. Claude Code gets it as the first message. If your browser supports speech input, a microphone button lets you dictate it.
+- **New worktree.** Starts Claude Code in a new git worktree at `.claude/worktrees/<name>`. The name is optional: letters, digits, `.`, `_` and `-`, up to 64 characters. With no name, Claude Code picks one.
+- **Model.** Default, Fable, Opus, Sonnet or Haiku.
+
+The button reads **Start in &lt;folder&gt;**. Press <kbd>Enter</kbd> to start, or <kbd>Ctrl+Enter</kbd> while you type in the prompt. <kbd>Esc</kbd> closes the folder list, then the dialog.
+
+Until Claude Code writes its first message, the sidebar shows a placeholder card with the text "waiting for your first message". It turns into a normal session card after the first message.
+
+## Resume a past session
+
+Press <kbd>Ctrl+Alt+R</kbd>. The same dialog opens with only the Folder field, and the button reads **Resume in &lt;folder&gt;**. The terminal runs `claude --resume`, which shows Claude Code's own session picker. Until you pick one, the sidebar shows a "Resume session" placeholder card. When you pick a session, the terminal moves to that session on the board.
+
+## Swap to the previous session
+
+Press <kbd>Ctrl+Alt+S</kbd> to go back to the session you had open before. Press it again to return. If the terminal has focus, it keeps focus after the swap, so you can go on typing.
+
+Inside Claude Code Hub, Claude Code Kanban keeps <kbd>Ctrl+Alt+N</kbd>, <kbd>Ctrl+Alt+R</kbd> and <kbd>Ctrl+Alt+S</kbd> for itself and does not send them to the hub.
+
+## Zen mode
+
+Press <kbd>Shift+Z</kbd> or click the target button in the Sessions header. The sidebar shows only the current session card and a panel with its context use, scratchpad folder, linked documents, artifacts and live workflow. The session picker (<kbd>Shift+P</kbd>) still lists all sessions.
+
+<Shot themed="08b-zen-mode" alt="Zen mode: one session in the sidebar next to its task board" />
+
+With the terminal open in zen mode, the sidebar shows one session and the terminal takes the place of the board.
+
+<Shot src="shots/10b-zen-terminal.webp" alt="Zen mode with the terminal open: one session card and its context use in the sidebar, and Claude Code in the terminal" />
+
+The browser remembers zen mode, so it stays on after a reload. Press <kbd>Shift+Z</kbd> again to leave it.
+
+## Terminals manager
+
+Press <kbd>Ctrl+Shift+&#96;</kbd>, or press <kbd>Shift</kbd> and click the terminal button. The Terminals manager shows "N of M running" and a row for each terminal on the server, with:
+
+- the mode (resume, fork, pick, new or shell)
+- how long it has run
+- the number of attached pages, or "detached"
+- its working folder
+- **Open** and **End** buttons
+
+**End all** appears when two or more terminals run. By default the server allows 20 terminals at the same time.
+
+## Choose the shell
+
+The terminal starts a shell and runs Claude Code in it. To pick the shell, use `--terminal-shell <value>` or the `CCK_TERMINAL_SHELL` environment variable. The value is one of:
+
+- `gitbash`
+- a program name on `PATH`, such as `pwsh`, `cmd` or `zsh`
+- a full path to a shell
+
+With no value, Claude Code Kanban uses `pwsh`, then `powershell` on Windows. On other systems it uses `$SHELL`, or `/bin/sh`. If the named shell is not found, the terminal does not start.
+
+For other terminal settings, such as font size and scrollback, see [Configuration](/claude-code-kanban/reference/configuration/). For all keys, see [Keyboard shortcuts](/claude-code-kanban/reference/keyboard-shortcuts/).
+
+<Lightbox />

@@ -1,0 +1,146 @@
+---
+title: Sessions and the board
+description: Find a session in the sidebar, read its tasks on the board, and switch between the three view modes.
+---
+
+import Shot from '../../../kit/Shot.astro';
+import Lightbox from '../../../kit/Lightbox.astro';
+
+The main screen has four parts:
+
+- The **Sessions** sidebar on the left lists your Claude Code sessions.
+- The board in the middle has three columns: **Pending**, **In Progress** and **Completed**. Each column header shows its task count.
+- The **Task Details** panel opens on the right when you click a task card.
+- The **Session Log** panel opens on the right with <kbd>Shift+L</kbd>. See [Session log and details](/claude-code-kanban/guides/session-details/).
+
+<Shot themed="board" alt="The main screen with the sessions sidebar, the three-column board and the session log" />
+
+## Session cards
+
+Each card in the sidebar shows the session name, project, git branch, plan title, goal, progress (completed of total tasks), a context use bar and the time of the last change. Badges show more state when it applies: team members, a running terminal, a waiting prompt, running agents, a plan, a scratchpad, bookmarked messages, linked documents and a shared task list. A gear badge shows that the session ran workflows. A clock badge shows that it has scheduled wakeups or cron jobs. Hover a badge to see the count, and click it to see the details. The info icon opens [session info](/claude-code-kanban/guides/session-details/#session-info).
+
+A pulse on the card means the session log changed in the last 10 seconds or agents are running.
+
+The **Active Only** filter keeps a session when one of these is true:
+
+- It runs in the embedded terminal.
+- It has pending tasks or tasks in progress.
+- It has running agents.
+- It waits for your answer.
+- Claude wrote to its log in the last 5 minutes and the session is not idle.
+
+When a turn ends, the session stays in the active list for 2 more minutes, so it does not disappear the moment Claude stops.
+
+The sidebar header shows two chips, **N waiting** and **N active**. The **active** count includes sessions that have tasks in progress, running agents, or a log change in the last 5 minutes. It does not include waiting sessions, because the **waiting** chip counts them. Click **waiting** to show only sessions that wait for you. Click **active** to show sessions with running work and waiting sessions together. A chip click also sets the session filter to **Active Only**. Click the chip again to clear it.
+
+## Filters and search
+
+The funnel button opens the filter menu. It has three lists:
+
+| List | Values | Default |
+| --- | --- | --- |
+| Project | All Projects, Recent (24h), or one project | Recent (24h) |
+| Sessions | All Sessions, Active Only | Active Only |
+| Limit | Show 10, Show 20, Show 50, Show All | Show 20 |
+
+When a filter is not at its default, the Sessions header shows a short summary of it. The reset button sets all filters back to the defaults and clears the selection.
+
+The search box (**Search tasks, sessions, projects...**) does a fuzzy match on the session name, id, project, description, task subject, task description, task activity text and group names.
+
+In **Active Only**, pinned and sticky sessions stay in the list even when they are idle. A search or a **waiting** or **active** chip still filters them.
+
+## Project groups
+
+In **Active Only**, the sidebar groups sessions under project headers. A project header has:
+
+- The folder name and the count of active and total sessions.
+- The full path as a breadcrumb. Click it to copy the path.
+- A **+** button that starts a new session in that folder. It shows only when the [embedded terminal](/claude-code-kanban/guides/embedded-terminal/) is available.
+- A scratchpad button.
+- A project view button that opens the [project view](#view-modes).
+
+When other project groups show, sessions with no project go under **Ungrouped**. In **All Sessions**, the sidebar shows your named groups first, then a flat list of the other sessions.
+
+You can also put sessions and projects into your own named groups. See [Session groups](/claude-code-kanban/guides/session-groups/).
+
+## Pin a session
+
+Press <kbd>.</kbd> or click the pin icon on a card to pin or unpin a session. Press <kbd>&gt;</kbd> to make a session sticky.
+
+Idle pinned sessions collect in a **Pinned** sub-section inside their project. Sticky sessions stay in the main list and never move into this sub-section. Click the **x** on the sub-section to ungroup pinned sessions. Then sticky sessions sort to the top of their list, and idle pinned sessions come next. A **Group pinned sessions** banner puts them back.
+
+The browser keeps your pins and also sends them to the server, so the [CLI](/claude-code-kanban/reference/cli/) can read them.
+
+## The board
+
+The board header shows the session title, a meta line (task count, project, description, last change) and a progress bar with the percent of completed tasks. The bar shimmers while a task is in progress.
+
+A task card shows:
+
+- The task id, such as **#3**.
+- A **Blocked** badge when the task has blockers.
+- The owner, when the task has one.
+- The subject.
+- The activity text, for a task in progress.
+- **Waiting on #x**, for a blocked task.
+- The first line of the description.
+
+<Shot themed="03-task-deps" alt="A task card with a Blocked badge and the Task Details panel with Blocked By and Blocks lists" />
+
+### Move a card
+
+Drag a card to another column to change its status. The board writes the new status to the task file.
+
+Claude does not see the move unless you ran `/claude-code-kanban:kanban-follow` in that session. That skill makes Claude react to card moves. See [Claude Code plugin skills](/claude-code-kanban/guides/plugin-skills/).
+
+### Add a task
+
+In single-session view, the Pending column has an **Add task** tile.
+
+1. Click **Add task**.
+2. Type a subject.
+3. Press <kbd>Enter</kbd> or click away. The board creates a pending task with the next free id.
+
+Press <kbd>Esc</kbd> to cancel. Adding a task does not tell the session about it.
+
+### Task details
+
+Click a card to open **Task Details**. The panel shows the status, the owner, the description as Markdown, a **Currently:** line with the activity text, and the **Blocked By** and **Blocks** lists.
+
+- Click the title to edit it in place.
+- Click the description to edit it, then click **Save** or **Cancel**.
+- Click the trash button or press <kbd>D</kbd> to delete the task. A dialog asks you to confirm, because you cannot undo a delete.
+
+## View modes
+
+The board has three view modes:
+
+- **Single session.** Click a session card. You can add, edit, move and delete tasks.
+- **Project view.** Click the project view button on a project header. The board shows the tasks of all sessions in that project. Task Details is read-only here. You cannot edit or delete a task.
+- **All Tasks.** The board shows tasks from all sessions, titled **All Tasks**, **Recent Tasks** or **Tasks: &lt;project&gt;** after the project filter. The reset button and the project filter open this view.
+
+In project view and All Tasks, each task id starts with the first 4 characters of its task folder, so ids from different sessions do not clash. All Tasks also shows the session name on each card.
+
+For team sessions, an **All Members** list above the board filters the tasks by owner.
+
+## Empty states
+
+- **Select a session to view tasks** shows when no session is open.
+- **No pending tasks**, **No active tasks** and **No completed tasks** show in empty columns.
+- **No sessions found** shows in an empty sidebar. Other messages cover a search with no results, a project with no sessions and **No active sessions**. For the last one, select **All Sessions** in the filter menu.
+
+If the board stays empty while Claude works, the task tools may be off. See [The board is empty](/claude-code-kanban/troubleshooting/#the-board-is-empty).
+
+## Share a view
+
+The page URL keeps the view mode, the open session, the filters, the owner filter, the search text and whether the session log is open. Copy the URL to share the view or to open it again later.
+
+## Themes and the sidebar footer
+
+Press <kbd>T</kbd> to switch between light and dark mode. By default the mode follows your system. The palette menu has 17 color themes: Ember (the default), Gruvbox, Catppuccin, Tokyo Night, Solarized, Dracula, Nord, Rosé Pine, Everforest, Kanagawa, One Dark, Night Owl, Monokai Pro, GitHub, Ayu, Vitesse and Synthwave '84.
+
+The sidebar footer shows the version and your 5-hour and 7-day rate limit use.
+
+For all keys, see [Keyboard shortcuts](/claude-code-kanban/reference/keyboard-shortcuts/).
+
+<Lightbox />

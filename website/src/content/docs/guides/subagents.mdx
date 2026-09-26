@@ -1,0 +1,66 @@
+---
+title: Subagents
+description: Follow the subagents a session starts in the Agents Log footer and open each one to read its prompt, response and log.
+---
+
+import Shot from '../../../kit/Shot.astro';
+import Lightbox from '../../../kit/Lightbox.astro';
+
+When a Claude Code session starts subagents, Claude Code Kanban lists them under the board. You can see which agents run now, how long they took, and what each one was asked to do.
+
+<Shot themed="02-subagent-preview" alt="The Agents Log footer under the board, with the Agent modal open on the prompt of one subagent" />
+
+## Before you start
+
+Subagent tracking needs the plugin hooks. Install them once with `npx claude-code-kanban --install`. See [Getting started](/claude-code-kanban/getting-started/). Without the hooks the board shows tasks only, with no Agents Log.
+
+The plugin runs `agent-spy.sh` on the `SubagentStart`, `SubagentStop` and `TeammateIdle` hooks. The script writes one JSONL file per agent to `<config-dir>/.cck/agent-activity/<sessionId>/<agentId>.jsonl`. Each line records a change to the agent.
+
+## The Agents Log footer
+
+Select a session. If it has subagents, the **Agents Log (N)** footer shows under the board. It lists up to 8 agents. Active and idle agents come first, then the most recently updated ones.
+
+Each agent card shows:
+
+- The agent type, and a name badge when the agent has a name.
+- The status (`active`, `idle` or `stopped`) and the run time.
+- A model chip, for example `opus` or `sonnet`.
+- The agent description. If there is none, the card shows the start of the prompt.
+
+Click the footer header to collapse or expand it. The board keeps this choice for the next visit.
+
+While an agent is active or idle, the board fetches the agent list every 3 seconds. When all agents have stopped, polling stops.
+
+When the session waits for you, the footer also shows a badge: **Awaiting: &lt;tool&gt;** (for example **Awaiting: Bash**), **Question pending** or **Plan pending**. The footer shows this badge also when the session has no agents. Click it to open the prompt. See [Answer prompts from the board](/claude-code-kanban/guides/waiting-prompts/).
+
+If an active agent has no update for 30 minutes, or its session log does not change for 30 minutes, the board shows it as stopped. The agent stays in the list.
+
+## The Agent modal
+
+Click an agent card to open the Agent modal. The chips at the top show:
+
+- The short agent id (hover to see the full id).
+- The status and the run time.
+- Token count and tool call count, when known.
+- The model.
+- The owner, for a named teammate.
+- The start time and, for a stopped agent, the stop time.
+
+The **Prompt** tab shows the task the parent session gave the agent. The **Response** tab shows the last message the agent returned. Both render as Markdown.
+
+The buttons in the modal header:
+
+- **View session log** opens the agent's own log in the Session Log panel. The panel title shows the agent type and id. Click the back arrow to return to the session log. The clock button on an agent card does the same.
+- **Pin** bookmarks the agent. Pinned agents show at the top of the session log. See [Session log and details](/claude-code-kanban/guides/session-details/).
+- **Copy prompt + response** copies both texts as one Markdown block.
+- **Toggle fullscreen** makes the modal fill the window.
+
+For an active or idle agent, the Agent modal shows a **Dismiss** button next to **Close**. It marks the agent as stopped on the board. Use it when an agent stays active after its session crashed. Press <kbd>Esc</kbd> or click **Close** to close the modal.
+
+## Team sessions
+
+In a team session each teammate is an agent. Agent cards and task cards show a colored owner badge with the teammate name, so you can match tasks to the agent that works on them.
+
+Above the board, an **All Members** list filters the tasks by owner. Select a teammate to see only that teammate's tasks.
+
+<Lightbox />

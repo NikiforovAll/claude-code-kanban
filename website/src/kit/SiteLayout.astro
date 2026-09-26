@@ -1,0 +1,66 @@
+---
+import ThemeHead from './ThemeHead.astro';
+import { url } from './family';
+import './kit.css';
+
+interface Props {
+  title: string;
+  description: string;
+  image?: string;
+}
+const { title, description, image } = Astro.props;
+const ogImage = image && new URL(url(image), Astro.site).href;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    {ogImage && <meta property="og:image" content={ogImage} />}
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" href={url('favicon.svg')} type="image/svg+xml" />
+    <ThemeHead />
+  </head>
+  <body>
+    <slot />
+  </body>
+</html>
+
+<style is:global>
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    margin: 0;
+    color: var(--c-ink1);
+    font: 400 1.0625rem/1.65 var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  img {
+    max-width: 100%;
+    display: block;
+  }
+  a {
+    color: var(--c-accent-ink);
+  }
+  code,
+  kbd {
+    font-family: var(--font-mono);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * {
+      transition: none !important;
+      animation: none !important;
+    }
+  }
+</style>

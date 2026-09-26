@@ -1,0 +1,59 @@
+<dialog id="lightbox" aria-label="Screenshot">
+  <form method="dialog">
+    <button class="close" aria-label="Close">Close</button>
+  </form>
+  <img alt="" />
+</dialog>
+
+<script>
+  const dialog = document.getElementById('lightbox') as HTMLDialogElement;
+  const big = dialog.querySelector('img')!;
+  document.addEventListener('click', (e) => {
+    const trigger = (e.target as HTMLElement).closest('[data-lightbox]');
+    const img = trigger?.querySelector('img');
+    if (!img) return;
+    big.src = img.currentSrc || img.src;
+    big.alt = img.alt;
+    dialog.showModal();
+  });
+  dialog.addEventListener('click', (e) => {
+    if (e.target === dialog || e.target === big) dialog.close();
+  });
+</script>
+
+<style>
+  dialog {
+    width: fit-content;
+    max-width: none;
+    max-height: none;
+    padding: 0;
+    border: 1px solid var(--c-border);
+    border-radius: 0.625rem;
+    background: var(--c-surface);
+    overflow: hidden;
+  }
+  dialog::backdrop {
+    background: color-mix(in srgb, var(--c-field) 80%, transparent);
+    backdrop-filter: blur(4px);
+  }
+  img {
+    display: block;
+    width: auto;
+    height: auto;
+    max-width: 96vw;
+    max-height: 96vh;
+    cursor: zoom-out;
+  }
+  .close {
+    position: absolute;
+    top: 0.75rem;
+    right: 0.75rem;
+    font: 500 0.8125rem var(--font-mono);
+    padding: 0.375rem 0.75rem;
+    color: var(--c-ink1);
+    background: var(--c-elevated);
+    border: 1px solid var(--c-border);
+    border-radius: 999px;
+    cursor: pointer;
+  }
+</style>

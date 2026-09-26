@@ -1,0 +1,7 @@
+---
+// Renders [Key] in copy as a <kbd>, so data strings can carry shortcuts.
+const { text } = Astro.props as { text: string };
+const parts = text.split(/\[([^\]]+)\]/);
+---
+
+{parts.map((p, i) => (i % 2 ? <kbd>{p}</kbd> : p))}

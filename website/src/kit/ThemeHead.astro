@@ -1,0 +1,69 @@
+---
+import { DEFAULT_MODE, DEFAULT_PALETTE, MODE_KEY, PALETTE_KEY, paletteCss, palettes } from './palettes';
+
+const ids = palettes.map((p) => p.id);
+---
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link
+  rel="stylesheet"
+  href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=Playfair+Display:wght@500;600;700&display=swap"
+/>
+<style is:inline set:html={paletteCss()} />
+
+{/* Inline so the first paint already has the reader's palette and mode. */}
+<script is:inline define:vars={{ ids, DEFAULT_MODE, DEFAULT_PALETTE, MODE_KEY, PALETTE_KEY }}>
+  const read = (k) => {
+    try {
+      return localStorage.getItem(k);
+    } catch {
+      return null;
+    }
+  };
+  const write = (k, v) => {
+    try {
+      localStorage.setItem(k, v);
+    } catch {}
+  };
+  const root = document.documentElement;
+  const storedPalette = read(PALETTE_KEY);
+  const storedMode = read(MODE_KEY);
+  const system = window.matchMedia?.('(prefers-color-scheme: dark)');
+  const systemMode = () => (system ? (system.matches ? 'dark' : 'light') : DEFAULT_MODE);
+  const emit = () =>
+    document.dispatchEvent(
+      new CustomEvent('site-theme', { detail: { palette: root.dataset.palette, mode: root.dataset.theme } }),
+    );
+  root.dataset.palette = ids.includes(storedPalette) ? storedPalette : DEFAULT_PALETTE;
+  root.dataset.theme = storedMode === 'light' || storedMode === 'dark' ? storedMode : systemMode();
+  // Until the reader picks a mode, the page follows the OS setting, including changes while open.
+  system?.addEventListener('change', () => {
+    const picked = read(MODE_KEY);
+    if (picked === 'light' || picked === 'dark') return;
+    root.dataset.theme = systemMode();
+    emit();
+  });
+
+  window.siteTheme = {
+    get palette() {
+      return root.dataset.palette;
+    },
+    get mode() {
+      return root.dataset.theme;
+    },
+    set(palette, mode) {
+      if (palette && ids.includes(palette)) {
+        root.dataset.palette = palette;
+        write(PALETTE_KEY, palette);
+      }
+      if (mode === 'light' || mode === 'dark') {
+        root.dataset.theme = mode;
+        write(MODE_KEY, mode);
+      }
+      emit();
+    },
+  };
+  // Starlight's own scripts call this; the site replaces its theme picker, so there is nothing to update.
+  window.StarlightThemeProvider = { updatePickers() {} };
+</script>
