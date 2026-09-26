@@ -10,7 +10,12 @@ function loadDoorbell() {
   const mod = require(MODULE);
   const poll = (sessionId, wait = 0, query = {}) => new Promise((resolve) => {
     const req = { params: { sessionId }, query: { wait, ...query }, on() {}, removeListener() {} };
-    const res = { writableEnded: false, json: (body) => { res.writableEnded = true; resolve(body); } };
+    const res = {
+      writableEnded: false,
+      statusCode: 200,
+      status(code) { res.statusCode = code; return res; },
+      json: (body) => { res.writableEnded = true; resolve({ ...body, statusCode: res.statusCode }); },
+    };
     mod.handleSessionEvents(req, res);
   });
   return { ...mod, poll };
@@ -142,5 +147,28 @@ describe('task.moved line format', () => {
     );
     assert.doesNotMatch(line, /[\r\n]/);
     assert.equal(line.match(/cck:1/g).length, 2); // both inside one line, not two events
+  });
+
+  it('keeps dispatch reports and task moves in separate topics', async () => {
+    const { enqueueSessionEvent, topicKey, poll } = loadDoorbell();
+    enqueueSessionEvent('s1', 'cck:1 task.moved T-1 pending>in_progress');
+    enqueueSessionEvent(topicKey('dispatch', 's1'), 'cck:1 dispatch.succeeded d_1 session=c');
+    assert.deepEqual((await poll('s1', 0, { topic: 'dispatch' })).events, ['cck:1 dispatch.succeeded d_1 session=c']);
+    assert.deepEqual((await poll('s1')).events, ['cck:1 task.moved T-1 pending>in_progress']);
+  });
+
+  it('drops a topic backlog on the first attach, and keeps it without first', async () => {
+    const { enqueueSessionEvent, topicKey, poll } = loadDoorbell();
+    enqueueSessionEvent(topicKey('dispatch', 's1'), 'cck:1 dispatch.failed d_1 session=c');
+    assert.equal((await poll('s1', 0, { topic: 'dispatch' })).events.length, 1);
+    enqueueSessionEvent(topicKey('dispatch', 's1'), 'cck:1 dispatch.failed d_2 session=c');
+    assert.equal((await poll('s1', 0, { topic: 'dispatch', first: '1' })).events.length, 0);
+  });
+
+  it('refuses a malformed topic rather than reading the task-move bucket', async () => {
+    const { enqueueSessionEvent, poll } = loadDoorbell();
+    enqueueSessionEvent('s1', 'cck:1 task.moved T-1 pending>in_progress');
+    assert.equal((await poll('s1', 0, { topic: '../x' })).statusCode, 400);
+    assert.equal((await poll('s1')).events.length, 1);
   });
 });

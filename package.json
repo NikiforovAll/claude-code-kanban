@@ -55,7 +55,8 @@
     "install.js",
     "plugin/**/*",
     "lib/**/*",
-    "public/**/*"
+    "public/**/*",
+    "skill-guides/**/*"
   ],
   "devDependencies": {
     "@biomejs/biome": "2.4.14",

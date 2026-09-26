@@ -1,4 +1,6 @@
+const fs = require('fs');
 const path = require('path');
+const { getClaudeDir, displayPath } = require('./lib/claude-dir');
 
 // Help is auto-generated from this table — keep flags/usage in sync with `run` behavior.
 const COMMANDS = {
@@ -80,6 +82,67 @@ const COMMANDS = {
           '--json': 'Output JSON instead of formatted lines',
         },
         run: runSessionPeekCli,
+      },
+    },
+  },
+  dispatch: {
+    summary: 'Start a Claude Code session for a task in cck and collect its report',
+    verbs: {
+      start: {
+        summary: 'Start a session with a task; prints the dispatch id',
+        usage: 'claude-code-kanban dispatch start --cwd <dir> (--spec <text> | --spec-file <path>) [--name <n>] [--model <m>] [--worktree [name]] [--json]',
+        flags: {
+          '--cwd <dir>': 'Folder to run in (a known project, default: current dir)',
+          '--spec <text>': 'The task, self-contained',
+          '--spec-file <path>': 'Read the task from a file',
+          '--name <n>': 'Session name',
+          '--model <m>': 'fable, opus, sonnet or haiku',
+          '--worktree [name]': 'Run in a new git worktree',
+          '--json': 'Output JSON',
+        },
+        run: runDispatchStartCli,
+      },
+      done: {
+        summary: 'Report the outcome of a dispatch (run by the started session)',
+        usage: 'claude-code-kanban dispatch done <id> --cap <cap> --outcome succeeded|failed (--summary <text> | --summary-file <path>)',
+        flags: {
+          '<id>': 'Dispatch id from the preamble',
+          '--cap <cap>': 'Capability from the preamble',
+          '--outcome <o>': 'succeeded or failed',
+          '--summary <text>': 'What changed, what was found, what remains',
+          '--summary-file <path>': 'Read the summary from a file',
+        },
+        run: runDispatchDoneCli,
+      },
+      wait: {
+        summary: 'Wait until a dispatch settles; a timeout is a checkpoint, not a failure',
+        usage: 'claude-code-kanban dispatch wait [<id>...] [--timeout <dur>] [--json]',
+        flags: {
+          '<id>': 'Dispatches to wait on (default: all started by this session)',
+          '--timeout <dur>': 'How long to wait, e.g. 90s, 15m, 1h (default: 10m)',
+          '--json': 'Output JSON',
+        },
+        run: runDispatchWaitCli,
+      },
+      list: {
+        summary: 'List dispatches started by this session',
+        usage: 'claude-code-kanban dispatch list [--all] [--json]',
+        flags: {
+          '--all': 'Every dispatch on this board',
+          '--json': 'Output JSON',
+        },
+        run: runDispatchListCli,
+      },
+    },
+  },
+  skills: {
+    summary: 'Print a skill guide bundled with this version',
+    verbs: {
+      get: {
+        summary: 'Print the guide for a skill',
+        usage: 'claude-code-kanban skills get <name>',
+        flags: { '<name>': 'Skill name, e.g. dispatch' },
+        run: runSkillsGetCli,
       },
     },
   },
@@ -197,8 +260,25 @@ function getArgValue(args, name) {
   return args[idx + 1] && !args[idx + 1].startsWith('--') ? args[idx + 1] : null;
 }
 
-function cliPort() { return process.env.PORT || 3541; }
-function unreachable() { return `Cannot reach cck server on port ${cliPort()}. Start it first with "claude-code-kanban".`; }
+// The hub runs one cck per config dir, each on its own port, so 3541 can be another dir's board.
+// The server's beacon in this config dir names the right one; PORT still wins when set.
+function cliPort() {
+  if (process.env.PORT) return process.env.PORT;
+  const { port, pid } = readCckJson('server.json') || {};
+  return port && pid && isPidAlive(pid) ? port : 3541;
+}
+
+function readCckJson(name) {
+  try { return JSON.parse(fs.readFileSync(path.join(getClaudeDir(), '.cck', name), 'utf8')); } catch (_) { return null; }
+}
+
+// EPERM means the process exists but belongs to someone else.
+function isPidAlive(pid) {
+  try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }
+}
+function unreachable() {
+  return `Cannot reach cck server for ${displayPath(getClaudeDir())} on port ${cliPort()}. Start it first with "claude-code-kanban".`;
+}
 
 class CliUnreachable extends Error { constructor() { super(unreachable()); this.code = 'unreachable'; } }
 
@@ -213,15 +293,19 @@ async function cliFetch(urlPath, init) {
 
 // Every write verb posts JSON and reports failure the same way; `label` names the verb
 // in the error line. Returns false when the server refused, so callers just return 1.
-async function cliPostJson(urlPath, body, label) {
+// Returns the parsed response body ({} when empty), or null after printing the failure.
+async function cliPostJson(urlPath, body, label, headers = {}) {
   const res = await cliFetch(urlPath, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...headers },
     body: JSON.stringify(body)
   });
-  if (res.ok) return true;
-  console.error(`${label} failed (${res.status}): ${await res.text()}`);
-  return false;
+  const text = await res.text();
+  let parsed = {};
+  try { parsed = text ? JSON.parse(text) : {}; } catch (_) { /* not JSON */ }
+  if (res.ok) return parsed;
+  console.error(`${label} failed (${res.status}): ${parsed.error || text}`);
+  return null;
 }
 
 function reportCliError(e) {
@@ -590,6 +674,136 @@ async function runSessionPeekCli(args) {
     }
     return 0;
   } catch (e) { reportCliError(e); return 1; }
+}
+
+function positionals(args, valueFlags) {
+  return args.filter((a, i) => !a.startsWith('--') && !valueFlags.includes(args[i - 1]));
+}
+
+// The server matches the folder against known project paths by string, so an 8.3 short name
+// or a differently cased drive letter from the shell must become the long, canonical form.
+function canonicalDir(dir) {
+  try { return fs.realpathSync.native(path.resolve(dir)); } catch (_) { return path.resolve(dir); }
+}
+
+function textArg(args, name) {
+  const file = getArgValue(args, `${name}-file`);
+  return file ? fs.readFileSync(path.resolve(file), 'utf8') : getArgValue(args, name);
+}
+
+function parseDuration(raw, fallbackSec) {
+  if (!raw) return fallbackSec;
+  const m = /^(\d+(?:\.\d+)?)(s|m|h)?$/.exec(raw);
+  if (!m) return null;
+  return Number(m[1]) * ({ s: 1, m: 60, h: 3600 }[m[2] || 's']);
+}
+
+function printDispatch(r) {
+  const head = `${r.id}  ${r.status.padEnd(9)} session=${r.session}${r.name ? `  ${r.name}` : ''}`;
+  console.log(r.summary ? `${head}\n  ${r.summary}` : head);
+}
+
+async function runDispatchStartCli(args) {
+  const token = readCckJson('terminal-token.json')?.token;
+  if (!token) {
+    console.error(`No terminal token for ${displayPath(getClaudeDir())}. The cck server must be running with the terminal enabled.`);
+    return 1;
+  }
+  let spec;
+  try { spec = textArg(args, 'spec'); } catch (e) { console.error(e.message); return 1; }
+  if (!spec) {
+    printLeafHelp('dispatch start', COMMANDS.dispatch.verbs.start);
+    return 1;
+  }
+  const worktree = args.includes('--worktree') ? getArgValue(args, 'worktree') || true : false;
+  const body = {
+    cwd: canonicalDir(getArgValue(args, 'cwd') || '.'),
+    spec,
+    name: getArgValue(args, 'name'),
+    model: getArgValue(args, 'model'),
+    worktree,
+    parent: process.env.CLAUDE_CODE_SESSION_ID || null,
+  };
+  try {
+    const out = await cliPostJson('/api/dispatch', body, 'Dispatch', { 'x-terminal-token': token });
+    if (!out) return 1;
+    if (args.includes('--json')) console.log(JSON.stringify(out, null, 2));
+    else console.log(`Started ${out.dispatch} (session ${out.session}) in ${out.cwd}`);
+    return 0;
+  } catch (e) { reportCliError(e); return 1; }
+}
+
+async function runDispatchDoneCli(args) {
+  const [id] = positionals(args, ['--cap', '--outcome', '--summary', '--summary-file']);
+  let summary;
+  try { summary = textArg(args, 'summary'); } catch (e) { console.error(e.message); return 1; }
+  const body = { cap: getArgValue(args, 'cap'), outcome: getArgValue(args, 'outcome'), summary };
+  if (!id || !body.cap || !body.outcome) {
+    printLeafHelp('dispatch done', COMMANDS.dispatch.verbs.done);
+    return 1;
+  }
+  try {
+    if (!await cliPostJson(`/api/dispatch/${encodeURIComponent(id)}/done`, body, 'Report')) return 1;
+    console.log(`Reported ${id}: ${body.outcome}`);
+    return 0;
+  } catch (e) { reportCliError(e); return 1; }
+}
+
+function dispatchQuery(ids, all = false) {
+  const q = new URLSearchParams();
+  if (ids.length) q.set('ids', ids.join(','));
+  else if (!all && process.env.CLAUDE_CODE_SESSION_ID) q.set('parent', process.env.CLAUDE_CODE_SESSION_ID);
+  return q;
+}
+
+async function runDispatchWaitCli(args) {
+  const timeoutRaw = getArgValue(args, 'timeout');
+  const timeoutSec = parseDuration(timeoutRaw, 600);
+  if (timeoutSec === null) {
+    console.error(`Invalid --timeout value: ${timeoutRaw}`);
+    return 1;
+  }
+  const q = dispatchQuery(positionals(args, ['--timeout']));
+  const deadline = Date.now() + timeoutSec * 1000;
+  try {
+    let out;
+    do {
+      q.set('wait', String(Math.max(1, Math.min(120, Math.ceil((deadline - Date.now()) / 1000)))));
+      const res = await cliFetch(`/api/dispatch?${q}`);
+      out = await res.json();
+    } while (out.timeout && Date.now() < deadline);
+    if (args.includes('--json')) console.log(JSON.stringify(out, null, 2));
+    else {
+      for (const r of out.settled) printDispatch(r);
+      if (out.running.length) console.log(`${out.timeout ? 'Timed out; still running' : 'Still running'}: ${out.running.map(r => r.id).join(' ')}`);
+      if (!out.settled.length && !out.running.length) console.log('No dispatches to wait on.');
+    }
+    return 0;
+  } catch (e) { reportCliError(e); return 1; }
+}
+
+async function runDispatchListCli(args) {
+  try {
+    const res = await cliFetch(`/api/dispatch?${dispatchQuery([], args.includes('--all'))}`);
+    const { settled, running } = await res.json();
+    const rows = [...running, ...settled].sort((a, b) => b.startedAt - a.startedAt);
+    if (args.includes('--json')) console.log(JSON.stringify(rows, null, 2));
+    else if (!rows.length) console.log('No dispatches.');
+    else rows.forEach(printDispatch);
+    return 0;
+  } catch (e) { reportCliError(e); return 1; }
+}
+
+async function runSkillsGetCli(args) {
+  const name = args.find(a => !a.startsWith('--'));
+  const file = name && /^[a-z][a-z-]*$/.test(name) ? path.join(__dirname, 'skill-guides', `${name}.md`) : null;
+  if (!file || !fs.existsSync(file)) {
+    const known = fs.readdirSync(path.join(__dirname, 'skill-guides')).map(f => f.replace(/\.md$/, ''));
+    console.error(`Unknown skill guide: ${name || '(none)'}. Known: ${known.join(', ')}`);
+    return 1;
+  }
+  process.stdout.write(fs.readFileSync(file, 'utf8'));
+  return 0;
 }
 
 module.exports = { runCli };

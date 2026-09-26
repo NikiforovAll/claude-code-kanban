@@ -39,6 +39,7 @@ const { inlineHtmlAssets, MIME_BY_EXT } = require('./lib/inline-assets');
 const { buildDecision, decisionFileName, isDecisionFile, approvalsFrom, boardRefusal } = require('./lib/approvals');
 const { getClaudeDir, getArgValue, storageNamespace, isDefaultClaudeDir } = require('./lib/claude-dir');
 const { createTerminalService, readTerminalConfig } = require('./lib/terminal');
+const { createDispatchRegistry, formatPreamble, formatDispatchLine } = require('./lib/dispatch');
 const { pickFolder } = require('./lib/folder-dialog');
 
 if (process.argv.includes("--install") || process.argv.includes("--uninstall")) {
@@ -80,6 +81,7 @@ const AGENT_ACTIVITY_DIR = path.join(CCK_DIR, 'agent-activity');
 const CONTEXT_STATUS_DIR = path.join(CCK_DIR, 'context-status');
 const PINS_FILE = path.join(CCK_DIR, 'pins.json');
 const SERVER_INFO_FILE = path.join(CCK_DIR, 'server.json');
+const TERMINAL_TOKEN_FILE = path.join(CCK_DIR, 'terminal-token.json');
 // Harness-owned scratchpad root; the per-session dir under it is created lazily.
 const SCRATCHPAD_ROOT = path.join(os.tmpdir(), 'claude');
 
@@ -95,11 +97,11 @@ function readPins() {
   return {};
 }
 
-function writeJsonAtomic(file, obj) {
+function writeJsonAtomic(file, obj, mode) {
   try {
     mkdirSync(CCK_DIR, { recursive: true });
     const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
-    writeFileSync(tmp, JSON.stringify(obj, null, 2), 'utf8');
+    writeFileSync(tmp, JSON.stringify(obj, null, 2), { encoding: 'utf8', mode });
     renameSync(tmp, file);
   } catch (e) {
     console.error(`Failed to write ${path.basename(file)}:`, e.message);
@@ -115,6 +117,14 @@ function writePins(pins) {
 // a crashed one.
 function writeServerInfo(port) {
   writeJsonAtomic(SERVER_INFO_FILE, { port, pid: process.pid });
+  writeTerminalToken();
+}
+
+// For `dispatch start`: a local process as the same user can already run claude itself,
+// so handing it the token adds little. A browser still cannot read the file.
+function writeTerminalToken() {
+  if (terminal.unavailableReason()) return;
+  writeJsonAtomic(TERMINAL_TOKEN_FILE, { pid: process.pid, token: terminal.token }, 0o600);
 }
 
 // A beacon that outlives its server disarms UI approvals silently: approval-gate.sh
@@ -123,10 +133,22 @@ function writeServerInfo(port) {
 // the way out. Only when the file is still ours: a newer server on the same config
 // dir has already claimed it.
 function removeServerInfo() {
+  for (const file of [SERVER_INFO_FILE, TERMINAL_TOKEN_FILE]) {
+    try {
+      const info = JSON.parse(readFileSync(file, 'utf8'));
+      if (info.pid === process.pid) unlinkSync(file);
+    } catch (_) { /* gone, unreadable, or not ours */ }
+  }
+}
+
+// A second server on the same config dir (a test hub, say) takes the beacon and removes it on
+// exit, which leaves this live server undiscoverable. A newer live owner keeps it.
+function reclaimServerInfo(port) {
   try {
-    const info = JSON.parse(readFileSync(SERVER_INFO_FILE, 'utf8'));
-    if (info.pid === process.pid) unlinkSync(SERVER_INFO_FILE);
-  } catch (_) { /* gone, unreadable, or not ours */ }
+    const { pid } = JSON.parse(readFileSync(SERVER_INFO_FILE, 'utf8'));
+    if (pid === process.pid || isPidAlive(pid)) return;
+  } catch (_) { /* missing or unreadable beacon */ }
+  writeServerInfo(port);
 }
 
 process.on('exit', removeServerInfo);
@@ -459,8 +481,13 @@ function isRegistryIdle(sessionId) {
 function isSessionProcessAlive(sessionId, exceptPid = null) {
   return loadLiveSessions().some((s) => {
     if (s.sessionId !== sessionId || !s.pid || s.pid === exceptPid) return false;
-    try { process.kill(s.pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }
+    return isPidAlive(s.pid);
   });
+}
+
+// EPERM means the process exists but belongs to someone else.
+function isPidAlive(pid) {
+  try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }
 }
 
 function hasRecentLogActivity(sessionId, logAge) {
@@ -3131,6 +3158,7 @@ const terminal = createTerminalService({
   isAllowedFolder,
   liveSessions: () => loadLiveSessions(true),
   onChange: () => broadcast({ type: 'terminals-update', ids: terminal.list().map((t) => t.id) }),
+  onExit: (id) => dispatches.sessionExited(id),
 });
 
 let folderDialogOpen = false;
@@ -3179,6 +3207,53 @@ app.get('/vendor/xterm/:file', (req, res) => {
   try { file = require.resolve(rel); } catch { return res.status(404).end(); }
   res.setHeader('Cache-Control', 'public, max-age=86400');
   res.sendFile(file);
+});
+// #endregion
+
+// #region DISPATCH
+const dispatches = createDispatchRegistry({
+  onSettle: (r) => {
+    if (r.parent) enqueueSessionEvent(topicKey('dispatch', r.parent), formatDispatchLine(r));
+    broadcast({ type: 'dispatch-update' });
+  },
+});
+
+// Starting a session needs the terminal token, as the browser does; the CLI reads it from
+// TERMINAL_TOKEN_FILE. The child gets only its dispatch capability through the preamble.
+app.post('/api/dispatch', (req, res) => {
+  if (!terminal.authorized(req.get('x-terminal-token'))) return res.status(401).json({ error: 'invalid terminal token' });
+  const { cwd, spec, name, model, worktree, parent } = req.body || {};
+  if (typeof spec !== 'string' || !spec.trim()) return res.status(400).json({ error: 'spec is required' });
+  if (parent != null && !(typeof parent === 'string' && isUUID(parent))) return res.status(400).json({ error: 'invalid parent' });
+  const r = dispatches.create({ parent, name, spec: spec.trim() });
+  const env = { CCK_DISPATCH_ID: r.id, ...(parent && { PARENT_SESSION_ID: parent }) };
+  const started = terminal.startNew({ cwd, name, model, worktree, prompt: formatPreamble(r) }, env);
+  if (started.error) {
+    dispatches.discard(r.id);
+    return res.status(started.status).json({ error: started.error });
+  }
+  dispatches.attach(r.id, { session: started.id, cwd: started.cwd });
+  broadcast({ type: 'dispatch-update' });
+  res.status(201).json({ dispatch: r.id, session: started.id, cwd: started.cwd });
+});
+
+app.post('/api/dispatch/:id/done', (req, res) => {
+  const { cap, outcome, summary } = req.body || {};
+  const err = dispatches.settle(req.params.id, cap, outcome, summary);
+  if (err) return res.status(err.status).json({ error: err.error });
+  res.status(204).end();
+});
+
+app.get('/api/dispatch', async (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const ids = typeof req.query.ids === 'string' && req.query.ids ? req.query.ids.split(',') : null;
+  const parent = typeof req.query.parent === 'string' && req.query.parent ? req.query.parent : null;
+  // res, not req: a GET's request stream can close before the response is sent.
+  const out = await dispatches.wait({ ids, parent }, req.query.wait, (stop) => {
+    res.on('close', stop);
+    return () => res.off('close', stop);
+  });
+  if (!res.writableEnded) res.json(out);
 });
 // #endregion
 
@@ -3237,7 +3312,7 @@ app.get('/api/tasks/all', async (_req, res) => {
   }
 });
 
-const { enqueueSessionEvent, formatTaskMoved, handleSessionEvents } = require('./lib/session-events');
+const { enqueueSessionEvent, formatTaskMoved, handleSessionEvents, topicKey } = require('./lib/session-events');
 app.get('/api/sessions/:sessionId/events', handleSessionEvents);
 
 // API: Create a task
@@ -3994,6 +4069,7 @@ async function prewarmCaches() {
     // The port is configurable and falls back to a random one when taken, so the postman
     // monitor cannot assume it -- publish the live one where it can read it.
     writeServerInfo(actualPort);
+    setInterval(() => reclaimServerInfo(actualPort), 30000).unref();
     migrateLegacyApprovalsConfig();
     const warning = net.exposureWarning();
     if (warning) console.log(warning);

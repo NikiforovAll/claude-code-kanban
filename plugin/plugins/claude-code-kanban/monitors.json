@@ -4,5 +4,11 @@
     "description": "Notifies this session when its tasks are moved on the kanban board.",
     "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/postman.js\"",
     "when": "on-skill-invoke:claude-code-kanban:kanban-follow"
+  },
+  {
+    "name": "kanban-dispatch-inbox",
+    "description": "Notifies this session when a session it dispatched through cck reports or exits.",
+    "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/postman.js\" --topic dispatch --keep-backlog",
+    "when": "on-skill-invoke:claude-code-kanban:kanban-dispatch"
   }
 ]
