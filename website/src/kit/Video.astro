@@ -1,0 +1,115 @@
+---
+import { url } from './family';
+
+interface Props {
+  title: string;
+  /** YouTube video ids for each site mode. */
+  light: string;
+  dark: string;
+  /** Poster path under public/, with {mode} in place of light or dark. */
+  poster: string;
+  width?: number;
+  height?: number;
+}
+const { title, light, dark, poster, width = 1920, height = 1200 } = Astro.props;
+---
+
+<site-video class="video" data-light={light} data-dark={dark} style={`aspect-ratio: ${width} / ${height}`}>
+  {
+    (['light', 'dark'] as const).map((mode) => (
+      <a class={`play ${mode}`} href={`https://youtu.be/${mode === 'light' ? light : dark}`} aria-label={`Play video: ${title}`}>
+        <img src={url(poster.replace('{mode}', mode))} alt="" width={width} height={height} loading="lazy" decoding="async" />
+        <span class="button" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z" /></svg>
+        </span>
+      </a>
+    ))
+  }
+</site-video>
+
+<script>
+  // The player loads only on click, so the page makes no request to YouTube until then.
+  class SiteVideo extends HTMLElement {
+    connectedCallback() {
+      for (const link of this.querySelectorAll('a')) {
+        link.addEventListener('click', (e) => {
+          e.preventDefault();
+          const id = window.siteTheme.mode === 'dark' ? this.dataset.dark : this.dataset.light;
+          const frame = document.createElement('iframe');
+          frame.src = `https://www.youtube-nocookie.com/embed/${id}?autoplay=1&rel=0`;
+          frame.title = link.getAttribute('aria-label') ?? '';
+          frame.allow = 'autoplay; encrypted-media; picture-in-picture; fullscreen';
+          frame.allowFullscreen = true;
+          this.replaceChildren(frame);
+        });
+      }
+    }
+  }
+  customElements.define('site-video', SiteVideo);
+</script>
+
+<style>
+  .video {
+    position: relative;
+    display: block;
+    overflow: hidden;
+    border: 1px solid var(--c-border);
+    border-radius: 0.75rem;
+    background: var(--c-elevated);
+  }
+  :root[data-theme='dark'] .play.light,
+  :root:not([data-theme='dark']) .play.dark {
+    display: none;
+  }
+  .play {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+  }
+  .play img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .button {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 5rem;
+    height: 5rem;
+    border-radius: 50%;
+    color: var(--c-field);
+    background: var(--c-ink1);
+    box-shadow: 0 12px 32px -8px rgb(0 0 0 / 0.45);
+    transition: transform 0.15s ease, background 0.15s ease;
+  }
+  .button svg {
+    width: 2rem;
+    height: 2rem;
+    margin-left: 0.25rem;
+    fill: currentColor;
+  }
+  .play:hover .button {
+    transform: scale(1.06);
+    background: var(--c-accent-ink);
+  }
+  .play:focus-visible {
+    outline: 2px solid var(--c-accent);
+    outline-offset: -4px;
+  }
+  .video :global(iframe) {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border: 0;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .button {
+      transition: none;
+    }
+  }
+</style>

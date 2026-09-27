@@ -5,6 +5,7 @@ import Keys from '../kit/Keys.astro';
 import ModeToggle from '../kit/ModeToggle.astro';
 import ThemeDial from '../kit/ThemeDial.astro';
 import Lightbox from '../kit/Lightbox.astro';
+import Video from '../kit/Video.astro';
 import FamilyFooter from '../kit/FamilyFooter.astro';
 import { family, url } from '../kit/family';
 
@@ -138,6 +139,17 @@ const setup = [
             <p>The 17 themes the app ships with, in light and dark. Pick one and the page follows.</p>
           </figcaption>
         </figure>
+      </section>
+
+      <section class="half" aria-labelledby="tour">
+        <div class="half-head">
+          <h2 id="tour">Tour</h2>
+          <p>
+            Start a session, watch its tasks move to done, approve a prompt from the board, and open the file it wrote.
+            74 seconds, with sound.
+          </p>
+        </div>
+        <Video title="Claude Code Kanban tour" light="QbvDBFyfC7s" dark="bXZ4_QCmD7k" poster="video/cck-{mode}.webp" />
       </section>
 
       <section class="half" aria-labelledby="watch">

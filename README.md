@@ -8,10 +8,14 @@ Start, watch and answer Claude Code sessions from one live board, with a termina
 
 **[Documentation](https://nikiforovall.blog/claude-code-kanban/)**
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="website/public/shots/themes/ember-board-dark.webp">
-  <img alt="The board: session sidebar on the left, Pending and In Progress task columns, the agents log below, and the session log on the right" src="website/public/shots/themes/ember-board-light.webp">
-</picture>
+<a href="https://youtu.be/QbvDBFyfC7s">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="website/public/video/cck-dark.webp">
+    <img alt="Claude Code Kanban tour video (74 seconds). Opens on YouTube." src="website/public/video/cck-light.webp">
+  </picture>
+</a>
+
+Watch the tour on YouTube: [light](https://youtu.be/QbvDBFyfC7s), [dark](https://youtu.be/bXZ4_QCmD7k).
 
 ## Getting started
 
