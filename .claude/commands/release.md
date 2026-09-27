@@ -51,4 +51,11 @@ Create a new release for this project.
    gh release create v<version> --title "v<version>" --notes "<notes>" [--prerelease]
    ```
 
-9. **Report**: Show the release URL to the user.
+9. **Watch the publish**: The tag push starts `.github/workflows/release.yml`, which publishes to npm through trusted publishing (a version with `-` goes to the `rc` dist-tag) and then deploys the docs site for a stable version. Nobody runs `npm publish` locally.
+   ```
+   gh run list --workflow release.yml --limit 1
+   gh run watch <run-id> --exit-status
+   ```
+   If a run fails, fix the cause, then run it again from the tag: `gh workflow run release.yml --ref v<version>`. The publish step skips a version that is already on the registry.
+
+10. **Report**: Show the release URL, the workflow run URL, and the published npm version.

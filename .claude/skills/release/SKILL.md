@@ -1,13 +1,13 @@
 ---
 name: release
-description: This skill should be used when the user wants to create a new release — bump version, tag, push, create GitHub release, and optionally publish to npm. Use when user says "release", "bump version", "publish", "cut a release", or "release candidate".
+description: This skill should be used when the user wants to create a new release — bump version, tag, push, create GitHub release, and publish to npm through the release workflow. Use when user says "release", "bump version", "publish", "cut a release", or "release candidate".
 argument-hint: "[version | rc]"
 allowed-tools: Read, Bash(git *), Bash(gh *), Bash(bun *)
 ---
 
 # Release
 
-Bump version, tag, push, create a GitHub release with auto-generated notes, and present npm publish command. Supports both stable releases and release candidates (RC).
+Bump version, tag, push, create a GitHub release with auto-generated notes, and watch the workflow that publishes to npm. Supports both stable releases and release candidates (RC).
 
 ## Inputs
 
@@ -102,20 +102,17 @@ gh release create v<version> --title "v<version>" --notes "<notes>"
 gh release create v<version> --title "v<version>" --notes "<notes>" --prerelease
 ```
 
-### Step 9: Present npm Publish
+### Step 9: Watch the Publish
 
-Show the release URL. Then present the user with the manual publish command:
+The tag push in Step 6 starts `.github/workflows/release.yml`. It publishes to npm through trusted publishing and then deploys the docs site for a stable release. Nobody runs `npm publish` locally.
 
-**Stable release:**
-```
-npm publish
-```
-
-**RC release:**
-```
-npm publish --tag rc
+```bash
+gh run list --workflow release.yml --limit 1
+gh run watch <run-id> --exit-status
 ```
 
-Explain: `--tag rc` prevents the RC from becoming the `latest` dist-tag. Users install via `npm install <pkg>@rc` or `npx <pkg>@rc`.
+An RC version (with `-`) goes to the `rc` dist-tag and skips the docs deploy, so it never becomes `latest`. Users install it with `npm install <pkg>@rc` or `npx <pkg>@rc`.
 
-Do **not** run `npm publish` automatically — let the user decide.
+If the run fails, fix the cause, then run it again from the tag: `gh workflow run release.yml --ref v<version>`. The publish step skips a version that is already on the registry.
+
+Report the release URL, the workflow run URL, and the published npm version.
