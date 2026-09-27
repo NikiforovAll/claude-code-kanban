@@ -4,92 +4,116 @@
 [![license](https://img.shields.io/npm/l/claude-code-kanban)](LICENSE)
 [![npm downloads](https://img.shields.io/npm/dm/claude-code-kanban)](https://www.npmjs.com/package/claude-code-kanban)
 
-**[Live Demo & Docs](https://nikiforovall.blog/claude-code-kanban/)**
+Start, watch and answer Claude Code sessions from one live board, with a terminal built in.
 
-> Watch Claude Code work, in real time.
+**[Documentation](https://nikiforovall.blog/claude-code-kanban/)**
 
-![Kanban board with session log](assets/shot-session-log.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="website/public/shots/themes/ember-board-dark.webp">
+  <img alt="The board: session sidebar on the left, Pending and In Progress task columns, the agents log below, and the session log on the right" src="website/public/shots/themes/ember-board-light.webp">
+</picture>
 
-## Getting Started
+## Getting started
 
-### 1. Install hooks (one-time setup)
+You need Node.js 20 or later, the `claude` CLI, and `jq` for the hook scripts.
 
-Hooks enable subagent tracking, waiting-for-user detection, and session activity indicators. **Without hooks, you only see tasks — no agent log, no live indicators.**
+### 1. Install the integration (one time)
 
 ```bash
 npx claude-code-kanban --install
 ```
 
-Non-destructive — existing settings in `~/.claude/settings.json` are preserved. Uninstall anytime with `npx claude-code-kanban --uninstall`.
+The installer adds a Claude Code plugin with hooks and skills, and a statusLine script for context use and cost. It asks before each change and keeps your other settings. Without the hooks, the board shows tasks only: no agent log, no live activity, no waiting prompts.
 
-Using another Claude config dir? Pass `--dir=<path>` (or set `CLAUDE_CONFIG_DIR`) to both `--install` and `--uninstall`. The plugin, hooks and statusLine land in that dir, and the hooks write their data under it when Claude Code runs with the same `CLAUDE_CONFIG_DIR`.
+To remove it, run `npx claude-code-kanban --uninstall`. For another Claude config dir, pass the same `--dir=<path>` (or set `CLAUDE_CONFIG_DIR`) to `--install`, `--uninstall` and the server. See [Getting started](https://nikiforovall.blog/claude-code-kanban/getting-started/) for each install step.
 
-### 2. Start the dashboard
+### 2. Start the board
 
 ```bash
 npx claude-code-kanban --open
 ```
 
+The board runs at `http://localhost:3541`. To install the command globally, run `npm install -g claude-code-kanban`, then `claude-code-kanban --open`.
+
 ### 3. Use Claude Code as usual
 
-Tasks, agents, and messages appear on the board automatically — Claude Code writes task files and conversation logs to `~/.claude`, the dashboard watches them and streams updates to the browser via SSE. Moving a card is the one thing that flows the other way: the board notifies the owning session with the card subject and description, so the agent can act on it.
+Run `claude` in any project. You do not configure anything per project. Claude Code writes task files and transcripts to the config dir, and the board watches them and sends each change to the browser.
 
-> **Empty board?** Claude Code ships the task tools off by default on some models — currently Opus 5, Fable 5 — so nothing writes task files and the board stays empty. Turn them on in `~/.claude/settings.json`:
+> **Empty board?** Claude Code ships the task tools off by default on some models, so Claude writes no tasks. Turn them on in the `env` block of Claude Code `settings.json`, then restart Claude Code:
 >
 > ```json
 > { "env": { "CLAUDE_CODE_ENABLE_TODO_TOOLS": "true" } }
 > ```
 >
-> Then restart Claude Code. You can also add a task by hand from the board's Pending column.
+> You can also add a task by hand with **Add task** in the Pending column.
 
 ## Features
 
-- **Real-time Kanban board** — Tasks move through Pending → In Progress → Completed as Claude works
-- **Session log** — The full conversation timeline: prompts, replies, tool calls and results (`Shift+L`)
-- **Agent log** — Live subagent tracking with prompts, duration, status, and idle detection
-- **Task detail panel** — Full description, notes, blockedBy/blocks dependencies, inline editing
-- **Follow & pin** — Follow the latest message live (`Shift+M`), pin the messages that matter
-- **Tool stats & impact** — Per-session tool usage breakdown and file impact
-- **Waiting-for-user indicators** — Amber highlight on sessions needing permission or input
-- **UI approvals** — Allow/deny permission asks and answer questions from the board; on by default, opt out per config dir — [docs](docs/ui-approvals.md)
-- **Agent teams** — Color-coded team members, owner filtering, member count badges
-- **17 color themes** — Dracula, Nord, Catppuccin, Gruvbox, Tokyo Night, and more — each in light and dark
-- **Storage manager** — Inspect disk usage and clean up stale sessions and tasks
-- **Session picker** — Jump to any session in the sidebar with `Shift+P`, filtering by name, project or branch
-- **Keyboard-first** — Press `?` for the full shortcut reference
+### Watch
 
-![Session info](assets/shot-session-info.png)
+- **Live board.** Tasks move through Pending, In Progress and Completed as Claude works. The task panel shows what a task waits on and what it blocks, and you can edit the title and description in place. [Sessions and the board](https://nikiforovall.blog/claude-code-kanban/guides/sessions-and-board/)
+- **Session log.** Every prompt, reply and tool call in order (<kbd>Shift</kbd>+<kbd>L</kbd>). Follow the newest message with <kbd>Shift</kbd>+<kbd>M</kbd>, and pin the messages that matter. [Session log and details](https://nikiforovall.blog/claude-code-kanban/guides/session-details/)
+- **Subagents.** The agents log lists each subagent with its model, status and run time. Open one to read its prompt and response. Team sessions get colored owner badges and an owner filter. [Subagents](https://nikiforovall.blog/claude-code-kanban/guides/subagents/)
+- **Session info and tool stats.** Model, branch, context window use, cost, and which tools ran. The sidebar footer shows your 5-hour and 7-day rate limit use.
+- **Zen mode.** <kbd>Shift</kbd>+<kbd>Z</kbd> shows only the current session in the sidebar, with its context use, scratchpad folder and linked documents.
 
-![Subagent preview](assets/shot-subagent-preview.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="website/public/shots/themes/ember-02-subagent-preview-dark.webp">
+  <img alt="The Agent modal open on the prompt of an Explore subagent, with id, status, tokens, tools and model chips, above the agents log" src="website/public/shots/themes/ember-02-subagent-preview-light.webp">
+</picture>
 
-![Theme picker](assets/shot-theme-picker.png)
+### Drive
 
+- **Answer prompts from the board.** When Claude asks for permission, asks a question or waits for plan approval, the session gets an amber highlight and the ask shows with Allow and Deny buttons or an answer form. The terminal prompt stays open, and the first answer wins. [Answer prompts from the board](https://nikiforovall.blog/claude-code-kanban/guides/waiting-prompts/)
+- **Embedded terminal.** Run a real Claude Code process for any session next to its board (<kbd>Ctrl</kbd>+<kbd>&#96;</kbd>). <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>R</kbd> resumes a past session and <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>S</kbd> swaps to the previous one. The terminal is off by default when the board runs alone. Start it with `--enable-terminal` and open the `#t=<token>` link the server prints. [Embedded terminal](https://nikiforovall.blog/claude-code-kanban/guides/embedded-terminal/)
+- **New session.** <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>N</kbd> opens a dialog to pick a folder, a name, a model, an optional git worktree and a first prompt. Needs the terminal.
+- **Dispatch.** Hand a written task to a new session with `claude-code-kanban dispatch start`, or ask Claude to do it with the `kanban-dispatch` skill. Add `--report` to get the outcome back. Needs the terminal. [Dispatch tasks to other sessions](https://nikiforovall.blog/claude-code-kanban/guides/dispatch/)
+- **Steer with card moves.** Run `/claude-code-kanban:kanban-follow` in a session, then drag its cards. Claude starts, parks or stops the task. [Claude Code plugin skills](https://nikiforovall.blog/claude-code-kanban/guides/plugin-skills/)
 
-## Context Window Monitoring
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="website/public/shots/themes/ember-11-waiting-prompt-dark.webp">
+  <img alt="An Awaiting permission: Bash dialog with the command and Allow and Deny buttons, over a session log that ends with the same waiting ask" src="website/public/shots/themes/ember-11-waiting-prompt-light.webp">
+</picture>
 
-Per-session context usage bars, token/cost breakdowns, and model info in the sidebar and detail panel. The installer copies `context-status.sh` — wire it into your statusline in `~/.claude/settings.json`:
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="website/public/shots/themes/ember-terminal-dark.webp">
+  <img alt="Zen mode with the embedded terminal: one session card and its context use and cost in the sidebar, and Claude Code running in the terminal" src="website/public/shots/themes/ember-terminal-light.webp">
+</picture>
 
-```json
-{
-  "statusLine": {
-    "type": "command",
-    "command": "~/.claude/hooks/context-status.sh | npx -y ccstatusline@latest",
-    "padding": 0
-  }
-}
-```
+### Organize
 
-The script pipes through, so your existing statusline keeps working.
+- **Session groups.** Drag sessions and projects from different folders into one named group in the sidebar. [Session groups](https://nikiforovall.blog/claude-code-kanban/guides/session-groups/)
+- **Filters, search and pins.** Filter by project and activity, search across sessions and tasks, pin a session or make it sticky. <kbd>Shift</kbd>+<kbd>P</kbd> opens the session picker.
+- **Scratchpad and linked documents.** Keep a note per session, project or group (<kbd>N</kbd>), and link files to a session to preview them in one click.
+- **Themes.** 17 color themes, each in light and dark. <kbd>T</kbd> switches the mode.
+- **Keyboard first.** Arrow keys or <kbd>H</kbd> <kbd>J</kbd> <kbd>K</kbd> <kbd>L</kbd> move through tasks, and <kbd>Tab</kbd> moves between the sidebar and the board. Press <kbd>?</kbd> for the full list. [Keyboard shortcuts](https://nikiforovall.blog/claude-code-kanban/reference/keyboard-shortcuts/)
+
+## CLI
+
+With no subcommand, `claude-code-kanban` starts the server. Subcommands talk to a server that already runs:
+
+- `session list|open|view|pin|pins|peek` to read and focus sessions.
+- `preview-doc` and `link-doc` to show or link a file on the board.
+- `dispatch start|done|wait|list` to start sessions with a task and collect their reports.
+
+Run `claude-code-kanban --help` or see the [CLI reference](https://nikiforovall.blog/claude-code-kanban/reference/cli/).
 
 ## Configuration
 
 ```bash
-PORT=8080 npx claude-code-kanban             # Custom port (falls back if busy)
-npx claude-code-kanban --open                # Auto-open browser
-npx claude-code-kanban --dir=~/.claude-work  # Custom Claude config dir (or CLAUDE_CONFIG_DIR)
+PORT=8080 npx claude-code-kanban               # Custom port. If it is busy, the server uses a random free port.
+npx claude-code-kanban --dir=~/.claude-work    # Another Claude config dir (or CLAUDE_CONFIG_DIR)
+npx claude-code-kanban --enable-terminal       # Turn on the embedded terminal
+EDITOR="code -w" npx claude-code-kanban        # Command for Open in editor (default: code)
 ```
 
-Global install: `npm install -g claude-code-kanban`, then `claude-code-kanban --open`.
+- The server listens on `127.0.0.1` only and has no authentication. To reach it from another machine, use `--host` and `--allowed-hosts`, and do it only on a network you trust.
+- UI approvals are on by default. Turn them off or tune them in `<config-dir>/.cck/config.json`.
+- Terminal settings, such as the shell, font size and scrollback, go in the `CCK_TERMINAL` JSON variable.
+
+See [Configuration](https://nikiforovall.blog/claude-code-kanban/reference/configuration/) for every setting, and [Troubleshooting](https://nikiforovall.blog/claude-code-kanban/troubleshooting/) for common problems.
+
+Claude Code Kanban also runs as a tab in [Claude Code Hub](https://nikiforovall.blog/claude-code-kanban/guides/claude-code-hub/), where the terminal is on by default.
 
 ## License
 
