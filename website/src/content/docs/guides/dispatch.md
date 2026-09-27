@@ -67,14 +67,14 @@ claude-code-kanban dispatch done d_1a2b3c4d5e6f --cap <cap> --outcome succeeded 
 
 The capability lets the session report on its own dispatch and do nothing else. The session never gets the terminal token.
 
-Without `--report`, the prompt is the spec alone, as if you typed it.
+With neither `--report` nor `--peer`, the prompt is the spec alone, as if you typed it.
 
 ### If you are the started session
 
 - Do only the task in the prompt.
 - Report once, when the task is done or when you cannot finish it. Use `--outcome failed` when the task is not done, and say why.
 - Write the summary as three sentences: what changed, what you found, what remains. Use `--summary-file <path>` if the text needs quotes.
-- The starting session cannot answer questions. If you are blocked on a decision, report `failed` and put the question in the summary.
+- When the prompt names a peer, ask it with `SendMessage` when you need a decision or find something that changes the task. Without a peer, report `failed` and put the question in the summary.
 - After you report, stop.
 
 A dispatch settles once. A second report gets `409`. A summary longer than 4000 characters is cut to 4000.
@@ -107,6 +107,17 @@ A dispatch ends in one of three states:
 - `exited`, when its terminal ends before it reports.
 
 A summary is the started session's own claim. Check it yourself: run the tests or read the diff.
+
+## Talk during the run
+
+A started session is an ordinary Claude Code session, so Claude Code's `ListAgents` and `SendMessage` tools list it under its `--name` and can send it a message.
+
+Pass `--peer` with the starting session's own peer name, which is the first line of `ListAgents`. The new session's prompt then names that peer and tells it to send questions and findings there with `SendMessage`, and to keep working while it waits for the answer. The prompt carries the peer with or without `--report`.
+
+- The starting session answers those questions and steers the dispatch with `SendMessage` to its `--name`.
+- The report stays the record. Only `dispatch done` settles the dispatch, ends `dispatch wait` and shows in the sidebar.
+
+A message arrives between the receiver's steps, not inside a running workflow or subagent. A session in another permission mode can hold a message until its user approves it. When a session restarts, cck marks its dispatch `exited` and refuses a later report, so the result can only come back as a message.
 
 ## Where records live
 

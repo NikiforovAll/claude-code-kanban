@@ -19,9 +19,10 @@ Dispatch when the task can run on its own. Do the work yourself when it is small
 ## Start
 
 ```bash
-claude-code-kanban dispatch start --cwd <dir> --spec-file <spec.md> --name <name> --group <group> [--report] [--model haiku|sonnet|opus|fable] [--worktree [name]] --json
+claude-code-kanban dispatch start --cwd <dir> --spec-file <spec.md> --name <name> --group <group> --peer <your-peer> [--report] [--model haiku|sonnet|opus|fable] [--worktree [name]] --json
 ```
 
+- `--peer` is your own peer name: the first line of `ListAgents` ("This session is `<name>`"). Pass it whenever you have the `ListAgents` tool. cck then tells the started session to ask you with `SendMessage` instead of failing on a question. See [Peer](#peer).
 - `--cwd` must be a project cck already knows (default: the current dir).
 - `--spec-file` over `--spec` for anything longer than a line: no shell quoting.
 - `--name` is what the user sees in the sidebar. Kebab-case, saying what the session does: `fix-login-redirect`, not `task-1`.
@@ -30,7 +31,7 @@ claude-code-kanban dispatch start --cwd <dir> --spec-file <spec.md> --name <name
 
 ## Fire-and-forget
 
-Tell the user the session name, its group, and the dispatch id, then carry on with your own work or end your turn. The dispatch is yours to forget: the user follows it in the sidebar.
+Tell the user the session name, its group, and the dispatch id, then carry on with your own work or end your turn. The user follows the dispatch in the sidebar. With `--peer`, its questions still reach you as new turns.
 
 ## With `--report`
 
@@ -54,12 +55,18 @@ A dispatch still `running` is still working; retry only after a `failed` report 
 
 The summary is the started session's own claim. Verify it (run the tests, read the diff), then give the user each dispatch's outcome, the summary, and what you checked. Done when every `--report` dispatch has settled and each summary is verified.
 
+## Peer
+
+A dispatch is a Claude Code peer under its `--name`, so `SendMessage` reaches it and it reaches you. The peer channel carries the conversation. The report carries the record: only `dispatch done` settles a dispatch, ends `dispatch wait`, and shows in the sidebar.
+
+- **Answer questions.** A question or a finding from the dispatch arrives as a new turn. Answer it yourself, or ask the user when the decision is theirs, then send the answer back.
+- **Steer.** Send a short, self-contained message to the dispatch's name. It arrives between the receiver's steps, never inside a subagent or a running workflow.
+- **Limits.** A session in another permission mode can hold a message until its user approves it, so anything the result depends on goes in the report. A dispatch that restarts ends as `exited` and cannot report, so its result comes back as a message.
+
 ## If you are the started session
 
-When the starting session asked for a report, your prompt begins with `[cck dispatch <id>]` and holds the exact `dispatch done` command with your capability. Copy that command verbatim. Without that line, just do the task; there is nothing to report.
+Your prompt begins with `[cck dispatch <id>]` and holds your instructions: the peer to ask, and with a report the exact `dispatch done` command. Follow them. Without that line, the prompt is the task alone.
 
-- Do only the task in your prompt.
-- Report exactly once, when the task is done or when you cannot finish it. Use `--outcome failed` when it is not done, and say why in the summary.
+- Ask the peer with `SendMessage` when you need a decision or find something that changes the task, and keep working on what does not depend on the answer.
 - The summary is three sentences: what changed, what you found, what remains. Use `--summary-file` if it needs quotes.
-- The starting session cannot answer questions. If you are blocked on a decision, report `failed` with the question in the summary.
-- After you report, stop.
+- After you report, a message from the peer is a new request: answer it.

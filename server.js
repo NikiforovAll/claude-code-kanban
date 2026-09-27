@@ -39,7 +39,7 @@ const { inlineHtmlAssets, MIME_BY_EXT } = require('./lib/inline-assets');
 const { buildDecision, decisionFileName, isDecisionFile, approvalsFrom, boardRefusal } = require('./lib/approvals');
 const { getClaudeDir, getArgValue, storageNamespace, isDefaultClaudeDir } = require('./lib/claude-dir');
 const { createTerminalService, readTerminalConfig } = require('./lib/terminal');
-const { createDispatchRegistry, formatPreamble, formatDispatchLine } = require('./lib/dispatch');
+const { createDispatchRegistry, formatPreamble, formatDispatchLine, isPeerName } = require('./lib/dispatch');
 const { createGroupStore, isGroupName, suggestGroupName } = require('./lib/dispatch-groups');
 const { pickFolder } = require('./lib/folder-dialog');
 
@@ -3249,15 +3249,16 @@ function withDispatchPlacement(sessions) {
 // TERMINAL_TOKEN_FILE. The child gets only its dispatch capability through the preamble.
 app.post('/api/dispatch', (req, res) => {
   if (!terminal.authorized(req.get('x-terminal-token'))) return res.status(401).json({ error: 'invalid terminal token' });
-  const { cwd, spec, name, model, worktree, parent, group, report } = req.body || {};
+  const { cwd, spec, name, model, worktree, parent, group, report, peer } = req.body || {};
   if (typeof spec !== 'string' || !spec.trim()) return res.status(400).json({ error: 'spec is required' });
+  if (peer != null && !isPeerName(peer)) return res.status(400).json({ error: 'peer must be a peer name as ListAgents prints it' });
   if (parent != null && !(typeof parent === 'string' && isUUID(parent))) return res.status(400).json({ error: 'invalid parent' });
   if (group != null && !isGroupName(group)) {
     return res.status(400).json({ error: `group must be kebab-case, e.g. ${suggestGroupName(group) || 'my-group'}` });
   }
   const starterGroup = parent ? dispatchGroups.groupOf(parent) : null;
   const target = group || starterGroup;
-  const r = dispatches.create({ parent, name, spec: spec.trim(), report: report === true, group: target, worktree });
+  const r = dispatches.create({ parent, name, spec: spec.trim(), report: report === true, peer, group: target, worktree });
   const env = { CCK_DISPATCH_ID: r.id, ...(parent && { PARENT_SESSION_ID: parent }) };
   const started = terminal.startNew({ cwd, name, model, worktree, prompt: formatPreamble(r) }, env);
   if (started.error) {

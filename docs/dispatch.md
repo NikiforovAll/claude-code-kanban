@@ -5,7 +5,7 @@
 ## Flow
 
 ```
-starter  dispatch start --cwd <dir> --spec-file <f> --name <n> --group <g> [--report] [--model <m>] [--worktree [n]]
+starter  dispatch start --cwd <dir> --spec-file <f> --name <n> --group <g> [--peer <p>] [--report] [--model <m>] [--worktree [n]]
 cck      POST /api/dispatch -> record + terminal.startNew(prompt) -> {dispatch, session, cwd, group}
 started  (only with --report) dispatch done <id> --cap <cap> --outcome succeeded|failed --summary <text>
 starter  dispatch wait [<id>...] --timeout 15m, or a pushed line from the kanban-dispatch postman
@@ -13,7 +13,7 @@ starter  dispatch wait [<id>...] --timeout 15m, or a pushed line from the kanban
 
 - The starter id comes from `CLAUDE_CODE_SESSION_ID` and is stored as `parent`. It routes a report to the starter's inbox and lets the board follow the starter into a named group. The board never shows it.
 - `POST /api/dispatch` needs the terminal token, which the CLI reads from `<config dir>/.cck/terminal-token.json`. `done` needs only the per-dispatch capability from the preamble; the started session never holds the terminal token.
-- Without `--report` the prompt is the task alone. With it, the prompt starts with a preamble that holds the exact `done` command.
+- With neither `--report` nor `--peer` the prompt is the task alone. Otherwise it starts with a preamble (`formatPreamble`): `--peer` names the starter's Claude Code peer to ask with `SendMessage`, and `--report` adds the exact `done` command. The peer name goes into the prompt verbatim, so the server accepts only `isPeerName` values.
 - Records are in memory (`lib/dispatch.js`). The terminals die with the server, so a restart loses nothing that could still settle. A session whose terminal ends before `done` settles as `exited`.
 - A report is pushed to the starter only with `--report`, on the `dispatch` doorbell topic, so a `kanban-dispatch` postman never gets `task.moved` lines.
 

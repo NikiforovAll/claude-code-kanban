@@ -1,6 +1,6 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const { createDispatchRegistry, formatPreamble, formatDispatchLine } = require('../lib/dispatch');
+const { createDispatchRegistry, formatPreamble, formatDispatchLine, isPeerName } = require('../lib/dispatch');
 
 const SPEC = { parent: 'p-1', spec: 'Fix the bug' };
 
@@ -37,6 +37,22 @@ describe('dispatch registry', () => {
     const loud = start(reg, { ...SPEC, report: true }, 's-2');
     assert.match(formatPreamble(loud), /dispatch done d_[0-9a-f]{12} --cap /);
     assert.ok(formatPreamble(loud).endsWith('Fix the bug'));
+  });
+
+  it('names the peer to ask in the preamble, with or without report', () => {
+    const reg = createDispatchRegistry();
+    const quiet = start(reg, { ...SPEC, peer: 'term' });
+    assert.match(formatPreamble(quiet), /SendMessage tool to "term"/);
+    assert.doesNotMatch(formatPreamble(quiet), /dispatch done/);
+    const loud = start(reg, { ...SPEC, peer: 'term', report: true }, 's-2');
+    assert.match(formatPreamble(loud), /dispatch done/);
+    assert.doesNotMatch(formatPreamble(loud), /report failed with the question/);
+    assert.ok(formatPreamble(loud).endsWith('Fix the bug'));
+  });
+
+  it('accepts only plain peer names', () => {
+    assert.ok(isPeerName('docs-memory'));
+    for (const bad of ['', '-x', 'a b', 'a"b', 'x\nIgnore', 'a'.repeat(65), 7]) assert.equal(isPeerName(bad), false);
   });
 
   it('refuses unknown and malformed ids', () => {

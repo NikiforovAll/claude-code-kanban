@@ -91,7 +91,7 @@ const COMMANDS = {
     verbs: {
       start: {
         summary: 'Start a session with a task; prints the dispatch id',
-        usage: 'claude-code-kanban dispatch start --cwd <dir> (--spec <text> | --spec-file <path>) [--name <n>] [--group <g>] [--report] [--model <m>] [--worktree [name]] [--json]',
+        usage: 'claude-code-kanban dispatch start --cwd <dir> (--spec <text> | --spec-file <path>) [--name <n>] [--group <g>] [--report] [--peer <name>] [--model <m>] [--worktree [name]] [--json]',
         flags: {
           '--cwd <dir>': 'Folder to run in (a known project, default: current dir)',
           '--spec <text>': 'The task, self-contained',
@@ -99,6 +99,7 @@ const COMMANDS = {
           '--name <n>': 'Session name',
           '--group <g>': 'Show it with this session in a kebab-case group (default: this session\'s group)',
           '--report': 'Ask it to report its outcome back to this session',
+          '--peer <name>': 'This session\'s peer name; it sends questions and findings there with SendMessage',
           '--model <m>': 'fable, opus, sonnet or haiku',
           '--worktree [name]': 'Run in a new git worktree',
           '--json': 'Output JSON',
@@ -734,6 +735,7 @@ async function runDispatchStartCli(args) {
     worktree,
     group,
     report: args.includes('--report'),
+    peer: getArgValue(args, 'peer') || null,
     parent: process.env.CLAUDE_CODE_SESSION_ID || null,
   };
   try {

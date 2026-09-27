@@ -203,7 +203,7 @@ Starts a Claude Code session in the embedded terminal to do a task, and collects
 ### dispatch start
 
 ```bash
-claude-code-kanban dispatch start --cwd <dir> (--spec <text> | --spec-file <path>) [--name <n>] [--group <g>] [--report] [--model <m>] [--worktree [name]] [--json]
+claude-code-kanban dispatch start --cwd <dir> (--spec <text> | --spec-file <path>) [--name <n>] [--group <g>] [--report] [--peer <name>] [--model <m>] [--worktree [name]] [--json]
 ```
 
 | Flag | What it does |
@@ -214,6 +214,7 @@ claude-code-kanban dispatch start --cwd <dir> (--spec <text> | --spec-file <path
 | `--name <n>` | Session name: up to 80 letters, digits, spaces, `.`, `_` and `-`. The first character must be a letter or a digit. |
 | `--group <g>` | Shows the new session in this [session group](/claude-code-kanban/guides/session-groups/). The name must be kebab-case, for example `auth-refactor`. Default is the group of the session that runs the command. |
 | `--report` | Asks the new session to report its outcome back. |
+| `--peer <name>` | The Claude Code peer name of the session that starts the dispatch. The new session sends its questions and findings there with `SendMessage`. See [Talk during the run](/claude-code-kanban/guides/dispatch/#talk-during-the-run). |
 | `--model <m>` | `fable`, `opus`, `sonnet` or `haiku`. |
 | `--worktree [name]` | Runs the session in a new git worktree. |
 | `--json` | Prints JSON. |
