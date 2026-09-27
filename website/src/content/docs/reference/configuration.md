@@ -36,6 +36,7 @@ When the dir is not `~/.claude`, the installer runs the `claude` CLI with `CLAUD
 | `CCK_TERMINAL` | | JSON config for the embedded terminal. See [Terminal config](#terminal-config). |
 | `CCK_TERMINAL_SHELL` | `--terminal-shell <value>` | Shell for the embedded terminal. |
 | `CCK_TERMINAL_TOKEN` | | Fixed token for the terminal WebSocket. When unset, the server makes a random token on each start. |
+| `CCK_PRIORITY_BOOST` | | Windows only. With the terminal on, the server, each terminal's console host, and the process you type into in an attached terminal run at above-normal priority, so typing stays responsive while other work loads the CPU. Tools those processes start still run at normal priority. Set `0` to turn it off. The hub reads it too. |
 | `MARKETPLACE_URL` | `--marketplace-url <url>` | URL of Claude Code Marketplace that the board links to. |
 | `COST_URL` | `--cost-url <url>` | URL of Claude Code Cost that the board links to. |
 | `MEMORY_URL` | `--memory-url <url>` | URL of Claude Code Memory that the board links to. |

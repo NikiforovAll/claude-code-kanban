@@ -305,6 +305,38 @@ describe('terminal endpoint', { skip: !ptyAvailable }, () => {
     assert.equal(after.sessions.length, 0);
     assert.equal((await exited).ended, true);
   });
+
+  it('raises the server, its console host and an attached shell, and restores the shell on detach', { skip: process.platform !== 'win32' }, async () => {
+    const { PRIORITY_NORMAL, PRIORITY_ABOVE_NORMAL } = os.constants.priority;
+    const until = async (test, what) => {
+      for (let i = 0; i < 100; i++) {
+        if (test()) return;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      assert.fail(`timeout: ${what}`);
+    };
+    const hosts = () => {
+      const q = `(Get-CimInstance Win32_Process -Filter "ParentProcessId=${srv.child.pid} AND Name='conhost.exe'").ProcessId`;
+      return require('node:child_process').execFileSync('powershell.exe', ['-NoProfile', '-Command', q]).toString().split(/\s+/).filter(Boolean).map(Number);
+    };
+    assert.equal(os.getPriority(srv.child.pid), PRIORITY_ABOVE_NORMAL);
+
+    const got = await session(port, { id: SESSION, mode: 'shell' }, (g) => g.control.some((m) => m.t === 'ready'));
+    let pid = 0;
+    // ConPTY reports the shell's pid only once its output pipe connects.
+    for (let i = 0; i < 100 && !pid; i++) {
+      [{ pid }] = (await api(port, 'GET', '/api/terminals')).json.sessions;
+      if (!pid) await new Promise((r) => setTimeout(r, 100));
+    }
+    assert.ok(pid, 'shell pid');
+    await until(() => os.getPriority(pid) === PRIORITY_ABOVE_NORMAL, 'shell raised');
+    await until(() => { const h = hosts(); return h.length > 0 && h.every((p) => os.getPriority(p) === PRIORITY_ABOVE_NORMAL); }, 'console host raised');
+
+    got.ws.close();
+    await until(() => os.getPriority(pid) === PRIORITY_NORMAL, 'shell restored');
+    const del = await api(port, 'DELETE', `/api/terminals/${SESSION}`, { origin: `http://localhost:${port}`, 'x-terminal-token': TOKEN });
+    assert.equal(del.status, 204);
+  });
 });
 
 describe('terminal endpoint when disabled', { skip: !ptyAvailable }, () => {
