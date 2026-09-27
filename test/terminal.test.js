@@ -47,8 +47,26 @@ function stopServer(s) {
   try { rmSync(s.dir, { recursive: true, force: true }); } catch { /* locked by the dying child */ }
 }
 
+// Windows loopback sometimes fails a connect with ETIMEDOUT under load, before any byte reaches the server.
+const CONNECT_ERRORS = new Set(['ETIMEDOUT', 'ECONNRESET', 'ECONNREFUSED']);
+
+async function retryConnect(attempt) {
+  for (let i = 1; ; i++) {
+    try {
+      return await attempt();
+    } catch (e) {
+      if (i === 3 || !CONNECT_ERRORS.has(e.code)) throw e;
+      await new Promise((r) => setTimeout(r, 100 * i));
+    }
+  }
+}
+
 // A fresh connection per call: a pooled keep-alive socket can be closed by the server just as it is reused.
 function api(port, method, pathname, headers = {}) {
+  return retryConnect(() => apiOnce(port, method, pathname, headers));
+}
+
+function apiOnce(port, method, pathname, headers) {
   return new Promise((resolve, reject) => {
     const req = http.request({ host: '127.0.0.1', port, method, path: pathname, headers, agent: false }, (res) => {
       let body = '';
@@ -83,12 +101,25 @@ function handshakeStatus(port, headers) {
 
 // Collects JSON control messages and decoded output until `until` returns true.
 function session(port, hello, until) {
+  return retryConnect(() => sessionOnce(port, hello, until));
+}
+
+function sessionOnce(port, hello, until) {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(`ws://127.0.0.1:${port}/api/terminal/ws`, { headers: { origin: `http://localhost:${port}` } });
     const got = { control: [], out: '', closeCode: null, ws };
     const timer = setTimeout(() => { ws.terminate(); reject(new Error(`timeout: ${JSON.stringify(got.control)} ${got.out}`)); }, 15000);
     const check = () => { if (until(got)) { clearTimeout(timer); resolve(got); } };
-    ws.on('open', () => ws.send(JSON.stringify({ t: 'hello', token: TOKEN, cols: 80, rows: 24, ...hello })));
+    let opened = false;
+    ws.on('error', (e) => {
+      clearTimeout(timer);
+      // Only a failure before the handshake may be retried; after it the hello has reached the server.
+      reject(opened ? new Error(e.message) : e);
+    });
+    ws.on('open', () => {
+      opened = true;
+      ws.send(JSON.stringify({ t: 'hello', token: TOKEN, cols: 80, rows: 24, ...hello }));
+    });
     ws.on('message', (data, isBinary) => {
       if (isBinary) got.out += data.toString('utf8');
       else got.control.push(JSON.parse(data.toString()));
