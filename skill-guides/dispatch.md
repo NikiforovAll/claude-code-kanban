@@ -19,11 +19,12 @@ Dispatch when the task can run on its own. Do the work yourself when it is small
 ## Start
 
 ```bash
-claude-code-kanban dispatch start --cwd <dir> --spec-file <spec.md> --name <name> --group <group> --peer <your-peer> [--report] [--model haiku|sonnet|opus|fable] [--worktree [name]] --json
+claude-code-kanban dispatch start --cwd <dir> --spec-file <spec.md> --name <name> --group <group> --peer <your-peer> [--report] --json
 ```
 
+`claude-code-kanban help dispatch start` lists every flag (model, worktree, and the rest). `project list` shows the folders `--cwd` accepts. How to choose the values:
+
 - `--peer` is your own peer name: the first line of `ListAgents` ("This session is `<name>`"). Pass it whenever you have the `ListAgents` tool. cck then tells the started session to ask you with `SendMessage` instead of failing on a question. See [Peer](#peer).
-- `--cwd` must be a project cck already knows (default: the current dir).
 - `--spec-file` over `--spec` for anything longer than a line: no shell quoting.
 - `--name` is what the user sees in the sidebar. Kebab-case, saying what the session does: `fix-login-redirect`, not `task-1`.
 - `--group` names the effort, in kebab-case (`auth-refactor`), and shows the new session and this session together under one sidebar group. Pass it on your first dispatch; later dispatches join the same group without it. A group goes away when its sessions end, unless the user pins a member or keeps the group.
@@ -44,7 +45,7 @@ The started session settles with one report, `succeeded` or `failed`, or as `exi
 claude-code-kanban dispatch wait [<id>...] --timeout 15m --json
 ```
 
-It returns `settled`, `running`, and `timeout`, as soon as any watched dispatch settles; call it again with the ids still running. A timeout is a checkpoint: the session may still be working. Look before you act:
+Call it again with the ids still running (`help dispatch wait` has the output fields). A timeout is a checkpoint: the session may still be working. Look before you act:
 
 ```bash
 claude-code-kanban dispatch list --json

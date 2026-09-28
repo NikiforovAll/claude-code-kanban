@@ -6082,10 +6082,12 @@ function _storagePreviewLinkedDoc(path) {
 
 function _storageUnlinkDoc(sessionId, path) {
   setSessionDocLink(sessionId, path, true);
+  forgetServerLinkedDoc(sessionId, path);
 }
 
 function _storageClearLinkedDocs(sessionId) {
   store.removeItem(PREVIEW_STORAGE_PREFIX + sessionId);
+  forgetServerLinkedDoc(sessionId);
   // The auto-link record deliberately survives: clearing is unlinking every row at
   // once, and an unlinked pad must not come back on the next read of the transcript.
   afterLinkedDocsChanged(sessionId);
@@ -6606,6 +6608,31 @@ function setSessionDocLink(sessionId, filePath, unlink) {
   if (unlink) removeSessionPreviewPath(sessionId, filePath);
   else addSessionPreviewPath(sessionId, filePath);
   afterLinkedDocsChanged(sessionId);
+}
+
+// Links sent while no tab was open reach the browser only through the server copy.
+async function mergeServerLinkedDocs() {
+  let bySession;
+  try {
+    const res = await fetch('/api/document/links');
+    if (!res.ok) return;
+    bySession = await res.json();
+  } catch {
+    return;
+  }
+  for (const [sessionId, paths] of Object.entries(bySession || {})) {
+    const local = getSessionPreviewPaths(sessionId);
+    const known = new Set(local.map(canonicalPath));
+    const missing = (paths || []).filter((p) => !known.has(canonicalPath(p)));
+    if (!missing.length) continue;
+    store.setItem(PREVIEW_STORAGE_PREFIX + sessionId, JSON.stringify([...missing, ...local].slice(0, 20)));
+    afterLinkedDocsChanged(sessionId);
+  }
+}
+
+function forgetServerLinkedDoc(sessionId, filePath) {
+  const q = filePath ? `?path=${encodeURIComponent(filePath)}` : '';
+  fetch(`/api/document/links/${encodeURIComponent(sessionId)}${q}`, { method: 'DELETE' }).catch(() => {});
 }
 
 function afterLinkedDocsChanged(sessionId) {
@@ -7281,6 +7308,7 @@ function bindLinkedDocsHandlers(container, sessionId) {
       copyWithFeedback(hit.dataset.path, hit);
     } else if (hit.classList.contains('linked-doc-remove')) {
       removeSessionPreviewPath(sessionId, hit.dataset.path);
+      forgetServerLinkedDoc(sessionId, hit.dataset.path);
       afterLinkedDocsChanged(sessionId);
     } else {
       openLinkedDoc(hit.dataset.path, getSessionBaseDir(sessionId));
@@ -7396,6 +7424,7 @@ function setupEventSource() {
             .catch(() => {});
       }
       wasConnected = true;
+      mergeServerLinkedDocs();
       retryDelay = 1000;
       hideOffline();
     };

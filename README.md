@@ -96,7 +96,8 @@ Run `claude` in any project. You do not configure anything per project. Claude C
 
 With no subcommand, `claude-code-kanban` starts the server. Subcommands talk to a server that already runs:
 
-- `session list|open|view|pin|pins|peek` to read and focus sessions.
+- `session list|search|open|view|plan|agents|pin|pins|peek` to read and focus sessions.
+- `task list` and `project list` to read tasks and projects.
 - `preview-doc` and `link-doc` to show or link a file on the board.
 - `dispatch start|done|wait|list` to start sessions with a task and collect their reports.
 

@@ -38,7 +38,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // Re-read every cycle rather than caching: it is how we follow the board across a
 // restart onto a different port. A file left behind by a crashed server names a port
 // something else may now hold, so trust it only while its pid is alive.
+// CCK_URL comes from the board whose terminal started this session. That board owns the
+// session's queue, and server.json may name another board on the same config dir.
 function serverUrl() {
+  if (process.env.CCK_URL) return process.env.CCK_URL.replace(/\/+$/, '');
   const { port, pid } = JSON.parse(fs.readFileSync(SERVER_INFO, 'utf8'));
   if (pid) process.kill(pid, 0);
   return `http://127.0.0.1:${port}`;
