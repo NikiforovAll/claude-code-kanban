@@ -633,6 +633,28 @@ describe('Parser: updateLoopInfo', () => {
     assert.equal(state.scannedOffset, readFileSync(p).length);
   });
 
+  const wakeAt = (timestamp, id, input) => line({ timestamp, type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id, name: 'ScheduleWakeup', input }] } });
+
+  it('replaces a pending wakeup with a newer one and keeps the fired ones', () => {
+    const p = path.join(dir, 'replace.jsonl');
+    writeFileSync(p, [
+      wakeAt('2026-01-01T00:00:00Z', 'toolu_w1', { delaySeconds: 60, prompt: 'fired' }),
+      wakeAt('2026-01-01T00:02:00Z', 'toolu_w2', { delaySeconds: 600, prompt: 'replaced' }),
+      wakeAt('2026-01-01T00:03:00Z', 'toolu_w3', { delaySeconds: 600, prompt: 'pending' }),
+    ].join(''));
+    const info = buildLoopInfoFromState(updateLoopInfo(p, null));
+    assert.deepEqual(info.wakeups.map((w) => w.id), ['toolu_w1', 'toolu_w3']);
+  });
+
+  it('cancels the pending wakeup on stop and shows no row for the stop', () => {
+    const p = path.join(dir, 'stop.jsonl');
+    writeFileSync(p, wakeAt('2026-01-01T00:00:00Z', 'toolu_w1', { delaySeconds: 600, prompt: 'go' }));
+    let state = updateLoopInfo(p, null);
+    writeFileSync(p, wakeAt('2026-01-01T00:01:00Z', 'toolu_w2', { stop: true }), { flag: 'a' });
+    state = updateLoopInfo(p, state);
+    assert.deepEqual(buildLoopInfoFromState(state).wakeups, []);
+  });
+
   it('keeps a partial last line for the next call', () => {
     const p = path.join(dir, 'partial.jsonl');
     const wake = toolUse('toolu_w1', 'ScheduleWakeup', { delaySeconds: 30 });

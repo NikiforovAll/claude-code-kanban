@@ -193,7 +193,9 @@ Each call to `updateLoopInfo(path, prev)`:
 
 If `size < prev.size` (file truncated/replaced) → start over from offset 0.
 
-`buildLoopInfoFromState(state)` resolves cron task ids on read and filters out cancelled crons. This keeps the cached state monotonic (append-only) — `CronDelete` doesn't mutate prior entries, it only adds to `deletedTaskIds`.
+A `ScheduleWakeup` call first drops every wakeup that has not fired by the call's timestamp, because the harness keeps one pending wakeup per session: a newer call replaces it, and `stop: true` cancels it. A stop call adds no row. Wakeups that already fired stay, so the 5-min grace filter below still shows the last one.
+
+`buildLoopInfoFromState(state)` resolves cron task ids on read and filters out cancelled crons. This keeps the cron state monotonic (append-only) — `CronDelete` doesn't mutate prior entries, it only adds to `deletedTaskIds`.
 
 ### Watcher warming
 
@@ -210,7 +212,7 @@ Two gates run before `JSON.parse`:
 
 ### 5-min fired-grace filter
 
-`filterActiveLoopInfo` (`server.js`) hides wakeups whose computed fire time is more than `WAKEUP_FIRED_GRACE_MS` (5 min) in the past. Applied at consumption sites only (`getLoopInfoSummary`, `/api/sessions/:id/loop`); the cached state stays immutable.
+`filterActiveLoopInfo` (`server.js`) hides wakeups whose computed fire time is more than `WAKEUP_FIRED_GRACE_MS` (5 min) in the past. Applied at consumption sites only (`getLoopInfoSummary`, `/api/sessions/:id/loop`), because it depends on the current time; the cached state does not.
 
 ### Cost summary
 
