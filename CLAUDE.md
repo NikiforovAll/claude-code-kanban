@@ -63,7 +63,7 @@ Subcommands live in a dispatch table in `cli.js` (`COMMANDS`). `server.js` deleg
 
 **The help is the CLI reference.** The plugin skills point at it instead of listing flags, so a command change needs no skill change. **Every new command MUST be documented in the dispatch table** with `summary`, `usage`, `flags` (if any), and 1–2 `examples` where they help. The design contract for the CLI lives in `_plans/cli-scope.md`.
 
-The CLI finds the server through `CCK_URL`, then `PORT`, then `<config dir>/.cck/server.json`, then 3541. A `server.json` whose pid is dead is an error, not a fallback, because 3541 can be another config dir's board.
+The CLI finds the server through `CCK_URL`, then `PORT`, then `<config dir>/.cck/server.json`, then 3541. A `server.json` whose pid is dead is an error, not a fallback, because 3541 can be another config dir's board. The embedded terminal sets `CCK_URL` to its own board (`ptyEnv` in `lib/terminal.js`), so a session started there, and its postman monitor, reach that board even when another board on the same config dir owns `server.json`.
 
 Adding a command:
 

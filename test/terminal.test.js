@@ -5,7 +5,7 @@ const { mkdtempSync, rmSync } = require('node:fs');
 const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
-const { shellArgs, readTerminalConfig, resolveShell, claudeArgsFor, parseNewSpec, findPickProcess } = require('../lib/terminal');
+const { shellArgs, readTerminalConfig, resolveShell, claudeArgsFor, parseNewSpec, findPickProcess, ptyEnv } = require('../lib/terminal');
 
 let WebSocket = null;
 let ptyAvailable = false;
@@ -205,6 +205,26 @@ describe('resolveShell', () => {
   });
 });
 
+describe('ptyEnv', () => {
+  it('pins the session to this board with CCK_URL', () => {
+    const env = ptyEnv({ claudeDir: '/c', isDefaultDir: false, cckUrl: 'http://127.0.0.1:4795' });
+    assert.equal(env.CCK_URL, 'http://127.0.0.1:4795');
+    assert.equal(env.CLAUDE_CONFIG_DIR, '/c');
+    assert.equal(env.PORT, undefined);
+  });
+
+  it('drops an inherited CCK_URL when the port is not known yet', () => {
+    const saved = process.env.CCK_URL;
+    process.env.CCK_URL = 'http://127.0.0.1:1';
+    try {
+      assert.equal(ptyEnv({ claudeDir: '/c', isDefaultDir: true }).CCK_URL, undefined);
+    } finally {
+      if (saved === undefined) delete process.env.CCK_URL;
+      else process.env.CCK_URL = saved;
+    }
+  });
+});
+
 describe('readTerminalConfig', () => {
   it('is off by default and turns on from the flag or the hub block', () => {
     assert.equal(readTerminalConfig({ argv: [], env: {} }).enabled, false);
@@ -291,6 +311,16 @@ describe('terminal endpoint', { skip: !ptyAvailable }, () => {
     await exited;
     const after = (await api(port, 'GET', '/api/terminals')).json;
     assert.equal(after.sessions.length, 0);
+  });
+
+  it('hands the shell this board as CCK_URL', async () => {
+    const got = await session(port, { id: SESSION, mode: 'shell' }, (g) => g.control.some((m) => m.t === 'ready'));
+    const ref = process.platform === 'win32' ? '%CCK_URL%' : '$CCK_URL';
+    const want = `cck-url=http://127.0.0.1:${port}`;
+    got.ws.send(JSON.stringify({ t: 'in', d: `echo cck-url=${ref}\r` }));
+    await waitFor(got.ws, (d, bin) => bin && (got.out += d.toString()).includes(want), 'CCK_URL');
+    const del = await api(port, 'DELETE', `/api/terminals/${SESSION}`, { origin: `http://localhost:${port}`, 'x-terminal-token': TOKEN });
+    assert.equal(del.status, 204);
   });
 
   it('ends a terminal over HTTP only with the token', async () => {

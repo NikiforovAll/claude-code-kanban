@@ -3176,8 +3176,10 @@ function isAllowedFolder(dir) {
   try { return known && statSync(dir).isDirectory(); } catch { return false; }
 }
 
+let listenPort = null;
 const terminal = createTerminalService({
   config: readTerminalConfig({ getArgValue }),
+  serverUrl: () => (listenPort ? `http://127.0.0.1:${listenPort}` : null),
   net,
   claudeDir: CLAUDE_DIR,
   isDefaultDir: isDefaultClaudeDir(CLAUDE_DIR),
@@ -4174,6 +4176,7 @@ async function prewarmCaches() {
 }
 
   const onReady = (actualPort) => {
+    listenPort = actualPort;
     console.log(`Claude Task Kanban running at http://localhost:${actualPort}`);
     // The port is configurable and falls back to a random one when taken, so the postman
     // monitor cannot assume it -- publish the live one where it can read it.
