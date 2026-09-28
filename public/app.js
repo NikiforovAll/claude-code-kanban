@@ -20,18 +20,24 @@ const store = {
 
 // The baseline "nothing is filtered" state: what resetState() returns to, what updateUrl() omits
 // from the query string, and what decides whether a control tints ember in the header summary.
-const FILTER_DEFAULTS = { project: '__recent__', session: 'active', limit: '20' };
+const FILTER_DEFAULTS = { project: '__recent__', session: 'active' };
+const RECENT_PROJECT_HOURS = 24;
 
 let sessions = [];
 let currentSessionId = null;
-let lastSessionId = null;
-let previousSessionId = null;
+// Kept in the store because a config-dir switch in the hub reloads this page.
+const SWAP_KEY = 'swap-sessions';
+let [lastSessionId, previousSessionId] = readSwapPair();
 let currentTasks = [];
 let viewMode = 'session';
 let sessionFilter = FILTER_DEFAULTS.session;
 // Only meaningful while sessionFilter === 'active' (filterBySessions clears it otherwise)
 const activityFilter = new Set(); // kinds: 'waiting' | 'active'
-let sessionLimit = FILTER_DEFAULTS.limit;
+// The sidebar asks for one page and grows by a page when it is scrolled to the end. A live
+// refresh asks for the same count, so the loaded rows stay loaded.
+const SESSION_PAGE = 20;
+let sessionLimit = SESSION_PAGE;
+let sessionsHasMore = false;
 // Narrows the sidebar to the open session only. Kept out of FILTER_DEFAULTS/updateUrl because it
 // is not a filter — it has no select, no summary token, and never reaches the session picker.
 // Persisted in localStorage rather than the URL: the hub recreates each iframe at the app's base
@@ -58,6 +64,8 @@ let currentWaiting = null;
 let lastWaitingHash = '';
 let lastAgentsHash = '';
 let messagePanelOpen = false;
+let logAutoOpened = false;
+const logDismissed = new Set();
 let lastMessagesHash = '';
 let currentMessages = [];
 let agentDurationInterval = null;
@@ -109,7 +117,6 @@ function getUrlState() {
     session: params.get('session'),
     view: params.get('view'),
     filter: params.get('filter'),
-    limit: params.get('limit'),
     project: params.get('project'),
     owner: params.get('owner'),
     search: params.get('search'),
@@ -124,11 +131,10 @@ function updateUrl() {
   if (viewMode === 'project' && currentProjectPath) params.set('projectView', btoa(currentProjectPath));
   if (currentSessionId) params.set('session', currentSessionId);
   if (sessionFilter !== FILTER_DEFAULTS.session) params.set('filter', sessionFilter);
-  if (sessionLimit !== FILTER_DEFAULTS.limit) params.set('limit', sessionLimit);
   if (filterProject && filterProject !== FILTER_DEFAULTS.project) params.set('project', filterProject);
   if (ownerFilter) params.set('owner', ownerFilter);
   if (searchQuery) params.set('search', searchQuery);
-  if (messagePanelOpen) params.set('messages', '1');
+  if (messagePanelOpen && !logAutoOpened) params.set('messages', '1');
   const qs = params.toString();
   const url = qs ? `?${qs}` : window.location.pathname;
   history.replaceState(null, '', url);
@@ -165,7 +171,7 @@ function resetState() {
     store.removeItem(LAST_VIEW_KEY);
   } catch (_) {}
   sessionFilter = FILTER_DEFAULTS.session;
-  sessionLimit = FILTER_DEFAULTS.limit;
+  sessionLimit = SESSION_PAGE;
   filterProject = FILTER_DEFAULTS.project;
   zenMode = false;
   store.removeItem(ZEN_KEY);
@@ -182,7 +188,7 @@ function resetState() {
   if (searchInput) searchInput.value = '';
   document.getElementById('search-clear-btn')?.classList.remove('visible');
   renderFilterState();
-  fetchSessions().then(() => showAllTasks());
+  fetchSessions().then((tasksLoaded) => showAllTasks({ reuseTasks: tasksLoaded }));
 }
 
 //#endregion
@@ -223,46 +229,87 @@ async function fetchSessions(includeTasks = true) {
     // opened from outside the current filter would leave the view on the previous one.
     const includeParam = currentSessionId ? `&include=${encodeURIComponent(currentSessionId)}` : '';
     const projectParam =
-      filterProject && filterProject !== '__recent__' ? `&project=${encodeURIComponent(filterProject)}` : '';
+      filterProject === '__recent__'
+        ? `&recentHours=${RECENT_PROJECT_HOURS}`
+        : filterProject
+          ? `&project=${encodeURIComponent(filterProject)}`
+          : '';
     const filterParam = sessionFilter === 'active' ? '&filter=active' : '';
     const sessionsPromise = fetch(
       `/api/sessions?limit=${sessionLimit}${pinnedParam}${includeParam}${projectParam}${filterParam}`,
-    ).then((r) => r.json());
+    ).then((r) => {
+      sessionsHasMore = r.headers.get('X-Has-More') === 'true';
+      return r.json();
+    });
 
-    let newSessions, newTasks;
-    if (includeTasks) {
-      [newSessions, newTasks] = await Promise.all([sessionsPromise, fetch('/api/tasks/all').then((r) => r.json())]);
-    } else {
-      newSessions = await sessionsPromise;
-    }
+    const tasksPromise = includeTasks ? fetch('/api/tasks/all').then((r) => r.json()) : null;
 
+    // The server answers one request at a time, so the task list comes after the sessions.
+    // The sidebar does not wait for it; the promise still resolves after both, as callers expect.
+    const newSessions = await sessionsPromise;
     const sessionsHash = JSON.stringify(newSessions);
-    if (includeTasks) {
-      const tasksHash = JSON.stringify(newTasks);
-      if (sessionsHash === lastSessionsHash && tasksHash === lastTasksHash) return;
+    if (sessionsHash !== lastSessionsHash) {
+      lastSessionsHash = sessionsHash;
+      sessions = mergePlaceholders(newSessions);
+      renderSessions();
+      renderActivityChip();
+    }
+    // A list too short to scroll gives no scroll event, so fill it until it can scroll.
+    if (sessionsHasMore) setTimeout(loadMoreIfNearEnd);
+
+    if (!tasksPromise) return false;
+    const newTasks = await tasksPromise;
+    const tasksHash = JSON.stringify(newTasks);
+    if (tasksHash !== lastTasksHash) {
       lastTasksHash = tasksHash;
       allTasksCache = newTasks;
-    } else {
-      if (sessionsHash === lastSessionsHash) return;
+      // The sidebar reads the task list only to match a search.
+      if (searchQuery) renderSessions();
     }
-    lastSessionsHash = sessionsHash;
-
-    sessions = mergePlaceholders(newSessions);
-    renderSessions();
-    renderActivityChip();
+    return true;
   } catch (error) {
     console.error('Failed to fetch sessions:', error);
   }
 }
 
-// One session by id, ignoring every sidebar filter — that is what `include` means.
-async function fetchSessionById(id) {
+let sessionsLoadingMore = false;
+async function loadMoreSessions() {
+  if (!sessionsHasMore || sessionsLoadingMore) return;
+  sessionsLoadingMore = true;
+  sessionLimit += SESSION_PAGE;
   try {
-    const r = await fetch(`/api/sessions?limit=1&include=${encodeURIComponent(id)}`);
-    return r.ok ? (await r.json()).find((s) => s.id === id) || null : null;
-  } catch (_) {
-    return null;
+    await fetchSessions(false);
+  } finally {
+    sessionsLoadingMore = false;
   }
+}
+
+function resetSessionPage() {
+  sessionLimit = SESSION_PAGE;
+  sessionsList.scrollTop = 0;
+}
+
+const LOAD_MORE_MARGIN_PX = 240;
+function loadMoreIfNearEnd() {
+  const { scrollTop, clientHeight, scrollHeight } = sessionsList;
+  if (clientHeight > 0 && scrollTop + clientHeight >= scrollHeight - LOAD_MORE_MARGIN_PX) loadMoreSessions();
+}
+sessionsList.addEventListener('scroll', loadMoreIfNearEnd, { passive: true });
+
+// Sessions by id, in the order given, ignoring every sidebar filter — that is what `include` means.
+async function fetchSessionsByIds(ids) {
+  try {
+    const r = await fetch(`/api/sessions?limit=1&include=${ids.map(encodeURIComponent).join(',')}`);
+    if (!r.ok) return [];
+    const byId = new Map((await r.json()).map((s) => [s.id, s]));
+    return ids.map((id) => byId.get(id)).filter(Boolean);
+  } catch (_) {
+    return [];
+  }
+}
+
+async function fetchSessionById(id) {
+  return (await fetchSessionsByIds([id]))[0] || null;
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
@@ -465,11 +512,10 @@ async function fetchTasks(sessionId) {
       revealedStorageSessionId = null;
     }
     if (currentSessionId && currentSessionId !== sessionId) deferredPinPlacement.delete(currentSessionId);
-    if (lastSessionId !== sessionId) {
-      previousSessionId = lastSessionId;
-      lastSessionId = sessionId;
-    }
+    if (lastSessionId !== sessionId) setSwapPair(sessionId, lastSessionId);
+    const switched = sessionId !== currentSessionId;
     currentSessionId = sessionId;
+    if (switched) autoRevealLog(sessionId, newTasks.length === 0);
     currentPins = loadPins(sessionId);
     ownerFilter = '';
     resetMessageScrollState();
@@ -632,7 +678,27 @@ async function refreshProjectAgents() {
 }
 
 //#region MESSAGE_PANEL
+function setMessagePanelVisible(open) {
+  messagePanelOpen = open;
+  document.getElementById('message-panel').classList.toggle('visible', open);
+  document.getElementById('message-toggle')?.classList.toggle('active', open);
+}
+
+// An empty board has nothing to show, so the log opens in its place. It is not the user's choice,
+// so it is not stored, it closes again on a session with tasks, and a manual close sticks for that session.
+function autoRevealLog(sessionId, empty) {
+  if (empty && !messagePanelOpen && !logDismissed.has(sessionId) && !wantsTerminal()) {
+    setMessagePanelVisible(true);
+    logAutoOpened = true;
+  } else if (!empty && logAutoOpened) {
+    setMessagePanelVisible(false);
+    logAutoOpened = false;
+  }
+}
+
 function toggleMessagePanel() {
+  if (logAutoOpened && messagePanelOpen && currentSessionId) logDismissed.add(currentSessionId);
+  logAutoOpened = false;
   const panel = document.getElementById('message-panel');
   messagePanelOpen = !messagePanelOpen;
   termState.panelHidden = false;
@@ -3107,15 +3173,18 @@ async function revealPlanSession(planSessionId) {
   await revealSession(planSessionId);
 }
 
-async function showAllTasks() {
+// reuseTasks: the caller has just awaited a fetchSessions() that loaded the same list.
+async function showAllTasks({ reuseTasks = false } = {}) {
   try {
     viewMode = 'all';
     if (agentLogMode) exitAgentLogMode();
     currentSessionId = null;
     ownerFilter = '';
     resetAgentState();
-    const res = await fetch('/api/tasks/all');
-    allTasksCache = await res.json();
+    if (!reuseTasks) {
+      const res = await fetch('/api/tasks/all');
+      allTasksCache = await res.json();
+    }
     let tasks = allTasksCache;
     if (filterProject) {
       tasks = tasks.filter((t) => matchesProjectFilter(t.project));
@@ -3147,9 +3216,11 @@ function renderAllTasks() {
     : filterProject === '__recent__'
       ? 'Recent Tasks'
       : 'All Tasks';
-  sessionMeta.textContent = isFiltered
-    ? `${totalTasks} tasks in this project`
-    : `${totalTasks} tasks across ${sessions.length} sessions`;
+  sessionMeta.textContent = !isFiltered
+    ? `${totalTasks} tasks across ${sessions.length} sessions`
+    : isExactProjectFilter(filterProject)
+      ? `${totalTasks} tasks in this project`
+      : `${totalTasks} tasks in projects matching "${filterProject}"`;
   progressPercent.textContent = `${percent}%`;
   progressBar.style.width = `${percent}%`;
 
@@ -3260,8 +3331,7 @@ function renderSessions() {
   // Rebuilding the list under the pointer cancels an in-flight drop and would swallow a
   // half-typed group name, and the SSE path can fire at any moment — defer instead.
   if (sgDrag || sgIsEditing() || zenPanelIsEditing()) return;
-  // Update project dropdown
-  updateProjectDropdown();
+  refreshProjectList();
 
   // Zen narrows the rendered list only — the session picker keeps calling getFilteredSessions()
   // and still offers everything, or there would be no way to switch sessions without leaving zen.
@@ -3279,11 +3349,11 @@ function renderSessions() {
       emptyMsg = `No results for "${searchQuery}"`;
       emptyHint = 'Try a different search term or clear the search';
     } else if (filterProject && sessionFilter === 'active') {
-      emptyMsg = 'No active sessions for this project';
-      emptyHint = 'Try "All Sessions" or "All Projects"';
+      emptyMsg = 'No active sessions for this project filter';
+      emptyHint = 'Try "All Sessions" or clear the project filter';
     } else if (filterProject) {
-      emptyMsg = 'No sessions for this project';
-      emptyHint = 'Select "All Projects" to see all';
+      emptyMsg = 'No sessions for this project filter';
+      emptyHint = 'Clear the project filter to see all';
     } else if (sessionFilter === 'active') {
       emptyMsg = 'No active sessions';
       emptyHint = 'Select "All Sessions" to see all';
@@ -3338,7 +3408,6 @@ function renderSessions() {
             ${projectHtml ? `<div class="session-secondary">${projectHtml}</div>` : ''}
             ${gitBranch ? `<div class="session-branch">${gitBranch}</div>` : ''}
             ${session.planTitle ? `<div class="session-plan">${escapeHtml(session.planTitle)}</div>` : ''}
-            ${renderGoalSubtitle(session)}
             <div class="session-progress">
               <span class="session-indicators">
                 ${isTeam ? `<span class="team-badge" title="${memberCount} team members"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>${memberCount}</span>` : ''}
@@ -4196,7 +4265,6 @@ function sgAssign(groupId, type, ref, opts = {}) {
     if (loose) member.loose = true;
     group.members.push(member);
   }
-  if (collapsedProjectGroups.delete(sgKey(groupId))) persistCollapsedGroups();
   persistSessionGroups();
 }
 
@@ -4468,7 +4536,11 @@ function sgOnDrop(e) {
   if (hit.groupId) {
     if (hit.reorder) sgReorderMember(hit.groupId, drag, hit.reorder);
     else if (drag.kind === 'group') sgReorderGroup(drag.ref, hit.groupId);
-    else sgAssign(hit.groupId, drag.kind, drag.ref, { under: hit.under, loose: hit.loose });
+    else {
+      sgAssign(hit.groupId, drag.kind, drag.ref, { under: hit.under, loose: hit.loose });
+      // A drop shows where the card landed; a move from the context menu leaves the group as it was.
+      if (collapsedProjectGroups.delete(sgKey(hit.groupId))) persistCollapsedGroups();
+    }
   } else {
     sgDetach(drag.kind, drag.ref);
     if (drag.kind === 'session') sgReleased.add(drag.ref);
@@ -4505,6 +4577,10 @@ function initSessionGroupsDnd() {
   sessionsList.addEventListener('drop', sgOnDrop);
   sessionsList.addEventListener('dragend', sgOnDragEnd);
   sessionsList.addEventListener('contextmenu', sgOnContextMenu);
+  // The Menu key fires contextmenu at the focused element, which by then is our menu.
+  document.addEventListener('contextmenu', (e) => {
+    if (e.target.closest?.('.sg-menu')) e.preventDefault();
+  });
   sessionsList.addEventListener('keydown', (e) => {
     const input = e.target.closest?.('.sg-name-input');
     if (!input) return;
@@ -4539,8 +4615,37 @@ function initSessionGroupsDnd() {
 let sgLongPressTimer = null;
 
 function sgCloseMenu() {
+  document.removeEventListener('keydown', sgMenuKeydown, true);
   const menu = document.getElementById('sg-menu');
   if (menu) menu.remove();
+}
+
+// Capture phase: the global handler would otherwise read these keys as sidebar shortcuts.
+function sgMenuKeydown(e) {
+  const menu = document.getElementById('sg-menu');
+  if (!menu || e.ctrlKey || e.altKey || e.metaKey) return;
+  const items = [...menu.querySelectorAll('.sg-menu-item')];
+  const i = items.indexOf(document.activeElement);
+  e.stopPropagation();
+  if (e.key === 'Enter' || e.key === ' ') return;
+  e.preventDefault();
+  let next = null;
+  if (matchKey(e, 'ArrowDown', 'KeyJ')) next = (i + 1) % items.length;
+  else if (matchKey(e, 'ArrowUp', 'KeyK')) next = i < 0 ? items.length - 1 : (i - 1 + items.length) % items.length;
+  else if (e.key === 'Home') next = 0;
+  else if (e.key === 'End') next = items.length - 1;
+  else if (e.key === 'Escape' || e.key === 'Tab') sgCloseMenu();
+  if (next !== null) items[next]?.focus();
+}
+
+function sgOpenMenuForKbSelection() {
+  const el = sessionsList.querySelector('.kb-selected');
+  if (!el?.matches('.session-item, .project-group-header')) return false;
+  const payload = sgDragPayload(el);
+  if (!payload?.ref) return false;
+  const rect = el.getBoundingClientRect();
+  sgOpenMenu(rect.left + 16, rect.bottom, payload.kind, payload.ref);
+  return true;
 }
 
 function sgOpenMenu(x, y, kind, ref) {
@@ -4549,22 +4654,29 @@ function sgOpenMenu(x, y, kind, ref) {
   const label = kind === 'project' ? 'project' : 'session';
   const rows = sessionGroups
     .filter((g) => g.id !== current?.id)
-    .map((g) => `<button class="sg-menu-item" data-sg-move="${escapeHtml(g.id)}">${escapeHtml(g.name)}</button>`)
+    .map(
+      (g) =>
+        `<button class="sg-menu-item" role="menuitem" data-sg-move="${escapeHtml(g.id)}">${escapeHtml(g.name)}</button>`,
+    )
     .join('');
   const menu = document.createElement('div');
   menu.id = 'sg-menu';
   menu.className = 'sg-menu';
+  menu.setAttribute('role', 'menu');
+  menu.setAttribute('aria-label', `Move ${label} to group`);
   menu.dataset.sgKind = kind;
   menu.dataset.sgRef = ref;
   menu.innerHTML = `
-        <div class="sg-menu-label">Move ${label} to group</div>
+        <div class="sg-menu-label" aria-hidden="true">Move ${label} to group</div>
         ${rows}
-        <button class="sg-menu-item" data-sg-move="__new__">+ New group…</button>
-        ${current ? `<button class="sg-menu-item sg-menu-remove" data-sg-move="__none__">Remove from “${escapeHtml(current.name)}”</button>` : ''}`;
+        <button class="sg-menu-item" role="menuitem" data-sg-move="__new__">+ New group…</button>
+        ${current ? `<button class="sg-menu-item sg-menu-remove" role="menuitem" data-sg-move="__none__">Remove from “${escapeHtml(current.name)}”</button>` : ''}`;
   document.body.appendChild(menu);
   const rect = menu.getBoundingClientRect();
   menu.style.left = `${Math.min(x, window.innerWidth - rect.width - 8)}px`;
   menu.style.top = `${Math.min(y, window.innerHeight - rect.height - 8)}px`;
+  document.addEventListener('keydown', sgMenuKeydown, true);
+  menu.querySelector('.sg-menu-item')?.focus();
 }
 
 function sgOnContextMenu(e) {
@@ -5366,10 +5478,11 @@ const SHORTCUT_PAIRS = [
       title: 'Session',
       rows: [
         { keys: ['P'], label: 'Open plan' },
-        { keys: ['Shift', 'P'], combo: true, label: 'Session picker' },
+        { keys: ['Ctrl', 'Shift', 'P'], combo: true, label: 'Session picker' },
         { keys: ['I'], label: 'Session info' },
         { keys: ['.'], label: 'Pin / unpin' },
         { keys: ['>'], label: 'Toggle sticky' },
+        { keys: ['Shift', 'F10'], combo: true, label: 'Move to group (or Menu key)' },
         { keys: ['Ctrl', 'D'], combo: true, label: 'Dismiss session' },
         { keys: ['Shift', 'L'], combo: true, label: 'Toggle session log' },
         { keys: ['Shift', 'M'], combo: true, label: 'Open last message' },
@@ -6272,12 +6385,6 @@ document.addEventListener('keydown', (e) => {
     toggleZenMode();
     return;
   }
-  // Ctrl+Shift+P is the browser's own; only the bare chord opens the picker.
-  if (e.code === 'KeyP' && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
-    e.preventDefault();
-    openSessionPicker();
-    return;
-  }
   if (e.key === '.' || e.key === '>') {
     const sid = sessionsList.querySelector('.kb-selected')?.dataset.sessionId || currentSessionId;
     if (sid) {
@@ -6329,6 +6436,11 @@ document.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
       activateSelectedSession();
+      return;
+    }
+    const menuKey = e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey);
+    if (menuKey && sgOpenMenuForKbSelection()) {
+      e.preventDefault();
       return;
     }
     if (e.key === 'Escape') {
@@ -8270,17 +8382,105 @@ function toggleFilterMenu(e) {
   document.getElementById('filter-menu-btn')?.setAttribute('aria-expanded', 'true');
   renderFilterState();
   document.addEventListener('click', closeFilterMenu, { once: true });
-  // Capture phase: the global keydown handler bails out on SELECT targets, and every
-  // focusable thing in this popover is a select — Escape would never reach it otherwise.
+  // Capture phase: the global keydown handler bails out on form fields, and the path box
+  // has focus — Escape would never reach it otherwise.
   document.addEventListener('keydown', filterMenuKeydown, true);
-  document.getElementById('project-filter')?.focus();
+  pfIdx = -1;
+  renderProjectOptions();
+  const input = document.getElementById('project-filter');
+  input?.focus();
+  input?.select();
 }
 
 function filterMenuKeydown(e) {
-  if (e.key !== 'Escape') return;
-  e.stopPropagation();
-  if (closeFilterMenu()) document.getElementById('filter-menu-btn')?.focus();
+  if (e.key === 'Escape') {
+    e.stopPropagation();
+    if (closeFilterMenu()) document.getElementById('filter-menu-btn')?.focus();
+    return;
+  }
+  if (e.target.id !== 'project-filter') return;
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    const n = pfOptions.length;
+    if (!n) return;
+    pfIdx = e.key === 'ArrowDown' ? (pfIdx + 1) % n : (pfIdx - 1 + n) % n;
+    renderProjectOptions();
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    if (pfIdx >= 0 && pfOptions[pfIdx]) pickProject(pfOptions[pfIdx].path);
+    else closeFilterMenu();
+  }
 }
+
+// The menu's project list: projects the path box matches, newest activity first.
+const PF_MAX = 7;
+let pfOptions = [];
+let pfIdx = -1;
+
+function renderProjectOptions() {
+  const list = document.getElementById('project-filter-options');
+  const input = document.getElementById('project-filter');
+  if (!list || !input) return;
+  const text = projectFilterText();
+  const q = normalizeProjectPath(text.trim());
+  const partial = !!q && !isExactProjectPath(q);
+  const needle = partial ? q : '';
+  const selected = q && !partial ? q : null;
+  const byRecent = (a, b) => (b.modifiedAt || '').localeCompare(a.modifiedAt || '');
+  pfOptions = (projectsCache || [])
+    .map((p) => ({ ...p, norm: normalizeProjectPath(p.path) }))
+    .filter((p) => !needle || p.norm.includes(needle))
+    .sort(byRecent)
+    .slice(0, PF_MAX);
+  if (pfIdx >= pfOptions.length) pfIdx = pfOptions.length - 1;
+  list.innerHTML = pfOptions.length
+    ? pfOptions
+        .map((p, i) => {
+          const cut = Math.max(p.path.lastIndexOf('/'), p.path.lastIndexOf('\\')) + 1;
+          const at = needle ? p.norm.indexOf(needle) : -1;
+          const range = at >= 0 ? [at, at + needle.length] : null;
+          const isSel = p.norm === selected;
+          return `<li id="pf-opt-${i}" role="option" class="pf-opt${i === pfIdx ? ' hl' : ''}" aria-selected="${isSel}" data-path="${escapeHtml(p.path)}" title="${escapeHtml(p.path)}">
+            <span class="pf-name">${markRange(p.path, cut, p.path.length, range)}</span>
+            <span class="pf-dir"><bdi>${markRange(p.path, 0, cut, range)}</bdi></span>
+            <span class="pf-age">${p.modifiedAt ? shortAge(p.modifiedAt) : ''}</span>
+          </li>`;
+        })
+        .join('')
+    : `<li class="pf-empty">${
+        partial ? `No project path contains “${escapeHtml(text.trim())}”` : 'No projects yet'
+      }</li>`;
+  if (pfIdx >= 0) input.setAttribute('aria-activedescendant', `pf-opt-${pfIdx}`);
+  else input.removeAttribute('aria-activedescendant');
+  list.querySelector('.pf-opt.hl')?.scrollIntoView({ block: 'nearest' });
+}
+
+function shortAge(iso) {
+  const min = Math.max(0, (Date.now() - new Date(iso).getTime()) / 60000);
+  if (min < 60) return `${Math.floor(min)}m`;
+  if (min < 1440) return `${Math.floor(min / 60)}h`;
+  if (min < 60 * 24 * 60) return `${Math.floor(min / 1440)}d`;
+  return `${Math.floor(min / (1440 * 30))}mo`;
+}
+
+// The slice [from, to) of text, with the part inside range marked.
+function markRange(text, from, to, range) {
+  if (!range || range[1] <= from || range[0] >= to) return escapeHtml(text.slice(from, to));
+  const a = Math.max(from, range[0]);
+  const b = Math.min(to, range[1]);
+  return `${escapeHtml(text.slice(from, a))}<mark>${escapeHtml(text.slice(a, b))}</mark>${escapeHtml(text.slice(b, to))}`;
+}
+
+function pickProject(path) {
+  filterByProject(path);
+  closeFilterMenu();
+  document.getElementById('filter-menu-btn')?.focus();
+}
+
+document.getElementById('project-filter-options')?.addEventListener('click', (e) => {
+  const opt = e.target.closest('.pf-opt');
+  if (opt) pickProject(opt.dataset.path);
+});
 
 function closeFilterMenu() {
   const menu = document.getElementById('filter-menu');
@@ -8291,50 +8491,53 @@ function closeFilterMenu() {
   return true;
 }
 
-// One row per filter control: the select it mirrors, its value, whether it differs from the
-// default, and two label forms — terse tokens for the header strip (which has ~15 characters
+// One row per filter: whether it differs from the default, and two label forms — terse tokens for the header strip (which has ~15 characters
 // before the sidebar's width ellipsises it) and long form for its tooltip.
 const FILTERS = [
   {
-    id: 'project-filter',
-    value: () => filterProject ?? '',
     active: () => filterProject !== FILTER_DEFAULTS.project,
-    short: () => (filterProject ? filterProject.split(/[/\\]/).pop() : 'all proj'),
-    long: () => (filterProject ? `project ${filterProject}` : 'all projects'),
+    short: () => {
+      if (filterProject === '__recent__') return 'recent';
+      if (!filterProject) return 'all proj';
+      const name = pathBasename(filterProject);
+      return isExactProjectFilter(filterProject) ? name : `*${name}*`;
+    },
+    long: () => {
+      if (filterProject === '__recent__') return 'projects active in the last 24h';
+      if (!filterProject) return 'all projects';
+      return isExactProjectFilter(filterProject)
+        ? `project ${filterProject}`
+        : `project path contains "${filterProject}"`;
+    },
   },
   {
-    id: 'session-filter',
-    value: () => sessionFilter,
     active: () => sessionFilter !== FILTER_DEFAULTS.session,
     short: () => 'inactive',
     long: () => 'including inactive sessions',
   },
-  {
-    id: 'session-limit',
-    value: () => sessionLimit,
-    active: () => sessionLimit !== FILTER_DEFAULTS.limit,
-    short: () => (sessionLimit === 'all' ? 'n=∞' : `n=${sessionLimit}`),
-    long: () => (sessionLimit === 'all' ? 'no session limit' : `showing ${sessionLimit}`),
-  },
 ];
 
-// Keeps the header (summary + funnel tint) and the popover's selects in sync with state.
+// Keeps the header (summary + funnel tint) and the popover's controls in sync with state.
 // Safe to call on every filter change — it only touches classes, values, and text.
 function renderFilterState() {
   const short = [];
   const long = [];
   for (const f of FILTERS) {
-    const active = f.active();
-    if (active) {
-      short.push(f.short());
-      long.push(f.long());
-    }
-    const el = document.getElementById(f.id);
-    if (!el) continue;
-    const value = String(f.value());
-    if (el.value !== value) el.value = value;
-    el.classList.toggle('non-default', active);
+    if (!f.active()) continue;
+    short.push(f.short());
+    long.push(f.long());
   }
+  const input = document.getElementById('project-filter');
+  if (input) {
+    const value = projectFilterText();
+    if (input.value !== value) input.value = value;
+  }
+  const recent = document.getElementById('project-recent-btn');
+  recent?.setAttribute('aria-pressed', String(filterProject === '__recent__'));
+  for (const b of document.querySelectorAll('[data-session-filter]')) {
+    b.setAttribute('aria-checked', String(b.dataset.sessionFilter === sessionFilter));
+  }
+  if (document.getElementById('filter-menu')?.classList.contains('open')) renderProjectOptions();
 
   const summary = document.getElementById('filter-summary');
   if (summary) {
@@ -8364,7 +8567,9 @@ function renderZenState() {
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
 function filterBySessions(value) {
+  if (value === sessionFilter) return;
   sessionFilter = value;
+  resetSessionPage();
   if (value !== 'active') activityFilter.clear();
   renderFilterState();
   updateUrl();
@@ -8376,18 +8581,38 @@ function filterBySessions(value) {
   fetchSessions(false);
 }
 
-// biome-ignore lint/correctness/noUnusedVariables: used in HTML
-function changeSessionLimit(value) {
-  sessionLimit = value;
-  renderFilterState();
-  updateUrl();
-  fetchSessions();
+// Same rule as `projectMatcher` in server.js: an absolute path is one project, other text a part.
+function normalizeProjectPath(p) {
+  return p.toLowerCase().replace(/\\/g, '/').replace(/\/+$/, '');
+}
+function isExactProjectPath(normalized) {
+  return /^([a-z]:)?\//.test(normalized);
+}
+function isExactProjectFilter(query) {
+  return isExactProjectPath(normalizeProjectPath(query.trim()));
+}
+function projectMatcher(query) {
+  const q = normalizeProjectPath(query.trim());
+  const exact = isExactProjectPath(q);
+  return (project) => {
+    if (!project) return false;
+    const p = normalizeProjectPath(project);
+    return exact ? p === q : p.includes(q);
+  };
 }
 
+function projectFilterText() {
+  return filterProject && filterProject !== '__recent__' ? filterProject : '';
+}
+
+let filterMatcher = { query: null, match: null };
 function matchesProjectFilter(project) {
   if (!filterProject) return true;
   if (filterProject === '__recent__') return recentProjects.has(project);
-  return project === filterProject;
+  if (filterMatcher.query !== filterProject) {
+    filterMatcher = { query: filterProject, match: projectMatcher(filterProject) };
+  }
+  return filterMatcher.match(project);
 }
 
 //#endregion
@@ -8507,11 +8732,32 @@ document.addEventListener('click', (e) => {
 
 // Used in HTML; also called by the hub project shim, so no biome suppression is needed.
 function filterByProject(project) {
+  clearTimeout(projectFilterTimer);
   filterProject = project || null;
+  resetSessionPage();
   renderFilterState();
   updateUrl();
   fetchSessions(false);
   showAllTasks();
+}
+
+// The sidebar narrows on every key from the rows it has; the server round trip for rows past
+// the limit waits for a pause in typing.
+const PROJECT_FILTER_DEBOUNCE_MS = 250;
+let projectFilterTimer = null;
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+function typeProjectFilter(value) {
+  filterProject = value.trim() ? value : null;
+  pfIdx = -1;
+  updateUrl();
+  renderSessions();
+  clearTimeout(projectFilterTimer);
+  projectFilterTimer = setTimeout(() => filterByProject(filterProject), PROJECT_FILTER_DEBOUNCE_MS);
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+function toggleRecentProjects() {
+  filterByProject(filterProject === '__recent__' ? null : '__recent__');
 }
 
 let projectsCache = null;
@@ -8532,50 +8778,26 @@ async function loadProjects() {
   return projects;
 }
 
-async function updateProjectDropdown() {
-  const dropdown = document.getElementById('project-filter');
-
+async function refreshProjectList() {
   if (!projectsCacheDirty && projectsCache) {
-    renderProjectDropdown(dropdown, projectsCache);
+    renderFilterState();
     return;
   }
 
   const projects = await loadProjects();
-  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  const cutoff = Date.now() - RECENT_PROJECT_HOURS * 60 * 60 * 1000;
   const prevRecent = recentProjects;
   recentProjects = new Set(
     projects.filter((p) => p.modifiedAt && new Date(p.modifiedAt).getTime() > cutoff).map((p) => p.path),
   );
 
-  renderProjectDropdown(dropdown, projects);
+  renderFilterState();
 
   // recentProjects was empty before — sidebar rendered with __recent__ filter
   // dropping every session. Re-render now that we know which projects qualify.
   if (filterProject === '__recent__' && prevRecent.size === 0 && recentProjects.size > 0) {
     renderSessions();
   }
-}
-
-function renderProjectDropdown(dropdown, projects) {
-  const recentSelected = filterProject === '__recent__' ? ' selected' : '';
-  // A hub-pushed project with no session history isn't in /api/projects, so synthesize its
-  // option here rather than in the hub shim — this also survives the SSE re-render below.
-  const list =
-    filterProject && filterProject !== '__recent__' && !projects.some((p) => p.path === filterProject)
-      ? [...projects, { path: filterProject, modifiedAt: null }]
-      : projects;
-  dropdown.innerHTML =
-    '<option value="">All Projects</option>' +
-    `<option value="__recent__"${recentSelected}>Recent (24h)</option>` +
-    list
-      .map((p) => {
-        const name = p.path.split(/[/\\]/).pop();
-        const selected = p.path === filterProject ? ' selected' : '';
-        return `<option value="${escapeHtml(p.path)}"${selected} title="${escapeHtml(p.path)}">${escapeHtml(name)}</option>`;
-      })
-      .join('');
-  // The option list just changed under the select — re-assert tint and header summary.
-  renderFilterState();
 }
 
 function updateThemeColor(isLight) {
@@ -8993,13 +9215,6 @@ function showInfoModal(session, teamConfig, tasks, planContent, parentInfo) {
   });
   html += `</div>`;
 
-  if (session.goal?.condition) {
-    html += `<div class="info-goal-card">
-          <div class="info-goal-head"><span class="info-goal-icon">◎</span>Goal</div>
-          <div class="info-goal-text">${escapeHtml(session.goal.condition)}</div>
-        </div>`;
-  }
-
   if (session.contextStatus) {
     html += `<hr style="border: none; border-top: 1px solid var(--border); margin: 12px 0;">`;
     html += renderContextDetail(session.contextStatus);
@@ -9152,47 +9367,69 @@ let spIdx = 0;
 let spPeekTimer = null;
 let spPeekToken = 0;
 let spPeekedId = null;
+let spFromTerminal = false;
+let spRenderedQuery = null;
 // Per-open cache: spSource is frozen while the picker is up, so a fetched log stays valid.
 const spPeekCache = new Map();
 
-// A session outside the sidebar filter has no name to fuzzy-match against, so a full id
-// is read as a request for that exact session and resolved against the server instead.
-// Values: 'pending' while the request is out, then the session or null.
-const spGlobal = new Map();
+// A query that can be part of a session id also searches every transcript on the server,
+// so a session outside the sidebar filter is found too. Values: 'pending', then the rows.
+const spSearch = new Map();
+const SP_ID_QUERY_RE = /^[0-9a-f-]*$/i;
+let spSearchTimer = null;
 
-async function spResolveGlobal(id) {
-  spGlobal.set(id, 'pending');
-  spGlobal.set(id, await fetchSessionById(id));
-  if (document.getElementById('session-picker-input').value.trim().toLowerCase() === id) renderSessionPicker();
+function spSearchKey(query) {
+  const key = query.toLowerCase().replace(/-/g, '');
+  return key.length >= 3 && SP_ID_QUERY_RE.test(query) ? key : null;
 }
 
-// The row to show for a query nothing in the list matched, as `{ hit, empty }` — one of
-// the two is always null. Starts the lookup when the query is an id not asked about yet.
-function spResolveMiss(query) {
-  if (!SESSION_UUID_RE.test(query)) {
-    return { hit: null, empty: spSource.length ? 'No session matches' : 'No sessions in the current sidebar filter' };
-  }
-  const id = query.toLowerCase();
-  if (!spGlobal.has(id)) spResolveGlobal(id);
-  const found = spGlobal.get(id);
-  if (found === 'pending') return { hit: null, empty: 'Looking up session…' };
-  return found ? { hit: found, empty: null } : { hit: null, empty: 'No session with that id' };
+function spScheduleSearch(key) {
+  clearTimeout(spSearchTimer);
+  spSearchTimer = setTimeout(async () => {
+    spSearch.set(key, 'pending');
+    let ids = [];
+    try {
+      const r = await fetch(`/api/sessions/search?q=${encodeURIComponent(key)}`);
+      if (r.ok) ids = await r.json();
+    } catch (_) {}
+    spSearch.set(key, ids.length ? await fetchSessionsByIds(ids) : []);
+    renderSessionPicker();
+  }, 100);
+}
+
+// The server rows not already matched in the sidebar list, and whether a search is still out.
+function spSearchRows(key, localRows) {
+  if (!key) return { rows: [], pending: false };
+  const found = spSearch.get(key);
+  if (!found) spScheduleSearch(key);
+  if (!Array.isArray(found)) return { rows: [], pending: true };
+  const seen = new Set(localRows.map((s) => s.id));
+  return { rows: found.filter((s) => !seen.has(s.id)), pending: false };
 }
 
 function openSessionPicker() {
+  spFromTerminal = terminalPaneFocused();
   const input = document.getElementById('session-picker-input');
   input.value = '';
   spSource = getFilteredSessions().sort((a, b) => Date.parse(b.modifiedAt) - Date.parse(a.modifiedAt));
   spPeekCache.clear();
-  spGlobal.clear();
+  spSearch.clear();
+  spRenderedQuery = null;
   document.getElementById('session-picker-modal').classList.add('visible');
   renderSessionPicker();
   input.focus();
 }
 
-function closeSessionPicker() {
+// refocus: false when a session is being opened, which moves the terminal focus itself.
+function closeSessionPicker({ refocus = true } = {}) {
   spSetPeeking(false);
   hideModalOverlay('session-picker-modal');
+  if (refocus && spFromTerminal && wantsTerminal()) focusTerminalPane();
+}
+
+function toggleSessionPicker() {
+  if (document.getElementById('session-picker-modal').classList.contains('visible')) closeSessionPicker();
+  else openSessionPicker();
 }
 
 function spIsPeeking() {
@@ -9274,21 +9511,30 @@ function spDotHtml(session) {
 function renderSessionPicker() {
   const list = document.getElementById('session-picker-list');
   const query = document.getElementById('session-picker-input').value.trim();
-  spRows = spSource.filter((s) => spMatches(s, query));
+  // Search rows that arrive for the same query append below, so the cursor stays on its row.
+  const selectedId = query === spRenderedQuery ? spRows[spIdx]?.id : null;
+  spRenderedQuery = query;
+  const key = spSearchKey(query);
+  const local = spSource.filter((s) => spMatches(s, query));
+  const found = spSearchRows(key, local);
+  spRows = [...local, ...found.rows];
   if (!spRows.length) {
-    const { hit, empty } = spResolveMiss(query);
-    if (hit) spRows = [hit];
-    else {
-      spIdx = -1;
-      list.innerHTML = `<div class="sp-empty">${empty}</div>`;
-      return;
-    }
+    spIdx = -1;
+    const empty = found.pending
+      ? 'Searching all sessions…'
+      : spSource.length || key
+        ? 'No session matches'
+        : 'No sessions in the current sidebar filter';
+    list.innerHTML = `<div class="sp-empty">${empty}</div>`;
+    return;
   }
 
+  // Rows past the sidebar list come from the id search and show their full project path.
   list.innerHTML = spRows
     .map((s, i) => {
-      const project = s.project ? s.project.split(/[/\\]/).pop() : '';
-      return `<button class="sp-row${s.id === currentSessionId ? ' current' : ''}" data-idx="${i}" title="${escapeHtml(s.id)}">
+      const outside = i >= local.length;
+      const project = s.project ? (outside ? s.project : pathBasename(s.project)) : '';
+      return `<button class="sp-row${s.id === currentSessionId ? ' current' : ''}${outside ? ' outside' : ''}" data-idx="${i}" title="${escapeHtml(s.project ? `${s.id}\n${s.project}` : s.id)}">
         ${spDotHtml(s)}
         <span class="sp-name">${escapeHtml(sessionDisplayName(s))}</span>
         <span class="sp-project">${escapeHtml(project)}</span>
@@ -9298,7 +9544,8 @@ function renderSessionPicker() {
       </button>`;
     })
     .join('');
-  spSelect(0);
+  const keep = spRows.findIndex((s) => s.id === selectedId);
+  spSelect(Math.max(0, keep));
 }
 
 function spSelect(idx) {
@@ -9314,7 +9561,8 @@ function spSelect(idx) {
 async function spOpen(idx) {
   const session = spRows[idx];
   if (!session) return;
-  closeSessionPicker();
+  closeSessionPicker({ refocus: false });
+  if (spFromTerminal) termState.focusNext = true;
   await revealSession(session.id);
 }
 
@@ -9325,7 +9573,7 @@ function initSessionPicker() {
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') closeSessionPicker();
     else if (matchKey(e, 'ArrowDown') || (e.ctrlKey && e.key === 'n')) spSelect(spIdx + 1);
-    else if (matchKey(e, 'ArrowUp') || (e.ctrlKey && e.key === 'p')) spSelect(spIdx - 1);
+    else if (matchKey(e, 'ArrowUp') || (e.ctrlKey && !e.shiftKey && e.key === 'p')) spSelect(spIdx - 1);
     else if (e.key === 'Enter') spOpen(spIdx);
     else if (e.ctrlKey && e.code === 'Space') spSetPeeking(!spIsPeeking());
     else return;
@@ -9453,16 +9701,6 @@ function renderLoopModalBody(data) {
       ? `<h4 class="loop-section-title">${title} <span class="loop-count">${items.length}</span></h4>${items.map((i) => renderLoopRow(i, kind)).join('')}`
       : '';
   body.innerHTML = section('Wakeups', wakeups, 'wakeup') + section('Cron jobs', crons, 'cron');
-}
-
-function renderGoalSubtitle(session) {
-  const g = session.goal;
-  if (!g?.condition) return '';
-  const short = g.condition.length > 70 ? `${g.condition.slice(0, 70)}…` : g.condition;
-  // Only active (unmet) goals reach here — a met goal auto-clears. Clicking
-  // opens the info modal (full text); stopPropagation so it doesn't also
-  // trigger the card's fetchTasks.
-  return `<div class="session-goal" onclick="event.stopPropagation(); showSessionInfoModal('${escAttrJs(session.id)}')" title="${escapeHtml(g.condition)}"><span class="session-goal-icon">◎</span><span class="session-goal-text">${escapeHtml(short)}</span></div>`;
 }
 
 function renderLoopBadge(session) {
@@ -10059,6 +10297,8 @@ function terminalPaneFocused() {
 function terminalShortcut(e) {
   const ctrlAlt = e.ctrlKey && e.altKey && !e.shiftKey && !e.metaKey;
   if (ctrlAlt && e.code === 'KeyS') return swapToPreviousSession;
+  // Cancelling the default also stops Chrome's system print dialog, which this page has no use for.
+  if (e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey && e.code === 'KeyP') return toggleSessionPicker;
   if (ctrlAlt && (e.code === 'KeyN' || e.code === 'KeyR') && terminalAvailable()) {
     return () => openNewSession(null, e.code === 'KeyR');
   }
@@ -10071,6 +10311,22 @@ function terminalShortcut(e) {
     return () => closeTerminalSession(currentSessionId);
   }
   return null;
+}
+
+function readSwapPair() {
+  try {
+    const pair = JSON.parse(store.getItem(SWAP_KEY));
+    if (Array.isArray(pair) && pair.length === 2) return pair;
+  } catch {}
+  return [null, null];
+}
+
+function setSwapPair(last, previous) {
+  lastSessionId = last;
+  previousSessionId = previous;
+  try {
+    store.setItem(SWAP_KEY, JSON.stringify([last, previous]));
+  } catch {}
 }
 
 function swapToPreviousSession() {
@@ -10100,7 +10356,10 @@ function syncTerminal() {
   if (view !== termState.syncedView) {
     termState.syncedView = view;
     // The terminal shows the same conversation, so the log panel only takes width; it comes back when the terminal goes.
-    if (on && messagePanelOpen) {
+    if (on && logAutoOpened) {
+      setMessagePanelVisible(false);
+      logAutoOpened = false;
+    } else if (on && messagePanelOpen) {
       toggleMessagePanel();
       termState.panelHidden = true;
     } else if (!on && arrived && termState.panelHidden) toggleMessagePanel();
@@ -10562,8 +10821,8 @@ function terminalOpenMode(sessionId) {
 // replays the same screen, and the placeholder gives way to the real card.
 function adoptPickedSession(oldId, id) {
   const focused = terminalPaneFocused();
-  if (lastSessionId === oldId) lastSessionId = id;
-  if (previousSessionId === oldId) previousSessionId = id;
+  const adopt = (x) => (x === oldId ? id : x);
+  setSwapPair(adopt(lastSessionId), adopt(previousSessionId));
   setTerminalMode(id, true);
   forgetPlaceholder(oldId);
   if (currentSessionId !== oldId || viewMode !== 'session') return renderSessions();
@@ -10852,8 +11111,8 @@ function forgetPlaceholder(id) {
   // Before the socket's close handler runs, or it would reconnect and start the session again.
   if (termState.sessionId === id) detachTerminal();
   sessions = sessions.filter((s) => s.id !== id);
-  if (previousSessionId === id) previousSessionId = null;
-  if (lastSessionId === id) lastSessionId = null;
+  const forget = (x) => (x === id ? null : x);
+  setSwapPair(forget(lastSessionId), forget(previousSessionId));
   return true;
 }
 
@@ -11391,7 +11650,6 @@ fetch('/api/version')
 const urlState = getUrlState();
 const lastView = loadLastView();
 sessionFilter = urlState.filter || FILTER_DEFAULTS.session;
-sessionLimit = urlState.limit || FILTER_DEFAULTS.limit;
 // The URL wins; the persisted view only fills in when it carries a project key, so 'all' (null)
 // restores as 'all' and pre-existing blobs without the key still default to '__recent__'.
 filterProject = urlState.project || (lastView && 'project' in lastView ? lastView.project : FILTER_DEFAULTS.project);
@@ -11431,32 +11689,34 @@ Promise.all([
 ])
   .then(restorePendingSessions)
   .then(() => fetchSessions())
-  .then(async () => {
+  .then(async (tasksLoaded) => {
+    const allTasksOpts = { reuseTasks: tasksLoaded };
     if (urlState.projectView) {
       try {
         await fetchProjectView(atob(urlState.projectView));
       } catch (_) {
-        showAllTasks();
+        showAllTasks(allTasksOpts);
       }
     } else if (urlState.session) {
       await fetchTasks(urlState.session);
     } else if (urlState.view === 'all') {
-      showAllTasks();
+      showAllTasks(allTasksOpts);
     } else {
       const last = loadLastView();
       if (last?.view === 'project' && last.projectPath && sessions.some((s) => s.project === last.projectPath)) {
         try {
           await fetchProjectView(last.projectPath);
         } catch (_) {
-          showAllTasks();
+          showAllTasks(allTasksOpts);
         }
       } else if (last?.view === 'session' && last.session && sessions.some((s) => s.id === last.session)) {
         await fetchTasks(last.session);
       } else {
-        showAllTasks();
+        showAllTasks(allTasksOpts);
       }
     }
     if (urlState.messages && currentSessionId) {
+      if (logAutoOpened) setMessagePanelVisible(false);
       toggleMessagePanel();
       // Re-render after panel layout settles so scroll dimensions are correct
       requestAnimationFrame(() => {
@@ -11472,7 +11732,7 @@ Promise.all([
 window.addEventListener('popstate', () => {
   const s = getUrlState();
   sessionFilter = s.filter || FILTER_DEFAULTS.session;
-  sessionLimit = s.limit || FILTER_DEFAULTS.limit;
+  resetSessionPage();
   filterProject = s.project || FILTER_DEFAULTS.project;
   ownerFilter = s.owner || '';
   searchQuery = s.search || '';
@@ -11593,7 +11853,6 @@ function hubPost(message) {
     const dirPath = e.data.project;
     if (typeof dirPath !== 'string' || !dirPath || dirPath === filterProject) return;
     filterByProject(dirPath);
-    updateProjectDropdown();
   });
 })();
 // #endregion HUB_INTEGRATION

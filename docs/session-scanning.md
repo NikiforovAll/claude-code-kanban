@@ -31,7 +31,7 @@ These run only when an API request is served (no background timer).
 | Function | Cache | TTL | Source |
 |---|---|---|---|
 | `loadSessionMetadata()` | `sessionMetadataCache` | `METADATA_CACHE_TTL = 10000` ms (per-path dirty set for hot updates) | `server.js:389` |
-| `readSessionInfoFromJsonl()` | `sessionInfoCache` | inode-keyed; `slug`+`projectPath`+`logicalParentUuid`+`compactBoundaryUuid` pinned, `cwd`+`goal` refreshed from appended bytes only | `lib/parsers.js:225` |
+| `readSessionInfoFromJsonl()` | `sessionInfoCache` + `customTitleCache` | per path, valid while `sameFileGrown` (same inode, not shorter, and a new mtime only with new bytes); `slug`+`projectPath`+`logicalParentUuid`+`compactBoundaryUuid` pinned, `cwd` and title refreshed from appended bytes only; saved to disk, see [Persistent session cache](#3a-persistent-session-cache) | `lib/parsers.js` |
 | `getGitBranch(cwd)` | `gitBranchCache` | `GIT_BRANCH_TTL_MS = 30000` ms, keyed by `cwd` | `server.js` |
 | `resolveWorktree(dir)` | `worktreeCache` | no TTL — keyed by `dir`, misses cached too, capped at `WORKTREE_CACHE_MAX = 500` | `server.js` |
 | Task-map scan | `sessionToTaskListCache` | `TASK_MAP_SCAN_TTL = 5000` ms | `server.js:271` |
@@ -70,17 +70,15 @@ Eager recursion is a deliberate omission, not an oversight: a pruned depth-3 wal
 
 **Fork vs compact continuation.** A fork taken off an already-compacted transcript copies the parent's `compact_boundary` record verbatim, so the child gets a `logicalParentUuid` and is indistinguishable from a real compact continuation by anchor alone — which used to make the suppression pass delete the (still running) parent card. The discriminator is `compactBoundaryUuid`: a fork's copy is present in the parent JSONL, a genuine continuation's is freshly generated and is not. `findSessionContainingUuid` probes it with one `String.includes` on the winning candidate's text (already read for the anchor scan) and returns `isFork`.
 
-`lookupParentSession` turns that evidence into a single verdict, `relation: 'none' | 'compact' | 'fork'` (`isCompact`/`isFork` are derived views kept for the `/api/sessions/:id/parent` response shape). An anchor found by `findForkAnchorUuid` — no boundary record at all — is a fork by construction. Consumers: the suppression pass only deletes a parent when `relation === 'compact'`, and the session-info modal labels the row *Continued from* vs *Forked from* off the same field. Two safeguards remain independent of the heuristics: the pass keeps its cheap `metadata[sid].logicalParentUuid` pre-gate (a cold `lookupParentSession` reads JSONLs, so it must not run for every session), and a post-pass drops any id present in the live-session registry (`loadLiveSessions`, 5 s cache) — a running process is never a superseded lineage.
+`lookupParentSession` turns that evidence into a single verdict, `relation: 'none' | 'compact' | 'fork'` (`isCompact`/`isFork` are derived views kept for the `/api/sessions/:id/parent` response shape). An anchor found by `findForkAnchorUuid` — no boundary record at all — is a fork by construction. Consumers: the suppression pass only deletes a parent when `relation === 'compact'`, and the session-info modal labels the row *Continued from* vs *Forked from* off the same field. Two safeguards remain independent of the heuristics: the pass keeps its cheap `metadata[sid].logicalParentUuid` pre-gate (a `lookupParentSession` without a cached verdict reads JSONLs, so it must not run for every session), and a post-pass drops any id present in the live-session registry (`loadLiveSessions`, 5 s cache) — a running process is never a superseded lineage.
 
-The same scan also extracts the active session `goal` (`{condition}` or `null`) from `/goal`. The condition is carried by `goal_status` attachment records (latest-wins as the Stop hook re-evaluates). Only an **unmet** goal is surfaced — a `met:true` status means the goal was satisfied and auto-cleared by Claude Code, so it is treated as removal (`null`), exactly like a `/goal clear` command line (`/goal <text>` is a `type:user` line, `/goal clear` a `type:system` `local_command` line; `extractGoalFromLine` reads both). Extraction is folded into the existing per-line `applyLine` (forward, last-write-wins) plus the tail backward-scan (tail bytes are newer, so a tail goal/met/clear supersedes the head value).
-
-Goal events are rare and land anywhere, so the head and tail windows are not enough: when a cold scan finds no goal event in the tail of a file larger than `HEAD_MAX`, `scanGoalInRange` covers the gap from the head's last partial line to EOF; an incremental pass covers the bytes an over-`DELTA_MAX` delta skipped, before applying the delta's own lines so order still decides. It runs on `scanMarkedLines`, a byte-gated streamer: each 64 KB chunk is tested with `Buffer.includes` for a goal marker (`"goal_status"` or the `/goal` command tag) and only chunks that hit are decoded and line-split, so the pass stays close to raw read speed. Like `readCustomTitle`, this is a sequential marker scan over the whole file, once per file per cache lifetime — `buildSessionObject` itself still never reads a full JSONL. `goal` is cached in `sessionInfoCache`, merged through `loadSessionMetadata`/`refreshSessionMetadataPath` (direct-assigned, not guarded, so a met/clear propagates as `null`), and surfaced by `buildSessionObject`. The client renders a compact truncated subtitle on the session card and the full condition in the session-info modal; it never feeds `getSessionDisplayName`, so a user rename (`customTitle`) always takes precedence.
+`readCustomTitle` is the one reader that can cover a whole file, once per file per cache lifetime. It reads 1 MB chunks from the end and stops at the first chunk with a title, because the last such chunk wins; `extractCustomTitleFromBuffer` decodes only the lines that hold a marker. `buildSessionObject` itself never reads a full JSONL.
 
 ### 3. Boot-time prewarm
 
-`prewarmCaches()` runs once via `setImmediate` after `app.listen` fires. It primes the metadata + loop-info caches in the background so the first user request lands warm.
+`prewarmCaches()` runs once, after the first `/api/sessions` answer is sent, or `PREWARM_FALLBACK_MS` (5 s) after `app.listen` when no client asks. It primes the metadata + loop-info caches in the background so later requests land warm. It does not start on the ready line because its full read of every transcript competes for disk and CPU with the hub's other apps while they render.
 
-Steps, with periodic `setImmediate` yields so any inbound request isn't starved:
+Steps, with a `setImmediate` yield after every `PREWARM_SLICE_MS` (10 ms) of work so any inbound request isn't starved. The yield is by time, not by session count, because one large transcript is a long synchronous read:
 
 1. `loadSessionMetadata()` — full directory scan, populates `sessionMetadataCache`.
 2. For each metadata entry: `refreshLoopInfoState(meta.jsonlPath)` — primes `loopInfoStateByPath` so the per-session loop scan is a single `statSync` afterwards.
@@ -88,6 +86,19 @@ Steps, with periodic `setImmediate` yields so any inbound request isn't starved:
 Previously this also pre-warmed `gitBranchCache` per distinct `cwd` and ran a self-request to `/api/sessions?limit=all` to drive task-count / plan / team / agent caches. Both were removed once the `/api/sessions` handler grew a **cheap-probe** for `?filter=active`: inactive non-pinned sessions short-circuit before `buildSessionObject`, so the survivors (typically <10) don't need bulk-warmed caches. The self-request was 690× wasted work for an active-filter first hit.
 
 No new SSE event. Watchers remain authoritative for incremental updates after boot.
+
+### 3a. Persistent session cache
+
+`sessionInfoCache`, `customTitleCache` and the parent verdicts (`lib/parent-cache.js`) are saved to `<config dir>/.cck/session-cache.json` (`lib/session-cache.js`) and loaded before `listen`, so the first `/api/sessions` after a restart does not parse every transcript again. Without it, that parse is most of the cold list time.
+
+- **When it is saved:** after the prewarm, every `SESSION_CACHE_SAVE_MS` (30 s) when an entry changed, and on `exit`. The timer is needed because under the hub a child can end by `TerminateProcess` on Windows, where no exit handler runs.
+- **How it is written:** the whole file each time, to a temp file and then renamed over the old one. Never appended.
+- **What bounds it:** `exportSessionCaches` leaves out entries whose transcript is gone, so the file holds at most the live transcripts (≤ `SESSION_INFO_CACHE_MAX`, 2000, per map). A file over 8 MB is deleted and rebuilt cold. A file with another `VERSION`, or one that does not parse, is ignored.
+- **Why it is safe:** an entry is used only while `sameFileGrown` holds for the file's current `stat`: same inode, not shorter, and a changed mtime only together with new bytes. A grown file is read from `scannedUpTo`, as in memory. A file rewritten in place, replaced or truncated is parsed from the start. The worst case is a cold parse, never a stale row.
+
+**Parent verdicts.** A `lookupParentSession` verdict depends on sibling transcripts, not on one file, so it has its own check (`getParentVerdict`), run on every use, in memory and after a restart alike. A parent is always born before its child, so only the transcripts of the child's folder born before it can change a verdict; new sessions cannot. The entry keeps the child's inode, the parent's inode, the child's `logicalParentUuid`, and the number of transcripts in the folder born before the child (`countTranscriptsBornBefore`, from the `birthtimeMs` in `sessionInfoCache`, so the check reads no other file). A replaced child or parent, an anchor seen later, or an older transcript moved into the folder makes the entry stale, and the lookup runs again. A deleted transcript stays in `sessionInfoCache` until the next save, so it does not change the count; a deleted parent fails the inode check. A lookup that finds no anchor is not stored, because the child's head is not written yet.
+
+Loop state and task counts are not saved, so a cold first list still computes them.
 
 ### 3b. Cheap-probe on `?filter=active`
 
@@ -154,7 +165,7 @@ The clock badge on session cards needs to know whether a session contains `Sched
 
 ### Hot-path constraint: no full scans
 
-`getLoopInfoSummary(meta)` runs inside `buildSessionObject`, which is invoked **once per session per `/api/sessions` response**. Anything that reads a full JSONL there scales N×file-size per list refresh — unacceptable.
+`getLoopInfoSummary(meta)` runs in `/api/sessions` after the limit, once per row sent, not in `buildSessionObject`. A cold state is a full read of the transcript, so running it for every session made the first list pay for all of them. `buildSessionObject` is still invoked **once per session per `/api/sessions` response**. Anything that reads a full JSONL there scales N×file-size per list refresh — unacceptable.
 
 > **Hot-path rule.** Code reachable from `buildSessionObject` MUST NOT do full-JSONL reads. Use incremental / append-only scanning with a per-path state cache warmed by `projectsWatcher`. Full-file readers in `lib/parsers.js` (`readFullToolResult`, `readUserImage`, `readToolResultImage`, `readMessagesPage`, `buildSessionDigest`, `readCompactSummaries`, `readArtifactLinks`, `readScratchpadCreations`, `extractTranscriptStats`) are fine — but they run on dedicated endpoints, never in the list path. `extractTranscriptStats` (model + summed output tokens + first/last timestamp per subagent transcript) is called only by the workflow run view (`GET /api/sessions/:id/workflows/:wfId/run`), once per agent when that modal is opened — cold path. `readArtifactLinks` (published artifact links, keyed by URL) is the same shape: `GET /api/sessions/:id/artifacts`, asked for when the zen panel or the session-info modal opens. Its cache is `artifactsByPath` in `server.js`, keyed by JSONL path and invalidated by `mtimeMs`/`size`, so a repeat ask costs one `statSync` — which is what lets the panel re-ask on every render instead of going stale after a publish. Why a result is tied back to its `tool_use` is explained next to the code.
 
@@ -190,7 +201,10 @@ If `size < prev.size` (file truncated/replaced) → start over from offset 0.
 
 ### Substring fast-reject (still applies)
 
-Each complete line is checked for `"tool_use_id"` / `"ScheduleWakeup"` / `"CronCreate"` / `"CronDelete"` substrings before `JSON.parse`. Lines that match none are skipped — the overwhelming majority of session content (user/assistant text, other tool calls) pays only a few `String.includes`.
+Two gates run before `JSON.parse`:
+
+1. **Bytes.** `hasLoopMarker` tests the appended bytes with `Buffer.includes` for `"ScheduleWakeup"` / `"CronCreate"` / `"CronDelete"`, and for the id of each `CronCreate` call whose task id is still unknown. Bytes with no marker are never decoded: `scannedOffset` moves to the last `\n` and a partial last line waits for the next call. Most appends take this path.
+2. **Lines.** When the bytes hit, each complete line is checked for the tool names. A tool result is parsed only when it holds `"tool_use_id"` and the id of a pending `CronCreate`, because `buildLoopInfoFromState` reads `taskIdByToolUseId` only for cron ids, and a result is always written after its `tool_use`. Other tool results, most lines of a transcript, are skipped.
 
 ### 5-min fired-grace filter
 

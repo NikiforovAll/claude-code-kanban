@@ -42,6 +42,8 @@ const { createTerminalService, readTerminalConfig } = require('./lib/terminal');
 const { createDispatchRegistry, formatPreamble, formatDispatchLine, isPeerName } = require('./lib/dispatch');
 const { createGroupStore, isGroupName, suggestGroupName } = require('./lib/dispatch-groups');
 const { pickFolder } = require('./lib/folder-dialog');
+const { loadSessionCache, saveSessionCache } = require('./lib/session-cache');
+const { getParentVerdict, setParentVerdict } = require('./lib/parent-cache');
 
 if (process.argv.includes("--install") || process.argv.includes("--uninstall")) {
   const { runInstall, runUninstall } = require("./install");
@@ -84,6 +86,7 @@ const PINS_FILE = path.join(CCK_DIR, 'pins.json');
 const DISPATCH_GROUPS_FILE = path.join(CCK_DIR, 'dispatch-groups.json');
 const SERVER_INFO_FILE = path.join(CCK_DIR, 'server.json');
 const TERMINAL_TOKEN_FILE = path.join(CCK_DIR, 'terminal-token.json');
+const SESSION_CACHE_FILE = path.join(CCK_DIR, 'session-cache.json');
 // Harness-owned scratchpad root; the per-session dir under it is created lazily.
 const SCRATCHPAD_ROOT = path.join(os.tmpdir(), 'claude');
 
@@ -823,8 +826,6 @@ function refreshSessionMetadataPath(jsonlPath) {
   if (info.cwd) existing.cwd = info.cwd;
   if (info.gitBranch) existing.gitBranch = info.gitBranch;
   if (info.customTitle) existing.customTitle = info.customTitle;
-  // Direct assign (not guarded) so a /goal clear propagates as null.
-  existing.goal = info.goal || null;
   if (info.logicalParentUuid) existing.logicalParentUuid = info.logicalParentUuid;
   if (info.compactBoundaryUuid) existing.compactBoundaryUuid = info.compactBoundaryUuid;
   return true;
@@ -911,7 +912,6 @@ function loadSessionMetadata() {
           cwd: sessionInfo.cwd || null,
           gitBranch: sessionInfo.gitBranch || null,
           customTitle: sessionInfo.customTitle || null,
-          goal: sessionInfo.goal || null,
           jsonlPath: jsonlPath,
           logicalParentUuid: sessionInfo.logicalParentUuid || null,
           compactBoundaryUuid: sessionInfo.compactBoundaryUuid || null
@@ -1155,7 +1155,6 @@ function buildSessionObject(id, meta, overrides = {}) {
     gitBranch: resolveSessionGitBranch(meta),
     worktree: resolveWorktree(meta.project),
     customTitle: meta.customTitle || null,
-    goal: meta.goal || null,
     taskCount: 0,
     completed: 0,
     inProgress: 0,
@@ -1177,7 +1176,6 @@ function buildSessionObject(id, meta, overrides = {}) {
     contextStatus: getContextStatus(id, meta),
     ...getPlanInfo(meta.slug),
     ...getWorkflowInfoSummary(id),
-    loopInfo: getLoopInfoSummary(meta),
     ...overrides,
     // Remove internal-only field
     _logStat: undefined,
@@ -1551,22 +1549,69 @@ app.get('/api/sessions', async (req, res) => {
     // The client sends the session it currently has open, which it cannot render at all
     // if the row is missing — that one is not a preference.
     if (projectFilter) {
-      sessions = sessions.filter(s => s.project === projectFilter || includeIds.has(s.id));
+      const matches = projectMatcher(String(projectFilter));
+      sessions = sessions.filter(s => matches(s.project) || includeIds.has(s.id));
+    }
+    // The sidebar's 24h filter: projects with any transcript written in the window, so an older
+    // session of such a project stays in.
+    const recentHours = Number(req.query.recentHours);
+    if (recentHours > 0) {
+      const cutoff = Date.now() - recentHours * 3600 * 1000;
+      const activity = projectActivity();
+      sessions = sessions.filter(s => (activity.get(s.project) || 0) > cutoff || includeIds.has(s.id));
     }
 
+    const paged = limit !== null && limit > 0;
+    // The sidebar loads the next page on scroll while this is true. A header, so the body stays a plain array.
+    res.setHeader('X-Has-More', String(paged && sessions.length > limit));
     // Apply limit if specified, but always include pinned sessions
-    if (limit !== null && limit > 0) {
+    if (paged) {
       const top = sessions.slice(0, limit);
       const topIds = new Set(top.map(s => s.id));
       const missingPinned = sessions.filter(s => pinnedIds.has(s.id) && !topIds.has(s.id));
       sessions = [...top, ...missingPinned];
     }
 
+    // Loop info can mean a full read of the transcript, so only the rows sent pay for it.
+    for (const s of sessions) s.loopInfo = getLoopInfoSummary(s);
+
     res.json(withDispatchPlacement(sessions));
+    startPrewarm();
   } catch (error) {
     console.error('Error listing sessions:', error);
     res.status(500).json({ error: 'Failed to list sessions' });
   }
+});
+
+// Same rule as `projectMatcher` in public/app.js. An absolute path selects that one project, so
+// the hub's scope does not also pull in `app-2` next to `app`; any other text matches a part.
+function normalizeProjectPath(p) {
+  return p.toLowerCase().replace(/\\/g, '/').replace(/\/+$/, '');
+}
+function projectMatcher(query) {
+  const q = normalizeProjectPath(query.trim());
+  const exact = /^([a-z]:)?\//.test(q);
+  return (project) => {
+    if (!project) return false;
+    const p = normalizeProjectPath(project);
+    return exact ? p === q : p.includes(q);
+  };
+}
+
+// Ids of sessions whose id contains q, from any transcript, newest first. The client gets the
+// rows through `/api/sessions?include=`. A linear scan is enough: ~4 ms for 10k ids.
+const SESSION_SEARCH_MIN = 3;
+const SESSION_SEARCH_MAX = 20;
+app.get('/api/sessions/search', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const q = String(req.query.q || '').toLowerCase().replace(/-/g, '');
+  if (q.length < SESSION_SEARCH_MIN) return res.json([]);
+  const hits = [];
+  for (const [id, meta] of Object.entries(loadSessionMetadata())) {
+    if (id.replace(/-/g, '').includes(q)) hits.push({ id, mtime: getSessionLogStat(meta).mtime || 0 });
+  }
+  hits.sort((a, b) => b.mtime - a.mtime);
+  res.json(hits.slice(0, SESSION_SEARCH_MAX).map((h) => h.id));
 });
 
 // os.tmpdir() can be an 8.3 short path on Windows; transcripts record the long form.
@@ -1578,19 +1623,22 @@ function isTempPath(p) {
   return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel);
 }
 
+// Project path → newest transcript mtime among its sessions (undefined when none has one).
+function projectActivity() {
+  const activity = new Map();
+  for (const meta of Object.values(loadSessionMetadata())) {
+    if (!meta.project) continue;
+    const mtime = getSessionLogStat(meta).mtime;
+    const prev = activity.get(meta.project);
+    if (!prev || (mtime && mtime > prev)) activity.set(meta.project, mtime);
+  }
+  return activity;
+}
+
 // API: Get distinct project paths with last-modified timestamps
 app.get('/api/projects', (_req, res) => {
   res.setHeader('Cache-Control', 'no-store');
-  const metadata = loadSessionMetadata();
-  const projectMap = {};
-  for (const meta of Object.values(metadata)) {
-    if (!meta.project) continue;
-    const mtime = getSessionLogStat(meta).mtime;
-    if (!projectMap[meta.project] || (mtime && mtime > projectMap[meta.project])) {
-      projectMap[meta.project] = mtime;
-    }
-  }
-  const projects = Object.entries(projectMap)
+  const projects = [...projectActivity()]
     .map(([path, mtime]) => ({
       path,
       modifiedAt: mtime ? new Date(mtime).toISOString() : null,
@@ -2674,7 +2722,6 @@ function resolveSubagentJsonl(meta, sessionId, agentId) {
 //   Fork: copies the parent's early messages verbatim (same UUIDs). Anchor = first UUID.
 //   Compact: writes a compact_boundary record with logicalParentUuid in the preamble.
 // Birthtime (not mtime) identifies the parent — mtime changes on resume, birthtime is immutable.
-const parentSessionCache = new Map();
 const FORK_ANCHOR_SCAN_LINES = 10;
 function findForkAnchorUuid(jsonlPath) {
   let text;
@@ -2688,8 +2735,8 @@ function findForkAnchorUuid(jsonlPath) {
   return firstUuid;
 }
 // Fallback when the metadata cache lacks the boundary pair (older entries, cold cache).
-// Reached only from lookupParentSession, whose result is memoized for the process life —
-// at most one read per session, never per request.
+// Reached only from lookupParentSession, whose result is cached (lib/parent-cache.js) —
+// one read per session until its verdict goes stale, never per request.
 // Bounded read (~1 MB) mirrors readSessionInfoFromJsonl's HEAD_MAX — compact_boundary
 // always sits in the preamble before the first user/assistant record.
 const COMPACT_ANCHOR_READ_MAX = 1048576;
@@ -2729,8 +2776,9 @@ function findSessionContainingUuid(projectDir, targetUuid, excludeJsonlPath, max
     if (!f.endsWith('.jsonl')) continue;
     const fp = path.join(projectDir, f);
     if (fp === excludeJsonlPath) continue;
-    let birthtime = 0;
-    try { birthtime = statSync(fp).birthtimeMs; } catch { continue; }
+    let st;
+    try { st = statSync(fp); } catch { continue; }
+    const birthtime = st.birthtimeMs;
     if (maxBirthtimeMs != null && birthtime >= maxBirthtimeMs) continue;
     if (birthtime >= bestBirthtime) continue;
     let text;
@@ -2741,7 +2789,7 @@ function findSessionContainingUuid(projectDir, targetUuid, excludeJsonlPath, max
       try {
         const d = JSON.parse(l);
         if (d.uuid === targetUuid && d.sessionId) {
-          best = { parentSessionId: d.sessionId, parentJsonlPath: fp, isFork: false };
+          best = { parentSessionId: d.sessionId, parentJsonlPath: fp, parentIno: st.ino, isFork: false };
           bestBirthtime = birthtime;
           bestText = text;
           break;
@@ -2754,8 +2802,10 @@ function findSessionContainingUuid(projectDir, targetUuid, excludeJsonlPath, max
   return best;
 }
 function lookupParentSession(sessionId) {
-  if (parentSessionCache.has(sessionId)) return parentSessionCache.get(sessionId);
   const meta = loadSessionMetadata()[sessionId];
+  const known = getParentVerdict(sessionId, meta);
+  if (known) return known;
+  let self = null, parentIno = null;
   // relation is the single verdict: 'none' (no parent found), 'compact' (this session
   // continues a lineage the parent could not hold) or 'fork' (an intentional branch off
   // a parent that keeps its own life). isCompact/isFork are derived views of it.
@@ -2770,23 +2820,24 @@ function lookupParentSession(sessionId) {
     // A fork copies the parent's early records verbatim, so its first uuid is the anchor.
     const anchorUuid = compactAnchor ?? findForkAnchorUuid(meta.jsonlPath);
     if (anchorUuid) {
-      let selfBirthtime;
-      try { selfBirthtime = statSync(meta.jsonlPath).birthtimeMs; } catch { /* ignore */ }
-      if (selfBirthtime != null) {
-        const hit = findSessionContainingUuid(path.dirname(meta.jsonlPath), anchorUuid, meta.jsonlPath, selfBirthtime, boundary?.boundaryUuid);
+      try { self = statSync(meta.jsonlPath); } catch { /* ignore */ }
+      if (self) {
+        const hit = findSessionContainingUuid(path.dirname(meta.jsonlPath), anchorUuid, meta.jsonlPath, self.birthtimeMs, boundary?.boundaryUuid);
         if (hit) {
           // No compact boundary at all → fork by construction; with one, the copied
           // boundary uuid (hit.isFork) is what separates a fork from a continuation.
           result.parentSessionId = hit.parentSessionId;
           result.parentJsonlPath = hit.parentJsonlPath;
           result.relation = (!compactAnchor || hit.isFork) ? 'fork' : 'compact';
+          parentIno = hit.parentIno;
         }
       }
     }
   }
   result.isCompact = result.relation === 'compact';
   result.isFork = result.relation === 'fork';
-  parentSessionCache.set(sessionId, result);
+  // No anchor yet means the head is not written; that "no parent" is not a verdict.
+  if (self) setParentVerdict(sessionId, meta, self, parentIno, result);
   return result;
 }
 // #endregion
@@ -4080,20 +4131,39 @@ setInterval(cleanupContextStatus, 30 * 60 * 1000);
 // enrichment for inactive sessions, so we no longer drive a full self-request
 // here — that was 690× wasted work for an active-filter first hit.
 // Yields to the event loop periodically so any inbound request isn't starved.
+// A yield every N sessions does not bound the wait: one large transcript is a long sync read.
+const PREWARM_SLICE_MS = 10;
+// Started on the ready line, the full read of every transcript competes for disk and CPU with
+// the hub's other apps while they render, and slows their first render. It starts after the
+// first list is sent, or after the fallback when no client asks.
+const PREWARM_FALLBACK_MS = 5000;
+const SESSION_CACHE_SAVE_MS = 30000;
+const persistSessionCache = () => saveSessionCache((data) => writeJsonAtomic(SESSION_CACHE_FILE, data));
+let prewarmStarted = false;
+function startPrewarm() {
+  if (prewarmStarted) return;
+  prewarmStarted = true;
+  setImmediate(prewarmCaches);
+}
+
 async function prewarmCaches() {
   const t0 = Date.now();
   try {
     const metadata = loadSessionMetadata();
 
-    let i = 0;
+    let sliceStart = Date.now();
     for (const meta of Object.values(metadata)) {
       if (meta?.jsonlPath) {
         try { refreshLoopInfoState(meta.jsonlPath); } catch {}
       }
-      if (++i % 50 === 0) await new Promise(r => setImmediate(r));
+      if (Date.now() - sliceStart >= PREWARM_SLICE_MS) {
+        await new Promise(r => setImmediate(r));
+        sliceStart = Date.now();
+      }
     }
 
     console.log(`[prewarm] done in ${Date.now() - t0}ms (${Object.keys(metadata).length} sessions)`);
+    persistSessionCache();
   } catch (e) {
     console.warn('[prewarm] failed:', e.message);
   }
@@ -4118,8 +4188,14 @@ async function prewarmCaches() {
     if (process.argv.includes('--open')) {
       import('open').then(open => open.default(`http://localhost:${actualPort}`));
     }
-    setImmediate(prewarmCaches);
+    setTimeout(startPrewarm, PREWARM_FALLBACK_MS).unref();
   };
+
+  loadSessionCache(SESSION_CACHE_FILE);
+  // Under the hub a child can end by TerminateProcess on Windows, where no exit handler runs,
+  // so the cache is also saved on a timer.
+  setInterval(persistSessionCache, SESSION_CACHE_SAVE_MS).unref();
+  process.on('exit', persistSessionCache);
 
   const listenOpts = { onUpgrade: terminal.handleUpgrade };
   const server = net.listenLoopback(app, PORT, onReady, listenOpts);

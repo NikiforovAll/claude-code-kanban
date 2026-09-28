@@ -23,7 +23,9 @@ const {
   readCompactSummaries,
   findTerminatedTeammates,
   extractPromptFromTranscript,
-  readScratchpadCreations
+  readScratchpadCreations,
+  updateLoopInfo,
+  buildLoopInfoFromState
 } = require('../lib/parsers');
 
 const ajv = new Ajv({ allErrors: true, strict: false });
@@ -586,35 +588,241 @@ describe('Parser: readSessionInfoFromJsonl', () => {
   });
 });
 
-describe('Parser: readSessionInfoFromJsonl goal', () => {
-  const base = { cwd: '/home/user/project', slug: 's', gitBranch: 'main', timestamp: '2026-01-01T00:00:00Z' };
-  const line = (o) => `${JSON.stringify({ ...base, ...o })}\n`;
-  const goalSet = line({ type: 'attachment', attachment: { type: 'goal_status', met: false, condition: 'ship it' } });
-  const goalMet = line({ type: 'attachment', attachment: { type: 'goal_status', met: true, condition: 'ship it' } });
-  const goalClear = line({
-    type: 'system',
-    subtype: 'local_command',
-    content: '<command-name>/goal</command-name>\n<command-message>goal</command-message>\n<command-args>clear</command-args>',
+describe('Parser: updateLoopInfo', () => {
+  const line = (o) => `${JSON.stringify({ timestamp: '2026-01-01T00:00:00Z', ...o })}\n`;
+  const toolUse = (id, name, input) => line({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id, name, input }] } });
+  const toolResult = (toolUseId, resultId) => line({
+    type: 'user',
+    message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, content: 'ok' }] },
+    ...(resultId && { toolUseResult: { id: resultId } }),
   });
-  const filler = line({ type: 'assistant', message: { role: 'assistant', content: 'x'.repeat(2000) } });
-  const pastHead = filler.repeat(Math.ceil((1.2 * 1048576) / filler.length));
+  const otherTools = toolUse('toolu_b1', 'Bash', { command: 'ls' }) + toolResult('toolu_b1', 'not-a-cron');
 
   let dir;
-  before(() => { dir = mkdtempSync(path.join(os.tmpdir(), 'cck-goal-')); });
+  before(() => { dir = mkdtempSync(path.join(os.tmpdir(), 'cck-loop-')); });
   after(() => rmSync(dir, { recursive: true, force: true }));
 
-  const cases = [
-    ['keeps a goal set in the head when nothing later touches it', goalSet + pastHead, { condition: 'ship it' }],
-    ['drops a goal met between the head and tail windows', goalSet + pastHead + goalMet + pastHead, null],
-    ['drops a goal cleared by a system local_command line in the tail', goalSet + pastHead + goalClear, null],
-    ['keeps a goal re-set after an earlier one was met', goalSet + pastHead + goalMet + pastHead + goalSet + pastHead, { condition: 'ship it' }],
-  ];
-  cases.forEach(([name, body, expected], i) => {
-    it(name, () => {
-      const p = path.join(dir, `${i}.jsonl`);
-      writeFileSync(p, body);
-      assert.deepEqual(readSessionInfoFromJsonl(p).goal, expected);
-    });
+  it('resolves a cron task id from its result and drops a deleted cron', () => {
+    const p = path.join(dir, 'full.jsonl');
+    writeFileSync(p, [
+      otherTools,
+      toolUse('toolu_w1', 'ScheduleWakeup', { delaySeconds: 60, reason: 'poll', prompt: 'go' }),
+      toolUse('toolu_c1', 'CronCreate', { cron: '0 * * * *', prompt: 'hourly' }),
+      otherTools,
+      toolResult('toolu_c1', 'task-1'),
+      toolUse('toolu_c2', 'CronCreate', { cron: '5 * * * *', prompt: 'gone' }),
+      toolResult('toolu_c2', 'task-2'),
+      toolUse('toolu_d1', 'CronDelete', { id: 'task-2' }),
+    ].join(''));
+    const info = buildLoopInfoFromState(updateLoopInfo(p, null));
+    assert.equal(info.wakeups.length, 1);
+    assert.equal(info.wakeups[0].delaySeconds, 60);
+    assert.deepEqual(info.crons.map((c) => [c.id, c.taskId, c.prompt]), [['toolu_c1', 'task-1', 'hourly']]);
+  });
+
+  it('resolves a cron result that arrives in a later append with no loop tool in it', () => {
+    const p = path.join(dir, 'append.jsonl');
+    writeFileSync(p, toolUse('toolu_c1', 'CronCreate', { cron: '0 * * * *', prompt: 'hourly' }));
+    let state = updateLoopInfo(p, null);
+    assert.equal(buildLoopInfoFromState(state).crons[0].taskId, null);
+    writeFileSync(p, otherTools, { flag: 'a' });
+    state = updateLoopInfo(p, state);
+    writeFileSync(p, otherTools + toolResult('toolu_c1', 'task-1'), { flag: 'a' });
+    state = updateLoopInfo(p, state);
+    assert.equal(buildLoopInfoFromState(state).crons[0].taskId, 'task-1');
+    assert.equal(state.scannedOffset, readFileSync(p).length);
+  });
+
+  it('keeps a partial last line for the next call', () => {
+    const p = path.join(dir, 'partial.jsonl');
+    const wake = toolUse('toolu_w1', 'ScheduleWakeup', { delaySeconds: 30 });
+    writeFileSync(p, otherTools + wake.slice(0, 20));
+    let state = updateLoopInfo(p, null);
+    assert.equal(state.scannedOffset, Buffer.byteLength(otherTools));
+    writeFileSync(p, wake.slice(20), { flag: 'a' });
+    state = updateLoopInfo(p, state);
+    assert.equal(buildLoopInfoFromState(state).wakeups.length, 1);
+  });
+});
+
+describe('Session cache across restarts', () => {
+  const { execFileSync } = require('child_process');
+  const { utimesSync } = require('fs');
+  const lines = (slug, title) => [
+    JSON.stringify({ type: 'user', slug, cwd: 'C:/proj', sessionId: 's1' }),
+    JSON.stringify({ type: 'custom-title', customTitle: title, sessionId: 's1' }),
+    '',
+  ].join('\n');
+  // Each call is a fresh process, so the in-memory caches start empty and only the file carries state.
+  const run = (op, cacheFile, jsonl) => JSON.parse(execFileSync(process.execPath, ['-e', `
+    const { loadSessionCache, saveSessionCache } = require(${JSON.stringify(path.join(__dirname, '../lib/session-cache'))});
+    const { readSessionInfoFromJsonl } = require(${JSON.stringify(path.join(__dirname, '../lib/parsers'))});
+    const [op, cacheFile, jsonl] = process.argv.slice(1);
+    const loaded = loadSessionCache(cacheFile);
+    const info = readSessionInfoFromJsonl(jsonl);
+    if (op === 'save') saveSessionCache((data) => require('fs').writeFileSync(cacheFile, JSON.stringify(data)));
+    console.log(JSON.stringify({ loaded, slug: info.slug, title: info.customTitle }));
+  `, op, cacheFile, jsonl], { encoding: 'utf8' }));
+
+  let dir, cacheFile, jsonl;
+  before(() => {
+    dir = mkdtempSync(path.join(os.tmpdir(), 'cck-cache-'));
+    cacheFile = path.join(dir, 'session-cache.json');
+    jsonl = path.join(dir, 's1.jsonl');
+  });
+  after(() => rmSync(dir, { recursive: true, force: true }));
+
+  // Whole seconds, because utimes cannot set the sub-millisecond part a real write leaves.
+  const T0 = new Date('2026-01-01T00:00:00Z');
+  const writeAt = (slug, title, t = T0) => {
+    writeFileSync(jsonl, lines(slug, title));
+    utimesSync(jsonl, t, t);
+  };
+
+  it('reuses entries of an unchanged file from the last run', () => {
+    writeAt('s-one', 'Alpha');
+    assert.deepEqual(run('save', cacheFile, jsonl), { loaded: false, slug: 's-one', title: 'Alpha' });
+    writeAt('s-two', 'Brava');
+    assert.deepEqual(run('read', cacheFile, jsonl), { loaded: true, slug: 's-one', title: 'Alpha' });
+  });
+
+  it('rescans a file rewritten in place with the same size', () => {
+    writeAt('s-one', 'Alpha');
+    run('save', cacheFile, jsonl);
+    writeAt('s-two', 'Brava', new Date(T0.getTime() + 5000));
+    assert.deepEqual(run('read', cacheFile, jsonl), { loaded: true, slug: 's-two', title: 'Brava' });
+  });
+
+  it('reads only the appended bytes of a file that grew', () => {
+    writeAt('s-one', 'Alpha');
+    run('save', cacheFile, jsonl);
+    writeAt('s-two', 'Brava');
+    writeFileSync(jsonl, `${JSON.stringify({ type: 'custom-title', customTitle: 'Gamma', sessionId: 's1' })}\n`, { flag: 'a' });
+    assert.deepEqual(run('read', cacheFile, jsonl), { loaded: true, slug: 's-one', title: 'Gamma' });
+  });
+
+  it('ignores a cache file of another version', () => {
+    writeAt('s-one', 'Alpha');
+    run('save', cacheFile, jsonl);
+    const data = JSON.parse(readFileSync(cacheFile, 'utf8'));
+    writeFileSync(cacheFile, JSON.stringify({ ...data, version: data.version + 1 }));
+    writeAt('s-two', 'Brava');
+    assert.deepEqual(run('read', cacheFile, jsonl), { loaded: false, slug: 's-two', title: 'Brava' });
+  });
+
+  it('drops entries of deleted transcripts on save', () => {
+    const gone = path.join(dir, 'gone.jsonl');
+    writeFileSync(gone, lines('s-gone', 'Gone'));
+    run('save', cacheFile, gone);
+    rmSync(gone);
+    writeFileSync(jsonl, lines('s-one', 'Alpha'));
+    run('save', cacheFile, jsonl);
+    const data = JSON.parse(readFileSync(cacheFile, 'utf8'));
+    assert.deepEqual(data.info.map(([p]) => p), [jsonl]);
+    assert.deepEqual(data.titles.map(([p]) => p), [jsonl]);
+  });
+});
+
+describe('Parent verdict cache', () => {
+  const { renameSync, statSync } = require('fs');
+  const { execFileSync } = require('child_process');
+  const { getParentVerdict, setParentVerdict } = require('../lib/parent-cache');
+  // Birth times must differ, and NTFS keeps them to 100 ns.
+  const pause = () => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+  const line = (sessionId) => `${JSON.stringify({ type: 'user', uuid: 'u1', sessionId, cwd: 'C:/proj' })}\n`;
+  const result = { parentSessionId: 'p', parentJsonlPath: null, relation: 'compact', isCompact: true, isFork: false };
+
+  let root, proj, older, parent, child, meta;
+  const put = (p, sessionId) => {
+    writeFileSync(p, line(sessionId));
+    readSessionInfoFromJsonl(p);
+  };
+  // Writes a new file first and renames it over, so the replacement gets its own inode.
+  const replace = (p, sessionId) => {
+    writeFileSync(`${p}.new`, line(sessionId));
+    rmSync(p);
+    renameSync(`${p}.new`, p);
+    readSessionInfoFromJsonl(p);
+  };
+  const record = () => {
+    setParentVerdict('c', meta, statSync(child), statSync(parent).ino, { ...result, parentJsonlPath: parent });
+  };
+
+  before(() => {
+    root = mkdtempSync(path.join(os.tmpdir(), 'cck-parent-'));
+    proj = path.join(root, 'proj');
+    mkdirSync(proj);
+  });
+  after(() => rmSync(root, { recursive: true, force: true }));
+
+  const setup = (name) => {
+    const dir = path.join(proj, name);
+    mkdirSync(dir);
+    older = path.join(root, `${name}-older.jsonl`);
+    parent = path.join(dir, 'p.jsonl');
+    child = path.join(dir, 'c.jsonl');
+    put(older, 'o');
+    pause();
+    put(parent, 'p');
+    pause();
+    put(child, 'c');
+    meta = { jsonlPath: child, logicalParentUuid: 'u1' };
+    record();
+  };
+
+  it('holds while the child grows and newer transcripts appear', () => {
+    setup('grow');
+    writeFileSync(child, line('c'), { flag: 'a' });
+    readSessionInfoFromJsonl(child);
+    pause();
+    put(path.join(path.dirname(child), 'newer.jsonl'), 'n');
+    assert.equal(getParentVerdict('c', meta)?.parentSessionId, 'p');
+  });
+
+  it('goes stale when an older transcript is moved into the folder', () => {
+    setup('moved');
+    const moved = path.join(path.dirname(child), 'older.jsonl');
+    renameSync(older, moved);
+    readSessionInfoFromJsonl(moved);
+    assert.equal(getParentVerdict('c', meta), null);
+  });
+
+  it('goes stale when the child or the parent is replaced', () => {
+    setup('replaced');
+    replace(child, 'c');
+    assert.equal(getParentVerdict('c', meta), null);
+    record();
+    replace(parent, 'p');
+    assert.equal(getParentVerdict('c', meta), null);
+  });
+
+  it('goes stale when the compact anchor changes', () => {
+    setup('anchor');
+    assert.equal(getParentVerdict('c', { ...meta, logicalParentUuid: 'u2' }), null);
+  });
+
+  it('survives a restart through the session cache', () => {
+    setup('restart');
+    const cacheFile = path.join(root, 'session-cache.json');
+    const lib = (m) => JSON.stringify(path.join(__dirname, '../lib', m));
+    execFileSync(process.execPath, ['-e', `
+      const { saveSessionCache } = require(${lib('session-cache')});
+      const { readSessionInfoFromJsonl } = require(${lib('parsers')});
+      const { setParentVerdict } = require(${lib('parent-cache')});
+      const fs = require('fs');
+      const [cacheFile, parent, child, older] = process.argv.slice(1);
+      for (const p of [parent, child, older]) readSessionInfoFromJsonl(p);
+      setParentVerdict('c', { jsonlPath: child, logicalParentUuid: 'u1' }, fs.statSync(child), fs.statSync(parent).ino, { parentSessionId: 'p', parentJsonlPath: parent, relation: 'compact' });
+      saveSessionCache((data) => fs.writeFileSync(cacheFile, JSON.stringify(data)));
+    `, cacheFile, parent, child, older]);
+    const out = execFileSync(process.execPath, ['-e', `
+      const { loadSessionCache } = require(${lib('session-cache')});
+      const { getParentVerdict } = require(${lib('parent-cache')});
+      const [cacheFile, child] = process.argv.slice(1);
+      loadSessionCache(cacheFile);
+      console.log(getParentVerdict('c', { jsonlPath: child, logicalParentUuid: 'u1' })?.parentSessionId ?? 'none');
+    `, cacheFile, child], { encoding: 'utf8' });
+    assert.equal(out.trim(), 'p');
   });
 });
 

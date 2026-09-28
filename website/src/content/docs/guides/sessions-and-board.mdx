@@ -17,11 +17,11 @@ The main screen has four parts:
 
 ## Session cards
 
-Each card in the sidebar shows the session name, project, git branch, plan title, goal, progress (completed of total tasks), a context use bar and the time of the last change. Badges show more state when it applies: team members, a running terminal, a waiting prompt, running agents, a plan, a scratchpad, bookmarked messages, linked documents and a shared task list. A gear badge shows that the session ran workflows. A clock badge shows that it has scheduled wakeups or cron jobs. Hover a badge to see the count, and click it to see the details. The info icon opens [session info](/claude-code-kanban/guides/session-details/#session-info).
+Each card in the sidebar shows the session name, project, git branch, plan title, progress (completed of total tasks), a context use bar and the time of the last change. Badges show more state when it applies: team members, a running terminal, a waiting prompt, running agents, a plan, a scratchpad, bookmarked messages, linked documents and a shared task list. A gear badge shows that the session ran workflows. A clock badge shows that it has scheduled wakeups or cron jobs. Hover a badge to see the count, and click it to see the details. The info icon opens [session info](/claude-code-kanban/guides/session-details/#session-info).
 
 A pulse on the card means the session log changed in the last 10 seconds or agents are running.
 
-The **Active Only** filter keeps a session when one of these is true:
+The **Active** filter keeps a session when one of these is true:
 
 - It runs in the embedded terminal.
 - It has pending tasks or tasks in progress.
@@ -31,27 +31,30 @@ The **Active Only** filter keeps a session when one of these is true:
 
 When a turn ends, the session stays in the active list for 2 more minutes, so it does not disappear the moment Claude stops.
 
-The sidebar header shows two chips, **N waiting** and **N active**. The **active** count includes sessions that have tasks in progress, running agents, or a log change in the last 5 minutes. It does not include waiting sessions, because the **waiting** chip counts them. Click **waiting** to show only sessions that wait for you. Click **active** to show sessions with running work and waiting sessions together. A chip click also sets the session filter to **Active Only**. Click the chip again to clear it.
+The sidebar header shows two chips, **N waiting** and **N active**. The **active** count includes sessions that have tasks in progress, running agents, or a log change in the last 5 minutes. It does not include waiting sessions, because the **waiting** chip counts them. Click **waiting** to show only sessions that wait for you. Click **active** to show sessions with running work and waiting sessions together. A chip click also sets the session filter to **Active**. Click the chip again to clear it.
 
 ## Filters and search
 
-The funnel button opens the filter menu. It has three lists:
+The funnel button opens the filter menu. It has two filters:
 
-| List | Values | Default |
+| Filter | Values | Default |
 | --- | --- | --- |
-| Project | All Projects, Recent (24h), or one project | Recent (24h) |
-| Sessions | All Sessions, Active Only | Active Only |
-| Limit | Show 10, Show 20, Show 50, Show All | Show 20 |
+| Project | A project path or part of one, **24h**, or empty for all projects | **24h** |
+| Sessions | Active, All sessions | Active |
+
+The project box shows the sessions whose project path contains the text you type. Case and the type of slash do not matter. Below the box, the menu lists up to 7 matching projects, newest activity first, with the matching text underlined. Click a project, or select it with <kbd>↓</kbd> and <kbd>↑</kbd> and press <kbd>Enter</kbd>, to show that one project only. A full path typed in the box does the same. The **24h** button shows the projects with activity in the last 24 hours. Typing in the box turns **24h** off.
+
+The sidebar loads 20 sessions first. When you scroll to the end of the list, it loads 20 more.
 
 When a filter is not at its default, the Sessions header shows a short summary of it. The reset button sets all filters back to the defaults and clears the selection.
 
 The search box (**Search tasks, sessions, projects...**) does a fuzzy match on the session name, id, project, description, task subject, task description, task activity text and group names.
 
-In **Active Only**, pinned and sticky sessions stay in the list even when they are idle. A search or a **waiting** or **active** chip still filters them.
+In **Active**, pinned and sticky sessions stay in the list even when they are idle. A search or a **waiting** or **active** chip still filters them.
 
 ## Project groups
 
-In **Active Only**, the sidebar groups sessions under project headers. A project header has:
+In **Active**, the sidebar groups sessions under project headers. A project header has:
 
 - The folder name and the count of active and total sessions.
 - The full path as a breadcrumb. Click it to copy the path.
@@ -59,7 +62,7 @@ In **Active Only**, the sidebar groups sessions under project headers. A project
 - A scratchpad button.
 - A project view button that opens the [project view](#view-modes).
 
-When other project groups show, sessions with no project go under **Ungrouped**. In **All Sessions**, the sidebar shows your named groups first, then a flat list of the other sessions.
+When other project groups show, sessions with no project go under **Ungrouped**. In **All sessions**, the sidebar shows your named groups first, then a flat list of the other sessions.
 
 You can also put sessions and projects into your own named groups. See [Session groups](/claude-code-kanban/guides/session-groups/).
 
@@ -127,7 +130,7 @@ For team sessions, an **All Members** list above the board filters the tasks by 
 
 - **Select a session to view tasks** shows when no session is open.
 - **No pending tasks**, **No active tasks** and **No completed tasks** show in empty columns.
-- **No sessions found** shows in an empty sidebar. Other messages cover a search with no results, a project with no sessions and **No active sessions**. For the last one, select **All Sessions** in the filter menu.
+- **No sessions found** shows in an empty sidebar. Other messages cover a search with no results, a project with no sessions and **No active sessions**. For the last one, select **All sessions** in the filter menu.
 
 If the board stays empty while Claude works, the task tools may be off. See [The board is empty](/claude-code-kanban/troubleshooting/#the-board-is-empty).
 

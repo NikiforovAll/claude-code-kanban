@@ -456,14 +456,14 @@ body::before {
   gap: 8px;
   padding: 14px 16px 10px 20px;
   font-size: 11px;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
   color: var(--text-muted);
 }
 
 .section-header-label {
   flex: 0 0 auto;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
 }
 
 /* Non-default filters, spelled out in the header so folding them into the popover
@@ -475,9 +475,7 @@ body::before {
   white-space: nowrap;
   text-overflow: ellipsis;
   font-size: 10px;
-  font-weight: 400;
   letter-spacing: 0.02em;
-  text-transform: none;
   color: var(--accent-text);
 }
 
@@ -545,15 +543,6 @@ body::before {
   display: block;
 }
 
-.filter-row {
-  display: flex;
-  gap: 5px;
-}
-
-.filter-row + .filter-row {
-  margin-top: 5px;
-}
-
 .filter-dropdown {
   flex: 1;
   appearance: none;
@@ -577,26 +566,180 @@ body::before {
   border-color: var(--border);
 }
 
-/* A filter holding a non-default value tints toward the ember, so it reads as "active"
-   before you read the value. Border and text only — the fill never floods. */
-.filter-dropdown.non-default {
-  color: var(--accent-text);
-  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
-}
-
-.filter-dropdown.non-default:hover {
-  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
-}
-
 .filter-dropdown option {
   background: var(--bg-surface);
   color: var(--text-primary);
 }
 
-.filter-dropdown:focus {
+.filter-dropdown:focus,
+.pf-field:focus-within {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent-dim);
+}
+
+/* The project box: path field with the 24h switch set into its right end. */
+.pf-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px 0 9px;
+  background: var(--bg-deep);
+  border: 1px solid transparent;
+  border-radius: 6px;
+}
+
+.pf-icon {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  color: var(--text-muted);
+}
+
+.pf-input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 0;
+  background: none;
+  border: none;
+  outline: none;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.pf-input::placeholder {
+  color: var(--text-muted);
+}
+
+.pf-recent {
+  flex: none;
+  padding: 3px 7px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.pf-recent:hover {
+  color: var(--text-secondary);
+}
+
+.pf-recent[aria-pressed='true'] {
+  background: var(--accent-dim);
+  border-color: transparent;
+  color: var(--accent-text);
+}
+
+.pf-recent:focus-visible,
+.pf-seg button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-dim);
+}
+
+/* Name first, folder after it, age last. The folder clips from its left end, so the part
+   next to the name stays readable. */
+.pf-list {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+}
+
+.pf-opt {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 5px;
+  font-family: var(--mono);
+  cursor: pointer;
+}
+
+.pf-opt:hover,
+.pf-opt.hl {
+  background: var(--bg-hover);
+}
+
+.pf-name {
+  font-size: 12px;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.pf-dir,
+.pf-age {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.pf-dir {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+}
+
+.pf-opt mark {
+  background: none;
+  color: var(--accent-text);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.pf-opt[aria-selected='true']::before {
+  content: '';
+  position: absolute;
+  top: 5px;
+  bottom: 5px;
+  left: 0;
+  width: 2px;
+  background: var(--accent);
+}
+
+.pf-opt[aria-selected='true'] .pf-name {
+  color: var(--accent-text);
+}
+
+.pf-empty {
+  padding: 8px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.pf-seg {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+
+.pf-seg button {
+  padding: 6px;
+  background: none;
+  border: none;
+  border-radius: 5px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.pf-seg button:hover {
+  color: var(--text-secondary);
+}
+
+.pf-seg button[aria-checked='true'] {
+  background: var(--bg-deep);
+  color: var(--text-primary);
 }
 
 /* #endregion */
@@ -902,34 +1045,6 @@ body.booting .boot-splash {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-/* inline-flex so only the text takes the click — a full-width row would swallow clicks
-   meant for the card itself */
-.session-goal {
-  display: inline-flex;
-  align-items: baseline;
-  max-width: 100%;
-  font-size: 10px;
-  margin-top: var(--card-gap-tight);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  cursor: pointer;
-  color: var(--warning);
-}
-.session-goal .session-goal-icon {
-  margin-right: 3px;
-  font-weight: 700;
-  flex-shrink: 0;
-}
-.session-goal .session-goal-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.session-goal:hover .session-goal-text {
-  text-decoration: underline;
-  text-underline-offset: 2px;
 }
 
 .session-item.plan-reveal {
@@ -2611,35 +2726,6 @@ body.booting .boot-splash {
   margin-top: 16px;
   padding-top: 12px;
   border-top: 1px solid var(--border);
-}
-
-.info-goal-card {
-  margin: 12px 0;
-  padding: 10px 14px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-.info-goal-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--text-muted);
-}
-.info-goal-icon {
-  color: var(--warning);
-}
-.info-goal-text {
-  margin-top: 6px;
-  font-size: 13px;
-  line-height: 1.45;
-  color: var(--text-primary);
-  white-space: pre-wrap;
-  word-break: break-word;
 }
 
 .info-grid {
@@ -5749,6 +5835,10 @@ select.form-input option:checked {
   color: var(--text-primary);
 }
 
+.sp-row:not(.outside) + .sp-row.outside {
+  margin-top: 8px;
+}
+
 .sp-row.current .sp-name {
   color: var(--accent-text);
 }
@@ -7024,8 +7114,10 @@ pre.mermaid svg {
   cursor: pointer;
 }
 
-.sg-menu-item:hover {
+.sg-menu-item:hover,
+.sg-menu-item:focus-visible {
   background: var(--bg-hover);
+  outline: none;
 }
 
 .sg-menu-remove {

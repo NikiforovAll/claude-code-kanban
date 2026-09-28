@@ -147,7 +147,7 @@ claude-code-kanban session list [--active] [--days <n>] [--project <name>] [--li
 
 | Flag | What it does |
 | --- | --- |
-| `--active` | Only sessions with recent activity, as in the sidebar's Active Only filter. |
+| `--active` | Only sessions with recent activity, as in the sidebar's Active filter. |
 | `--days <n>` | Only sessions changed in the last `n` days. Fractions work, for example `0.5`. |
 | `--project <name>` | Only sessions whose project path contains `name`. The match ignores case. |
 | `--limit <n\|all>` | Maximum rows. Default 10. `all` removes the limit. |
