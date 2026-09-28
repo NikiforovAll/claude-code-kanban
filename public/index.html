@@ -201,11 +201,20 @@
         </svg>
         <p id="boot-verb">Clawding…</p>
       </div>
-      <div id="no-session" class="empty-state">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-          <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
-        </svg>
-        <p>Select a session to view tasks</p>
+      <div id="no-session" class="empty-state idle-board">
+        <div class="idle-ghost" aria-hidden="true">
+          <div><span></span><span></span><span></span></div>
+          <div><span></span><span></span></div>
+          <div><span></span><span></span><span></span><span></span></div>
+        </div>
+        <div class="idle-glow" aria-hidden="true"><span></span><span></span></div>
+        <div class="idle-content">
+          <div class="idle-clawd" aria-hidden="true">
+            <svg class="clawd" viewBox="1 0 16 10" shape-rendering="crispEdges"><use href="#clawd-shape"/></svg>
+          </div>
+          <p class="idle-title">Select a session to view tasks</p>
+          <div class="idle-hint sp-hint"><kbd>↑</kbd><kbd>↓</kbd> move <span>·</span> <kbd>Enter</kbd> open <span>·</span> <kbd>?</kbd> shortcuts</div>
+        </div>
       </div>
 
       <div id="session-view" class="session-view">
@@ -226,7 +235,7 @@
                 <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
               </svg>
             </button>
-            <button id="message-toggle" class="icon-btn" onclick="toggleMessagePanel()" title="Session log (L)" aria-label="Toggle session log">
+            <button id="message-toggle" class="icon-btn" onclick="toggleMessagePanel()" title="Session log (Shift+L)" aria-label="Toggle session log">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
               </svg>

@@ -115,7 +115,6 @@ function getUrlState() {
   const params = new URLSearchParams(window.location.search);
   return {
     session: params.get('session'),
-    view: params.get('view'),
     filter: params.get('filter'),
     project: params.get('project'),
     owner: params.get('owner'),
@@ -127,7 +126,6 @@ function getUrlState() {
 
 function updateUrl() {
   const params = new URLSearchParams();
-  if (viewMode === 'all') params.set('view', 'all');
   if (viewMode === 'project' && currentProjectPath) params.set('projectView', btoa(currentProjectPath));
   if (currentSessionId) params.set('session', currentSessionId);
   if (sessionFilter !== FILTER_DEFAULTS.session) params.set('filter', sessionFilter);
@@ -176,11 +174,7 @@ function resetState() {
   zenMode = false;
   store.removeItem(ZEN_KEY);
   renderZenState();
-  ownerFilter = '';
   searchQuery = '';
-  viewMode = 'all';
-  if (agentLogMode) exitAgentLogMode();
-  currentSessionId = null;
   currentProjectPath = null;
   currentProjectSessionIds = [];
   resetMessageScrollState();
@@ -188,7 +182,8 @@ function resetState() {
   if (searchInput) searchInput.value = '';
   document.getElementById('search-clear-btn')?.classList.remove('visible');
   renderFilterState();
-  fetchSessions().then((tasksLoaded) => showAllTasks({ reuseTasks: tasksLoaded }));
+  showNoSession();
+  fetchSessions();
 }
 
 //#endregion
@@ -242,10 +237,6 @@ async function fetchSessions(includeTasks = true) {
       return r.json();
     });
 
-    const tasksPromise = includeTasks ? fetch('/api/tasks/all').then((r) => r.json()) : null;
-
-    // The server answers one request at a time, so the task list comes after the sessions.
-    // The sidebar does not wait for it; the promise still resolves after both, as callers expect.
     const newSessions = await sessionsPromise;
     const sessionsHash = JSON.stringify(newSessions);
     if (sessionsHash !== lastSessionsHash) {
@@ -257,19 +248,19 @@ async function fetchSessions(includeTasks = true) {
     // A list too short to scroll gives no scroll event, so fill it until it can scroll.
     if (sessionsHasMore) setTimeout(loadMoreIfNearEnd);
 
-    if (!tasksPromise) return false;
-    const newTasks = await tasksPromise;
-    const tasksHash = JSON.stringify(newTasks);
-    if (tasksHash !== lastTasksHash) {
-      lastTasksHash = tasksHash;
-      allTasksCache = newTasks;
-      // The sidebar reads the task list only to match a search.
-      if (searchQuery) renderSessions();
-    }
-    return true;
+    if (includeTasks && searchQuery) await loadSearchTasks();
   } catch (error) {
     console.error('Failed to fetch sessions:', error);
   }
+}
+
+async function loadSearchTasks() {
+  const newTasks = await fetch('/api/tasks/all').then((r) => r.json());
+  const tasksHash = JSON.stringify(newTasks);
+  if (tasksHash === lastTasksHash) return;
+  lastTasksHash = tasksHash;
+  allTasksCache = newTasks;
+  if (searchQuery) renderSessions();
 }
 
 let sessionsLoadingMore = false;
@@ -314,7 +305,9 @@ async function fetchSessionById(id) {
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
 function handleSearch(query) {
+  const wasSearching = !!searchQuery;
   searchQuery = query.toLowerCase().trim();
+  if (searchQuery && !wasSearching) loadSearchTasks().catch(() => {});
 
   // Show/hide clear button
   const clearBtn = document.getElementById('search-clear-btn');
@@ -3173,58 +3166,18 @@ async function revealPlanSession(planSessionId) {
   await revealSession(planSessionId);
 }
 
-// reuseTasks: the caller has just awaited a fetchSessions() that loaded the same list.
-async function showAllTasks({ reuseTasks = false } = {}) {
-  try {
-    viewMode = 'all';
-    if (agentLogMode) exitAgentLogMode();
-    currentSessionId = null;
-    ownerFilter = '';
-    resetAgentState();
-    if (!reuseTasks) {
-      const res = await fetch('/api/tasks/all');
-      allTasksCache = await res.json();
-    }
-    let tasks = allTasksCache;
-    if (filterProject) {
-      tasks = tasks.filter((t) => matchesProjectFilter(t.project));
-    }
-    currentTasks = tasks;
-    updateUrl();
-    renderAllTasks();
-    renderSessions();
-    renderActivityChip();
-  } catch (error) {
-    console.error('Failed to fetch all tasks:', error);
-  }
-}
-
-function renderAllTasks() {
-  noSession.style.display = 'none';
-  sessionView.classList.add('visible');
-  document.getElementById('owner-filter-bar').classList.remove('visible');
-
-  const visibleTasks = currentTasks.filter((t) => !isInternalTask(t));
-  const totalTasks = visibleTasks.length;
-  const completed = visibleTasks.filter((t) => t.status === 'completed').length;
-  const percent = totalTasks > 0 ? Math.round((completed / totalTasks) * 100) : 0;
-
-  const isFiltered = filterProject && filterProject !== '__recent__';
-  const projectName = isFiltered ? filterProject.split(/[/\\]/).pop() : null;
-  sessionTitle.textContent = isFiltered
-    ? `Tasks: ${projectName}`
-    : filterProject === '__recent__'
-      ? 'Recent Tasks'
-      : 'All Tasks';
-  sessionMeta.textContent = !isFiltered
-    ? `${totalTasks} tasks across ${sessions.length} sessions`
-    : isExactProjectFilter(filterProject)
-      ? `${totalTasks} tasks in this project`
-      : `${totalTasks} tasks in projects matching "${filterProject}"`;
-  progressPercent.textContent = `${percent}%`;
-  progressBar.style.width = `${percent}%`;
-
-  renderKanban();
+function showNoSession() {
+  viewMode = 'none';
+  if (agentLogMode) exitAgentLogMode();
+  currentSessionId = null;
+  ownerFilter = '';
+  resetAgentState();
+  currentTasks = [];
+  updateUrl();
+  sessionView.classList.remove('visible');
+  noSession.style.display = '';
+  renderSessions();
+  renderActivityChip();
 }
 
 // Filter pipeline: active filter → force-include revealed/current (non-pinned) sessions →
@@ -3798,9 +3751,8 @@ function renderProjectView() {
 
 function renderTaskCard(task) {
   const isBlocked = task.blockedBy && task.blockedBy.length > 0;
-  const useSlug = viewMode === 'all' || viewMode === 'project';
+  const useSlug = viewMode === 'project';
   const taskId = useSlug ? `${(task._taskDir || task.sessionId || '')?.slice(0, 4)}-${task.id}` : task.id;
-  const sessionLabel = viewMode === 'all' && task.sessionName ? task.sessionName : null;
   const statusClass = task.status.replace('_', '-');
   const actualSessionId = task._taskDir || task.sessionId || currentSessionId || '';
 
@@ -3831,7 +3783,6 @@ function renderTaskCard(task) {
             }
           </div>
           <div class="task-title">${escapeHtml(task.subject)}</div>
-          ${sessionLabel ? `<div class="task-session">${escapeHtml(sessionLabel)}</div>` : ''}
           ${task.status === 'in_progress' && task.activeForm ? `<div class="task-active">${escapeHtml(task.activeForm)}</div>` : ''}
           ${isBlocked ? `<div class="task-blocked">Waiting on ${task.blockedBy.map((id) => `#${id}`).join(', ')}</div>` : ''}
           ${task.description ? `<div class="task-desc">${escapeHtml(task.description.split('\n')[0])}</div>` : ''}
@@ -4630,8 +4581,8 @@ function sgMenuKeydown(e) {
   if (e.key === 'Enter' || e.key === ' ') return;
   e.preventDefault();
   let next = null;
-  if (matchKey(e, 'ArrowDown', 'KeyJ')) next = (i + 1) % items.length;
-  else if (matchKey(e, 'ArrowUp', 'KeyK')) next = i < 0 ? items.length - 1 : (i - 1 + items.length) % items.length;
+  if (matchKey(e, 'ArrowDown')) next = (i + 1) % items.length;
+  else if (matchKey(e, 'ArrowUp')) next = i < 0 ? items.length - 1 : (i - 1 + items.length) % items.length;
   else if (e.key === 'Home') next = 0;
   else if (e.key === 'End') next = items.length - 1;
   else if (e.key === 'Escape' || e.key === 'Tab') sgCloseMenu();
@@ -5310,13 +5261,7 @@ async function saveTaskField(taskId, sessionId, field, value) {
 
     if (res.ok) {
       lastCurrentTasksHash = null;
-      if (viewMode === 'all') {
-        const tasksRes = await fetch('/api/tasks/all');
-        currentTasks = await tasksRes.json();
-        renderKanban();
-      } else {
-        await fetchTasks(sessionId);
-      }
+      await fetchTasks(sessionId);
       showTaskDetail(taskId, sessionId);
     }
   } catch (error) {
@@ -5400,11 +5345,11 @@ function deleteTask(taskId, sessionId) {
     if (e.key === 'Escape') {
       e.preventDefault();
       closeDeleteConfirmModal();
-    } else if (matchKey(e, 'ArrowLeft', 'KeyH')) {
+    } else if (matchKey(e, 'ArrowLeft')) {
       e.preventDefault();
       focusIdx = 0;
       buttons[focusIdx].focus();
-    } else if (matchKey(e, 'ArrowRight', 'KeyL')) {
+    } else if (matchKey(e, 'ArrowRight')) {
       e.preventDefault();
       focusIdx = 1;
       buttons[focusIdx].focus();
@@ -5466,10 +5411,10 @@ const SHORTCUT_PAIRS = [
     {
       title: 'Navigate',
       rows: [
-        { keys: ['J', '↓'], label: 'Next item' },
-        { keys: ['K', '↑'], label: 'Previous item' },
-        { keys: ['H', '←'], label: 'Left column / collapse group' },
-        { keys: ['L', '→'], label: 'Right column / expand group' },
+        { keys: ['↓'], label: 'Next item' },
+        { keys: ['↑'], label: 'Previous item' },
+        { keys: ['←'], label: 'Left column / collapse group' },
+        { keys: ['→'], label: 'Right column / expand group' },
         { keys: ['Tab'], label: 'Switch sidebar ↔ board' },
         { keys: ['Enter', 'Space'], label: 'Open selected item' },
       ],
@@ -5486,7 +5431,7 @@ const SHORTCUT_PAIRS = [
         { keys: ['Ctrl', 'D'], combo: true, label: 'Dismiss session' },
         { keys: ['Shift', 'L'], combo: true, label: 'Toggle session log' },
         { keys: ['Shift', 'M'], combo: true, label: 'Open last message' },
-        { keys: ['J', 'K'], label: 'Previous / next message in detail' },
+        { keys: ['↑', '↓'], label: 'Previous / next message in detail' },
         { keys: ['Ctrl', 'Enter'], combo: true, label: 'Allow / approve the waiting prompt' },
       ],
     },
@@ -5603,9 +5548,7 @@ function closeHelpModal() {
 }
 
 async function refreshCurrentView() {
-  if (viewMode === 'all') {
-    await showAllTasks();
-  } else if (currentSessionId) {
+  if (currentSessionId) {
     await fetchTasks(currentSessionId);
   } else {
     await fetchSessions();
@@ -6261,11 +6204,7 @@ document.addEventListener('keydown', (e) => {
       return;
     }
     if (e.key === 'Enter' || e.key === ' ') return;
-    const step = matchKey(e, 'ArrowLeft', 'ArrowUp', 'KeyH', 'KeyK')
-      ? -1
-      : matchKey(e, 'ArrowRight', 'ArrowDown', 'KeyL', 'KeyJ')
-        ? 1
-        : 0;
+    const step = matchKey(e, 'ArrowLeft', 'ArrowUp') ? -1 : matchKey(e, 'ArrowRight', 'ArrowDown') ? 1 : 0;
     if (step) {
       e.preventDefault();
       const buttons = [...terminalPrompt.querySelectorAll('button')];
@@ -6285,7 +6224,7 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
-  // Modal guard — only Escape, Shift+M, and msg-detail J/K navigation pass through
+  // Modal guard — only Escape, Shift+M, and msg-detail arrow navigation pass through
   if (isAnyModalOpen()) {
     if (e.key === 'Escape') {
       if (_scratchpadModal.classList.contains('visible')) {
@@ -6319,7 +6258,7 @@ document.addEventListener('keydown', (e) => {
       ) {
         e.preventDefault();
         respondWaiting({ behavior: 'allow' });
-      } else if (matchKey(e, 'ArrowDown', 'KeyJ')) {
+      } else if (matchKey(e, 'ArrowDown')) {
         e.preventDefault();
         if (currentMsgDetailIdx === MSG_DETAIL_WAITING_IDX) {
           msgDetailFollowLatest = true;
@@ -6334,7 +6273,7 @@ document.addEventListener('keydown', (e) => {
           msgDetailFollowLatest = true;
           showMsgDetail(currentMsgDetailIdx);
         }
-      } else if (matchKey(e, 'ArrowUp', 'KeyK')) {
+      } else if (matchKey(e, 'ArrowUp')) {
         e.preventDefault();
         if (currentMsgDetailIdx === MSG_DETAIL_WAITING_IDX) {
           if (currentMessages.length) {
@@ -6413,22 +6352,22 @@ document.addEventListener('keydown', (e) => {
 
   // Sidebar navigation
   if (focusZone === 'sidebar') {
-    if (matchKey(e, 'ArrowDown', 'KeyJ')) {
+    if (matchKey(e, 'ArrowDown')) {
       e.preventDefault();
       navigateSession(1);
       return;
     }
-    if (matchKey(e, 'ArrowUp', 'KeyK')) {
+    if (matchKey(e, 'ArrowUp')) {
       e.preventDefault();
       navigateSession(-1);
       return;
     }
-    if (matchKey(e, 'ArrowLeft', 'KeyH')) {
+    if (matchKey(e, 'ArrowLeft')) {
       e.preventDefault();
       handleSidebarHorizontal(-1);
       return;
     }
-    if (matchKey(e, 'ArrowRight', 'KeyL')) {
+    if (matchKey(e, 'ArrowRight')) {
       e.preventDefault();
       handleSidebarHorizontal(1);
       return;
@@ -6453,16 +6392,16 @@ document.addEventListener('keydown', (e) => {
 
   // Board navigation
   if (focusZone === 'board') {
-    if (matchKey(e, 'ArrowDown', 'KeyJ', 'ArrowUp', 'KeyK', 'ArrowLeft', 'KeyH', 'ArrowRight', 'KeyL')) {
+    if (matchKey(e, 'ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight')) {
       e.preventDefault();
       if (!selectedTaskId && !document.querySelector('.task-card.selected')) {
         setFocusZone('sidebar');
         return;
       }
-      if (matchKey(e, 'ArrowDown', 'KeyJ')) navigateVertical(1);
-      else if (matchKey(e, 'ArrowUp', 'KeyK')) navigateVertical(-1);
-      else if (matchKey(e, 'ArrowLeft', 'KeyH')) navigateHorizontal(-1);
-      else if (matchKey(e, 'ArrowRight', 'KeyL')) navigateHorizontal(1);
+      if (matchKey(e, 'ArrowDown')) navigateVertical(1);
+      else if (matchKey(e, 'ArrowUp')) navigateVertical(-1);
+      else if (matchKey(e, 'ArrowLeft')) navigateHorizontal(-1);
+      else if (matchKey(e, 'ArrowRight')) navigateHorizontal(1);
 
       if (selectedTaskId && detailPanel.classList.contains('visible')) {
         showTaskDetail(selectedTaskId, selectedSessionId);
@@ -6561,10 +6500,11 @@ document.addEventListener('keydown', (e) => {
         if (targetSid) {
           fetchTasks(targetSid).then(() => selectSessionByIndex(targetIdx, getNavigableItems()));
         } else {
-          showAllTasks().then(() => selectSessionByIndex(targetIdx, getNavigableItems()));
+          showNoSession();
+          selectSessionByIndex(targetIdx, getNavigableItems());
         }
       } else {
-        showAllTasks();
+        showNoSession();
       }
     } else if (targetIdx >= 0) {
       selectSessionByIndex(targetIdx, newItems);
@@ -7436,12 +7376,6 @@ function setupEventSource() {
   const pendingTaskSessionIds = new Set();
   const pendingAgentSessionIds = new Set();
 
-  function refreshAllView() {
-    currentTasks = filterProject ? allTasksCache.filter((t) => matchesProjectFilter(t.project)) : allTasksCache;
-    renderAllTasks();
-    renderActivityChip();
-  }
-
   async function refreshSessionDetail(sessionId) {
     await fetchAgents(sessionId);
     if (!agentLogMode) fetchMessages(sessionId);
@@ -7495,9 +7429,7 @@ function setupEventSource() {
         taskRefreshTimer = setTimeout(async () => {
           if (skipOffScreen()) return;
           await fetchSessions().catch((err) => console.error('[SSE] fetchSessions failed:', err));
-          if (viewMode === 'all') {
-            refreshAllView();
-          } else if (viewMode === 'project' && currentProjectPath) {
+          if (viewMode === 'project' && currentProjectPath) {
             const hasUpdate = currentProjectSessionIds.some((id) => pendingTaskSessionIds.has(id));
             if (hasUpdate) fetchProjectView(currentProjectPath);
           } else if (currentSessionId && pendingTaskSessionIds.has(currentSessionId)) {
@@ -7584,10 +7516,7 @@ function setupEventSource() {
     pendingTaskSessionIds.clear();
     pendingAgentSessionIds.clear();
     const sessionsLoaded = fetchSessions().catch(() => {});
-    if (viewMode === 'all') {
-      await sessionsLoaded;
-      refreshAllView();
-    } else if (viewMode === 'project' && currentProjectPath) {
+    if (viewMode === 'project' && currentProjectPath) {
       await sessionsLoaded;
       fetchProjectView(currentProjectPath);
     } else if (currentSessionId) {
@@ -8736,9 +8665,8 @@ function filterByProject(project) {
   filterProject = project || null;
   resetSessionPage();
   renderFilterState();
-  updateUrl();
   fetchSessions(false);
-  showAllTasks();
+  showNoSession();
 }
 
 // The sidebar narrows on every key from the rows it has; the server round trip for rows past
@@ -11101,7 +11029,7 @@ async function onDispatchUpdate() {
 // With no first message there is no transcript, so an ended placeholder leaves nothing to come back to.
 function dropPlaceholder(id) {
   if (!forgetPlaceholder(id)) return;
-  if (currentSessionId === id && viewMode === 'session') showAllTasks();
+  if (currentSessionId === id && viewMode === 'session') showNoSession();
   else renderSessions();
 }
 
@@ -11689,30 +11617,27 @@ Promise.all([
 ])
   .then(restorePendingSessions)
   .then(() => fetchSessions())
-  .then(async (tasksLoaded) => {
-    const allTasksOpts = { reuseTasks: tasksLoaded };
+  .then(async () => {
     if (urlState.projectView) {
       try {
         await fetchProjectView(atob(urlState.projectView));
       } catch (_) {
-        showAllTasks(allTasksOpts);
+        showNoSession();
       }
     } else if (urlState.session) {
       await fetchTasks(urlState.session);
-    } else if (urlState.view === 'all') {
-      showAllTasks(allTasksOpts);
     } else {
       const last = loadLastView();
       if (last?.view === 'project' && last.projectPath && sessions.some((s) => s.project === last.projectPath)) {
         try {
           await fetchProjectView(last.projectPath);
         } catch (_) {
-          showAllTasks(allTasksOpts);
+          showNoSession();
         }
       } else if (last?.view === 'session' && last.session && sessions.some((s) => s.id === last.session)) {
         await fetchTasks(last.session);
       } else {
-        showAllTasks(allTasksOpts);
+        showNoSession();
       }
     }
     if (urlState.messages && currentSessionId) {
@@ -11744,10 +11669,10 @@ window.addEventListener('popstate', () => {
     try {
       fetchProjectView(atob(s.projectView));
     } catch (_) {
-      showAllTasks();
+      showNoSession();
     }
   } else if (s.session) fetchTasks(s.session);
-  else showAllTasks();
+  else showNoSession();
   if (s.messages !== messagePanelOpen) toggleMessagePanel();
 });
 //#endregion

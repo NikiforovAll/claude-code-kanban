@@ -98,7 +98,9 @@ No new SSE event. Watchers remain authoritative for incremental updates after bo
 
 **Parent verdicts.** A `lookupParentSession` verdict depends on sibling transcripts, not on one file, so it has its own check (`getParentVerdict`), run on every use, in memory and after a restart alike. A parent is always born before its child, so only the transcripts of the child's folder born before it can change a verdict; new sessions cannot. The entry keeps the child's inode, the parent's inode, the child's `logicalParentUuid`, and the number of transcripts in the folder born before the child (`countTranscriptsBornBefore`, from the `birthtimeMs` in `sessionInfoCache`, so the check reads no other file). A replaced child or parent, an anchor seen later, or an older transcript moved into the folder makes the entry stale, and the lookup runs again. A deleted transcript stays in `sessionInfoCache` until the next save, so it does not change the count; a deleted parent fails the inode check. A lookup that finds no anchor is not stored, because the child's head is not written yet.
 
-Loop state and task counts are not saved, so a cold first list still computes them.
+**Task counts.** `getTaskCounts` keeps a per-folder result in `taskCountsCache`, which the tasks and task-maps watchers clear. Under it, `lib/task-counts.js` keeps the status of each task file, saved in the same file under `taskCounts`. A recount stats every task file and reads again only a file whose size, mtime or inode changed, so a change made while cck was stopped is seen on the first list. `pending`, `completed` and `in_progress` have different lengths, so a status edit changes the size even when the mtime does not move. A file written less than `RACY_MS` (3 s) before it was read is not stored, because a coarse mtime (2 s on FAT) could stay the same over a second write of the same size. A read that fails is not stored either. A folder's entry is replaced on each recount, so deleted files drop out, and folders that are gone are left out of the save.
+
+Loop state is not saved, so a cold first list still computes it.
 
 ### 3b. Cheap-probe on `?filter=active`
 

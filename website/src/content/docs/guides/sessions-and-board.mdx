@@ -1,6 +1,6 @@
 ---
 title: Sessions and the board
-description: Find a session in the sidebar, read its tasks on the board, and switch between the three view modes.
+description: Find a session in the sidebar, read its tasks on the board, and switch between the two view modes.
 ---
 
 import Shot from '../../../kit/Shot.astro';
@@ -116,13 +116,14 @@ Click a card to open **Task Details**. The panel shows the status, the owner, th
 
 ## View modes
 
-The board has three view modes:
+The board has two view modes:
 
 - **Single session.** Click a session card. You can add, edit, move and delete tasks.
 - **Project view.** Click the project view button on a project header. The board shows the tasks of all sessions in that project. Task Details is read-only here. You cannot edit or delete a task.
-- **All Tasks.** The board shows tasks from all sessions, titled **All Tasks**, **Recent Tasks** or **Tasks: &lt;project&gt;** after the project filter. The reset button and the project filter open this view.
 
-In project view and All Tasks, each task id starts with the first 4 characters of its task folder, so ids from different sessions do not clash. All Tasks also shows the session name on each card.
+In project view, each task id starts with the first 4 characters of its task folder, so ids from different sessions do not clash.
+
+When no session is open, the board shows **Select a session to view tasks**. The reset button and a change of the project filter close the open session.
 
 For team sessions, an **All Members** list above the board filters the tasks by owner.
 

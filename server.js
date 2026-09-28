@@ -43,6 +43,7 @@ const { createDispatchRegistry, formatPreamble, formatDispatchLine, isPeerName }
 const { createGroupStore, isGroupName, suggestGroupName } = require('./lib/dispatch-groups');
 const { pickFolder } = require('./lib/folder-dialog');
 const { loadSessionCache, saveSessionCache } = require('./lib/session-cache');
+const { countTaskDir } = require('./lib/task-counts');
 const { getParentVerdict, setParentVerdict } = require('./lib/parent-cache');
 
 if (process.argv.includes("--install") || process.argv.includes("--uninstall")) {
@@ -721,28 +722,12 @@ function getTaskCounts(sessionPath) {
   const cached = taskCountsCache.get(sessionPath);
   if (cached) return cached;
 
-  const taskFiles = readdirSync(sessionPath).filter(f => f.endsWith('.json'));
-  let completed = 0, inProgress = 0, pending = 0, newestTaskMtime = null;
+  const { completed, inProgress, pending, newestTaskMtime } = countTaskDir(sessionPath);
   // Directory mtime bumps when task files are added/removed, so it stays fresh even for an
   // emptied dir (task list closed) that has no files left to date. Task-file mtime alone would
   // report 0 for such a dir and lose "latest wins" to a stale prior-boot dir.
   let dirMtime = 0;
   try { dirMtime = statSync(sessionPath).mtimeMs; } catch (_) {}
-
-  for (const file of taskFiles) {
-    try {
-      const taskPath = path.join(sessionPath, file);
-      const task = JSON.parse(readFileSync(taskPath, 'utf8'));
-      if (task.metadata?._internal) continue;
-      if (task.status === 'completed') completed++;
-      else if (task.status === 'in_progress') inProgress++;
-      else pending++;
-      const taskStat = statSync(taskPath);
-      if (!newestTaskMtime || taskStat.mtime > newestTaskMtime) {
-        newestTaskMtime = taskStat.mtime;
-      }
-    } catch { /* skip invalid */ }
-  }
 
   const taskCount = completed + inProgress + pending;
   const result = { taskCount, completed, inProgress, pending, newestTaskMtime, dirMtime };

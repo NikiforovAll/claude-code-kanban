@@ -90,7 +90,7 @@ Run `claude` in any project. You do not configure anything per project. Claude C
 - **Filters, search and pins.** Filter by project and activity, search across sessions and tasks, pin a session or make it sticky. <kbd>Shift</kbd>+<kbd>P</kbd> opens the session picker.
 - **Scratchpad and linked documents.** Keep a note per session, project or group (<kbd>N</kbd>), and link files to a session to preview them in one click.
 - **Themes.** 17 color themes, each in light and dark. <kbd>T</kbd> switches the mode.
-- **Keyboard first.** Arrow keys or <kbd>H</kbd> <kbd>J</kbd> <kbd>K</kbd> <kbd>L</kbd> move through tasks, and <kbd>Tab</kbd> moves between the sidebar and the board. Press <kbd>?</kbd> for the full list. [Keyboard shortcuts](https://nikiforovall.blog/claude-code-kanban/reference/keyboard-shortcuts/)
+- **Keyboard first.** Arrow keys move through tasks, and <kbd>Tab</kbd> moves between the sidebar and the board. Press <kbd>?</kbd> for the full list. [Keyboard shortcuts](https://nikiforovall.blog/claude-code-kanban/reference/keyboard-shortcuts/)
 
 ## CLI
 

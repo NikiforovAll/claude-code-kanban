@@ -10,7 +10,7 @@ The board shows the tasks of a session. This page covers the panels and dialogs 
 
 ## Session log
 
-Press <kbd>Shift+L</kbd> or click the session log button above the board to open the Session Log panel on the right. The button tooltip says <kbd>L</kbd>, but plain <kbd>L</kbd> moves one column right on the board. Use <kbd>Shift+L</kbd>.
+Press <kbd>Shift+L</kbd> or click the session log button above the board to open the Session Log panel on the right.
 
 <Shot src="shots/01-board-session-log.webp" alt="The board with the Session Log panel open on the right, listing the latest tool calls and messages of the session" />
 
@@ -18,13 +18,13 @@ The panel loads the latest 15 messages. Scroll up to load older ones. Pinned mes
 
 Click a message to open it in the message dialog. In the dialog:
 
-- <kbd>↓</kbd> or <kbd>J</kbd> goes to the next message, and <kbd>↑</kbd> or <kbd>K</kbd> goes to the previous one. If the session waits for an answer, stepping past the last message shows the waiting prompt.
+- <kbd>↓</kbd> goes to the next message, and <kbd>↑</kbd> goes to the previous one. If the session waits for an answer, stepping past the last message shows the waiting prompt.
 - The header buttons are View Agent (for a message from a subagent), Pin, Copy, Open in editor and fullscreen.
 - <kbd>Ctrl++</kbd> and <kbd>Ctrl+-</kbd> make the text larger or smaller, from 0.7x to 2x. <kbd>Ctrl+0</kbd> resets it. The zoom works in every dialog that shows long text.
 
 ### Follow the latest message
 
-Press <kbd>Shift+M</kbd> or click the clock button in the panel to open the latest message in follow mode. While follow mode is on, the dialog moves to each new message as Claude writes it. If the session waits for an answer, it shows the waiting prompt instead. Press <kbd>Shift+M</kbd> again to close the dialog. Stepping back with <kbd>↑</kbd> or <kbd>K</kbd> turns follow mode off. Pressing <kbd>↓</kbd> or <kbd>J</kbd> on the last message turns it on again.
+Press <kbd>Shift+M</kbd> or click the clock button in the panel to open the latest message in follow mode. While follow mode is on, the dialog moves to each new message as Claude writes it. If the session waits for an answer, it shows the waiting prompt instead. Press <kbd>Shift+M</kbd> again to close the dialog. Stepping back with <kbd>↑</kbd> turns follow mode off. Pressing <kbd>↓</kbd> on the last message turns it on again.
 
 For waiting prompts, see [Answer prompts from the board](/claude-code-kanban/guides/waiting-prompts/).
 
