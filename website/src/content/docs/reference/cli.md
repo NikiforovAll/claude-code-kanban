@@ -15,13 +15,13 @@ claude-code-kanban --open
 
 | Command | Result |
 | --- | --- |
-| `claude-code-kanban --help`, `-h` | Top-level help: all commands and server flags. |
-| `claude-code-kanban <command> --help` | Help for a command or a subcommand, for example `session list --help`. |
-| `claude-code-kanban help <command>` | Same as `<command> --help`. |
-| `claude-code-kanban session` | A command without its subcommand prints the list of subcommands. |
+| `claude-code-kanban --help`, `-h` | Top-level help: each command with its subcommand names, server flags and environment. |
+| `claude-code-kanban help <command>` | The subcommands of a command, for example `help session`. |
+| `claude-code-kanban help <command> <subcommand>` | Flags, notes and examples of a subcommand, for example `help session list`. |
+| `claude-code-kanban <command> [<subcommand>] --help` | Same as `help <command> [<subcommand>]`. |
 | `claude-code-kanban --version`, `-v` | Prints the version and exits. |
 
-An unknown command or subcommand prints an error, the help, and exits with code 1.
+An unknown command or subcommand, or a command without its subcommand, prints an error or the help, and exits with code 1. A missing argument prints the subcommand's help. A bad value prints the error and the `help` command to run. Both exit with code 1.
 
 ## Server
 
@@ -92,11 +92,12 @@ npx claude-code-kanban --install --dir ~/.claude-work
 
 ## How commands find the server
 
-Every subcommand below sends requests to `http://127.0.0.1:<port>`. The CLI picks the port in this order:
+Every subcommand below sends requests to `http://127.0.0.1:<port>`. The CLI picks the server in this order:
 
-1. The `PORT` environment variable.
-2. The port in `<config-dir>/.cck/server.json`, if the process that wrote it still runs.
-3. 3541.
+1. The `CCK_URL` environment variable, a full base URL such as `http://127.0.0.1:4795`.
+2. The `PORT` environment variable.
+3. The port in `<config-dir>/.cck/server.json`. If the process that wrote it no longer runs, the command fails: port 3541 can be the board of another config dir.
+4. 3541, when there is no `server.json`.
 
 The server writes `server.json` on start, so the CLI finds a server that fell back to a random port. Pass the same `--dir` (or `CLAUDE_CONFIG_DIR`) that the server uses. If no server answers, the command fails with:
 
@@ -104,7 +105,7 @@ The server writes `server.json` on start, so the CLI finds a server that fell ba
 Cannot reach cck server for ~/.claude on port 3541. Start it first with "claude-code-kanban".
 ```
 
-Commands that change the browser view (`preview-doc`, `link-doc`, `session open`, `session pin`) act on board tabs that are open at that moment. With no tab open, nothing shows.
+Commands that change the browser view (`preview-doc`, `session open`) act on board tabs that are open at that moment. With no tab open, nothing shows. `link-doc` and `session pin` are also kept by the server, so a tab that opens later shows them.
 
 ## preview-doc
 
@@ -126,14 +127,17 @@ Links a file to a session in the sidebar. It does not open the preview.
 
 ```bash
 claude-code-kanban link-doc <file> --session <id> [--unlink]
+claude-code-kanban link-doc --list --session <id> [--json]
 ```
 
 | Flag | What it does |
 | --- | --- |
 | `--session <id>` | Session to link to. Required, unless `$PREVIEW_SESSION` is set. Accepts a unique id prefix. |
-| `--unlink` | Removes the link. |
+| `--unlink` | Removes the link. The file does not need to exist. |
+| `--list` | Prints the documents the server keeps for the session. |
+| `--json` | With `--list`: prints JSON. |
 
-The board stores linked documents in the browser, so a link lands only in tabs that are open. See [Session log and details](/claude-code-kanban/guides/session-details/).
+The server keeps linked documents in `<config-dir>/.cck/linked-docs.json`, up to 20 per session. Each board tab adds them to its own list when it connects, so a link made with no tab open shows when one opens. In that case the command also prints `No browser tab is open; the board shows it when one opens.` Unlinking in the board removes the server copy too. See [Session log and details](/claude-code-kanban/guides/session-details/).
 
 ## session
 
@@ -155,6 +159,14 @@ claude-code-kanban session list [--active] [--days <n>] [--project <name>] [--li
 | `--json` | Prints JSON. Each entry has a `pinState` field. |
 
 By default pinned and sticky sessions are always in the list, even past the limit or outside the `--active` and `--days` filters. `--project` still removes them. Sticky sessions come first. The table has the columns `ID`, `PIN`, `STATUS` (`idle`, `active`, `busy` or `wait`), `AGE`, `TASKS`, `PROJECT` and `TITLE`.
+
+### session search
+
+```bash
+claude-code-kanban session search <text> [--limit <n>] [--json]
+```
+
+Finds sessions whose name or id contains the text, from every transcript, newest first. The text needs at least 3 characters. `--limit` sets the maximum rows; the default and maximum are 20. The table has the columns `ID`, `STATUS`, `AGE`, `PROJECT` and `TITLE`.
 
 ### session open
 
@@ -195,6 +207,38 @@ claude-code-kanban session peek <id> [--limit <n>] [--json]
 ```
 
 Prints the last messages of a session, oldest first. `--limit` sets the count. The default is 10 and the maximum is 50.
+
+### session plan
+
+```bash
+claude-code-kanban session plan <id> [--json]
+```
+
+Prints the plan that plan mode saved for the session, or `No plan saved for session <id>.` `--json` prints `{content, slug}`.
+
+### session agents
+
+```bash
+claude-code-kanban session agents <id> [--json]
+```
+
+Lists the subagents of the session with the columns `AGENT`, `STATUS`, `AGE`, `TYPE` and `DESCRIPTION`, and prints `Waiting for the user.` when the session waits for an answer. It needs the cck hooks in the config dir (`--install`). `--json` prints `{agents, waitingForUser}`.
+
+## task list
+
+```bash
+claude-code-kanban task list (<session> | --project <path> | --all) [--status <s>] [--json]
+```
+
+Lists tasks. Give one source: a session id or unique prefix, `--project` with a project path (as `project list` prints it), or `--all` for every task on the board. `--status` keeps only tasks in that status, for example `in_progress`. The table has the columns `ID`, `STATUS` and `SUBJECT`, plus `SESSION` for `--project` and `--all`. The command only reads; to change a task, use the board.
+
+## project list
+
+```bash
+claude-code-kanban project list [--json]
+```
+
+Lists the project paths the board knows, newest activity first. These are the folders `dispatch start --cwd` accepts. A path under the OS temp dir is marked `(temp)`.
 
 ## dispatch
 
@@ -276,6 +320,7 @@ Prints a guide that ships with this version. The only guide now is `dispatch`, w
 
 | Variable | Used by |
 | --- | --- |
+| `CCK_URL` | Full base URL that subcommands connect to. Wins over `PORT` and `server.json`. |
 | `PORT` | The server port, and the port that subcommands connect to. |
 | `CLAUDE_CONFIG_DIR`, `CLAUDE_DIR` | Config dir, when `--dir` is not given. |
 | `CLAUDE_CODE_SESSION_ID` | Set by Claude Code. `dispatch start` records it as the parent. `dispatch wait` and `dispatch list` use it to find your dispatches. |

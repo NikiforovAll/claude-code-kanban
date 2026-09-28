@@ -59,15 +59,17 @@ When modifying a feature, open **both** the JS region and the matching CSS regio
 
 ## CLI
 
-Subcommands live in a dispatch table in `cli.js` (`COMMANDS`). `server.js` delegates to `runCli(process.argv)` from `cli.js`. Help (`--help`, `-h`, `help <cmd>`) is generated from the table — there is no manual help text to maintain.
+Subcommands live in a dispatch table in `cli.js` (`COMMANDS`). `server.js` delegates to `runCli(process.argv)` from `cli.js`. Help is generated from the table, one level at a time: `--help` lists the commands, `help <cmd>` its subcommands, `help <cmd> <sub>` (or `<cmd> <sub> --help`) the flags, notes and examples. There is no manual help text to maintain.
 
-**Every new command MUST be documented in the dispatch table** with `summary`, `usage`, and (if applicable) `flags`. The design contract for the CLI lives in `_plans/cli-scope.md`.
+**The help is the CLI reference.** The plugin skills point at it instead of listing flags, so a command change needs no skill change. **Every new command MUST be documented in the dispatch table** with `summary`, `usage`, `flags` (if any), and 1–2 `examples` where they help. The design contract for the CLI lives in `_plans/cli-scope.md`.
+
+The CLI finds the server through `CCK_URL`, then `PORT`, then `<config dir>/.cck/server.json`, then 3541. A `server.json` whose pid is dead is an error, not a fallback, because 3541 can be another config dir's board.
 
 Adding a command:
 
-1. Add an entry to `COMMANDS` in `cli.js` with `summary`, `usage`, optional `flags`, and `run(args)`.
+1. Add an entry to `COMMANDS` in `cli.js` with `summary`, `usage`, `flags`, optional `notes` and `examples`, and `run(args)`. Missing arguments print the leaf help and return 1; a bad value goes through `usageError`.
 2. The `run` function receives `process.argv.slice(3)` (or `slice(4)` for nested verbs) and returns an exit code.
-3. Add a server endpoint in `server.js` that broadcasts an SSE event (`{ type: '<noun>:<verb>', ... }`).
+3. Add a server endpoint in `server.js` that broadcasts an SSE event (`{ type: '<noun>:<verb>', ... }`). A read-only command reuses a GET route and needs no event.
 4. Handle the event in `public/app.js` SSE dispatcher.
 
 Test locally: start the server (`npm start`), then run `node server.js <command>` from another terminal.
