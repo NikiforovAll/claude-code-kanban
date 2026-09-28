@@ -41,6 +41,7 @@ const { getClaudeDir, getArgValue, storageNamespace, isDefaultClaudeDir } = requ
 const { createTerminalService, readTerminalConfig } = require('./lib/terminal');
 const { createDispatchRegistry, formatPreamble, formatDispatchLine, isPeerName } = require('./lib/dispatch');
 const { createGroupStore, isGroupName, suggestGroupName } = require('./lib/dispatch-groups');
+const { createLinkedDocStore } = require('./lib/linked-docs');
 const { pickFolder } = require('./lib/folder-dialog');
 const { loadSessionCache, saveSessionCache } = require('./lib/session-cache');
 const { countTaskDir } = require('./lib/task-counts');
@@ -88,6 +89,7 @@ const AGENT_ACTIVITY_DIR = path.join(CCK_DIR, 'agent-activity');
 const CONTEXT_STATUS_DIR = path.join(CCK_DIR, 'context-status');
 const PINS_FILE = path.join(CCK_DIR, 'pins.json');
 const DISPATCH_GROUPS_FILE = path.join(CCK_DIR, 'dispatch-groups.json');
+const LINKED_DOCS_FILE = path.join(CCK_DIR, 'linked-docs.json');
 const SERVER_INFO_FILE = path.join(CCK_DIR, 'server.json');
 const TERMINAL_TOKEN_FILE = path.join(CCK_DIR, 'terminal-token.json');
 const SESSION_CACHE_FILE = path.join(CCK_DIR, 'session-cache.json');
@@ -3260,6 +3262,13 @@ const dispatchGroups = createGroupStore({
   pinnedIds: () => new Set(Object.keys(readPins())),
 });
 
+const linkedDocs = createLinkedDocStore({
+  load: () => {
+    try { return JSON.parse(readFileSync(LINKED_DOCS_FILE, 'utf8')); } catch { return null; }
+  },
+  save: (data) => writeJsonAtomic(LINKED_DOCS_FILE, data),
+});
+
 // The board places a session from these alone, so it never has to move it later.
 // `startedBy` lets it follow a starter the user put in a named group, which only the
 // browser knows; it goes once the dispatch settles.
@@ -3684,12 +3693,27 @@ app.post('/api/document/link', async (req, res) => {
     const abs = resolvePreviewPath(filePath);
     if (!abs) return res.status(400).json({ error: 'path is required' });
     if (!unlink) await statFileTarget(abs);
+    if (unlink) linkedDocs.unlink(sessionId, abs);
+    else linkedDocs.link(sessionId, abs);
     broadcast({ type: 'document:link', path: abs, sessionId, unlink: !!unlink });
-    res.json({ success: true });
+    res.json({ success: true, path: abs, tabs: clients.size });
   } catch (error) {
     console.error('Error in /api/document/link:', error);
     res.status(error.status || 500).json({ error: error.message || 'Link failed' });
   }
+});
+
+app.get('/api/document/links', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const sessionId = req.query.session ? String(req.query.session) : null;
+  res.json(sessionId ? { [sessionId]: linkedDocs.get(sessionId) } : linkedDocs.all());
+});
+
+// The browser's own unlink: it already updated its list, so this only drops the server
+// copy that would bring the doc back on the next merge. No path clears the session.
+app.delete('/api/document/links/:sessionId', (req, res) => {
+  const filePath = req.query.path ? resolvePreviewPath(String(req.query.path)) : null;
+  res.json({ removed: linkedDocs.unlink(req.params.sessionId, filePath) });
 });
 
 app.get('/api/session/resolve', (req, res) => {
