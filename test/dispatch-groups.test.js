@@ -66,6 +66,39 @@ describe('transient groups', () => {
     assert.deepEqual(state.disk.sessions, { starter: 'auth' });
   });
 
+  it('remembers the starter without placing it, and forgets it with the group', () => {
+    const { state, store } = harness();
+    const groups = store();
+    groups.join('auth', ['child'], 'starter');
+    assert.deepEqual([...groups.snapshot()], [['child', 'auth']]);
+    assert.equal(groups.groupOf('starter'), 'auth');
+    assert.equal(store().groupOf('starter'), 'auth');
+    state.t += GRACE_MS + 1;
+    assert.equal(groups.groupOf('starter'), null);
+    assert.deepEqual(state.disk.starters, {});
+  });
+
+  it('defaults the starter to the group of its latest dispatch, and its own group wins', () => {
+    const { store } = harness();
+    const groups = store();
+    groups.join('auth', ['a'], 'starter');
+    groups.join('billing', ['b'], 'starter');
+    assert.equal(groups.groupOf('starter'), 'billing');
+    groups.join('ops', ['starter']);
+    assert.equal(groups.groupOf('starter'), 'ops');
+  });
+
+  it('forgets the starter once its sessions leave, even while the group lives', () => {
+    const { state, store } = harness();
+    const groups = store();
+    groups.join('auth', ['child'], 'starter');
+    groups.join('auth', ['other']);
+    state.pinned.add('other');
+    state.t += GRACE_MS + 1;
+    assert.equal(groups.groupOf('other'), 'auth');
+    assert.equal(groups.groupOf('starter'), null);
+  });
+
   it('ignores malformed entries on disk', () => {
     const { store } = harness({ sessions: { a: 'Bad Name', b: 'ok' } });
     assert.deepEqual([...store().snapshot()], [['b', 'ok']]);

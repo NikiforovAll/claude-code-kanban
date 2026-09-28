@@ -53,7 +53,7 @@ The `--cwd` folder must be a known project, which is a folder where a Claude Cod
 
 ## Groups
 
-Pass `--group` on your first dispatch. The new session and the session that ran `dispatch start` then show together under that group in the sidebar. Later dispatches from the same session join the group without the flag. If the starting session is already in a group, it stays where it is.
+Pass `--group` on your first dispatch. The new session then shows under that group in the sidebar. The session that ran `dispatch start` stays where it is. Later dispatches from the same session join the group without the flag.
 
 A dispatch group is temporary. Select **Keep** on the group header to turn it into a named group. For how long it lives and where a started session goes, see [Groups from dispatch](/claude-code-kanban/guides/session-groups/#groups-from-dispatch).
 

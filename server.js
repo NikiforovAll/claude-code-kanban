@@ -3298,8 +3298,7 @@ app.post('/api/dispatch', (req, res) => {
   if (group != null && !isGroupName(group)) {
     return res.status(400).json({ error: `group must be kebab-case, e.g. ${suggestGroupName(group) || 'my-group'}` });
   }
-  const starterGroup = parent ? dispatchGroups.groupOf(parent) : null;
-  const target = group || starterGroup;
+  const target = group || (parent && dispatchGroups.groupOf(parent)) || null;
   const r = dispatches.create({ parent, name, spec: spec.trim(), report: report === true, peer, group: target, worktree });
   const env = { CCK_DISPATCH_ID: r.id, ...(parent && { PARENT_SESSION_ID: parent }) };
   const started = terminal.startNew({ cwd, name, model, worktree, prompt: formatPreamble(r) }, env);
@@ -3308,8 +3307,8 @@ app.post('/api/dispatch', (req, res) => {
     return res.status(started.status).json({ error: started.error });
   }
   dispatches.attach(r.id, { session: started.id, cwd: started.cwd });
-  // A starter already in a group stays where it is: moving it would jump it under the user.
-  if (target) dispatchGroups.join(target, [starterGroup ? null : parent, started.id]);
+  // The starter stays where it is: moving it would jump it under the user.
+  if (target) dispatchGroups.join(target, [started.id], parent);
   broadcast({ type: 'dispatch-update' });
   res.status(201).json({ dispatch: r.id, session: started.id, cwd: started.cwd, group: target });
 });

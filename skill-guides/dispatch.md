@@ -27,7 +27,7 @@ claude-code-kanban dispatch start --cwd <dir> --spec-file <spec.md> --name <name
 - `--peer` is your own peer name: the first line of `ListAgents` ("This session is `<name>`"). Pass it whenever you have the `ListAgents` tool. cck then tells the started session to ask you with `SendMessage` instead of failing on a question. See [Peer](#peer).
 - `--spec-file` over `--spec` for anything longer than a line: no shell quoting.
 - `--name` is what the user sees in the sidebar. Kebab-case, saying what the session does: `fix-login-redirect`, not `task-1`.
-- `--group` names the effort, in kebab-case (`auth-refactor`), and shows the new session and this session together under one sidebar group. Pass it on your first dispatch; later dispatches join the same group without it. A group goes away when its sessions end, unless the user pins a member or keeps the group.
+- `--group` names the effort, in kebab-case (`auth-refactor`), and shows the new session under that sidebar group. This session stays where it is. Pass it on your first dispatch; later dispatches join the same group without it. A group goes away when its sessions end, unless the user pins a member or keeps the group.
 - The result holds the `dispatch` id and the `session` id.
 
 ## Fire-and-forget

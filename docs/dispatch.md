@@ -32,7 +32,7 @@ A started session must not jump into a group after it appears, so its place is d
 
 `lib/dispatch-groups.js`, persisted in `<config dir>/.cck/dispatch-groups.json` as `{version: 1, sessions: {<id>: <group>}}`.
 
-- `--group` puts the started session in the group, and the starter too unless it is already in one. Moving a starter would jump it under the user.
+- `--group` puts the started session in the group. The starter stays where it is, because moving it would jump it under the user. Each started session records its starter in `starters` (`{<started id>: <starter id>}` in the same file), so the starter's later dispatches default to the group of its latest one. The link goes when that session leaves the group.
 - A group lives while any member's claude runs (a cck terminal or a live registry pid), and for 60 s after (a claude that has not registered yet, a resume, registry lag).
 - After that, only pinned members (`pins.json`) stay. So a pinned group survives a server restart; everything else returns to its project block, once its session has ended.
 - Named groups (localStorage) win: a session the user placed, or whose project sits in a named group, stays there. A named group with the transient group's name takes its sessions in.
