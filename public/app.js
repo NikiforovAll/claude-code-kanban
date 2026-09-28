@@ -100,7 +100,50 @@ let msgUserScrolledUp = false;
 const MSG_MAX_LOADED = 200;
 let currentProjectPath = null;
 let currentProjectSessionIds = [];
-const dismissedSessionIds = new Set();
+// Session id -> dismissed-at. Kept for a day: past that the session has usually gone stale,
+// and a reload (the hub reloads this page on a config-dir switch) must not bring it back.
+const DISMISSED_KEY = 'dismissed-sessions';
+const DISMISS_TTL_MS = 24 * 60 * 60 * 1000;
+const isDismissFresh = (at) => typeof at === 'number' && at > Date.now() - DISMISS_TTL_MS;
+const dismissedSessionIds = loadDismissedSessions();
+let dismissSaveWarned = false;
+
+function loadDismissedSessions() {
+  try {
+    const saved = Object.entries(JSON.parse(store.getItem(DISMISSED_KEY) || '{}'));
+    return new Map(saved.filter(([, at]) => isDismissFresh(at)));
+  } catch {
+    return new Map();
+  }
+}
+
+function persistDismissedSessions() {
+  for (const [id, at] of dismissedSessionIds) if (!isDismissFresh(at)) dismissedSessionIds.delete(id);
+  try {
+    store.setItem(DISMISSED_KEY, JSON.stringify(Object.fromEntries(dismissedSessionIds)));
+  } catch (e) {
+    console.error('[dismissed-sessions]', e);
+    // The map still works in memory, so only the next reload is affected. Say so once.
+    if (!dismissSaveWarned) {
+      dismissSaveWarned = true;
+      showToast(
+        'Browser storage is full: dismissed sessions come back on reload. Storage → Clean Orphaned frees space.',
+        'error',
+      );
+    }
+  }
+}
+
+function setSessionDismissed(id, dismissed) {
+  if (dismissed === dismissedSessionIds.has(id)) return false;
+  if (dismissed) dismissedSessionIds.set(id, Date.now());
+  else dismissedSessionIds.delete(id);
+  persistDismissedSessions();
+  updateDismissBtnState();
+  renderSessions();
+  renderActivityChip();
+  return true;
+}
 
 function resetMessageScrollState() {
   msgUserScrolledUp = false;
@@ -3133,6 +3176,8 @@ let revealedStorageSessionId = null;
 // Opens a session and scrolls the sidebar to it, refetching first when the id
 // fell outside the session list the current filters asked for.
 async function revealSession(id) {
+  // Explicit opens restore a dismissed session; activity and auto-follow do not.
+  setSessionDismissed(id, false);
   let session = sessions.find((s) => s.id === id);
   if (!session) {
     lastSessionsHash = '';
@@ -6487,12 +6532,8 @@ document.addEventListener('keydown', (e) => {
   }
   if (e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey && e.key === 'd') {
     e.preventDefault();
-    if (!contextSid || dismissedSessionIds.has(contextSid)) return;
     const prevIdx = selectedSessionIdx;
-    dismissedSessionIds.add(contextSid);
-    updateDismissBtnState();
-    renderSessions();
-    renderActivityChip();
+    if (!contextSid || !setSessionDismissed(contextSid, true)) return;
     const newItems = getNavigableItems();
     const targetIdx = newItems.length > 0 ? Math.max(0, prevIdx - 1) : -1;
     // If the dismissed session is currently open, navigate to the previous one
@@ -6850,6 +6891,7 @@ function handleSessionOpenEvent(data) {
   if (!isSessionActive(target)) {
     stickySessionIds.add(id);
   }
+  setSessionDismissed(id, false);
   fetchTasks(id);
 }
 
@@ -9274,14 +9316,7 @@ function openSessionFromInfo(sessionId) {
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
 function toggleDismissSession(sessionId) {
-  if (dismissedSessionIds.has(sessionId)) {
-    dismissedSessionIds.delete(sessionId);
-  } else {
-    dismissedSessionIds.add(sessionId);
-  }
-  updateDismissBtnState();
-  renderSessions();
-  renderActivityChip();
+  setSessionDismissed(sessionId, !dismissedSessionIds.has(sessionId));
 }
 
 function updateDismissBtnState() {
@@ -10324,6 +10359,7 @@ function syncTerminal() {
 
 // Only paths the user drives call this; restores, deep links and refreshes call fetchTasks, so they never take focus.
 function openSession(sessionId) {
+  setSessionDismissed(sessionId, false);
   const alreadyOpen = sessionId === currentSessionId && viewMode === 'session' && termState.shown;
   if (!alreadyOpen) termState.openedByUser = sessionId;
   else if (termState.attached && promptAwaitsUser(sessionId)) focusTerminalPane();
