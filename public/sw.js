@@ -1,5 +1,5 @@
 const CACHE_NAME = 'cc-kanban-v2';
-const PRECACHE_URLS = ['/', '/style.css', '/app.js'];
+const PRECACHE_URLS = ['/', '/style.css', '/project-match.js', '/app.js'];
 
 let cachePromise = null;
 function getCache() {

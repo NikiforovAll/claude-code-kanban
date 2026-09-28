@@ -4,6 +4,7 @@ const STORAGE_NS = window.__STORAGE_NS__ ? `${window.__STORAGE_NS__}:` : '';
 // Theme is hub-wide (echoed to every app via hub:theme), so it stays shared across config dirs.
 const GLOBAL_KEYS = new Set(['theme', 'color-theme']);
 const nsKey = (k) => (GLOBAL_KEYS.has(k) ? k : STORAGE_NS + k);
+const { normalizeProjectPath, isExactProjectPath, isExactProjectFilter, projectMatcher } = projectMatch;
 const store = {
   keys() {
     const out = [];
@@ -8510,26 +8511,6 @@ function filterBySessions(value) {
   fetchSessions(false);
 }
 
-// Same rule as `projectMatcher` in server.js: an absolute path is one project, other text a part.
-function normalizeProjectPath(p) {
-  return p.toLowerCase().replace(/\\/g, '/').replace(/\/+$/, '');
-}
-function isExactProjectPath(normalized) {
-  return /^([a-z]:)?\//.test(normalized);
-}
-function isExactProjectFilter(query) {
-  return isExactProjectPath(normalizeProjectPath(query.trim()));
-}
-function projectMatcher(query) {
-  const q = normalizeProjectPath(query.trim());
-  const exact = isExactProjectPath(q);
-  return (project) => {
-    if (!project) return false;
-    const p = normalizeProjectPath(project);
-    return exact ? p === q : p.includes(q);
-  };
-}
-
 function projectFilterText() {
   return filterProject && filterProject !== '__recent__' ? filterProject : '';
 }
@@ -9300,15 +9281,13 @@ let spRenderedQuery = null;
 // Per-open cache: spSource is frozen while the picker is up, so a fetched log stays valid.
 const spPeekCache = new Map();
 
-// A query that can be part of a session id also searches every transcript on the server,
-// so a session outside the sidebar filter is found too. Values: 'pending', then the rows.
+// A query also searches session ids and names in every transcript on the server, so a
+// session outside the sidebar filter is found too. Values: 'pending', then the rows.
 const spSearch = new Map();
-const SP_ID_QUERY_RE = /^[0-9a-f-]*$/i;
 let spSearchTimer = null;
 
 function spSearchKey(query) {
-  const key = query.toLowerCase().replace(/-/g, '');
-  return key.length >= 3 && SP_ID_QUERY_RE.test(query) ? key : null;
+  return query.length >= 3 ? query.toLowerCase() : null;
 }
 
 function spScheduleSearch(key) {
@@ -9457,7 +9436,7 @@ function renderSessionPicker() {
     return;
   }
 
-  // Rows past the sidebar list come from the id search and show their full project path.
+  // Rows past the sidebar list come from the server search and show their full project path.
   list.innerHTML = spRows
     .map((s, i) => {
       const outside = i >= local.length;

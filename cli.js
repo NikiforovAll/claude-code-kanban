@@ -2,7 +2,6 @@ const fs = require('fs');
 const path = require('path');
 const { getClaudeDir, displayPath } = require('./lib/claude-dir');
 const { isGroupName, suggestGroupName } = require('./lib/dispatch-groups');
-
 // Help is auto-generated from this table — keep flags/usage in sync with `run` behavior.
 const COMMANDS = {
   'preview-doc': {
@@ -31,7 +30,7 @@ const COMMANDS = {
         flags: {
           '--active': 'Only sessions with recent activity (sidebar-style filter)',
           '--days <n>': 'Only sessions modified within the last N days (fractional ok, e.g. 0.5)',
-          '--project <name>': 'Filter by project name (substring match)',
+          '--project <name>': 'Filter by project: an absolute path selects one project, other text matches a part of the path',
           '--limit <n|all>': 'Max rows to display (default: 10). Use "all" for no cap.',
           '--no-pins': 'Disable always-include and sticky-first ordering for pinned sessions',
           '--json': 'Output JSON instead of a table',
@@ -375,10 +374,11 @@ function parseLimit(args, { fallback, allowAll = false }) {
   return { ok: true, limit: n };
 }
 
-async function fetchSessionsList(limit, pinnedIds = []) {
+async function fetchSessionsList(limit, pinnedIds = [], project = null) {
   const q = limit === null ? 'all' : String(limit);
   const pinnedQ = pinnedIds.length ? `&pinned=${pinnedIds.join(',')}` : '';
-  const res = await cliFetch(`/api/sessions?limit=${q}${pinnedQ}`);
+  const projectQ = project ? `&project=${encodeURIComponent(project)}` : '';
+  const res = await cliFetch(`/api/sessions?limit=${q}${pinnedQ}${projectQ}`);
   if (!res.ok) throw new Error(`Failed to fetch sessions (${res.status})`);
   return res.json();
 }
@@ -433,10 +433,10 @@ async function runSessionListCli(args) {
   const asJson = args.includes('--json');
   const pinsMap = noPins ? {} : await fetchPinsMap();
   const pinnedIds = Object.keys(pinsMap);
-  const hasClientFilter = activeOnly || days !== null || projectFilter;
+  const hasClientFilter = activeOnly || days !== null;
   let list;
   try {
-    list = await fetchSessionsList(hasClientFilter ? null : limit, pinnedIds);
+    list = await fetchSessionsList(hasClientFilter ? null : limit, pinnedIds, projectFilter);
   } catch (e) {
     reportCliError(e);
     return 1;
@@ -446,10 +446,6 @@ async function runSessionListCli(args) {
   if (days !== null) {
     const cutoff = Date.now() - days * 86_400_000;
     list = list.filter(s => pinOf(s.id) || (s.modifiedAt && new Date(s.modifiedAt).getTime() >= cutoff));
-  }
-  if (projectFilter) {
-    const needle = projectFilter.toLowerCase();
-    list = list.filter(s => (s.project || '').toLowerCase().includes(needle));
   }
   const pinRank = id => pinOf(id) === 'sticky' ? 0 : pinOf(id) === 'pinned' ? 1 : 2;
   list.sort((a, b) => {

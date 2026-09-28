@@ -149,7 +149,7 @@ claude-code-kanban session list [--active] [--days <n>] [--project <name>] [--li
 | --- | --- |
 | `--active` | Only sessions with recent activity, as in the sidebar's Active filter. |
 | `--days <n>` | Only sessions changed in the last `n` days. Fractions work, for example `0.5`. |
-| `--project <name>` | Only sessions whose project path contains `name`. The match ignores case. |
+| `--project <name>` | Only sessions of matching projects. An absolute path selects that one project. Other text matches any part of the project path. The match ignores case, and `\` and `/` are the same. |
 | `--limit <n\|all>` | Maximum rows. Default 10. `all` removes the limit. |
 | `--no-pins` | Treats pinned sessions like other sessions. |
 | `--json` | Prints JSON. Each entry has a `pinState` field. |

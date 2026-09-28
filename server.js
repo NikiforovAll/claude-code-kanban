@@ -44,6 +44,7 @@ const { createGroupStore, isGroupName, suggestGroupName } = require('./lib/dispa
 const { pickFolder } = require('./lib/folder-dialog');
 const { loadSessionCache, saveSessionCache } = require('./lib/session-cache');
 const { countTaskDir } = require('./lib/task-counts');
+const { projectMatcher } = require('./public/project-match');
 const { getParentVerdict, setParentVerdict } = require('./lib/parent-cache');
 
 if (process.argv.includes("--install") || process.argv.includes("--uninstall")) {
@@ -1568,32 +1569,23 @@ app.get('/api/sessions', async (req, res) => {
   }
 });
 
-// Same rule as `projectMatcher` in public/app.js. An absolute path selects that one project, so
-// the hub's scope does not also pull in `app-2` next to `app`; any other text matches a part.
-function normalizeProjectPath(p) {
-  return p.toLowerCase().replace(/\\/g, '/').replace(/\/+$/, '');
-}
-function projectMatcher(query) {
-  const q = normalizeProjectPath(query.trim());
-  const exact = /^([a-z]:)?\//.test(q);
-  return (project) => {
-    if (!project) return false;
-    const p = normalizeProjectPath(project);
-    return exact ? p === q : p.includes(q);
-  };
-}
-
-// Ids of sessions whose id contains q, from any transcript, newest first. The client gets the
-// rows through `/api/sessions?include=`. A linear scan is enough: ~4 ms for 10k ids.
+// Ids of sessions whose id or name contains q, from any transcript, newest first. The client
+// gets the rows through `/api/sessions?include=`. A linear scan is enough: ~4 ms for 10k ids,
+// plus one stat per hit for the sort.
 const SESSION_SEARCH_MIN = 3;
 const SESSION_SEARCH_MAX = 20;
 app.get('/api/sessions/search', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
-  const q = String(req.query.q || '').toLowerCase().replace(/-/g, '');
-  if (q.length < SESSION_SEARCH_MIN) return res.json([]);
+  const text = String(req.query.q || '').trim().toLowerCase();
+  if (text.length < SESSION_SEARCH_MIN) return res.json([]);
+  const idQ = text.replace(/-/g, '');
+  const searchIds = idQ.length >= SESSION_SEARCH_MIN && /^[0-9a-f]+$/.test(idQ);
   const hits = [];
   for (const [id, meta] of Object.entries(loadSessionMetadata())) {
-    if (id.replace(/-/g, '').includes(q)) hits.push({ id, mtime: getSessionLogStat(meta).mtime || 0 });
+    const name = getSessionDisplayName(id, meta);
+    if ((searchIds && id.replace(/-/g, '').includes(idQ)) || name?.toLowerCase().includes(text)) {
+      hits.push({ id, mtime: getSessionLogStat(meta).mtime || 0 });
+    }
   }
   hits.sort((a, b) => b.mtime - a.mtime);
   res.json(hits.slice(0, SESSION_SEARCH_MAX).map((h) => h.id));
