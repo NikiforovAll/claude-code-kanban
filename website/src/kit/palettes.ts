@@ -1,4 +1,4 @@
-// themes.json is a copy of claude-code-hub/scripts/themes.json, the palettes every app ships with.
+// themes.json is a copy of claude-code-hub/lib/themes.json, the palettes every app ships with.
 import themes from './themes.json';
 
 type Tokens = (typeof themes)[number]['dark'];
