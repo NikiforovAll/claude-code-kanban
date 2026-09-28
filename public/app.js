@@ -11727,6 +11727,7 @@ window.addEventListener('popstate', () => {
 // these tests only decide whether a press is the hub's to handle.
 function isHubKey(e) {
   if (!window.__HUB__?.enabled) return false;
+  if (hubKeys) return hubKeys.has(hubCombo(e));
   if (e.ctrlKey && e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) return true;
   // Own branch: the Alt+digit case below requires !ctrlKey. The hub owns the Ctrl+Alt+letter
   // keymap and ignores unbound letters.
@@ -11741,6 +11742,19 @@ function isHubKey(e) {
     return true;
   }
   return e.altKey && !e.ctrlKey && !e.shiftKey && !e.metaKey && (/^[1-9]$/.test(e.key) || /^Digit[1-9]$/.test(e.code));
+}
+
+// The combos the hub binds, from its hub:keys message. Null until one arrives: a hub from before
+// hub:keys sends none, and the fallback filter above is what such a hub expects.
+let hubKeys = null;
+
+// Must name a press the way the hub's keysMessage() does, normalized as its bindingKey().
+function hubCombo(e) {
+  const lower = (e.key || '').toLowerCase();
+  const m = /^(?:Key|Digit)([A-Z1-9])$/.exec(e.code || '');
+  const key = /^[a-z1-9]$/.test(lower) ? lower : m ? m[1].toLowerCase() : e.key;
+  const mods = [e.ctrlKey && 'ctrl', e.altKey && 'alt', e.shiftKey && 'shift', e.metaKey && 'meta'];
+  return [...mods, key].filter(Boolean).join('+');
 }
 
 document.addEventListener('keydown', (e) => {
@@ -11812,6 +11826,14 @@ function hubPost(message) {
   }).observe(document.body, {
     attributes: true,
     attributeFilter: ['class', 'data-color-theme'],
+  });
+})();
+
+(function initHubKeys() {
+  window.addEventListener('message', (e) => {
+    if (e.source !== window.parent || e.origin !== hubOrigin()) return;
+    if (e.data?.type !== 'hub:keys' || !Array.isArray(e.data.keys)) return;
+    hubKeys = new Set(e.data.keys.filter((k) => typeof k === 'string'));
   });
 })();
 
