@@ -91,6 +91,32 @@ describe('CLI server resolution', () => {
     }
   });
 
+  it('sends dispatch start the token of the board it reaches', async () => {
+    const seen = [];
+    const board = () => http.createServer((req, res) => {
+      seen.push({ port: req.socket.localPort, token: req.headers['x-terminal-token'] });
+      res.setHeader('Content-Type', 'application/json');
+      res.end('{"dispatch":"d1","session":"s1","cwd":"."}');
+    });
+    const boards = [board(), board()];
+    await Promise.all(boards.map((s) => new Promise((r) => s.listen(0, '127.0.0.1', r))));
+    try {
+      const [ownerPort, pinnedPort] = boards.map((s) => s.address().port);
+      const dir = tempConfigDir({ port: ownerPort, pid: process.pid });
+      const tokens = path.join(dir, '.cck', 'terminal-tokens');
+      fs.mkdirSync(tokens);
+      for (const [port, token] of [[ownerPort, 'owner-token'], [pinnedPort, 'pinned-token']]) {
+        fs.writeFileSync(path.join(tokens, `${port}.json`), JSON.stringify({ pid: process.pid, token }));
+      }
+      const start = ['dispatch', 'start', '--spec', 'x', '--cwd', dir];
+      assert.equal((await runCli(start, { CLAUDE_CONFIG_DIR: dir })).code, 0);
+      assert.equal((await runCli(start, { CLAUDE_CONFIG_DIR: dir, CCK_URL: `http://127.0.0.1:${pinnedPort}` })).code, 0);
+      assert.deepEqual(seen, [{ port: ownerPort, token: 'owner-token' }, { port: pinnedPort, token: 'pinned-token' }]);
+    } finally {
+      for (const s of boards) s.close();
+    }
+  });
+
   it('names the config dir when the server is unreachable', async () => {
     const dir = tempConfigDir();
     const { code, stderr } = await runCli(['session', 'list'], { CLAUDE_CONFIG_DIR: dir, PORT: '1' });

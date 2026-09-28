@@ -130,11 +130,11 @@ The server, the hooks and the installer keep their state in `<config-dir>/.cck/`
 | `pins.json` | Server | Copy of the browser's session pins, so the CLI can read them |
 | `dispatch-groups.json` | Server | Groups made with `dispatch start --group` |
 | `server.json` | Server | `{port, pid}` of the running server. The CLI and hooks use it to find the port. |
-| `terminal-token.json` | Server | Terminal token (file mode 600), used by `dispatch start`. Written only when the terminal is available. |
+| `terminal-tokens/<port>.json` | Server | Terminal token of the board on `<port>` (file mode 600), used by `dispatch start`. Written only when the terminal is available. One file per board, so two boards on one config dir each keep their own. |
 | `config.json` | You | Optional [UI approvals config](#ui-approvals-config) |
 | `plugin/` | Installer | Copy of the Claude Code plugin |
 
-The server removes `server.json` and `terminal-token.json` when it exits, if they still belong to it.
+The server removes `server.json` and its `terminal-tokens/<port>.json` when it exits, if they still belong to it. At start it also removes token files left by servers that are no longer running.
 
 The installer also copies `context-status.sh` to `<config-dir>/hooks/context-status.sh` and can set `statusLine` in `<config-dir>/settings.json`.
 

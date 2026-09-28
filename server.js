@@ -91,7 +91,7 @@ const PINS_FILE = path.join(CCK_DIR, 'pins.json');
 const DISPATCH_GROUPS_FILE = path.join(CCK_DIR, 'dispatch-groups.json');
 const LINKED_DOCS_FILE = path.join(CCK_DIR, 'linked-docs.json');
 const SERVER_INFO_FILE = path.join(CCK_DIR, 'server.json');
-const TERMINAL_TOKEN_FILE = path.join(CCK_DIR, 'terminal-token.json');
+const TERMINAL_TOKENS_DIR = path.join(CCK_DIR, 'terminal-tokens');
 const SESSION_CACHE_FILE = path.join(CCK_DIR, 'session-cache.json');
 // Harness-owned scratchpad root; the per-session dir under it is created lazily.
 const SCRATCHPAD_ROOT = path.join(os.tmpdir(), 'claude');
@@ -110,7 +110,7 @@ function readPins() {
 
 function writeJsonAtomic(file, obj, mode) {
   try {
-    mkdirSync(CCK_DIR, { recursive: true });
+    mkdirSync(path.dirname(file), { recursive: true });
     const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
     writeFileSync(tmp, JSON.stringify(obj, null, 2), { encoding: 'utf8', mode });
     renameSync(tmp, file);
@@ -128,37 +128,46 @@ function writePins(pins) {
 // a crashed one.
 function writeServerInfo(port) {
   writeJsonAtomic(SERVER_INFO_FILE, { port, pid: process.pid });
-  writeTerminalToken();
 }
 
 // For `dispatch start`: a local process as the same user can already run claude itself,
 // so handing it the token adds little. A browser still cannot read the file.
-function writeTerminalToken() {
+// One file per port: two boards on one config dir each keep a token, so the CLI can
+// reach the board CCK_URL names even when the other one owns server.json.
+// The sweep also drops terminal-token.json, the single file that older versions wrote.
+let terminalTokenFile = null;
+function writeTerminalToken(port) {
   if (terminal.unavailableReason()) return;
-  writeJsonAtomic(TERMINAL_TOKEN_FILE, { pid: process.pid, token: terminal.token }, 0o600);
+  let stale = [path.join(CCK_DIR, 'terminal-token.json')];
+  try { stale = stale.concat(readdirSync(TERMINAL_TOKENS_DIR).map(name => path.join(TERMINAL_TOKENS_DIR, name))); } catch (_) { /* no dir yet */ }
+  for (const file of stale) {
+    const pid = ownerPid(file);
+    if (pid !== null && !isPidAlive(pid)) try { unlinkSync(file); } catch (_) { /* already gone */ }
+  }
+  terminalTokenFile = path.join(TERMINAL_TOKENS_DIR, `${port}.json`);
+  writeJsonAtomic(terminalTokenFile, { pid: process.pid, token: terminal.token }, 0o600);
+}
+
+function ownerPid(file) {
+  try { return JSON.parse(readFileSync(file, 'utf8')).pid ?? null; } catch (_) { return null; }
 }
 
 // A beacon that outlives its server disarms UI approvals silently: approval-gate.sh
 // probes the port, finds it closed and never waits. The hub spawns every sub-app on
 // an ephemeral port, so a stale beacon never comes back on its own — drop ours on
 // the way out. Only when the file is still ours: a newer server on the same config
-// dir has already claimed it.
+// dir has already claimed it. The terminal token file goes the same way.
 function removeServerInfo() {
-  for (const file of [SERVER_INFO_FILE, TERMINAL_TOKEN_FILE]) {
-    try {
-      const info = JSON.parse(readFileSync(file, 'utf8'));
-      if (info.pid === process.pid) unlinkSync(file);
-    } catch (_) { /* gone, unreadable, or not ours */ }
+  for (const file of [SERVER_INFO_FILE, terminalTokenFile]) {
+    if (file && ownerPid(file) === process.pid) try { unlinkSync(file); } catch (_) { /* already gone */ }
   }
 }
 
 // A second server on the same config dir (a test hub, say) takes the beacon and removes it on
 // exit, which leaves this live server undiscoverable. A newer live owner keeps it.
 function reclaimServerInfo(port) {
-  try {
-    const { pid } = JSON.parse(readFileSync(SERVER_INFO_FILE, 'utf8'));
-    if (pid === process.pid || isPidAlive(pid)) return;
-  } catch (_) { /* missing or unreadable beacon */ }
+  const pid = ownerPid(SERVER_INFO_FILE);
+  if (pid !== null && isPidAlive(pid)) return;
   writeServerInfo(port);
 }
 
@@ -4176,10 +4185,11 @@ async function prewarmCaches() {
 
   const onReady = (actualPort) => {
     listenPort = actualPort;
-    console.log(`Claude Task Kanban running at http://localhost:${actualPort}`);
     // The port is configurable and falls back to a random one when taken, so the postman
     // monitor cannot assume it -- publish the live one where it can read it.
     writeServerInfo(actualPort);
+    writeTerminalToken(actualPort);
+    console.log(`Claude Task Kanban running at http://localhost:${actualPort}`);
     setInterval(() => reclaimServerInfo(actualPort), 30000).unref();
     migrateLegacyApprovalsConfig();
     const warning = net.exposureWarning();

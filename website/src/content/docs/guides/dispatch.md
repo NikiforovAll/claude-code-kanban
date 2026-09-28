@@ -9,10 +9,10 @@ By default, you do not wait for a dispatch. You hand off the task and follow it 
 
 ## Before you start
 
-The server must run with the embedded terminal enabled. `dispatch start` reads the terminal token from `<config-dir>/.cck/terminal-token.json`, and the server writes that file only when the terminal is on. Without it, the command stops with this error:
+The server must run with the embedded terminal enabled. `dispatch start` reads the terminal token from `<config-dir>/.cck/terminal-tokens/<port>.json`, where `<port>` is the port of the board it reaches. The server writes that file only when the terminal is on. Without it, the command stops with this error:
 
 ```text
-No terminal token for <config-dir>. The cck server must be running with the terminal enabled.
+No terminal token for <config-dir> at <board-url>. The cck server must be running with the terminal enabled.
 ```
 
 To turn the terminal on, see [Embedded terminal](/claude-code-kanban/guides/embedded-terminal/). Inside [Claude Code Hub](/claude-code-kanban/guides/claude-code-hub/) the terminal is on by default.

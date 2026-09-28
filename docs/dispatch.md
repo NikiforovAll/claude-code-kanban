@@ -12,7 +12,7 @@ starter  dispatch wait [<id>...] --timeout 15m, or a pushed line from the kanban
 ```
 
 - The starter id comes from `CLAUDE_CODE_SESSION_ID` and is stored as `parent`. It routes a report to the starter's inbox and lets the board follow the starter into a named group. The board never shows it.
-- `POST /api/dispatch` needs the terminal token, which the CLI reads from `<config dir>/.cck/terminal-token.json`. `done` needs only the per-dispatch capability from the preamble; the started session never holds the terminal token.
+- `POST /api/dispatch` needs the terminal token, which the CLI reads from `<config dir>/.cck/terminal-tokens/<port>.json` for the board it reaches (`CCK_URL`, `PORT`, then `server.json`). Each board writes its own file, so two boards on one config dir do not overwrite each other's token. `done` needs only the per-dispatch capability from the preamble; the started session never holds the terminal token.
 - With neither `--report` nor `--peer` the prompt is the task alone. Otherwise it starts with a preamble (`formatPreamble`): `--peer` names the starter's Claude Code peer to ask with `SendMessage`, and `--report` adds the exact `done` command. The peer name goes into the prompt verbatim, so the server accepts only `isPeerName` values.
 - Records are in memory (`lib/dispatch.js`). The terminals die with the server, so a restart loses nothing that could still settle. A session whose terminal ends before `done` settles as `exited`.
 - A report is pushed to the starter only with `--report`, on the `dispatch` doorbell topic, so a `kanban-dispatch` postman never gets `task.moved` lines.

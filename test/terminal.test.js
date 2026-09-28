@@ -1,7 +1,7 @@
 const { describe, it, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { spawn } = require('node:child_process');
-const { mkdtempSync, rmSync } = require('node:fs');
+const { mkdtempSync, readFileSync, rmSync } = require('node:fs');
 const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
@@ -253,6 +253,11 @@ describe('terminal endpoint', { skip: !ptyAvailable }, () => {
     port = await srv.port;
   });
   after(() => stopServer(srv));
+
+  it('writes its token in a file named by its port', () => {
+    const file = path.join(srv.dir, '.cck', 'terminal-tokens', `${port}.json`);
+    assert.equal(JSON.parse(readFileSync(file, 'utf8')).token, TOKEN);
+  });
 
   it('refuses a cross-origin handshake', async () => {
     assert.equal(await handshakeStatus(port, { origin: 'http://evil.com' }), 403);

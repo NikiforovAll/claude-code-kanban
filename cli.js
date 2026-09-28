@@ -401,6 +401,11 @@ function cliBaseUrl() {
   return port === null ? null : `http://127.0.0.1:${port}`;
 }
 
+function cliTargetPort() {
+  if (!process.env.CCK_URL) return cliPort();
+  try { return new URL(process.env.CCK_URL).port; } catch (_) { return ''; }
+}
+
 function readCckJson(name) {
   try { return JSON.parse(fs.readFileSync(path.join(getClaudeDir(), '.cck', name), 'utf8')); } catch (_) { return null; }
 }
@@ -1016,9 +1021,14 @@ function printDispatch(r) {
 }
 
 async function runDispatchStartCli(args) {
-  const token = readCckJson('terminal-token.json')?.token;
+  const port = cliTargetPort();
+  if (port === null) {
+    console.error(unreachable());
+    return 1;
+  }
+  const token = port && readCckJson(`terminal-tokens/${port}.json`)?.token;
   if (!token) {
-    console.error(`No terminal token for ${displayPath(getClaudeDir())}. The cck server must be running with the terminal enabled.`);
+    console.error(`No terminal token for ${displayPath(getClaudeDir())} at ${cliBaseUrl()}. The cck server must be running with the terminal enabled.`);
     return 1;
   }
   let spec;
