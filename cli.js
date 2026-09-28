@@ -10,19 +10,31 @@ const COMMANDS = {
     flags: {
       '--session <id>': 'Switch focused session in the browser (does not link the file)',
     },
+    notes: 'HTML renders in a sandboxed iframe; local stylesheets, scripts and images are inlined. Relative paths resolve against the current dir.',
+    examples: [
+      'claude-code-kanban preview-doc ./notes.md --session $CLAUDE_SESSION_ID',
+    ],
     run: runPreviewCli,
   },
   'link-doc': {
     summary: 'Link a file to a session in the sidebar without opening the preview modal',
-    usage: 'claude-code-kanban link-doc <file> --session <id> [--unlink]',
+    usage: 'claude-code-kanban link-doc <file> --session <id> [--unlink] | link-doc --list --session <id> [--json]',
     flags: {
-      '--session <id>': 'Session to link the file to (required unless $PREVIEW_SESSION is set)',
-      '--unlink': 'Remove the link instead of adding it',
+      '<file>': 'Any file type; one the preview cannot render opens in the editor',
+      '--session <id>': 'Session to link the file to (required unless $PREVIEW_SESSION is set); full id or unique prefix',
+      '--unlink': 'Remove the link instead of adding it (the file need not exist)',
+      '--list': 'Print the docs the server holds for the session',
+      '--json': 'With --list: output JSON',
     },
+    notes: 'The server keeps the link, so it shows when a browser tab opens later.',
+    examples: [
+      'claude-code-kanban link-doc ./design.md --session $CLAUDE_SESSION_ID',
+      'claude-code-kanban link-doc --list --session $CLAUDE_SESSION_ID',
+    ],
     run: runLinkDocCli,
   },
   session: {
-    summary: 'List or open Claude Code sessions',
+    summary: 'List, search, open and inspect Claude Code sessions',
     verbs: {
       list: {
         summary: 'List sessions (pinned/sticky always included)',
@@ -35,7 +47,24 @@ const COMMANDS = {
           '--no-pins': 'Disable always-include and sticky-first ordering for pinned sessions',
           '--json': 'Output JSON instead of a table',
         },
+        examples: [
+          'claude-code-kanban session list --active',
+          'claude-code-kanban session list --days 0.5 --limit all --project my-repo',
+        ],
         run: runSessionListCli,
+      },
+      search: {
+        summary: 'Find sessions whose name or id contains the text, from any transcript',
+        usage: 'claude-code-kanban session search <text> [--limit <n>] [--json]',
+        flags: {
+          '<text>': 'At least 3 characters; matched against the session name and id',
+          '--limit <n>': 'Max rows (default and max: 20)',
+          '--json': 'Output JSON instead of a table',
+        },
+        examples: [
+          'claude-code-kanban session search login-redirect',
+        ],
+        run: runSessionSearchCli,
       },
       open: {
         summary: 'Focus a session in the browser (Active tab)',
@@ -43,6 +72,7 @@ const COMMANDS = {
         flags: {
           '<id>': 'Full session id, or a unique prefix',
         },
+        examples: ['claude-code-kanban session open $CLAUDE_SESSION_ID'],
         run: runSessionOpenCli,
       },
       view: {
@@ -52,7 +82,29 @@ const COMMANDS = {
           '<id>': 'Full session id, or a unique prefix',
           '--json': 'Output JSON instead of formatted sections',
         },
+        examples: ['claude-code-kanban session view $CLAUDE_SESSION_ID'],
         run: runSessionViewCli,
+      },
+      plan: {
+        summary: 'Print the plan saved for a session (plan mode)',
+        usage: 'claude-code-kanban session plan <id> [--json]',
+        flags: {
+          '<id>': 'Full session id, or a unique prefix',
+          '--json': 'Output JSON ({content, slug}); content is null when there is no plan',
+        },
+        examples: ['claude-code-kanban session plan 3fa9c1'],
+        run: runSessionPlanCli,
+      },
+      agents: {
+        summary: 'List the subagents a session has run, and whether it waits for the user',
+        usage: 'claude-code-kanban session agents <id> [--json]',
+        flags: {
+          '<id>': 'Full session id, or a unique prefix',
+          '--json': 'Output JSON ({agents, waitingForUser})',
+        },
+        notes: 'Needs the cck hooks in this config dir (claude-code-kanban --install); without them the list is empty.',
+        examples: ['claude-code-kanban session agents $CLAUDE_SESSION_ID'],
+        run: runSessionAgentsCli,
       },
       pin: {
         summary: 'Pin (or unpin) a session in the sidebar of connected browser tabs',
@@ -62,6 +114,10 @@ const COMMANDS = {
           '--sticky': 'Set sticky state (always shown, top of list)',
           '--unpin': 'Clear pin/sticky state',
         },
+        examples: [
+          'claude-code-kanban session pin $CLAUDE_SESSION_ID --sticky',
+          'claude-code-kanban session pin $CLAUDE_SESSION_ID --unpin',
+        ],
         run: runSessionPinCli,
       },
       pins: {
@@ -81,7 +137,43 @@ const COMMANDS = {
           '--limit <n>': 'Number of messages (default: 10, max: 50)',
           '--json': 'Output JSON instead of formatted lines',
         },
+        examples: ['claude-code-kanban session peek 3fa9c1 --limit 20'],
         run: runSessionPeekCli,
+      },
+    },
+  },
+  task: {
+    summary: 'Read the tasks on the board',
+    verbs: {
+      list: {
+        summary: 'List the tasks of a session, a project, or every session',
+        usage: 'claude-code-kanban task list (<session> | --project <path> | --all) [--status <s>] [--json]',
+        flags: {
+          '<session>': 'Full session id, or a unique prefix',
+          '--project <path>': 'Every task of the sessions in this project (absolute path, as in `project list`)',
+          '--all': 'Every task on the board',
+          '--status <s>': 'Only tasks in this status: pending, in_progress or completed',
+          '--json': 'Output JSON instead of a table',
+        },
+        examples: [
+          'claude-code-kanban task list $CLAUDE_SESSION_ID',
+          'claude-code-kanban task list --all --status in_progress',
+        ],
+        run: runTaskListCli,
+      },
+    },
+  },
+  project: {
+    summary: 'Read the projects the board knows',
+    verbs: {
+      list: {
+        summary: 'List known project paths, newest activity first',
+        usage: 'claude-code-kanban project list [--json]',
+        flags: {
+          '--json': 'Output JSON instead of a table',
+        },
+        notes: 'These are the folders `dispatch start --cwd` accepts.',
+        run: runProjectListCli,
       },
     },
   },
@@ -103,6 +195,10 @@ const COMMANDS = {
           '--worktree [name]': 'Run in a new git worktree',
           '--json': 'Output JSON',
         },
+        notes: 'Needs the terminal token, so it runs on the machine of the cck server. Run `claude-code-kanban skills get dispatch` for how to write the spec.',
+        examples: [
+          'claude-code-kanban dispatch start --cwd . --spec-file spec.md --name fix-login-redirect --group auth-refactor --peer my-peer --report --json',
+        ],
         run: runDispatchStartCli,
       },
       done: {
@@ -115,6 +211,9 @@ const COMMANDS = {
           '--summary <text>': 'What changed, what was found, what remains',
           '--summary-file <path>': 'Read the summary from a file',
         },
+        examples: [
+          'claude-code-kanban dispatch done d_1a2b3c --cap <cap> --outcome succeeded --summary-file summary.md',
+        ],
         run: runDispatchDoneCli,
       },
       wait: {
@@ -125,6 +224,8 @@ const COMMANDS = {
           '--timeout <dur>': 'How long to wait, e.g. 90s, 15m, 1h (default: 10m)',
           '--json': 'Output JSON',
         },
+        notes: 'Returns as soon as any watched dispatch settles, with settled, running and timeout.',
+        examples: ['claude-code-kanban dispatch wait --timeout 15m --json'],
         run: runDispatchWaitCli,
       },
       list: {
@@ -145,11 +246,17 @@ const COMMANDS = {
         summary: 'Print the guide for a skill',
         usage: 'claude-code-kanban skills get <name>',
         flags: { '<name>': 'Skill name, e.g. dispatch' },
+        examples: ['claude-code-kanban skills get dispatch'],
         run: runSkillsGetCli,
       },
     },
   },
 };
+
+for (const [noun, cmd] of Object.entries(COMMANDS)) {
+  cmd.name = noun;
+  for (const [verb, v] of Object.entries(cmd.verbs || {})) v.name = `${noun} ${verb}`;
+}
 
 function runCli(argv) {
   if (argv.includes('--version') || argv.includes('-v')) {
@@ -159,7 +266,10 @@ function runCli(argv) {
   const cli = resolveCliCommand(argv);
   if (cli.kind === 'server') return false;
   if (cli.kind === 'help') {
-    if (cli.target && Object.hasOwn(COMMANDS, cli.target)) printNounHelp(cli.target);
+    const noun = cli.target && Object.hasOwn(COMMANDS, cli.target) ? COMMANDS[cli.target] : null;
+    const verb = noun?.verbs && cli.verb && Object.hasOwn(noun.verbs, cli.verb) ? noun.verbs[cli.verb] : null;
+    if (verb) printLeafHelp(verb);
+    else if (noun) printNounHelp(cli.target);
     else printTopHelp();
     process.exit(0);
   }
@@ -175,7 +285,7 @@ function runCli(argv) {
   }
   if (cli.kind === 'noun') {
     printNounHelp(cli.noun);
-    process.exit(0);
+    process.exit(argv.includes('--help') || argv.includes('-h') ? 0 : 1);
   }
   if (cli.kind === 'leaf') {
     if (cli.args.includes('--help') || cli.args.includes('-h')) {
@@ -194,7 +304,7 @@ function resolveCliCommand(argv) {
   const noun = argv[2] && !argv[2].startsWith('-') ? argv[2] : null;
   const hasHelp = (a) => a.includes('--help') || a.includes('-h');
   if (!noun) return hasHelp(argv) ? { kind: 'help' } : { kind: 'server' };
-  if (noun === 'help') return { kind: 'help', target: argv[3] };
+  if (noun === 'help') return { kind: 'help', target: argv[3], verb: argv[4] };
   if (!Object.hasOwn(COMMANDS, noun)) return { kind: 'unknown-noun', noun };
   const entry = COMMANDS[noun];
   if (!entry.verbs) return { kind: 'leaf', name: noun, entry, args: argv.slice(3) };
@@ -208,12 +318,8 @@ function printTopHelp() {
   console.log('Usage: claude-code-kanban <command> [args] [--flags]\n');
   console.log('Commands:');
   for (const [name, cmd] of Object.entries(COMMANDS)) {
-    console.log(`  ${name.padEnd(20)}${cmd.summary}`);
-    if (cmd.verbs) {
-      for (const [vName, v] of Object.entries(cmd.verbs)) {
-        console.log(`    ${`${name} ${vName}`.padEnd(18)}${v.summary}`);
-      }
-    }
+    const verbs = cmd.verbs ? ` (${Object.keys(cmd.verbs).join(', ')})` : '';
+    console.log(`  ${name.padEnd(20)}${cmd.summary}${verbs}`);
   }
   console.log(`  ${'help'.padEnd(20)}Show help for a command (claude-code-kanban help <command>)`);
   console.log('\nFlags:');
@@ -225,6 +331,11 @@ function printTopHelp() {
   console.log('  --open                Open browser on start');
   console.log('  --install, --uninstall    Install or remove the plugin, context spy, and statusline');
   console.log('  --plugin-only         With --install: refresh only the plugin, skip context spy and statusline');
+  console.log('\nEnvironment:');
+  console.log('  CCK_URL               Server base URL, e.g. http://127.0.0.1:4795 (wins over PORT)');
+  console.log('  PORT                  Server port (default: the one this config dir\'s server reports, else 3541)');
+  console.log('  CLAUDE_CONFIG_DIR     Claude config dir whose board to use');
+  console.log('\nRun `claude-code-kanban help <command>` for its subcommands, and `help <command> <subcommand>` for flags and examples.');
 }
 
 function printNounHelp(noun) {
@@ -236,7 +347,7 @@ function printNounHelp(noun) {
     for (const [vName, v] of Object.entries(entry.verbs)) {
       console.log(`  ${vName.padEnd(12)}${v.summary}`);
     }
-    console.log(`\nRun \`claude-code-kanban ${noun} <subcommand> --help\` for details.`);
+    console.log(`\nRun \`claude-code-kanban help ${noun} <subcommand>\` for flags and examples.`);
   } else {
     printLeafHelp(entry);
   }
@@ -245,14 +356,24 @@ function printNounHelp(noun) {
 function printLeafHelp(entry) {
   console.log(`${entry.summary}\n`);
   console.log(`Usage: ${entry.usage}`);
-  if (entry.flags && Object.keys(entry.flags).length) {
-    const pad = Math.max(...Object.keys(entry.flags).map(f => f.length));
-    console.log('\nFlags:');
-    for (const [flag, desc] of Object.entries(entry.flags)) {
-      console.log(`  ${flag.padEnd(pad + 2)}${desc}`);
-    }
+  const flags = { ...entry.flags, '--help, -h': 'Show this help' };
+  const pad = Math.max(...Object.keys(flags).map(f => f.length));
+  console.log('\nFlags:');
+  for (const [flag, desc] of Object.entries(flags)) {
+    console.log(`  ${flag.padEnd(pad + 2)}${desc}`);
   }
-  console.log('\n  --help, -h            Show this help');
+  if (entry.notes) console.log(`\n${entry.notes}`);
+  if (entry.examples?.length) {
+    console.log('\nExamples:');
+    for (const ex of entry.examples) console.log(`  ${ex}`);
+  }
+}
+
+// For a bad value: the leaf help would bury the one line that says what is wrong.
+function usageError(entry, message) {
+  console.error(message);
+  console.error(`Run \`claude-code-kanban help ${entry.name}\` for usage.`);
+  return 1;
 }
 
 function getArgValue(args, name) {
@@ -265,10 +386,19 @@ function getArgValue(args, name) {
 
 // The hub runs one cck per config dir, each on its own port, so 3541 can be another dir's board.
 // The server's beacon in this config dir names the right one; PORT still wins when set.
+// A beacon left by a dead server means this dir's board is down: 3541 would be someone else's.
+// Returns null in that case.
 function cliPort() {
   if (process.env.PORT) return process.env.PORT;
-  const { port, pid } = readCckJson('server.json') || {};
-  return port && pid && isPidAlive(pid) ? port : 3541;
+  const beacon = readCckJson('server.json');
+  if (!beacon) return 3541;
+  return beacon.port && beacon.pid && isPidAlive(beacon.pid) ? beacon.port : null;
+}
+
+function cliBaseUrl() {
+  if (process.env.CCK_URL) return process.env.CCK_URL.replace(/\/+$/, '');
+  const port = cliPort();
+  return port === null ? null : `http://127.0.0.1:${port}`;
 }
 
 function readCckJson(name) {
@@ -280,14 +410,21 @@ function isPidAlive(pid) {
   try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }
 }
 function unreachable() {
-  return `Cannot reach cck server for ${displayPath(getClaudeDir())} on port ${cliPort()}. Start it first with "claude-code-kanban".`;
+  const dir = displayPath(getClaudeDir());
+  const start = 'Start it first with "claude-code-kanban".';
+  if (process.env.CCK_URL) return `Cannot reach cck server for ${dir} at ${cliBaseUrl()} (CCK_URL). ${start}`;
+  const port = cliPort();
+  if (port === null) return `Cannot reach cck server for ${dir}: its server.json names a server that is no longer running. ${start}`;
+  return `Cannot reach cck server for ${dir} on port ${port}. ${start}`;
 }
 
 class CliUnreachable extends Error { constructor() { super(unreachable()); this.code = 'unreachable'; } }
 
 async function cliFetch(urlPath, init) {
+  const base = cliBaseUrl();
+  if (!base) throw new CliUnreachable();
   try {
-    return await fetch(`http://127.0.0.1:${cliPort()}${urlPath}`, init);
+    return await fetch(`${base}${urlPath}`, init);
   } catch (e) {
     if (e.cause?.code === 'ECONNREFUSED' || /fetch failed/i.test(e.message)) throw new CliUnreachable();
     throw e;
@@ -331,24 +468,38 @@ async function runPreviewCli(args) {
 }
 
 async function runLinkDocCli(args) {
-  const filePathArg = args.find(a => !a.startsWith('--'));
+  const entry = COMMANDS['link-doc'];
+  const [filePathArg] = positionals(args, ['--session']);
   const sessionArg = getArgValue(args, 'session') || process.env.PREVIEW_SESSION || null;
-  if (!filePathArg) {
-    printLeafHelp(COMMANDS['link-doc']);
+  const list = args.includes('--list');
+  if (!filePathArg && !list) {
+    printLeafHelp(entry);
     return 1;
   }
-  if (!sessionArg) {
-    console.error('--session is required: linked docs are stored per session.');
-    return 1;
-  }
+  if (!sessionArg) return usageError(entry, '--session is required: linked docs are stored per session.');
   const unlink = args.includes('--unlink');
   // Resolved here because the browser keys linked docs by full id, so a prefix won't match.
   const resolved = await resolveSessionByIdOrPrefix(sessionArg);
   if (!resolved) return 1;
+  if (list) return printLinkedDocs(resolved.id, args.includes('--json'));
   const abs = path.resolve(filePathArg);
   try {
-    if (!await cliPostJson('/api/document/link', { path: abs, sessionId: resolved.id, unlink }, 'Link')) return 1;
+    const out = await cliPostJson('/api/document/link', { path: abs, sessionId: resolved.id, unlink }, 'Link');
+    if (!out) return 1;
     console.log(`Document ${unlink ? 'unlinked from' : 'linked to'} session ${resolved.id.slice(0, 8)}: ${abs}`);
+    if (!unlink && out.tabs === 0) console.log('No browser tab is open; the board shows it when one opens.');
+    return 0;
+  } catch (e) { reportCliError(e); return 1; }
+}
+
+async function printLinkedDocs(sessionId, asJson) {
+  try {
+    const res = await cliFetch(`/api/document/links?session=${encodeURIComponent(sessionId)}`);
+    if (!res.ok) throw new Error(`Failed to fetch linked docs (${res.status})`);
+    const paths = (await res.json())[sessionId] || [];
+    if (asJson) console.log(JSON.stringify(paths, null, 2));
+    else if (!paths.length) console.log(`No linked docs for session ${sessionId.slice(0, 8)}.`);
+    else for (const p of paths) console.log(p);
     return 0;
   } catch (e) { reportCliError(e); return 1; }
 }
@@ -424,11 +575,10 @@ async function runSessionListCli(args) {
   const daysArg = getArgValue(args, 'days');
   const days = daysArg !== null ? parseFloat(daysArg) : null;
   if (daysArg !== null && (Number.isNaN(days) || days <= 0)) {
-    console.error(`Invalid --days value: ${daysArg}`);
-    return 1;
+    return usageError(COMMANDS.session.verbs.list, `Invalid --days value: ${daysArg}`);
   }
   const parsed = parseLimit(args, { fallback: 10, allowAll: true });
-  if (!parsed.ok) { console.error(parsed.error); return 1; }
+  if (!parsed.ok) return usageError(COMMANDS.session.verbs.list, parsed.error);
   const limit = parsed.limit;
   const asJson = args.includes('--json');
   const pinsMap = noPins ? {} : await fetchPinsMap();
@@ -644,7 +794,7 @@ async function runSessionPeekCli(args) {
     return 1;
   }
   const parsed = parseLimit(args, { fallback: 10 });
-  if (!parsed.ok) { console.error(parsed.error); return 1; }
+  if (!parsed.ok) return usageError(COMMANDS.session.verbs.peek, parsed.error);
   const limit = parsed.limit;
   const asJson = args.includes('--json');
   const resolved = await resolveSessionByIdOrPrefix(idArg);
@@ -674,6 +824,168 @@ async function runSessionPeekCli(args) {
     }
     return 0;
   } catch (e) { reportCliError(e); return 1; }
+}
+
+function printTable(header, rows) {
+  const last = header.length - 1;
+  const width = header.map((h, i) => Math.max(h.length, ...rows.map(r => String(r[i]).length)));
+  const line = cells => cells.map((c, i) => (i === last ? String(c) : String(c).padEnd(width[i]))).join('  ');
+  console.log(line(header));
+  for (const r of rows) console.log(line(r));
+}
+
+const ageOf = (iso) => (iso ? formatAge(Date.now() - new Date(iso).getTime()) : '-');
+
+async function cliGetJson(urlPath, label) {
+  const res = await cliFetch(urlPath);
+  if (!res.ok) throw new Error(`${label} failed (${res.status}): ${await res.text()}`);
+  return res.json();
+}
+
+async function runSessionSearchCli(args) {
+  const entry = COMMANDS.session.verbs.search;
+  const text = positionals(args, ['--limit']).join(' ').trim();
+  if (!text) {
+    printLeafHelp(entry);
+    return 1;
+  }
+  if (text.length < 3) return usageError(entry, 'Search text needs at least 3 characters.');
+  const parsed = parseLimit(args, { fallback: 20 });
+  if (!parsed.ok) return usageError(entry, parsed.error);
+  try {
+    const ids = (await cliGetJson(`/api/sessions/search?q=${encodeURIComponent(text)}`, 'Search')).slice(0, parsed.limit);
+    const list = ids.length ? await cliGetJson(`/api/sessions?limit=1&include=${ids.join(',')}`, 'Search') : [];
+    const byId = new Map(list.map(s => [s.id, s]));
+    const rows = ids.map(id => byId.get(id) || { id });
+    if (args.includes('--json')) {
+      console.log(JSON.stringify(rows, null, 2));
+      return 0;
+    }
+    if (!rows.length) {
+      console.log(`No sessions match "${text}".`);
+      return 0;
+    }
+    printTable(['ID', 'STATUS', 'AGE', 'PROJECT', 'TITLE'], rows.map(s => [
+      s.id.slice(0, 8),
+      byId.has(s.id) ? sessionStatus(s) : '-',
+      ageOf(s.modifiedAt),
+      path.basename(s.project || ''),
+      s.customTitle || s.name || s.slug || '',
+    ]));
+    return 0;
+  } catch (e) { reportCliError(e); return 1; }
+}
+
+async function runSessionPlanCli(args) {
+  const [idArg] = positionals(args, []);
+  if (!idArg) {
+    printLeafHelp(COMMANDS.session.verbs.plan);
+    return 1;
+  }
+  const resolved = await resolveSessionByIdOrPrefix(idArg);
+  if (!resolved) return 1;
+  try {
+    const plan = await cliGetJson(`/api/sessions/${resolved.id}/plan`, 'Plan');
+    if (args.includes('--json')) console.log(JSON.stringify(plan, null, 2));
+    else if (!plan.content) console.log(`No plan saved for session ${resolved.id.slice(0, 8)}.`);
+    else process.stdout.write(plan.content.endsWith('\n') ? plan.content : `${plan.content}\n`);
+    return 0;
+  } catch (e) { reportCliError(e); return 1; }
+}
+
+async function runSessionAgentsCli(args) {
+  const [idArg] = positionals(args, []);
+  if (!idArg) {
+    printLeafHelp(COMMANDS.session.verbs.agents);
+    return 1;
+  }
+  const resolved = await resolveSessionByIdOrPrefix(idArg);
+  if (!resolved) return 1;
+  try {
+    const out = await cliGetJson(`/api/sessions/${resolved.id}/agents`, 'Agents');
+    if (args.includes('--json')) {
+      console.log(JSON.stringify(out, null, 2));
+      return 0;
+    }
+    const agents = out.agents || [];
+    if (!agents.length) console.log(`No agents for session ${resolved.id.slice(0, 8)}.`);
+    else {
+      printTable(['AGENT', 'STATUS', 'AGE', 'TYPE', 'DESCRIPTION'], agents.map(a => [
+        String(a.agentId || '').slice(0, 8),
+        a.status || '-',
+        ageOf(a.updatedAt || a.startedAt),
+        a.type || a.agentType || '',
+        (a.description || a.name || '').replace(/\s+/g, ' ').trim(),
+      ]));
+    }
+    if (out.waitingForUser) console.log('Waiting for the user.');
+    return 0;
+  } catch (e) { reportCliError(e); return 1; }
+}
+
+async function runTaskListCli(args) {
+  const entry = COMMANDS.task.verbs.list;
+  const [sessionArg] = positionals(args, ['--project', '--status']);
+  const project = getArgValue(args, 'project');
+  const all = args.includes('--all');
+  const status = getArgValue(args, 'status');
+  const sources = [sessionArg, project, all || null].filter(Boolean).length;
+  if (sources === 0) {
+    printLeafHelp(entry);
+    return 1;
+  }
+  if (sources > 1) return usageError(entry, 'Give one of <session>, --project or --all.');
+  if (args.includes('--status') && !status) return usageError(entry, '--status needs a value, e.g. in_progress');
+  let tasks;
+  let resolved = null;
+  try {
+    if (sessionArg) {
+      resolved = await resolveSessionByIdOrPrefix(sessionArg);
+      if (!resolved) return 1;
+      tasks = await cliGetJson(`/api/sessions/${resolved.id}`, 'Task list');
+    } else if (project) {
+      const encoded = Buffer.from(canonicalDir(project), 'utf8').toString('base64');
+      tasks = await cliGetJson(`/api/projects/${encodeURIComponent(encoded)}/tasks`, 'Task list');
+    } else {
+      tasks = await cliGetJson('/api/tasks/all', 'Task list');
+    }
+  } catch (e) { reportCliError(e); return 1; }
+  if (status) tasks = tasks.filter(t => t.status === status);
+  if (args.includes('--json')) {
+    console.log(JSON.stringify(tasks, null, 2));
+    return 0;
+  }
+  if (!tasks.length) {
+    console.log('No tasks match.');
+    return 0;
+  }
+  const showSource = !resolved;
+  const header = ['ID', 'STATUS', ...(showSource ? ['SESSION'] : []), 'SUBJECT'];
+  printTable(header, tasks.map(t => [
+    t.id,
+    t.status || '-',
+    ...(showSource ? [String(t.sessionId || t._taskDir || '').slice(0, 8)] : []),
+    `${t.subject || ''}${t.blockedBy?.length ? `  (blocked by ${t.blockedBy.join(', ')})` : ''}`,
+  ]));
+  return 0;
+}
+
+async function runProjectListCli(args) {
+  let projects;
+  try {
+    projects = await cliGetJson('/api/projects', 'Project list');
+  } catch (e) { reportCliError(e); return 1; }
+  projects.sort((a, b) => new Date(b.modifiedAt || 0) - new Date(a.modifiedAt || 0));
+  if (args.includes('--json')) {
+    console.log(JSON.stringify(projects, null, 2));
+    return 0;
+  }
+  if (!projects.length) {
+    console.log('No projects.');
+    return 0;
+  }
+  printTable(['AGE', 'PATH'], projects.map(p => [ageOf(p.modifiedAt), `${p.path}${p.temp ? '  (temp)' : ''}`]));
+  return 0;
 }
 
 function positionals(args, valueFlags) {
@@ -719,8 +1031,7 @@ async function runDispatchStartCli(args) {
   const group = hasGroup ? getArgValue(args, 'group') || '' : null;
   if (hasGroup && !isGroupName(group)) {
     const hint = suggestGroupName(group);
-    console.error(`Group names are kebab-case${hint ? `: try --group ${hint}` : ', e.g. auth-refactor'}`);
-    return 1;
+    return usageError(COMMANDS.dispatch.verbs.start, `Group names are kebab-case${hint ? `: try --group ${hint}` : ', e.g. auth-refactor'}`);
   }
   const worktree = args.includes('--worktree') ? getArgValue(args, 'worktree') || true : false;
   const body = {
@@ -769,10 +1080,7 @@ function dispatchQuery(ids, all = false) {
 async function runDispatchWaitCli(args) {
   const timeoutRaw = getArgValue(args, 'timeout');
   const timeoutSec = parseDuration(timeoutRaw, 600);
-  if (timeoutSec === null) {
-    console.error(`Invalid --timeout value: ${timeoutRaw}`);
-    return 1;
-  }
+  if (timeoutSec === null) return usageError(COMMANDS.dispatch.verbs.wait, `Invalid --timeout value: ${timeoutRaw}`);
   const q = dispatchQuery(positionals(args, ['--timeout']));
   const deadline = Date.now() + timeoutSec * 1000;
   try {
@@ -809,8 +1117,7 @@ async function runSkillsGetCli(args) {
   const file = name && /^[a-z][a-z-]*$/.test(name) ? path.join(__dirname, 'skill-guides', `${name}.md`) : null;
   if (!file || !fs.existsSync(file)) {
     const known = fs.readdirSync(path.join(__dirname, 'skill-guides')).map(f => f.replace(/\.md$/, ''));
-    console.error(`Unknown skill guide: ${name || '(none)'}. Known: ${known.join(', ')}`);
-    return 1;
+    return usageError(COMMANDS.skills.verbs.get, `Unknown skill guide: ${name || '(none)'}. Known: ${known.join(', ')}`);
   }
   process.stdout.write(fs.readFileSync(file, 'utf8'));
   return 0;
