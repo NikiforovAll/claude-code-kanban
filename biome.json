@@ -29,14 +29,15 @@
       "public/app.js",
       "public/project-match.js",
       "public/style.css",
-      "server.js"
+      "server.js",
+      "cli.js",
+      "install.js",
+      "lib/**/*.js"
     ]
   },
   "overrides": [
     {
-      "includes": [
-        "server.js"
-      ],
+      "includes": ["server.js", "cli.js", "install.js", "lib/**/*.js"],
       "formatter": {
         "enabled": false
       }

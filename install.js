@@ -1,10 +1,9 @@
 #!/usr/bin/env node
 
-const fs = require('fs');
-const path = require('path');
-const os = require('os');
-const readline = require('readline');
-const { execSync } = require('child_process');
+const fs = require('node:fs');
+const path = require('node:path');
+const readline = require('node:readline');
+const { execSync } = require('node:child_process');
 const { getClaudeDir, claudeCliEnv, displayPath } = require('./lib/claude-dir');
 
 const CLAUDE_DIR = getClaudeDir();
@@ -205,7 +204,7 @@ async function runInstall({ pluginOnly = false } = {}) {
       console.log(`\n  StatusLine: ${dim('not configured')}`);
       if (await prompt(`    Set up context tracking statusline? [Y/n] `)) {
         settings.statusLine = { type: 'command', command: CTX_COMMAND };
-        fs.writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2) + '\n');
+        fs.writeFileSync(SETTINGS_PATH, `${JSON.stringify(settings, null, 2)}\n`);
         console.log(`    ${green('✓')} StatusLine configured`);
       } else {
         console.log(`    ${dim('Skipped')}`);
@@ -216,7 +215,7 @@ async function runInstall({ pluginOnly = false } = {}) {
       if (await prompt(`    Prepend context spy to existing statusline? [Y/n] `)) {
         settings.statusLine.type = 'command';
         settings.statusLine.command = `${CTX_COMMAND} | ${existing}`;
-        fs.writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2) + '\n');
+        fs.writeFileSync(SETTINGS_PATH, `${JSON.stringify(settings, null, 2)}\n`);
         console.log(`    ${green('✓')} StatusLine updated`);
       } else {
         console.log(`    ${dim('Skipped')}`);
@@ -294,7 +293,7 @@ async function runUninstall() {
       }
 
       if (changed) {
-        fs.writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2) + '\n');
+        fs.writeFileSync(SETTINGS_PATH, `${JSON.stringify(settings, null, 2)}\n`);
       }
     } catch {
       console.log(`  Settings: ${red('✗')} Could not parse settings.json`);

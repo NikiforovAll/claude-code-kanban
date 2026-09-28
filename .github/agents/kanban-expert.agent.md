@@ -83,7 +83,7 @@ SSE debouncing: 500ms for tasks, 2s for metadata.
 
 ```bash
 npm ci
-npx @biomejs/biome check --error-on-warnings public/app.js public/style.css
+npx @biomejs/biome check --error-on-warnings
 node -c server.js
 npm test
 ```

@@ -53,10 +53,12 @@ if (process.argv.includes("--install") || process.argv.includes("--uninstall")) 
   (process.argv.includes("--install") ? runInstall({ pluginOnly }) : runUninstall())
     .then(() => process.exit(0))
     .catch(e => { console.error(e.message); process.exit(1); });
-  return;
+} else if (!require("./cli").runCli(process.argv)) {
+  startServer();
 }
-if (require("./cli").runCli(process.argv)) return;
 
+// Not indented: the formatter is off for this file, and a reindent would rewrite every line.
+function startServer() {
 
 const app = express();
 const PORT = process.env.PORT || 3541;
@@ -2423,7 +2425,8 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
       try {
         const progressMap = getProgressMap(meta.jsonlPath);
         for (const entry of Object.values(progressMap)) {
-          const e = (byAgentId[entry.agentId] ||= {});
+          byAgentId[entry.agentId] ||= {};
+          const e = byAgentId[entry.agentId];
           for (const f of ['prompt', 'name', 'description', 'usage']) {
             if (entry[f] && !e[f]) e[f] = entry[f];
           }
@@ -4189,3 +4192,4 @@ async function prewarmCaches() {
 
 
 // #endregion
+}

@@ -8370,7 +8370,7 @@ function renderProjectOptions() {
           const at = needle ? p.norm.indexOf(needle) : -1;
           const range = at >= 0 ? [at, at + needle.length] : null;
           const isSel = p.norm === selected;
-          return `<li id="pf-opt-${i}" role="option" class="pf-opt${i === pfIdx ? ' hl' : ''}" aria-selected="${isSel}" data-path="${escapeHtml(p.path)}" title="${escapeHtml(p.path)}">
+          return `<li id="pf-opt-${i}" role="option" class="pf-opt${i === pfIdx ? ' hl' : ''}" aria-selected="${isSel ? 'true' : 'false'}" data-path="${escapeHtml(p.path)}" title="${escapeHtml(p.path)}">
             <span class="pf-name">${markRange(p.path, cut, p.path.length, range)}</span>
             <span class="pf-dir"><bdi>${markRange(p.path, 0, cut, range)}</bdi></span>
             <span class="pf-age">${p.modifiedAt ? shortAge(p.modifiedAt) : ''}</span>

@@ -1,5 +1,5 @@
-const fs = require('fs');
-const path = require('path');
+const fs = require('node:fs');
+const path = require('node:path');
 const { getClaudeDir, displayPath } = require('./lib/claude-dir');
 const { isGroupName, suggestGroupName } = require('./lib/dispatch-groups');
 // Help is auto-generated from this table — keep flags/usage in sync with `run` behavior.
@@ -179,7 +179,7 @@ function runCli(argv) {
   }
   if (cli.kind === 'leaf') {
     if (cli.args.includes('--help') || cli.args.includes('-h')) {
-      printLeafHelp(cli.name, cli.entry);
+      printLeafHelp(cli.entry);
       process.exit(0);
     }
     cli.entry.run(cli.args)
@@ -238,11 +238,11 @@ function printNounHelp(noun) {
     }
     console.log(`\nRun \`claude-code-kanban ${noun} <subcommand> --help\` for details.`);
   } else {
-    printLeafHelp(noun, entry);
+    printLeafHelp(entry);
   }
 }
 
-function printLeafHelp(name, entry) {
+function printLeafHelp(entry) {
   console.log(`${entry.summary}\n`);
   console.log(`Usage: ${entry.usage}`);
   if (entry.flags && Object.keys(entry.flags).length) {
@@ -318,7 +318,7 @@ function reportCliError(e) {
 async function runPreviewCli(args) {
   const filePathArg = args.find(a => !a.startsWith('--'));
   if (!filePathArg) {
-    printLeafHelp('preview-doc', COMMANDS['preview-doc']);
+    printLeafHelp(COMMANDS['preview-doc']);
     return 1;
   }
   const sessionId = getArgValue(args, 'session') || process.env.PREVIEW_SESSION || null;
@@ -334,7 +334,7 @@ async function runLinkDocCli(args) {
   const filePathArg = args.find(a => !a.startsWith('--'));
   const sessionArg = getArgValue(args, 'session') || process.env.PREVIEW_SESSION || null;
   if (!filePathArg) {
-    printLeafHelp('link-doc', COMMANDS['link-doc']);
+    printLeafHelp(COMMANDS['link-doc']);
     return 1;
   }
   if (!sessionArg) {
@@ -506,7 +506,7 @@ function formatAge(ms) {
 async function runSessionOpenCli(args) {
   const idArg = args.find(a => !a.startsWith('--'));
   if (!idArg) {
-    printLeafHelp('session open', COMMANDS.session.verbs.open);
+    printLeafHelp(COMMANDS.session.verbs.open);
     return 1;
   }
   const resolved = await resolveSessionByIdOrPrefix(idArg);
@@ -521,7 +521,7 @@ async function runSessionOpenCli(args) {
 async function runSessionPinCli(args) {
   const idArg = args.find(a => !a.startsWith('--'));
   if (!idArg) {
-    printLeafHelp('session pin', COMMANDS.session.verbs.pin);
+    printLeafHelp(COMMANDS.session.verbs.pin);
     return 1;
   }
   const state = args.includes('--unpin') ? 'none' : args.includes('--sticky') ? 'sticky' : 'pinned';
@@ -551,7 +551,7 @@ async function runSessionPinsCli(args) {
     sessions = await fetchSessionsList(items.length, items.map(p => p.id));
   } catch (e) { reportCliError(e); return 1; }
   const byId = new Map(sessions.map(s => [s.id, s]));
-  let rows = items
+  const rows = items
     .map(p => {
       const s = byId.get(p.id) || {};
       return {
@@ -585,7 +585,7 @@ async function runSessionPinsCli(args) {
 async function runSessionViewCli(args) {
   const idArg = args.find(a => !a.startsWith('--'));
   if (!idArg) {
-    printLeafHelp('session view', COMMANDS.session.verbs.view);
+    printLeafHelp(COMMANDS.session.verbs.view);
     return 1;
   }
   const asJson = args.includes('--json');
@@ -640,7 +640,7 @@ async function runSessionViewCli(args) {
 async function runSessionPeekCli(args) {
   const idArg = args.find(a => !a.startsWith('--'));
   if (!idArg) {
-    printLeafHelp('session peek', COMMANDS.session.verbs.peek);
+    printLeafHelp(COMMANDS.session.verbs.peek);
     return 1;
   }
   const parsed = parseLimit(args, { fallback: 10 });
@@ -712,7 +712,7 @@ async function runDispatchStartCli(args) {
   let spec;
   try { spec = textArg(args, 'spec'); } catch (e) { console.error(e.message); return 1; }
   if (!spec) {
-    printLeafHelp('dispatch start', COMMANDS.dispatch.verbs.start);
+    printLeafHelp(COMMANDS.dispatch.verbs.start);
     return 1;
   }
   const hasGroup = args.some(a => a === '--group' || a.startsWith('--group='));
@@ -749,7 +749,7 @@ async function runDispatchDoneCli(args) {
   try { summary = textArg(args, 'summary'); } catch (e) { console.error(e.message); return 1; }
   const body = { cap: getArgValue(args, 'cap'), outcome: getArgValue(args, 'outcome'), summary };
   if (!id || !body.cap || !body.outcome) {
-    printLeafHelp('dispatch done', COMMANDS.dispatch.verbs.done);
+    printLeafHelp(COMMANDS.dispatch.verbs.done);
     return 1;
   }
   try {

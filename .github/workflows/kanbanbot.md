@@ -208,7 +208,7 @@ This is a real-time Kanban dashboard for Claude Code tasks. Use this expertise w
 Read `CLAUDE.md` for the full reference. Key commands:
 
 - **Install**: `npm ci`
-- **Lint & format**: `npx @biomejs/biome check --error-on-warnings public/app.js public/style.css`
+- **Lint & format**: `npx @biomejs/biome check --error-on-warnings`
 - **Syntax check**: `node -c server.js`
 - **Contract tests**: `npm test`
 - **Smoke test**: Start server, hit `/api/version`, verify response
@@ -252,8 +252,8 @@ Begin every comment with: `🤖 *This is an automated response from KanbanBot.*`
 
 Only attempt fixes you are confident about. For each fixable issue:
 1. Create branch `kanbanbot/fix-issue-<N>-<desc>` off default branch
-2. Implement minimal fix. Run `npx @biomejs/biome check --error-on-warnings public/app.js public/style.css` before committing.
-3. **Lint and test (required)**: `npx @biomejs/biome check --error-on-warnings public/app.js public/style.css` then `npm test`
+2. Implement minimal fix. Run `npx @biomejs/biome check --error-on-warnings` before committing.
+3. **Lint and test (required)**: `npx @biomejs/biome check --error-on-warnings` then `npm test`
 4. Add test case(s) if applicable
 5. Create draft PR with AI disclosure, `Closes #N`, root cause, fix rationale, Test Status section
 
@@ -331,7 +331,7 @@ Run History in reverse chronological order. Remove completed items from Suggeste
 - **No new npm dependencies** without discussion in an issue first
 - **Small, focused PRs** — one concern per PR
 - **Read CLAUDE.md first** before any code changes
-- **Lint and test before every PR**: `npx @biomejs/biome check --error-on-warnings public/app.js public/style.css` then `npm test`
+- **Lint and test before every PR**: `npx @biomejs/biome check --error-on-warnings` then `npm test`
 - **Respect existing style** — vanilla JS, CSS variables, `#region` markers, no framework
 - **XSS safety** — always use `escapeHtml()` for user data, `DOMPurify.sanitize(marked.parse(...))` for markdown
 - **AI transparency**: every comment, PR, and issue must include a KanbanBot disclosure with 🤖

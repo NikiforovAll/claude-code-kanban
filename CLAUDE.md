@@ -13,7 +13,7 @@ npm run dev          # start + open browser
 
 Also: `npm test` (node test runner over `test/*.test.js`), `npm run test:hooks` (`tests/test-agent-spy.sh`), `npm run validate:schemas`, and Biome for lint (`biome.json`). No build step.
 
-Biome covers `public/app.js`, `public/style.css` and `server.js`. The formatter is disabled for `server.js` (an override) because enabling it rewrites ~3.5k lines for no benefit — lint rules still apply. `biome check server.js` also reports two `parse` errors for the top-level `return` in the CLI bootstrap; that is valid CommonJS which Biome's parser rejects, so it exits non-zero no matter how clean the file is. That is why the pre-commit hook lints `public/` only, and why server.js lint findings have to be checked by eye.
+Biome covers `public/app.js`, `public/project-match.js`, `public/style.css`, `server.js`, `cli.js`, `install.js` and `lib/`, and the pre-commit hook and CI run `biome check` over all of them. The server files are lint-only (an override), because the formatter would rewrite thousands of lines for no benefit. `package.json` sets `"type": "commonjs"` so Biome parses `.js` as script; without it Biome reads the files as modules and flags every `'use strict'` as redundant. Biome rejects a top-level `return`, so server.js runs its body through `startServer()` instead; the body is left unindented.
 
 You have an access to gh cli to work on this project: https://github.com/NikiforovAll/claude-code-kanban
 
