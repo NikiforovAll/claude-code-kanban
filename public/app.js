@@ -8274,10 +8274,44 @@ function getMermaidTheme() {
   return isLightTheme() ? 'default' : 'dark';
 }
 
+// Mermaid is about 3 MB, so it loads on the first diagram instead of on the page's critical path.
+const MERMAID_SCRIPT = {
+  src: 'https://cdn.jsdelivr.net/npm/mermaid@12.0.0/dist/mermaid.min.js',
+  integrity: 'sha384-xzghz1GQ5u9HCpVskeDPqMsdogD1yvuMQbEK53+wi+G70+6J1AG0L2cfi9PHjDWI',
+};
+let mermaidLoading = null;
+
+function loadMermaid() {
+  mermaidLoading ??= new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = MERMAID_SCRIPT.src;
+    script.integrity = MERMAID_SCRIPT.integrity;
+    script.crossOrigin = 'anonymous';
+    script.onload = () => {
+      mermaid.initialize({ startOnLoad: false, theme: getMermaidTheme() });
+      resolve();
+    };
+    script.onerror = () => {
+      script.remove();
+      mermaidLoading = null;
+      reject(new Error('mermaid failed to load'));
+    };
+    document.head.appendChild(script);
+  });
+  return mermaidLoading;
+}
+
 function initMermaidBlocks(container) {
-  if (typeof mermaid === 'undefined') return;
   const blocks = (container || document).querySelectorAll('pre.mermaid:not([data-processed])');
-  if (blocks.length) mermaid.run({ nodes: [...blocks] });
+  if (!blocks.length) return;
+  if (typeof mermaid === 'undefined') {
+    loadMermaid().then(
+      () => initMermaidBlocks(container),
+      (err) => console.warn(err.message),
+    );
+    return;
+  }
+  mermaid.run({ nodes: [...blocks] });
 }
 
 function reinitMermaidTheme() {
@@ -11492,19 +11526,16 @@ document.addEventListener('DOMContentLoaded', () => {
     marked.use({ renderer });
   }
 
-  if (typeof mermaid !== 'undefined') {
-    mermaid.initialize({ startOnLoad: false, theme: getMermaidTheme() });
-    let mermaidPending = false;
-    const mo = new MutationObserver(() => {
-      if (mermaidPending) return;
-      mermaidPending = true;
-      queueMicrotask(() => {
-        mermaidPending = false;
-        initMermaidBlocks();
-      });
+  let mermaidPending = false;
+  const mo = new MutationObserver(() => {
+    if (mermaidPending) return;
+    mermaidPending = true;
+    queueMicrotask(() => {
+      mermaidPending = false;
+      initMermaidBlocks();
     });
-    mo.observe(document.body, { childList: true, subtree: true });
-  }
+  });
+  mo.observe(document.body, { childList: true, subtree: true });
 });
 
 loadSidebarState();
