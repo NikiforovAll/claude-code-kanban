@@ -74,6 +74,8 @@ let agentPollInterval = null;
 // Inside the hub an inactive app is a display:none iframe whose document.hidden stays false,
 // so the hub tells us via hub:active. Standalone, or if that message is lost, cck stays active.
 let hubActive = true;
+// setupEventSource runs before HUB_INTEGRATION connects, so it hands its handler over here.
+let onHubActive = () => {};
 let missedWhileHidden = false;
 const isOnScreen = () => hubActive && !document.hidden;
 function skipOffScreen() {
@@ -5632,7 +5634,7 @@ function showHelpModal() {
   const modal = document.getElementById('help-modal');
   const list = document.getElementById('help-shortcuts');
   if (!list.childElementCount) list.innerHTML = buildHelpShortcuts();
-  list.classList.toggle('sc-standalone', !window.__HUB__?.enabled);
+  list.classList.toggle('sc-standalone', !hub.inHub);
   modal.classList.add('visible');
 }
 
@@ -6963,7 +6965,7 @@ function handleDocumentLinkEvent(data) {
   setSessionDocLink(sessionId, filePath, unlink);
   const msg = `${unlink ? 'Unlinked' : 'Linked'} ${linkedDocLabel(filePath)}`;
   // Every tab gets the event; only the one on screen offers to open the URL.
-  if (open && isOnScreen()) showToast(msg, 'info', { label: 'Open', onClick: () => openExternal(filePath) });
+  if (open && isOnScreen()) showToast(msg, 'info', { label: 'Open', onClick: () => hub.openExternal(filePath) });
   else showToast(msg);
 }
 
@@ -7090,7 +7092,7 @@ function linkedDocLabel(p) {
 function openLinkedDoc(p, baseDir) {
   const opener = linkedDocOpener(p);
   if (opener === 'url') {
-    openExternal(p);
+    hub.openExternal(p);
     return;
   }
   if (opener === 'preview') {
@@ -7678,12 +7680,11 @@ function setupEventSource() {
     renderAgentFooter();
   }
   document.addEventListener('visibilitychange', catchUp);
-  window.addEventListener('message', (e) => {
-    if (e.source !== window.parent || e.origin !== hubOrigin() || e.data?.type !== 'hub:active') return;
-    hubActive = !!e.data.active;
+  onHubActive = (active) => {
+    hubActive = active;
     catchUp();
     if (hubActive && wantsTerminal()) onTerminalShown();
-  });
+  };
 
   // Fallback poll every 30s in case SSE silently drops; skip when not on screen
   setInterval(() => {
@@ -10303,32 +10304,18 @@ let tokenRefresh = null;
 // The hub mints a new token each run, and this page can outlive a hub restart. Resolves true only
 // for a token that differs from the one that just failed, so a caller retries at most once.
 function refreshTerminalToken() {
-  if (!window.__HUB__?.enabled) return Promise.resolve(false);
-  tokenRefresh ??= requestTerminalToken().finally(() => {
-    tokenRefresh = null;
-  });
-  return tokenRefresh;
-}
-
-function requestTerminalToken() {
-  return new Promise((resolve) => {
-    const done = (ok) => {
-      window.removeEventListener('message', onMessage);
-      clearTimeout(timer);
-      resolve(ok);
-    };
-    const onMessage = (e) => {
-      if (e.source !== window.parent || e.origin !== hubOrigin() || e.data?.type !== 'hub:terminalToken') return;
-      const token = e.data.token;
-      if (typeof token !== 'string' || !TERMINAL_TOKEN_RE.test(token) || token === terminalToken) return done(false);
+  tokenRefresh ??= hub
+    .terminalToken()
+    .then((token) => {
+      if (!TERMINAL_TOKEN_RE.test(token) || token === terminalToken) return false;
       terminalToken = token;
       storeTerminalToken(token);
-      done(true);
-    };
-    const timer = setTimeout(() => done(false), 3000);
-    window.addEventListener('message', onMessage);
-    hubPost({ type: 'hub:terminalToken' });
-  });
+      return true;
+    })
+    .finally(() => {
+      tokenRefresh = null;
+    });
+  return tokenRefresh;
 }
 
 function terminalAvailable() {
@@ -10802,11 +10789,11 @@ function syncCloseGuard() {
   const on = termState.attached && termState.shown;
   if (termState.closeGuard === on) return;
   termState.closeGuard = on;
-  hubPost({ type: 'hub:closeGuard', on });
+  hub.closeGuard(on);
 }
 
 window.addEventListener('beforeunload', (e) => {
-  if (termState.closeGuard && !window.__HUB__?.enabled) e.preventDefault();
+  if (termState.closeGuard && !hub.inHub) e.preventDefault();
 });
 
 // The terminal stands in for the board, so it takes the board zone however focus arrives
@@ -11809,21 +11796,12 @@ if (urlState.search) {
   document.getElementById('boot-verb').textContent = pickRandom(verbs);
 }
 
-Promise.all([
-  fetch('/hub-config')
-    .then((r) => r.json())
-    .then((cfg) => {
-      if (!cfg.enabled) return;
-      window.__HUB__ = cfg;
-    })
-    .catch(() => {}),
-  fetch('/api/config')
-    .then((r) => r.json())
-    .then((c) => {
-      appConfig = c;
-    })
-    .catch(() => {}),
-])
+fetch('/api/config')
+  .then((r) => r.json())
+  .then((c) => {
+    appConfig = c;
+  })
+  .catch(() => {})
   .then(restorePendingSessions)
   .then(() => fetchSessions())
   .then(async () => {
@@ -11910,8 +11888,10 @@ const hub = ClaudeHub.connect({
   }),
 });
 
+hub.onActive((active) => onHubActive(active));
+
 document.addEventListener('click', (e) => {
-  if (!window.__HUB__?.enabled) return;
+  if (!hub.inHub) return;
   const a = e.target.closest?.('a[href]');
   if (!a) return;
   const href = a.getAttribute('href');
@@ -11926,65 +11906,28 @@ document.addEventListener('click', (e) => {
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return;
   e.preventDefault();
   e.stopPropagation();
-  hubPost({ type: 'hub:openExternal', url: url.href });
+  hub.openExternal(url.href);
 });
-
-// The click handler above only catches anchors. A script open goes the same way, because
-// in the hub's installed PWA window a framed app's own `_blank` open does nothing.
-function openExternal(url) {
-  if (window.__HUB__?.enabled) hubPost({ type: 'hub:openExternal', url });
-  else window.open(url, '_blank', 'noopener');
-}
-
-// Hoisted out of initHubTheme so initHubProject can share it.
-const hubOrigin = () => (window.__HUB__?.url ? new URL(window.__HUB__.url).origin : null);
-
-// Every send is addressed to the hub explicitly. With targetOrigin '*' any page that
-// framed this app also received its navigation intents.
-function hubPost(message) {
-  const origin = hubOrigin();
-  if (origin) window.parent?.postMessage(message, origin);
-}
 
 (function initHubTheme() {
   const getTheme = () => (document.body.classList.contains('light') ? 'light' : 'dark');
   const getColorTheme = () => document.body.dataset.colorTheme || 'ember';
-  // lastTheme/lastColorTheme are updated synchronously when applying a hub
-  // message, so the (async) observer sees no diff and doesn't echo it back.
-  let lastTheme = getTheme();
-  let lastColorTheme = getColorTheme();
-  window.addEventListener('message', (e) => {
-    if (e.source !== window.parent || e.origin !== hubOrigin()) return;
-    if (e.data?.type !== 'hub:theme') return;
-    if (typeof e.data.colorTheme === 'string' && e.data.colorTheme !== getColorTheme()) {
-      setColorTheme(e.data.colorTheme);
-      lastColorTheme = getColorTheme();
-    }
-    if (getTheme() !== e.data.theme) {
-      window.toggleTheme();
-      lastTheme = getTheme();
-    }
+  const report = hub.bindTheme({
+    get: () => ({ theme: getTheme(), colorTheme: getColorTheme() }),
+    set: ({ theme, colorTheme }) => {
+      if (colorTheme !== getColorTheme()) setColorTheme(colorTheme);
+      if (theme !== getTheme()) window.toggleTheme();
+    },
   });
-  new MutationObserver(() => {
-    const t = getTheme();
-    const ct = getColorTheme();
-    if (t === lastTheme && ct === lastColorTheme) return;
-    lastTheme = t;
-    lastColorTheme = ct;
-    hubPost({ type: 'hub:theme', theme: t, colorTheme: ct });
-  }).observe(document.body, {
+  new MutationObserver(report).observe(document.body, {
     attributes: true,
     attributeFilter: ['class', 'data-color-theme'],
   });
 })();
 
-(function initHubProject() {
-  window.addEventListener('message', (e) => {
-    if (e.source !== window.parent || e.origin !== hubOrigin()) return;
-    if (e.data?.type !== 'hub:project') return;
-    const dirPath = e.data.project;
-    if (typeof dirPath !== 'string' || !dirPath || dirPath === filterProject) return;
-    filterByProject(dirPath);
-  });
-})();
+hub.subscribe('project.changed', (p) => {
+  const dirPath = p?.project;
+  if (typeof dirPath !== 'string' || !dirPath || dirPath === filterProject) return;
+  filterByProject(dirPath);
+});
 // #endregion HUB_INTEGRATION

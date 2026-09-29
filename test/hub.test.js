@@ -15,6 +15,9 @@ async function loadShim({ enabled = true, costUrl = null, marketplaceUrl = null,
   const posted = [];
   const opened = [];
   const timers = [];
+  const calls = [];
+  let light = false;
+  const body = { classList: { contains: () => light }, dataset: {}, style: { setProperty() {}, removeProperty() {} } };
   const parent = { postMessage: (message, origin) => posted.push({ message, origin }) };
   const context = vm.createContext({
     parent,
@@ -22,19 +25,26 @@ async function loadShim({ enabled = true, costUrl = null, marketplaceUrl = null,
     URL,
     URLSearchParams,
     console,
-    __HUB__: enabled ? { enabled: true, url: HUB } : undefined,
-    document: {
-      readyState: 'complete',
-      addEventListener: on,
-      body: { classList: { contains: () => false }, dataset: {}, style: { setProperty() {}, removeProperty() {} } },
-    },
+    document: { readyState: 'complete', addEventListener: on, body },
     addEventListener: on,
     fetch: async () => ({ json: async () => ({ enabled, url: enabled ? HUB : null }) }),
     localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
     setTimeout: (fn) => timers.push(fn),
+    clearTimeout() {},
     open: (...args) => opened.push(args),
     appConfig: { costUrl, marketplaceUrl, memoryUrl },
     CCK_CTRL_ALT_KEYS: new Set(['KeyN', 'KeyR', 'KeyS']),
+    onHubActive: (active) => calls.push(['active', active]),
+    filterProject: 'C:/p',
+    filterByProject: (p) => calls.push(['filter', p]),
+    setColorTheme: (id) => {
+      body.dataset.colorTheme = id;
+      calls.push(['color', id]);
+    },
+    toggleTheme: () => {
+      light = !light;
+      calls.push(['toggle', light ? 'light' : 'dark']);
+    },
     MutationObserver: class {
       observe() {}
     },
@@ -47,6 +57,8 @@ async function loadShim({ enabled = true, costUrl = null, marketplaceUrl = null,
   await new Promise((r) => setImmediate(r));
 
   return {
+    calls,
+    context,
     hub: vm.runInContext('hub', context),
     terminalKeeps: (init) =>
       context.terminalKeyFilter({ type: 'keydown', ctrlKey: false, altKey: false, shiftKey: false, metaKey: false, ...init }),
@@ -130,6 +142,29 @@ describe('hub key forwarding', () => {
   it('forwards nothing standalone', async () => {
     const shim = await loadShim({ enabled: false });
     assert.equal(shim.press({ ctrlKey: true, altKey: true, key: 'q', code: 'KeyQ' }), false);
+  });
+});
+
+describe('hub state', () => {
+  it('applies the project, theme and active state, and skips the project it already shows', async () => {
+    const shim = await loadShim();
+    shim.receive(welcome([]));
+    const event = (topic, payload) => shim.receive({ type: 'hub:event', topic, payload });
+    event('project.changed', { project: 'C:/p', encoded: 'C--p', name: 'p' });
+    event('project.changed', { project: 'C:/q', encoded: 'C--q', name: 'q' });
+    event('project.changed', null);
+    event('theme.changed', { theme: 'light', colorTheme: 'nord' });
+    shim.receive({ type: 'hub:active', active: false });
+    assert.deepEqual(shim.calls, [['filter', 'C:/q'], ['color', 'nord'], ['toggle', 'light'], ['active', false]]);
+    const hello = shim.sent().find((m) => m.type === 'hub:hello');
+    assert.deepEqual([...hello.subscribes].sort(), ['project.changed', 'theme.changed']);
+  });
+
+  it('applies the legacy project and theme messages from a hub with no welcome', async () => {
+    const shim = await loadShim();
+    shim.receive({ type: 'hub:project', project: 'C:/q', encoded: 'C--q', name: 'q' });
+    shim.receive({ type: 'hub:theme', theme: 'light', colorTheme: 'nord' });
+    assert.deepEqual(shim.calls, [['filter', 'C:/q'], ['color', 'nord'], ['toggle', 'light']]);
   });
 });
 

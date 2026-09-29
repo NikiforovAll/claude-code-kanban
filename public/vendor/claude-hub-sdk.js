@@ -1,4 +1,4 @@
-// claude-hub-sdk 0.0.0 (sha256 d61fcb9fe05b). Copied by npm run sdk:sync in claude-code-hub. Do not edit.
+// claude-hub-sdk 0.0.0 (sha256 8ff4c950d349). Copied by npm run sdk:sync in claude-code-hub. Do not edit.
 // Claude Code Hub SDK: the app side of the hub protocol v1, with the v0 fallback.
 // A classic script. Load it as the first element in <body>, with no defer or async,
 // so the cached theme is on the page before the first paint (protocol section 6, rule 3).
@@ -79,6 +79,7 @@
       const statusFns = new Set();
       const handlers = new Map();
       const pending = new Map();
+      const tokenWaiters = new Set();
       const queued = [];
       let status = 'connecting';
       let origin = null;
@@ -175,6 +176,9 @@
             const { type, ...result } = m;
             return resolve(result);
           }
+          case 'hub:terminalToken':
+            for (const done of [...tokenWaiters]) done(typeof m.token === 'string' ? m.token : null);
+            return;
         }
       }
 
@@ -261,6 +265,10 @@
         get themes() {
           return welcome ? welcome.themes : [];
         },
+        // True once /hub-config says a hub frames this page, whether or not it answers hello.
+        get inHub() {
+          return !!origin;
+        },
         onStatus(fn) {
           statusFns.add(fn);
           return () => statusFns.delete(fn);
@@ -283,6 +291,9 @@
             const key = themeKey(cur);
             if (key === themeBinding.last) return;
             themeBinding.last = key;
+            // The inline vars are the old pick's and outrank the app's own themes.css. Until the hub
+            // echoes the new pick's vars, a script that reads computed colors now would get the old ones.
+            setVars(null);
             post({ type: 'hub:theme', theme: cur.theme, colorTheme: cur.colorTheme });
           };
         },
@@ -302,6 +313,31 @@
         },
         // For an element that eats keys before the document sees them, like a terminal.
         forwards,
+        closeGuard(on) {
+          post({ type: 'hub:closeGuard', on: !!on });
+        },
+        // In the hub's installed PWA window, a framed page's own _blank open does nothing.
+        openExternal(url) {
+          if (origin) post({ type: 'hub:openExternal', url });
+          else win.open(url, '_blank', 'noopener');
+        },
+        // Resolves the hub's answer, or null standalone or after 3 s. The hub answers only its terminal provider.
+        terminalToken() {
+          return config.then(
+            () =>
+              origin &&
+              new Promise((resolve) => {
+                const done = (token) => {
+                  tokenWaiters.delete(done);
+                  win.clearTimeout(timer);
+                  resolve(token);
+                };
+                const timer = win.setTimeout(() => done(null), 3000);
+                tokenWaiters.add(done);
+                post({ type: 'hub:terminalToken' });
+              }),
+          );
+        },
       };
       return hub;
     }
