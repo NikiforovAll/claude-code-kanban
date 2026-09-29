@@ -8,7 +8,7 @@ const HUB = 'http://localhost:3540';
 const read = (file) => readFileSync(path.join(__dirname, '..', file), 'utf8');
 
 // Runs the vendored SDK and the page's HUB_INTEGRATION region against stub browser globals.
-async function loadShim({ enabled = true, costUrl = null } = {}) {
+async function loadShim({ enabled = true, costUrl = null, marketplaceUrl = null, memoryUrl = null } = {}) {
   const region = /\/\/ #region HUB_INTEGRATION\n([\s\S]*?)\/\/ #endregion/.exec(read('public/app.js'))[1];
   const listeners = { keydown: [], message: [], click: [], load: [] };
   const on = (type, fn) => listeners[type]?.push(fn);
@@ -33,7 +33,7 @@ async function loadShim({ enabled = true, costUrl = null } = {}) {
     localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
     setTimeout: (fn) => timers.push(fn),
     open: (...args) => opened.push(args),
-    appConfig: { costUrl },
+    appConfig: { costUrl, marketplaceUrl, memoryUrl },
     CCK_CTRL_ALT_KEYS: new Set(['KeyN', 'KeyR', 'KeyS']),
     MutationObserver: class {
       observe() {}
@@ -170,5 +170,50 @@ describe('session.cost', () => {
     assert.equal(shim.opened[0][0], 'http://localhost:3543/?view=detail&session=s1');
     const bare = await loadShim({ enabled: false });
     assert.equal(bare.hub.can('session.cost'), false);
+  });
+});
+
+describe('project.plugins and project.memory', () => {
+  it('invokes each action only when the hub lists it', async () => {
+    const shim = await loadShim();
+    shim.receive(welcome(['project.plugins']));
+    assert.equal(shim.hub.can('project.plugins'), true);
+    assert.equal(shim.hub.can('project.memory'), false);
+    shim.hub.invoke('project.plugins', { project: 'C:/p' });
+    const call = shim.sent().find((m) => m.type === 'hub:invoke');
+    assert.deepEqual({ ...call, id: 0 }, { type: 'hub:invoke', id: 0, action: 'project.plugins', params: { project: 'C:/p' } });
+  });
+
+  it('falls back to hub:navigate when the hub sends no welcome', async () => {
+    const shim = await loadShim();
+    shim.endWait();
+    await shim.hub.invoke('project.plugins', { project: 'C:/a b' });
+    await shim.hub.invoke('project.memory', {});
+    const navs = shim.sent().filter((m) => m.type === 'hub:navigate');
+    assert.deepEqual(
+      navs.map((m) => ({ ...m })),
+      [
+        { type: 'hub:navigate', app: 'marketplace', url: '?project=C%3A%2Fa+b' },
+        { type: 'hub:navigate', app: 'memory', url: undefined },
+      ],
+    );
+  });
+
+  it('opens the --*-url flags standalone, and cannot without them', async () => {
+    const shim = await loadShim({
+      enabled: false,
+      marketplaceUrl: 'http://localhost:3542/',
+      memoryUrl: 'http://localhost:3544/?x=1',
+    });
+    await shim.hub.invoke('project.plugins', { project: 'C:/p' });
+    await shim.hub.invoke('project.memory', { project: 'C:/p' });
+    await shim.hub.invoke('project.memory', {});
+    assert.deepEqual(
+      shim.opened.map((a) => a[0]),
+      ['http://localhost:3542/?project=C%3A%2Fp', 'http://localhost:3544/?project=C%3A%2Fp'],
+    );
+    const bare = await loadShim({ enabled: false });
+    assert.equal(bare.hub.can('project.plugins'), false);
+    assert.equal(bare.hub.can('project.memory'), false);
   });
 });

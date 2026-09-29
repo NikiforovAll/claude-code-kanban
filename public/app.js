@@ -6568,13 +6568,13 @@ document.addEventListener('keydown', (e) => {
   if (matchKey(e, 'KeyM')) {
     e.preventDefault();
     const mSession = contextSid ? sessions.find((s) => s.id === contextSid) : null;
-    hubNavigate('marketplace', mSession?.project ? `?project=${encodeURIComponent(mSession.project)}` : undefined);
+    openMarketplace(mSession?.project);
     return;
   }
   if (e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey && e.key === 'm') {
     e.preventDefault();
     const mSession = contextSid ? sessions.find((s) => s.id === contextSid) : null;
-    hubNavigate('memory', mSession?.project ? `?project=${encodeURIComponent(mSession.project)}` : undefined);
+    openMemory(mSession?.project);
     return;
   }
   if (e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey && e.key === 'd') {
@@ -9397,8 +9397,8 @@ function showInfoModal(session, teamConfig, tasks, planContent, parentInfo) {
   const mkBtn = document.getElementById('session-info-marketplace-btn');
   const memBtn = document.getElementById('session-info-memory-btn');
   const proj = session.project;
-  if (mkBtn) mkBtn.style.display = proj && (window.__HUB__?.enabled || appConfig.marketplaceUrl) ? '' : 'none';
-  if (memBtn) memBtn.style.display = proj && (window.__HUB__?.enabled || appConfig.memoryUrl) ? '' : 'none';
+  if (mkBtn) mkBtn.style.display = proj && hub.can('project.plugins') ? '' : 'none';
+  if (memBtn) memBtn.style.display = proj && hub.can('project.memory') ? '' : 'none';
   modal.classList.add('visible');
 
   if (alreadyVisible) return; // re-render during deferred hydration — key handler already attached
@@ -10067,25 +10067,11 @@ function openCost(sessionId) {
 }
 
 function openMarketplace(projectPath) {
-  const params = new URLSearchParams({ project: projectPath });
-  if (window.__HUB__?.enabled) {
-    hubNavigate('marketplace', `?${params}`);
-  } else if (appConfig.marketplaceUrl) {
-    const url = new URL(appConfig.marketplaceUrl);
-    url.search = params.toString();
-    window.open(url.toString(), '_blank');
-  }
+  hub.invoke('project.plugins', projectPath ? { project: projectPath } : {});
 }
 
 function openMemory(projectPath) {
-  const params = new URLSearchParams({ project: projectPath });
-  if (window.__HUB__?.enabled) {
-    hubNavigate('memory', `?${params}`);
-  } else if (appConfig.memoryUrl) {
-    const url = new URL(appConfig.memoryUrl);
-    url.search = params.toString();
-    window.open(url.toString(), '_blank');
-  }
+  hub.invoke('project.memory', projectPath ? { project: projectPath } : {});
 }
 
 function openForInfoModalProject(open) {
@@ -11902,14 +11888,26 @@ window.addEventListener('popstate', () => {
 
 // #region HUB_INTEGRATION
 const costDetail = (session) => `?view=detail&session=${encodeURIComponent(session)}`;
+const projectQuery = (project) => `?${new URLSearchParams({ project })}`;
 const hub = ClaudeHub.connect({
   reserved: [...CCK_CTRL_ALT_KEYS].map((code) => `ctrl+alt+${code.slice(3).toLowerCase()}`),
-  legacy: { 'session.cost': (p) => ({ app: 'cost', url: p.session ? costDetail(p.session) : undefined }) },
-  // A function, because --cost-url arrives with /api/config after connect.
-  standalone: () =>
-    appConfig.costUrl
-      ? { 'session.cost': (p) => p.session && new URL(costDetail(p.session), appConfig.costUrl).href }
-      : {},
+  legacy: {
+    'session.cost': (p) => ({ app: 'cost', url: p.session ? costDetail(p.session) : undefined }),
+    'project.plugins': (p) => ({ app: 'marketplace', url: p.project ? projectQuery(p.project) : undefined }),
+    'project.memory': (p) => ({ app: 'memory', url: p.project ? projectQuery(p.project) : undefined }),
+  },
+  // A function, because the --*-url flags arrive with /api/config after connect.
+  standalone: () => ({
+    ...(appConfig.costUrl && {
+      'session.cost': (p) => p.session && new URL(costDetail(p.session), appConfig.costUrl).href,
+    }),
+    ...(appConfig.marketplaceUrl && {
+      'project.plugins': (p) => p.project && new URL(projectQuery(p.project), appConfig.marketplaceUrl).href,
+    }),
+    ...(appConfig.memoryUrl && {
+      'project.memory': (p) => p.project && new URL(projectQuery(p.project), appConfig.memoryUrl).href,
+    }),
+  }),
 });
 
 document.addEventListener('click', (e) => {
@@ -11937,11 +11935,6 @@ function openExternal(url) {
   if (window.__HUB__?.enabled) hubPost({ type: 'hub:openExternal', url });
   else window.open(url, '_blank', 'noopener');
 }
-
-window.hubNavigate = function hubNavigate(app, url) {
-  if (!window.__HUB__?.enabled) return;
-  hubPost({ type: 'hub:navigate', app, url });
-};
 
 // Hoisted out of initHubTheme so initHubProject can share it.
 const hubOrigin = () => (window.__HUB__?.url ? new URL(window.__HUB__.url).origin : null);
