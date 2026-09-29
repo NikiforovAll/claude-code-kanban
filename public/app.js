@@ -749,6 +749,34 @@ function toggleMessagePanel() {
   updateUrl();
 }
 
+function applyMessagePanelFull(on) {
+  document.getElementById('message-panel').classList.toggle('full-width', on);
+  const btn = document.getElementById('message-panel-full-btn');
+  btn.classList.toggle('active', on);
+  btn.setAttribute('aria-pressed', String(on));
+  const label = on ? 'Restore width' : 'Expand to full width';
+  btn.title = label;
+  btn.setAttribute('aria-label', label);
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML onclick
+function toggleMessagePanelFull() {
+  const on = !document.getElementById('message-panel').classList.contains('full-width');
+  store.setItem('message-panel-full', on);
+  applyMessagePanelFull(on);
+}
+
+function initMessagePanelFull() {
+  const panel = document.getElementById('message-panel');
+  const sidebar = document.querySelector('.sidebar');
+  if (sidebar) {
+    const sync = () => panel.style.setProperty('--sidebar-edge', `${sidebar.getBoundingClientRect().right}px`);
+    new ResizeObserver(sync).observe(sidebar);
+    sync();
+  }
+  applyMessagePanelFull(store.getItem('message-panel-full') === 'true');
+}
+
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML onclick
 async function openSessionWithBookmarks(sessionId) {
   if (!messagePanelOpen) {
@@ -11500,6 +11528,7 @@ initModalResize();
 loadPanelWidths();
 initPanelResize('detail-panel', 'detail-panel-resize', '--detail-panel-width', 'detail-panel-width');
 initPanelResize('message-panel', 'message-panel-resize', '--message-panel-width', 'message-panel-width');
+initMessagePanelFull();
 
 const msgContentEl = document.getElementById('message-panel-content');
 const jumpLatestBtn = document.createElement('button');

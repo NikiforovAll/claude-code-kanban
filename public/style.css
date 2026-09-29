@@ -3208,6 +3208,16 @@ body.booting .boot-splash {
 .message-panel.msg-expanded-wide {
   width: 60vw;
 }
+.message-panel.full-width {
+  left: var(--sidebar-edge, 0);
+  width: auto;
+}
+.message-panel.full-width .panel-resize-handle {
+  display: none;
+}
+#message-panel-full-btn.active {
+  color: var(--accent);
+}
 .message-panel-header {
   padding: 16px 20px;
   display: flex;
