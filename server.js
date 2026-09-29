@@ -94,8 +94,12 @@ const LINKED_DOCS_FILE = path.join(CCK_DIR, 'linked-docs.json');
 const SERVER_INFO_FILE = path.join(CCK_DIR, 'server.json');
 const TERMINAL_TOKENS_DIR = path.join(CCK_DIR, 'terminal-tokens');
 const SESSION_CACHE_FILE = path.join(CCK_DIR, 'session-cache.json');
+// os.tmpdir() can be an 8.3 short path on Windows; transcripts record the long form.
+const TEMP_ROOT = (() => {
+  try { return realpathSync.native(os.tmpdir()); } catch { return os.tmpdir(); }
+})();
 // Harness-owned scratchpad root; the per-session dir under it is created lazily.
-const SCRATCHPAD_ROOT = path.join(os.tmpdir(), 'claude');
+const SCRATCHPAD_ROOT = path.join(TEMP_ROOT, 'claude');
 
 // #endregion
 
@@ -1605,10 +1609,6 @@ app.get('/api/sessions/search', (req, res) => {
   res.json(hits.slice(0, SESSION_SEARCH_MAX).map((h) => h.id));
 });
 
-// os.tmpdir() can be an 8.3 short path on Windows; transcripts record the long form.
-const TEMP_ROOT = (() => {
-  try { return realpathSync.native(os.tmpdir()); } catch { return os.tmpdir(); }
-})();
 function isTempPath(p) {
   const rel = path.relative(TEMP_ROOT, p);
   return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel);
@@ -1843,8 +1843,9 @@ async function readCreatedPads(meta) {
   // The project, not `meta.cwd`: cwd is wherever the session last stood, which drifts
   // into subdirectories — a session that made a pad and then worked inside it reports
   // a cwd below the pad, and a scan from there finds nothing above it.
-  const root = meta.project || meta.cwd;
-  const scanned = unresolved.length && root ? await findPads(root) : [];
+  // The session's own scratchpad dir too: a pad made there sits outside the project.
+  const roots = unresolved.length ? [meta.project || meta.cwd, getScratchpadDir(sessionId, meta)] : [];
+  const scanned = (await Promise.all(roots.filter(Boolean).map((r) => findPads(r)))).flat();
   const candidates = [...new Set([...reported, ...scanned.map((dir) => path.join(dir, SCRATCHPAD_MANIFEST))])];
   const rows = await Promise.all(
     candidates.map(async (file) => {
