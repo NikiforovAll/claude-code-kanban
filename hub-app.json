@@ -4,6 +4,10 @@
   "name": "Kanban",
   "icon": "columns",
   "run": { "entry": "server.js", "defaultPort": 3541 },
+  "provides": {
+    "projects": { "path": "/api/projects" },
+    "terminal": { "liveWork": "/api/terminals" }
+  },
   "loading": {
     "verbs": [
       "Shuffling cards…",
