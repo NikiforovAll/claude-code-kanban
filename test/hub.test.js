@@ -49,7 +49,7 @@ async function loadShim({ enabled = true, costUrl = null, marketplaceUrl = null,
     },
   });
   context.window = context;
-  vm.runInContext(read('public/vendor/claude-hub-sdk.js'), context);
+  vm.runInContext(read('test/vendor/claude-hub-sdk.js'), context);
   vm.runInContext(region, context);
   const filter = /^function terminalKeyFilter\(e\) \{[\s\S]*?^\}/m.exec(read('public/app.js'))[0];
   vm.runInContext(`const terminalShortcut = () => false;\n${filter}`, context);

@@ -2,7 +2,6 @@
 
 // #region SETUP
 const express = require('express');
-const hubSdk = require('./lib/vendor/claude-hub-sdk');
 const path = require('node:path');
 const fs = require('node:fs').promises;
 const { existsSync, readdirSync, readFileSync, writeFileSync, statSync, unlinkSync, mkdirSync, renameSync, openSync, readSync, closeSync, realpathSync } = require('node:fs');
@@ -64,7 +63,7 @@ if (process.argv.includes("--install") || process.argv.includes("--uninstall")) 
 function startServer() {
 
 const app = express();
-const PORT = process.env.PORT || 3541;
+const PORT = parseInt(getArgValue('port') || process.env.PORT || '3541', 10);
 
 // Mounted before express.json() so a rejected request never buffers a body, and
 // before the /api catch-all so no route escapes the check.
@@ -615,7 +614,8 @@ app.use(express.json());
 
 // #region STATIC
 
-hubSdk.mount(app, { publicDir: path.join(__dirname, 'public') });
+// Under a hub, the hub hands over its SDK. Alone, public/vendor/claude-hub-sdk.js is a stub.
+if (process.env.HUB_SDK_SERVER) require(process.env.HUB_SDK_SERVER).mount(app);
 
 // app.js reads localStorage synchronously at startup, before any fetch could deliver the
 // namespace, so it is injected into the page instead of served from /hub-config.

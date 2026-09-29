@@ -33,8 +33,7 @@
       "server.js",
       "cli.js",
       "install.js",
-      "lib/**/*.js",
-      "!lib/vendor"
+      "lib/**/*.js"
     ]
   },
   "overrides": [
