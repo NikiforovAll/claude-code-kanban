@@ -6134,7 +6134,7 @@ function _renderStorageLinkedDocs() {
       <span class="storage-item-id" title="${escapeHtml(p)}">${escapeHtml(name)}</span>
       <div class="storage-item-actions">
         <button onclick="_storagePreviewLinkedDoc('${jsPath}')">View</button>
-        <button onclick="copyWithFeedback('${jsPath}', this)" title="Copy ${what}" aria-label="Copy ${what}">${ICON_COPY}</button>
+        <button onclick="copyWithFeedback('${jsPath}', this)" title="Copy ${escapeHtml(what)}" aria-label="Copy ${escapeHtml(what)}">${ICON_COPY}</button>
         <button class="danger" onclick="_storageUnlinkDoc('${sid}','${jsPath}')">Unlink</button>
       </div>
     </div>`;
@@ -7118,11 +7118,11 @@ function renderLinkedDocsHtml(sessionId) {
       const pathSpan = rel ? `<span class="linked-doc-path" title="${escapeHtml(p)}">${escapeHtml(rel)}</span>` : '';
       const attr = escapeHtml(p);
       const href = isUrl ? `href="${attr}" target="_blank" rel="noopener"` : 'href="#"';
-      return `<li class="linked-doc-item${cls}">
+      return `<li class="linked-doc-item${escapeHtml(cls)}">
         <a ${href} class="linked-doc-link" data-path="${attr}" title="${escapeHtml(p + hint)}">${escapeHtml(name)}</a>${isUrl ? '<span class="linked-doc-external" aria-hidden="true">↗</span>' : ''}
         ${pathSpan}${tag ? `<span class="linked-doc-path">${tag}</span>` : ''}
         <span class="row-actions linked-doc-actions">
-          <button type="button" class="linked-doc-copy" data-path="${attr}" title="Copy ${noun}" aria-label="Copy ${noun} of ${escapeHtml(name)}">${ICON_COPY}</button>
+          <button type="button" class="linked-doc-copy" data-path="${attr}" title="Copy ${escapeHtml(noun)}" aria-label="Copy ${escapeHtml(noun)} of ${escapeHtml(name)}">${ICON_COPY}</button>
           <button type="button" class="linked-doc-remove" data-path="${attr}" title="Unlink" aria-label="Unlink ${escapeHtml(name)}">&times;</button>
         </span>
       </li>`;
