@@ -2,6 +2,7 @@
 
 // #region SETUP
 const express = require('express');
+const hubSdk = require('./lib/vendor/claude-hub-sdk');
 const path = require('node:path');
 const fs = require('node:fs').promises;
 const { existsSync, readdirSync, readFileSync, writeFileSync, statSync, unlinkSync, mkdirSync, renameSync, openSync, readSync, closeSync, realpathSync } = require('node:fs');
@@ -614,9 +615,7 @@ app.use(express.json());
 
 // #region STATIC
 
-app.get('/hub-config', (_req, res) => {
-  res.json({ enabled: !!process.env.CLAUDE_HUB, url: process.env.HUB_URL || null });
-});
+hubSdk.mount(app, { publicDir: path.join(__dirname, 'public') });
 
 // app.js reads localStorage synchronously at startup, before any fetch could deliver the
 // namespace, so it is injected into the page instead of served from /hub-config.
@@ -629,10 +628,6 @@ app.get(['/', '/index.html'], (_req, res) => {
   res.setHeader('Cache-Control', 'no-cache');
   res.type('html').send(INDEX_HTML);
 });
-
-// A hub run from its repo passes its SDK source, so an SDK edit needs no sync.
-const SDK_FILE = process.env.HUB_SDK_SRC || path.join(__dirname, 'public', 'vendor', 'claude-hub-sdk.js');
-app.get('/vendor/claude-hub-sdk.js', (_req, res) => res.sendFile(SDK_FILE));
 
 // Serve static files
 app.get('/sw.js', (_req, res) => {
