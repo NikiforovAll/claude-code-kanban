@@ -1,0 +1,20 @@
+{
+  "manifest": 1,
+  "id": "kanban",
+  "name": "Kanban",
+  "icon": "columns",
+  "run": { "entry": "server.js", "defaultPort": 3541 },
+  "loading": {
+    "verbs": [
+      "Shuffling cards…",
+      "Herding tasks…",
+      "Waking sessions…",
+      "Sorting the board…",
+      "Pinning sticky notes…",
+      "Moving cards to done…",
+      "Nudging agents…",
+      "Drawing columns…",
+      "Reading the backlog…"
+    ]
+  }
+}

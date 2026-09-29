@@ -6562,7 +6562,7 @@ document.addEventListener('keydown', (e) => {
   }
   if (e.key === '$' && !e.ctrlKey && !e.altKey && !e.metaKey) {
     e.preventDefault();
-    hubNavigate('cost', contextSid ? `?view=detail&session=${encodeURIComponent(contextSid)}` : undefined);
+    openCost(contextSid);
     return;
   }
   if (matchKey(e, 'KeyM')) {
@@ -9393,7 +9393,7 @@ function showInfoModal(session, teamConfig, tasks, planContent, parentInfo) {
   updateStickyBtnState();
   updateDismissBtnState();
   const costBtn = document.getElementById('session-info-cost-btn');
-  if (costBtn) costBtn.style.display = window.__HUB__?.enabled || appConfig.costUrl ? '' : 'none';
+  if (costBtn) costBtn.style.display = hub.can('session.cost') ? '' : 'none';
   const mkBtn = document.getElementById('session-info-marketplace-btn');
   const memBtn = document.getElementById('session-info-memory-btn');
   const proj = session.project;
@@ -10062,13 +10062,8 @@ function openFolderInEditor(folder, file) {
   postAndToast('/api/open-folder', body, 'folder');
 }
 
-// biome-ignore lint/correctness/noUnusedVariables: used in HTML
 function openCost(sessionId) {
-  if (window.__HUB__?.enabled) {
-    hubNavigate('cost', `?view=detail&session=${encodeURIComponent(sessionId)}`);
-  } else if (appConfig.costUrl) {
-    window.open(`${appConfig.costUrl}?view=detail&session=${encodeURIComponent(sessionId)}`, '_blank');
-  }
+  hub.invoke('session.cost', sessionId ? { session: sessionId } : {});
 }
 
 function openMarketplace(projectPath) {
@@ -10595,7 +10590,7 @@ function terminalKeyFilter(e) {
     return false;
   }
   if (ctrlOnly && e.code === 'KeyV') return false;
-  return !isHubKey(e);
+  return !hub.forwards(e);
 }
 
 function oscColor(hex) {
@@ -11906,45 +11901,15 @@ window.addEventListener('popstate', () => {
 //#endregion
 
 // #region HUB_INTEGRATION
-// e.code travels with e.key because macOS composes Option+<key> into a character (Option+P is
-// 'π'), so the key alone cannot identify the binding. The hub owns the keymap and normalizes;
-// these tests only decide whether a press is the hub's to handle.
-function isHubKey(e) {
-  if (!window.__HUB__?.enabled) return false;
-  if (hubKeys) return hubKeys.has(hubCombo(e));
-  if (e.ctrlKey && e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) return true;
-  // Own branch: the Alt+digit case below requires !ctrlKey. The hub owns the Ctrl+Alt+letter
-  // keymap and ignores unbound letters.
-  if (
-    e.ctrlKey &&
-    e.altKey &&
-    !e.shiftKey &&
-    !e.metaKey &&
-    !CCK_CTRL_ALT_KEYS.has(e.code) &&
-    (/^[a-z]$/i.test(e.key) || /^Key[A-Z]$/.test(e.code))
-  ) {
-    return true;
-  }
-  return e.altKey && !e.ctrlKey && !e.shiftKey && !e.metaKey && (/^[1-9]$/.test(e.key) || /^Digit[1-9]$/.test(e.code));
-}
-
-// The combos the hub binds, from its hub:keys message. Null until one arrives: a hub from before
-// hub:keys sends none, and the fallback filter above is what such a hub expects.
-let hubKeys = null;
-
-// A copy of the hub's comboOf(): its names must match the hub:keys list.
-function hubCombo(e) {
-  const lower = (e.key || '').toLowerCase();
-  const m = /^(?:Key|Digit)([A-Z1-9])$/.exec(e.code || '');
-  const key = /^[a-z1-9]$/.test(lower) ? lower : m ? m[1].toLowerCase() : e.key;
-  const mods = [e.ctrlKey && 'ctrl', e.altKey && 'alt', e.shiftKey && 'shift', e.metaKey && 'meta'];
-  return [...mods, key].filter(Boolean).join('+');
-}
-
-document.addEventListener('keydown', (e) => {
-  if (!isHubKey(e)) return;
-  e.preventDefault();
-  hubPost({ type: 'hub:keydown', key: e.key, code: e.code, ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey });
+const costDetail = (session) => `?view=detail&session=${encodeURIComponent(session)}`;
+const hub = ClaudeHub.connect({
+  reserved: [...CCK_CTRL_ALT_KEYS].map((code) => `ctrl+alt+${code.slice(3).toLowerCase()}`),
+  legacy: { 'session.cost': (p) => ({ app: 'cost', url: p.session ? costDetail(p.session) : undefined }) },
+  // A function, because --cost-url arrives with /api/config after connect.
+  standalone: () =>
+    appConfig.costUrl
+      ? { 'session.cost': (p) => p.session && new URL(costDetail(p.session), appConfig.costUrl).href }
+      : {},
 });
 
 document.addEventListener('click', (e) => {
@@ -11982,7 +11947,7 @@ window.hubNavigate = function hubNavigate(app, url) {
 const hubOrigin = () => (window.__HUB__?.url ? new URL(window.__HUB__.url).origin : null);
 
 // Every send is addressed to the hub explicitly. With targetOrigin '*' any page that
-// framed this app also received the forwarded keystrokes and navigation intents.
+// framed this app also received its navigation intents.
 function hubPost(message) {
   const origin = hubOrigin();
   if (origin) window.parent?.postMessage(message, origin);
@@ -12017,14 +11982,6 @@ function hubPost(message) {
   }).observe(document.body, {
     attributes: true,
     attributeFilter: ['class', 'data-color-theme'],
-  });
-})();
-
-(function initHubKeys() {
-  window.addEventListener('message', (e) => {
-    if (e.source !== window.parent || e.origin !== hubOrigin()) return;
-    if (e.data?.type !== 'hub:keys' || !Array.isArray(e.data.keys)) return;
-    hubKeys = new Set(e.data.keys.filter((k) => typeof k === 'string'));
   });
 })();
 

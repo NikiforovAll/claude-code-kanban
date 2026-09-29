@@ -52,6 +52,7 @@
   },
   "files": [
     "server.js",
+    "hub-app.json",
     "cli.js",
     "install.js",
     "plugin/**/*",
