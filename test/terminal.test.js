@@ -50,13 +50,16 @@ function stopServer(s) {
 // Windows loopback sometimes fails a connect with ETIMEDOUT under load, before any byte reaches the server.
 const CONNECT_ERRORS = new Set(['ETIMEDOUT', 'ECONNRESET', 'ECONNREFUSED']);
 
+// The failures come in bursts that can last seconds, so the waits grow.
+const CONNECT_RETRY_MS = [250, 500, 1000, 2000];
+
 async function retryConnect(attempt) {
-  for (let i = 1; ; i++) {
+  for (let i = 0; ; i++) {
     try {
       return await attempt();
     } catch (e) {
-      if (i === 3 || !CONNECT_ERRORS.has(e.code)) throw e;
-      await new Promise((r) => setTimeout(r, 100 * i));
+      if (i === CONNECT_RETRY_MS.length || !CONNECT_ERRORS.has(e.code)) throw e;
+      await new Promise((r) => setTimeout(r, CONNECT_RETRY_MS[i]));
     }
   }
 }
@@ -91,12 +94,13 @@ function waitFor(ws, test, what) {
 }
 
 function handshakeStatus(port, headers) {
-  return new Promise((resolve) => {
+  const once = () => new Promise((resolve, reject) => {
     const ws = new WebSocket(`ws://127.0.0.1:${port}/api/terminal/ws`, { headers, handshakeTimeout: 15000 });
     ws.on('unexpected-response', (_req, res) => { resolve(res.statusCode); ws.terminate(); });
     ws.on('open', () => { resolve(101); ws.close(); });
-    ws.on('error', (e) => resolve(`${e.code || ''} ${e.message}`));
+    ws.on('error', reject);
   });
+  return retryConnect(once).catch((e) => `${e.code || ''} ${e.message}`);
 }
 
 // Collects JSON control messages and decoded output until `until` returns true.

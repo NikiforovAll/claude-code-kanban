@@ -26,6 +26,9 @@ const SERVER_INFO = path.join(CLAUDE_DIR, '.cck', 'server.json');
 // because an enqueue wakes the poll immediately.
 const WAIT_SEC = 120;
 const RETRY_MS = 15000;
+// Windows sometimes fails a loopback connect with ETIMEDOUT while the board is up, so that
+// error gets a few short waits before the normal one.
+const CONNECT_RETRY_MS = [250, 500, 1000, 2000];
 // `--topic dispatch` is the kanban-dispatch inbox: reports from sessions this one started.
 const TOPIC = process.argv.includes('--topic') ? process.argv[process.argv.indexOf('--topic') + 1] : null;
 // A dispatch report is a result, not an instruction, so a late attach still wants it.
@@ -64,13 +67,21 @@ async function poll(base) {
 }
 
 (async () => {
+  let connectRetries = 0;
   for (;;) {
     try {
       for (const line of await poll(serverUrl())) console.log(line);
-    } catch (_) {
+      connectRetries = 0;
+    } catch (e) {
       // No board yet, or it went away. It may come back later in the session, so keep
       // waiting quietly -- a missing server is the normal case, not an error.
-      await sleep(RETRY_MS);
+      const timedOut = e.cause?.code === 'ETIMEDOUT' && e.cause?.syscall === 'connect';
+      if (timedOut && connectRetries < CONNECT_RETRY_MS.length) {
+        await sleep(CONNECT_RETRY_MS[connectRetries++]);
+      } else {
+        connectRetries = 0;
+        await sleep(RETRY_MS);
+      }
     }
   }
 })();

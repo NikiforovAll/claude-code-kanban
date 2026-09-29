@@ -427,14 +427,25 @@ function unreachable() {
 
 class CliUnreachable extends Error { constructor() { super(unreachable()); this.code = 'unreachable'; } }
 
+// Windows sometimes fails a loopback connect with ETIMEDOUT after ~300 ms when many
+// connects run at once. Nothing reached the server, so even a POST is safe to send again.
+const CONNECT_RETRY_MS = [250, 500, 1000, 2000];
+const isConnectTimeout = (e) => e.cause?.code === 'ETIMEDOUT' && e.cause?.syscall === 'connect';
+
 async function cliFetch(urlPath, init) {
   const base = cliBaseUrl();
   if (!base) throw new CliUnreachable();
-  try {
-    return await fetch(`${base}${urlPath}`, init);
-  } catch (e) {
-    if (e.cause?.code === 'ECONNREFUSED' || /fetch failed/i.test(e.message)) throw new CliUnreachable();
-    throw e;
+  for (let i = 0; ; i++) {
+    try {
+      return await fetch(`${base}${urlPath}`, init);
+    } catch (e) {
+      if (isConnectTimeout(e) && i < CONNECT_RETRY_MS.length) {
+        await new Promise((r) => setTimeout(r, CONNECT_RETRY_MS[i]));
+        continue;
+      }
+      if (e.cause?.code === 'ECONNREFUSED' || /fetch failed/i.test(e.message)) throw new CliUnreachable();
+      throw e;
+    }
   }
 }
 
