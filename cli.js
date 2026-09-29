@@ -2,25 +2,26 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { getClaudeDir, displayPath } = require('./lib/claude-dir');
 const { isGroupName, suggestGroupName } = require('./lib/dispatch-groups');
+const { linkUrl } = require('./public/link-url');
 // Help is auto-generated from this table — keep flags/usage in sync with `run` behavior.
 const COMMANDS = {
   'preview-doc': {
     summary: 'Open a markdown or HTML file in the preview modal on connected browser tabs',
-    usage: 'claude-code-kanban preview-doc <file.md|file.html> [--session <id>]',
+    usage: 'claude-code-kanban preview-doc <file.md|file.html|url> [--session <id>]',
     flags: {
-      '--session <id>': 'Switch focused session in the browser (does not link the file)',
+      '--session <id>': 'Switch focused session in the browser (does not link the file). Required for a URL.',
     },
-    notes: 'HTML renders in a sandboxed iframe; local stylesheets, scripts and images are inlined. Relative paths resolve against the current dir.',
+    notes: 'HTML renders in a sandboxed iframe; local stylesheets, scripts and images are inlined. Relative paths resolve against the current dir. An http(s) URL is linked to the session instead, and the tab on screen shows an Open button.',
     examples: [
       'claude-code-kanban preview-doc ./notes.md --session $CLAUDE_SESSION_ID',
     ],
     run: runPreviewCli,
   },
   'link-doc': {
-    summary: 'Link a file to a session in the sidebar without opening the preview modal',
-    usage: 'claude-code-kanban link-doc <file> --session <id> [--unlink] | link-doc --list --session <id> [--json]',
+    summary: 'Link a file or URL to a session in the sidebar without opening the preview modal',
+    usage: 'claude-code-kanban link-doc <file|url> --session <id> [--unlink] | link-doc --list --session <id> [--json]',
     flags: {
-      '<file>': 'Any file type; one the preview cannot render opens in the editor',
+      '<file|url>': 'Any file type; one the preview cannot render opens in the editor. An http(s) URL opens in a new tab.',
       '--session <id>': 'Session to link the file to (required unless $PREVIEW_SESSION is set); full id or unique prefix',
       '--unlink': 'Remove the link instead of adding it (the file need not exist)',
       '--list': 'Print the docs the server holds for the session',
@@ -29,6 +30,7 @@ const COMMANDS = {
     notes: 'The server keeps the link, so it shows when a browser tab opens later.',
     examples: [
       'claude-code-kanban link-doc ./design.md --session $CLAUDE_SESSION_ID',
+      'claude-code-kanban link-doc https://github.com/org/repo/pull/12 --session $CLAUDE_SESSION_ID',
       'claude-code-kanban link-doc --list --session $CLAUDE_SESSION_ID',
     ],
     run: runLinkDocCli,
@@ -464,10 +466,33 @@ async function runPreviewCli(args) {
     return 1;
   }
   const sessionId = getArgValue(args, 'session') || process.env.PREVIEW_SESSION || null;
+  const url = linkUrl(filePathArg);
+  if (url) return previewUrlCli(url, sessionId);
   const abs = path.resolve(filePathArg);
   try {
     if (!await cliPostJson('/api/preview', { path: abs, sessionId }, 'Preview')) return 1;
     console.log(`Preview opened: ${abs}${sessionId ? ` (session ${sessionId})` : ''}`);
+    return 0;
+  } catch (e) { reportCliError(e); return 1; }
+}
+
+// The modal cannot show a web page, so a URL is linked instead and the tab on screen
+// offers to open it.
+async function previewUrlCli(url, sessionArg) {
+  const entry = COMMANDS['preview-doc'];
+  if (!sessionArg) return usageError(entry, '--session is required for a URL: it is linked to the session.');
+  const resolved = await resolveSessionByIdOrPrefix(sessionArg);
+  if (!resolved) return 1;
+  return postDocLink(url, resolved.id, { open: true });
+}
+
+async function postDocLink(target, sessionId, { unlink = false, open = false } = {}) {
+  try {
+    const out = await cliPostJson('/api/document/link', { path: target, sessionId, unlink, open }, 'Link');
+    if (!out) return 1;
+    const what = linkUrl(target) ? 'URL' : 'Document';
+    console.log(`${what} ${unlink ? 'unlinked from' : 'linked to'} session ${sessionId.slice(0, 8)}: ${out.path}`);
+    if (!unlink && out.tabs === 0) console.log('No browser tab is open; the board shows it when one opens.');
     return 0;
   } catch (e) { reportCliError(e); return 1; }
 }
@@ -487,14 +512,7 @@ async function runLinkDocCli(args) {
   const resolved = await resolveSessionByIdOrPrefix(sessionArg);
   if (!resolved) return 1;
   if (list) return printLinkedDocs(resolved.id, args.includes('--json'));
-  const abs = path.resolve(filePathArg);
-  try {
-    const out = await cliPostJson('/api/document/link', { path: abs, sessionId: resolved.id, unlink }, 'Link');
-    if (!out) return 1;
-    console.log(`Document ${unlink ? 'unlinked from' : 'linked to'} session ${resolved.id.slice(0, 8)}: ${abs}`);
-    if (!unlink && out.tabs === 0) console.log('No browser tab is open; the board shows it when one opens.');
-    return 0;
-  } catch (e) { reportCliError(e); return 1; }
+  return postDocLink(linkUrl(filePathArg) || path.resolve(filePathArg), resolved.id, { unlink });
 }
 
 async function printLinkedDocs(sessionId, asJson) {

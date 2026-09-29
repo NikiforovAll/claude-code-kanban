@@ -24,7 +24,7 @@ claude-code-kanban help <command> <subcommand> # flags and examples
 | `open` (or none) | `session open ${CLAUDE_SESSION_ID}` |
 | `pin` / `unpin` | `session pin ${CLAUDE_SESSION_ID}` (`--sticky`, `--unpin`) |
 | `preview` | `preview-doc <file> --session ${CLAUDE_SESSION_ID}` — opens a modal on the user's screen |
-| `link` | `link-doc <file> --session ${CLAUDE_SESSION_ID}` — no modal, so it is the safe choice while the user is working |
+| `link` | `link-doc <file\|url> --session ${CLAUDE_SESSION_ID}` — no modal, so it is the safe choice while the user is working. An http(s) URL (a PR, an artifact) opens in a new tab |
 | `list` / `search` | `session list`, `session search <text>` |
 | `view` / `peek` | `session view <id>`, `session peek <id>` |
 | tasks, projects | `task list`, `project list` |

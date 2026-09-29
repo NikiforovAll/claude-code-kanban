@@ -2384,17 +2384,31 @@ let _manualRefreshing = false;
 //#endregion
 
 //#region TOAST
-function showToast(msg, type) {
+// `action` ({label, onClick}) adds a button and keeps the toast up long enough to reach it.
+function showToast(msg, type, action) {
   const el = document.getElementById('toast');
   clearTimeout(_toastTimer);
   el.style.transition = 'none';
-  el.classList.remove('visible', 'toast-success', 'toast-error', 'toast-info');
+  el.classList.remove('visible', 'toast-success', 'toast-error', 'toast-info', 'has-action');
   void el.offsetHeight;
   el.style.transition = '';
   el.textContent = msg;
+  const hide = () => el.classList.remove('visible', 'has-action');
+  if (action) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'toast-action';
+    btn.textContent = action.label;
+    btn.addEventListener('click', () => {
+      hide();
+      action.onClick();
+    });
+    el.append(btn);
+    el.classList.add('has-action');
+  }
   if (type) el.classList.add(`toast-${type}`);
   el.classList.add('visible');
-  _toastTimer = setTimeout(() => el.classList.remove('visible'), 2000);
+  _toastTimer = setTimeout(hide, action ? 8000 : 2000);
 }
 
 async function copyWithFeedback(text, btn) {
@@ -6115,11 +6129,12 @@ function _renderStorageLinkedDocs() {
     const name = linkedDocLabel(p);
     const sid = escAttrJs(sessionId);
     const jsPath = escAttrJs(p);
+    const what = LINKED_DOC_OPENERS[linkedDocOpener(p)].noun;
     return `<div class="storage-item" style="padding-left:24px;">
       <span class="storage-item-id" title="${escapeHtml(p)}">${escapeHtml(name)}</span>
       <div class="storage-item-actions">
         <button onclick="_storagePreviewLinkedDoc('${jsPath}')">View</button>
-        <button onclick="copyWithFeedback('${jsPath}', this)" title="Copy path" aria-label="Copy path">${ICON_COPY}</button>
+        <button onclick="copyWithFeedback('${jsPath}', this)" title="Copy ${what}" aria-label="Copy ${what}">${ICON_COPY}</button>
         <button class="danger" onclick="_storageUnlinkDoc('${sid}','${jsPath}')">Unlink</button>
       </div>
     </div>`;
@@ -6943,10 +6958,13 @@ async function handlePreviewOpenEvent(data) {
 // Linked docs live in localStorage, so the CLI can only reach them through a tab:
 // the server broadcasts the resolved path and every tab applies it idempotently.
 function handleDocumentLinkEvent(data) {
-  const { path: filePath, sessionId, unlink } = data;
+  const { path: filePath, sessionId, unlink, open } = data;
   if (!filePath || !sessionId) return;
   setSessionDocLink(sessionId, filePath, unlink);
-  showToast(`${unlink ? 'Unlinked' : 'Linked'} ${filePath.split(/[\\/]/).pop()}`);
+  const msg = `${unlink ? 'Unlinked' : 'Linked'} ${linkedDocLabel(filePath)}`;
+  // Every tab gets the event; only the one on screen offers to open the URL.
+  if (open && isOnScreen()) showToast(msg, 'info', { label: 'Open', onClick: () => openExternal(filePath) });
+  else showToast(msg);
 }
 
 function getSessionBaseDir(sessionId) {
@@ -7028,10 +7046,13 @@ function isScratchpadPath(p) {
 // `linkedDocOpener` is the only place a linked path is classified; the row's tag,
 // tooltip and action are all read from here, so a new destination is one entry.
 const LINKED_DOC_OPENERS = {
-  preview: { tag: '', hint: '' },
+  preview: { tag: '', hint: '', cls: '', noun: 'path' },
+  url: { tag: '', hint: ' — opens in a new tab', cls: ' is-url', noun: 'URL' },
   scratch: {
     tag: '(scratchpad)',
     hint: ' — opens in the scratch viewer',
+    cls: ' is-editor',
+    noun: 'path',
     url: '/api/scratchpad/open',
     body: (p) => ({ path: p }),
     toast: 'in the scratch viewer',
@@ -7039,6 +7060,8 @@ const LINKED_DOC_OPENERS = {
   editor: {
     tag: '(editor)',
     hint: ' — opens in editor',
+    cls: ' is-editor',
+    noun: 'path',
     url: '/api/open-in-editor',
     body: (p) => ({ file: p }),
     toast: 'in editor',
@@ -7049,6 +7072,7 @@ const LINKED_DOC_OPENERS = {
 // text, but the pad is what the user linked, so the viewer wins over the raw file.
 // Without the CLI there is nothing to launch, so it falls back to the editor.
 function linkedDocOpener(p) {
+  if (linkUrl(p)) return 'url';
   if (isScratchpadPath(p)) return appConfig.scratchAvailable ? 'scratch' : 'editor';
   // A path whose kind has not arrived yet renders as previewable, which is what the
   // click does anyway — openPreviewByPath falls back to the editor on a null kind.
@@ -7058,12 +7082,17 @@ function linkedDocOpener(p) {
 // Every manifest is called scratchpad.json, so the pad's folder names it. Kept
 // independent of the opener: the pad is still the pad when the CLI is missing.
 function linkedDocLabel(p) {
+  if (linkUrl(p)) return p.replace(/^https?:\/\//i, '').replace(/\/$/, '');
   const parts = p.split(/[\\/]/).filter(Boolean);
   return isScratchpadPath(p) ? parts[parts.length - 2] || parts[parts.length - 1] : parts[parts.length - 1];
 }
 
 function openLinkedDoc(p, baseDir) {
   const opener = linkedDocOpener(p);
+  if (opener === 'url') {
+    openExternal(p);
+    return;
+  }
   if (opener === 'preview') {
     openPreviewByPath(p, baseDir, openFileInEditor);
     return;
@@ -7076,21 +7105,24 @@ function renderLinkedDocsHtml(sessionId) {
   const paths = getSessionPreviewPaths(sessionId);
   // Kicked off from the render rather than the three call sites, so a new surface that
   // shows linked docs cannot forget it. Returns at once once every path is cached.
-  loadPreviewKinds(sessionId, paths);
+  const rows = paths.map((p) => ({ p, opener: linkedDocOpener(p) }));
+  const filePaths = rows.filter((r) => r.opener !== 'url').map((r) => r.p);
+  loadPreviewKinds(sessionId, filePaths);
   const baseDir = getSessionBaseDir(sessionId);
-  const items = paths
-    .map((p) => {
-      const opener = linkedDocOpener(p);
-      const { tag, hint } = LINKED_DOC_OPENERS[opener];
+  const items = rows
+    .map(({ p, opener }) => {
+      const { tag, hint, cls, noun } = LINKED_DOC_OPENERS[opener];
       const name = linkedDocLabel(p);
+      const isUrl = opener === 'url';
       const rel = baseDir ? toRelativeIfUnder(p, baseDir) : null;
       const pathSpan = rel ? `<span class="linked-doc-path" title="${escapeHtml(p)}">${escapeHtml(rel)}</span>` : '';
       const attr = escapeHtml(p);
-      return `<li class="linked-doc-item${opener === 'preview' ? '' : ' is-editor'}">
-        <a href="#" class="linked-doc-link" data-path="${attr}" title="${escapeHtml(p + hint)}">${escapeHtml(name)}</a>
+      const href = isUrl ? `href="${attr}" target="_blank" rel="noopener"` : 'href="#"';
+      return `<li class="linked-doc-item${cls}">
+        <a ${href} class="linked-doc-link" data-path="${attr}" title="${escapeHtml(p + hint)}">${escapeHtml(name)}</a>${isUrl ? '<span class="linked-doc-external" aria-hidden="true">↗</span>' : ''}
         ${pathSpan}${tag ? `<span class="linked-doc-path">${tag}</span>` : ''}
         <span class="row-actions linked-doc-actions">
-          <button type="button" class="linked-doc-copy" data-path="${attr}" title="Copy path" aria-label="Copy path of ${escapeHtml(name)}">${ICON_COPY}</button>
+          <button type="button" class="linked-doc-copy" data-path="${attr}" title="Copy ${noun}" aria-label="Copy ${noun} of ${escapeHtml(name)}">${ICON_COPY}</button>
           <button type="button" class="linked-doc-remove" data-path="${attr}" title="Unlink" aria-label="Unlink ${escapeHtml(name)}">&times;</button>
         </span>
       </li>`;
@@ -7099,13 +7131,13 @@ function renderLinkedDocsHtml(sessionId) {
   // Rendered even when empty — the add button has to stay reachable.
   const body = paths.length
     ? `<ul class="linked-doc-list">${items}</ul>`
-    : '<div class="linked-docs-empty">No linked files yet</div>';
+    : '<div class="linked-docs-empty">No linked documents yet</div>';
   return `<div class="linked-docs-section panel-section">
     <div class="panel-section-header">
       ${linkSvg(12)}
       <span>Linked documents</span>
       <span class="panel-section-count">${paths.length}</span>
-      <button type="button" class="linked-docs-add-btn" title="Link a file" aria-label="Link a file">+</button>
+      <button type="button" class="linked-docs-add-btn" title="Link a file or URL" aria-label="Link a file or URL">+</button>
     </div>
     <div class="linked-doc-editor-slot"></div>
     ${body}
@@ -7374,7 +7406,7 @@ function bindLinkedDocsHandlers(container, sessionId) {
   if (!container) return;
   container.addEventListener('click', (e) => {
     const hit = e.target.closest('.linked-doc-link, .linked-doc-copy, .linked-doc-remove, .linked-docs-add-btn');
-    if (!hit) return;
+    if (!hit || hit.target === '_blank') return;
     e.preventDefault();
     if (hit.classList.contains('linked-docs-add-btn')) {
       startLinkedDocInput(container, sessionId);
@@ -7393,7 +7425,7 @@ function bindLinkedDocsHandlers(container, sessionId) {
 function startLinkedDocInput(container, sessionId) {
   const slot = container.querySelector('.linked-doc-editor-slot');
   if (!slot) return;
-  slot.innerHTML = `<input class="linked-doc-input" type="text" spellcheck="false" placeholder="Absolute path, file:// URL, or relative to the session cwd">
+  slot.innerHTML = `<input class="linked-doc-input" type="text" spellcheck="false" placeholder="Path, file:// or https:// URL">
     <div class="linked-doc-hint">${escapeHtml(getSessionBaseDir(sessionId) || 'no session cwd — absolute paths only')}</div>
     <div class="linked-doc-error"></div>
     <div class="edit-actions">
@@ -7407,6 +7439,9 @@ function startLinkedDocInput(container, sessionId) {
   };
   slot.querySelector('.edit-save').addEventListener('click', save);
   slot.querySelector('.edit-cancel').addEventListener('click', cancel);
+  input.addEventListener('input', () => {
+    slot.querySelector('.linked-doc-error').textContent = '';
+  });
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
@@ -7429,27 +7464,38 @@ async function linkFileByPath(sessionId, raw, slot) {
     else showToast(msg, 'error');
   };
   if (!value) {
-    fail('Enter a file path');
+    fail('Enter a file path or URL');
     return;
   }
-  try {
-    const qs = new URLSearchParams({ path: value });
-    const base = getSessionBaseDir(sessionId);
-    if (base) qs.set('base', base);
-    const r = await fetch(`/api/file/resolve?${qs}`);
-    const data = await r.json().catch(() => ({}));
-    if (!r.ok || !data.exists) {
-      fail(data.error || 'File not found');
+  let target;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value) && !/^file:/i.test(value)) {
+    target = linkUrl(value);
+    if (!target) {
+      fail('Only http and https URLs can be linked');
       return;
     }
-    // Close the editor before the refresh: a sidebar panel defers its re-render while an
-    // input is open, so leaving it up would hide the file that was just linked.
-    if (slot) slot.innerHTML = '';
-    setSessionDocLink(sessionId, data.path, false);
-    showToast('Linked to session', 'success');
-  } catch {
-    fail('Failed to resolve file');
+  } else {
+    try {
+      const qs = new URLSearchParams({ path: value });
+      const base = getSessionBaseDir(sessionId);
+      if (base) qs.set('base', base);
+      const r = await fetch(`/api/file/resolve?${qs}`);
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok || !data.exists) {
+        fail(data.error || 'File not found');
+        return;
+      }
+      target = data.path;
+    } catch {
+      fail('Failed to resolve file');
+      return;
+    }
   }
+  // Close the editor before the refresh: a sidebar panel defers its re-render while an
+  // input is open, so leaving it up would hide the file that was just linked.
+  if (slot) slot.innerHTML = '';
+  setSessionDocLink(sessionId, target, false);
+  showToast('Linked to session', 'success');
 }
 //#endregion
 
@@ -11919,6 +11965,13 @@ document.addEventListener('click', (e) => {
   e.stopPropagation();
   hubPost({ type: 'hub:openExternal', url: url.href });
 });
+
+// The click handler above only catches anchors. A script open goes the same way, because
+// in the hub's installed PWA window a framed app's own `_blank` open does nothing.
+function openExternal(url) {
+  if (window.__HUB__?.enabled) hubPost({ type: 'hub:openExternal', url });
+  else window.open(url, '_blank', 'noopener');
+}
 
 window.hubNavigate = function hubNavigate(app, url) {
   if (!window.__HUB__?.enabled) return;

@@ -112,21 +112,23 @@ Commands that change the browser view (`preview-doc`, `session open`) act on boa
 Opens a Markdown or HTML file in the preview modal on every connected board tab.
 
 ```bash
-claude-code-kanban preview-doc <file.md|file.html> [--session <id>]
+claude-code-kanban preview-doc <file.md|file.html|url> [--session <id>]
 ```
 
 | Flag | What it does |
 | --- | --- |
-| `--session <id>` | Switches the focused session in the browser. It does not link the file to the session. `$PREVIEW_SESSION` is used when you omit the flag. |
+| `--session <id>` | Switches the focused session in the browser. It does not link the file to the session. `$PREVIEW_SESSION` is used when you omit the flag. Required for a URL. |
 
 Put the file path first. The CLI reads the first argument that does not start with `--` as the file. On success it prints `Preview opened: <absolute path>`.
 
+The preview cannot show a web page. With an `http://` or `https://` URL, `preview-doc` links it to the session, the same as `link-doc`, and prints `URL linked to session <id>: <url>`. A browser opens a new tab only after a click, so the board tab on screen shows a message with an **Open** button for 8 seconds. Tabs that are not on screen show the message without the button.
+
 ## link-doc
 
-Links a file to a session in the sidebar. It does not open the preview.
+Links a file or a web URL to a session in the sidebar. It does not open the preview.
 
 ```bash
-claude-code-kanban link-doc <file> --session <id> [--unlink]
+claude-code-kanban link-doc <file|url> --session <id> [--unlink]
 claude-code-kanban link-doc --list --session <id> [--json]
 ```
 
@@ -136,6 +138,8 @@ claude-code-kanban link-doc --list --session <id> [--json]
 | `--unlink` | Removes the link. The file does not need to exist. |
 | `--list` | Prints the documents the server keeps for the session. |
 | `--json` | With `--list`: prints JSON. |
+
+An argument that starts with `http://` or `https://` is linked as a URL. The server does not check that the page exists, and it stores the URL in a normal form: the scheme and host in lower case, with the rest as you typed it. Other schemes are refused. A file argument resolves against the current directory and must exist.
 
 The server keeps linked documents in `<config-dir>/.cck/linked-docs.json`, up to 20 per session. Each board tab adds them to its own list when it connects, so a link made with no tab open shows when one opens. In that case the command also prints `No browser tab is open; the board shows it when one opens.` Unlinking in the board removes the server copy too. See [Session log and details](/claude-code-kanban/guides/session-details/).
 

@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { createLinkedDocStore, MAX_PER_SESSION } = require('../lib/linked-docs');
+const { createLinkedDocStore, linkUrl, MAX_PER_SESSION } = require('../lib/linked-docs');
 
 function fileStore() {
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'cck-links-')), 'linked-docs.json');
@@ -58,5 +58,28 @@ describe('linked docs store', () => {
   it('ignores a malformed file', () => {
     const docs = createLinkedDocStore({ load: () => ({ sessions: { s1: 'nope', s2: [1, '/ok.md'] } }), save: () => {} });
     assert.deepEqual(docs.all(), { s2: ['/ok.md'] });
+  });
+
+  it('keeps URLs next to paths, with case and fragment intact', () => {
+    const docs = fileStore().open();
+    docs.link('s1', '/repo/a.md');
+    docs.link('s1', 'https://github.com/Org/Repo/pull/12#discussion');
+    docs.link('s1', 'https://github.com/Org/Repo/pull/12#discussion');
+    assert.deepEqual(docs.get('s1'), ['https://github.com/Org/Repo/pull/12#discussion', '/repo/a.md']);
+    assert.equal(docs.unlink('s1', 'https://github.com/Org/Repo/pull/12#discussion'), true);
+    assert.deepEqual(docs.get('s1'), ['/repo/a.md']);
+  });
+});
+
+describe('linkUrl', () => {
+  it('normalizes http(s) URLs', () => {
+    assert.equal(linkUrl('https://GitHub.com'), 'https://github.com/');
+    assert.equal(linkUrl('  http://x.test/a?b=1#c '), 'http://x.test/a?b=1#c');
+  });
+
+  it('rejects other schemes and non-URLs', () => {
+    for (const v of ['javascript:alert(1)', 'data:text/html,x', 'file:///C:/a.md', 'ftp://x.test/', '/repo/a.md', 'C:\\a.md', 'https://', 42, null]) {
+      assert.equal(linkUrl(v), null, String(v));
+    }
   });
 });

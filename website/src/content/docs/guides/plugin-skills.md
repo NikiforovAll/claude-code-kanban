@@ -38,9 +38,9 @@ Each argument runs a [CLI](/claude-code-kanban/reference/cli/) command for the c
 | `pin` | `session pin <id>`, with `--sticky` to keep it at the top |
 | `unpin` | `session pin <id> --unpin` |
 | `preview <file>` | `preview-doc <file> --session <id>` |
-| `link <file>` | `link-doc <file> --session <id>`, with `--unlink` to remove it |
+| `link <file\|url>` | `link-doc <file\|url> --session <id>`, with `--unlink` to remove it |
 
-`preview` opens a Markdown or HTML file in the preview modal of every open board tab. HTML renders in a sandboxed iframe. The server embeds the local stylesheets, scripts and images that the page refers to, such as `./style.css`, up to 4 MB for each file and 16 MB in total. Remote URLs load as usual. `link` adds any file to the linked documents of the session and opens no modal. Use `link` when you do not want a popup while you work.
+`preview` opens a Markdown or HTML file in the preview modal of every open board tab. HTML renders in a sandboxed iframe. The server embeds the local stylesheets, scripts and images that the page refers to, such as `./style.css`, up to 4 MB for each file and 16 MB in total. Remote URLs load as usual. `link` adds any file, or an `http(s)` URL such as a pull request, to the linked documents of the session and opens no modal. Use `link` when you do not want a popup while you work.
 
 The skill can also read the board with no changes. It uses `session list`, `session view` and `session peek`. `session list` shows 10 rows and always includes pinned sessions. `session peek` shows the last 10 messages by default, and 50 at most.
 

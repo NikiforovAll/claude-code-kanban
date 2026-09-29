@@ -28,6 +28,7 @@
     "includes": [
       "public/app.js",
       "public/project-match.js",
+      "public/link-url.js",
       "public/style.css",
       "server.js",
       "cli.js",

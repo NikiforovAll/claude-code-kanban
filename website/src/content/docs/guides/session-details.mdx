@@ -81,17 +81,18 @@ Press <kbd>P</kbd> to open the plan of the selected session, or click the plan c
 
 ## Linked documents
 
-Link files to a session to keep them one click away. The Linked documents section is in the session info dialog and in the zen mode panel. A session keeps up to 20 links. The newest link is first.
+Link files and web pages to a session to keep them one click away. The Linked documents section is in the session info dialog and in the zen mode panel. A session keeps up to 20 links. The newest link is first.
 
-- Click **+** and type an absolute path, a `file://` URL or a path relative to the session working directory. Press <kbd>Enter</kbd> to link it.
+- Click **+** and type an absolute path, a `file://` URL, a path relative to the session working directory, or an `http://` or `https://` URL. Press <kbd>Enter</kbd> to link it. Other URL schemes are refused.
+- Click a web URL to open it in a new browser tab. The row shows the URL without `https://`, with a ↗ mark, and a long URL is cut with an ellipsis. Hover the row to see the full URL.
 - Click a Markdown, HTML, text or image file to open it in the Preview dialog. HTML renders in a sandboxed frame.
 - A `scratchpad.json` file opens in the scratch viewer when it is installed.
 - Other files open in your editor.
-- Each row has a copy path button and an unlink button.
+- Each row has a copy button (path or URL) and an unlink button.
 
 The Preview dialog has a **Link to current session** toggle, an Open in editor button and a fullscreen button. Use the toggle to link or unlink the file you are reading.
 
-Links are stored in the browser's localStorage, so `link-doc` changes them only through an open board tab. `preview-doc` opens a file in the Preview dialog of open tabs and does not link it. See the [CLI reference](/claude-code-kanban/reference/cli/).
+To link from a terminal or an agent, use `link-doc <file|url>`. `preview-doc` opens a file in the Preview dialog of open tabs and does not link it. `preview-doc <url>` links the URL instead, and the tab on screen shows an **Open** button for 8 seconds. See the [CLI reference](/claude-code-kanban/reference/cli/).
 
 ## Scratchpad
 

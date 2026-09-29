@@ -3659,6 +3659,28 @@ body.booting .boot-splash {
   opacity: 1;
   transform: translateY(0);
 }
+.toast.has-action.visible {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(480px, calc(100vw - 32px));
+  overflow-wrap: anywhere;
+}
+.toast-action {
+  flex-shrink: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--accent-text);
+  background: transparent;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  padding: 2px 10px;
+  cursor: pointer;
+}
+.toast-action:hover {
+  background: var(--accent-dim);
+}
 .toast.toast-success {
   border-color: var(--success);
   color: var(--success);
@@ -4735,6 +4757,21 @@ body.booting .boot-splash {
 .linked-doc-item.is-editor .linked-doc-link {
   color: var(--text-secondary);
   text-decoration-style: dashed;
+}
+
+.linked-doc-item.is-url .linked-doc-link {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.linked-doc-external {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-size: 10px;
+  margin-left: -4px;
 }
 
 /* A section of the session panel: linked documents, artifacts. */

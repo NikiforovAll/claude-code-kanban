@@ -42,7 +42,7 @@ const { getClaudeDir, getArgValue, storageNamespace, isDefaultClaudeDir } = requ
 const { createTerminalService, readTerminalConfig } = require('./lib/terminal');
 const { createDispatchRegistry, formatPreamble, formatDispatchLine, isPeerName } = require('./lib/dispatch');
 const { createGroupStore, isGroupName, suggestGroupName } = require('./lib/dispatch-groups');
-const { createLinkedDocStore } = require('./lib/linked-docs');
+const { createLinkedDocStore, linkUrl } = require('./lib/linked-docs');
 const { pickFolder } = require('./lib/folder-dialog');
 const { loadSessionCache, saveSessionCache } = require('./lib/session-cache');
 const { countTaskDir } = require('./lib/task-counts');
@@ -3697,16 +3697,19 @@ app.post('/api/preview', async (req, res) => {
 // API: Link a file to a session's sidebar docs without opening the preview modal.
 // Not extension-restricted, matching /api/file/resolve — an unpreviewable link just
 // opens in the editor. Unlinking skips the stat so a deleted file can still be removed.
+// An http(s) URL is linked as it is. `open` comes from `preview-doc <url>`: a tab cannot
+// open a URL without a click, so the tab on screen offers an Open button.
 app.post('/api/document/link', async (req, res) => {
   try {
-    const { path: filePath, sessionId, unlink } = req.body || {};
+    const { path: filePath, sessionId, unlink, open } = req.body || {};
     if (typeof sessionId !== 'string' || !sessionId) return res.status(400).json({ error: 'sessionId is required' });
-    const abs = resolvePreviewPath(filePath);
+    const url = linkUrl(filePath);
+    const abs = url || resolvePreviewPath(filePath);
     if (!abs) return res.status(400).json({ error: 'path is required' });
-    if (!unlink) await statFileTarget(abs);
+    if (!unlink && !url) await statFileTarget(abs);
     if (unlink) linkedDocs.unlink(sessionId, abs);
     else linkedDocs.link(sessionId, abs);
-    broadcast({ type: 'document:link', path: abs, sessionId, unlink: !!unlink });
+    broadcast({ type: 'document:link', path: abs, sessionId, unlink: !!unlink, open: !!(url && open && !unlink) });
     res.json({ success: true, path: abs, tabs: clients.size });
   } catch (error) {
     console.error('Error in /api/document/link:', error);
@@ -3723,7 +3726,8 @@ app.get('/api/document/links', (req, res) => {
 // The browser's own unlink: it already updated its list, so this only drops the server
 // copy that would bring the doc back on the next merge. No path clears the session.
 app.delete('/api/document/links/:sessionId', (req, res) => {
-  const filePath = req.query.path ? resolvePreviewPath(String(req.query.path)) : null;
+  const raw = String(req.query.path || '');
+  const filePath = linkUrl(raw) || resolvePreviewPath(raw);
   res.json({ removed: linkedDocs.unlink(req.params.sessionId, filePath) });
 });
 
