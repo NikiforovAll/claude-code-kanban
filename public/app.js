@@ -3844,8 +3844,17 @@ function renderProjectView() {
   renderSessions();
 }
 
+// Claude Code keeps a blocker's id in blockedBy after the blocker completes.
+function openBlockers(task) {
+  const list = (t) => t.sessionId || t._taskDir;
+  return (task.blockedBy || []).filter(
+    (id) => currentTasks.find((t) => t.id === id && list(t) === list(task))?.status !== 'completed',
+  );
+}
+
 function renderTaskCard(task) {
-  const isBlocked = task.blockedBy && task.blockedBy.length > 0;
+  const blockers = openBlockers(task);
+  const isBlocked = blockers.length > 0;
   const useSlug = viewMode === 'project';
   const taskId = useSlug ? `${(task._taskDir || task.sessionId || '')?.slice(0, 4)}-${task.id}` : task.id;
   const statusClass = task.status.replace('_', '-');
@@ -3879,7 +3888,7 @@ function renderTaskCard(task) {
           </div>
           <div class="task-title">${escapeHtml(task.subject)}</div>
           ${task.status === 'in_progress' && task.activeForm ? `<div class="task-active">${escapeHtml(task.activeForm)}</div>` : ''}
-          ${isBlocked ? `<div class="task-blocked">Waiting on ${task.blockedBy.map((id) => `#${id}`).join(', ')}</div>` : ''}
+          ${isBlocked ? `<div class="task-blocked">Waiting on ${blockers.map((id) => `#${id}`).join(', ')}</div>` : ''}
           ${task.description ? `<div class="task-desc">${escapeHtml(task.description.split('\n')[0])}</div>` : ''}
         </div>
       `;
@@ -5200,7 +5209,8 @@ async function showTaskDetail(taskId, sessionId = null) {
     pending: '<span class="detail-status pending"><span class="dot"></span>Pending</span>',
   };
 
-  const isBlocked = task.blockedBy && task.blockedBy.length > 0;
+  const blockers = openBlockers(task);
+  const isBlocked = blockers.length > 0;
   const actualSessionId = task.sessionId || sessionId || currentSessionId;
 
   detailContent.innerHTML = `
@@ -5233,12 +5243,12 @@ async function showTaskDetail(taskId, sessionId = null) {
         }
 
         ${
-          task.blockedBy && task.blockedBy.length > 0
+          isBlocked
             ? `
         <div class="detail-section">
           <div class="detail-label">Blocked By</div>
           <div class="detail-deps">
-            <div class="detail-box blocked"><strong>Blocked by:</strong> ${task.blockedBy.map((id) => `#${id}`).join(', ')}</div>
+            <div class="detail-box blocked"><strong>Blocked by:</strong> ${blockers.map((id) => `#${id}`).join(', ')}</div>
           </div>
         </div>`
             : ''
