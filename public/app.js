@@ -2374,6 +2374,11 @@ function isAnyModalOpen() {
 
 const ZOOM_KEYS = { '+': 0.1, '=': 0.1, NumpadAdd: 0.1, '-': -0.1, _: -0.1, NumpadSubtract: -0.1, 0: 0, Numpad0: 0 };
 
+function zoomDelta(e) {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey) return undefined;
+  return ZOOM_KEYS[e.key] ?? ZOOM_KEYS[e.code];
+}
+
 let _toastTimer = null;
 let _manualRefreshing = false;
 //#endregion
@@ -5564,6 +5569,7 @@ const SHORTCUT_PAIRS = [
         { keys: ['Alt', '`'], combo: true, label: 'Focus terminal / page' },
         { keys: ['Alt', 'Shift', '`'], combo: true, label: 'End and close terminal' },
         { keys: ['Ctrl', 'Shift', '`'], combo: true, label: 'All terminals' },
+        { keys: ['Ctrl', '+/−/0'], combo: true, label: 'Terminal text size' },
       ],
     },
     {
@@ -6262,13 +6268,11 @@ document.addEventListener('keydown', (e) => {
   // Scale the open modal's reading surface instead of letting the browser zoom
   // the whole page. Sits above the text-field guard so it still works with the
   // caret in a field inside the modal.
-  if ((e.ctrlKey || e.metaKey) && !e.altKey) {
-    const delta = ZOOM_KEYS[e.key] ?? ZOOM_KEYS[e.code];
-    if (delta !== undefined && isZoomableModalOpen()) {
-      e.preventDefault();
-      adjustModalZoom(delta);
-      return;
-    }
+  const zoom = zoomDelta(e);
+  if (zoom !== undefined && isZoomableModalOpen()) {
+    e.preventDefault();
+    adjustModalZoom(zoom);
+    return;
   }
 
   // Above the text-field guard: xterm's input is a textarea, and the toggle must work from it.
@@ -10217,6 +10221,9 @@ const TERMINAL_TOKEN_RE = /^[0-9a-f]{64}$/;
 // Swap to the previous session.
 const CCK_CTRL_ALT_KEYS = new Set(['KeyN', 'KeyR', 'KeyS']);
 const TERMINAL_MODES_KEY = 'terminal-sessions';
+const TERMINAL_FONT_KEY = 'terminal-font-size';
+const TERMINAL_FONT_MIN = 8;
+const TERMINAL_FONT_MAX = 32;
 const ACK_BATCH_BYTES = 32 * 1024;
 const TERMINAL_RETRY_MS = [500, 1000, 2000, 4000, 8000];
 const TERMINAL_STABLE_MS = 5000;
@@ -10334,6 +10341,11 @@ const TEXT_FIELD_SELECTOR = 'input, textarea, select, [contenteditable]';
 function terminalShortcut(e) {
   const ctrlAlt = e.ctrlKey && e.altKey && !e.shiftKey && !e.metaKey;
   const ctrlShift = e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey;
+  // Ctrl+_ is Claude Code's undo, so the zoom keys leave it to the terminal.
+  const zoom = e.key === '_' ? undefined : zoomDelta(e);
+  if (zoom !== undefined && termState.term && terminalPaneFocused()) {
+    return () => adjustTerminalFontSize(Math.sign(zoom));
+  }
   if (ctrlAlt && e.code === 'KeyS') return swapToPreviousSession;
   // Cancelling the default also stops Chrome's system print dialog, which this page has no use for.
   if (ctrlShift && e.code === 'KeyP') return toggleSessionPicker;
@@ -10552,9 +10564,10 @@ function ensureTerm() {
   const host = document.getElementById('terminal-host');
   const fontFamily =
     cfg.fontFamily || getComputedStyle(document.body).getPropertyValue('--font-mono').trim() || 'monospace';
+  const fontSize = terminalFontSize();
   const term = new window.Terminal({
     fontFamily,
-    fontSize: cfg.fontSize,
+    fontSize,
     scrollback: cfg.scrollback,
     cursorBlink: true,
     allowProposedApi: true,
@@ -10578,7 +10591,7 @@ function ensureTerm() {
     // No WebGL: xterm falls back to its DOM renderer.
   }
   document.fonts
-    ?.load(`${cfg.fontSize}px ${fontFamily}`)
+    ?.load(`${fontSize}px ${fontFamily}`)
     .then(repaintTerminal)
     .catch(() => {});
   term.attachCustomKeyEventHandler(terminalKeyFilter);
@@ -10656,6 +10669,27 @@ function fitTerminal() {
   try {
     termState.fit.fit();
   } catch (_) {}
+}
+
+function clampTerminalFont(v) {
+  return Math.min(TERMINAL_FONT_MAX, Math.max(TERMINAL_FONT_MIN, v));
+}
+
+function terminalFontSize() {
+  const saved = Number.parseInt(store.getItem(TERMINAL_FONT_KEY), 10);
+  return saved ? clampTerminalFont(saved) : appConfig.terminal.fontSize;
+}
+
+function adjustTerminalFontSize(step) {
+  const term = termState.term;
+  const size = step === 0 ? appConfig.terminal.fontSize : clampTerminalFont(term.options.fontSize + step);
+  if (size !== term.options.fontSize) {
+    if (step === 0) store.removeItem(TERMINAL_FONT_KEY);
+    else store.setItem(TERMINAL_FONT_KEY, String(size));
+    term.options.fontSize = size;
+    fitTerminal();
+  }
+  showToast(`Terminal ${size}px`);
 }
 
 function terminalSend(msg) {

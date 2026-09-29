@@ -84,7 +84,7 @@ In the sidebar, <kbd>Esc</kbd> removes the keyboard cursor.
 | <kbd>Ctrl+0</kbd> | Reset the text size in the open window |
 | <kbd>?</kbd> | Show the help |
 
-The text size keys work only when a window with readable content is open, such as a message, a plan or a preview. They also accept <kbd>Ctrl+=</kbd>, <kbd>Ctrl+_</kbd> and the numeric keypad keys, and they work with the cursor in a field. On macOS, <kbd>Cmd</kbd> also works. With no such window open, the browser zooms the page as usual.
+The text size keys work only when a window with readable content is open, such as a message, a plan or a preview. They also accept <kbd>Ctrl+=</kbd>, <kbd>Ctrl+_</kbd> and the numeric keypad keys, and they work with the cursor in a field. On macOS, <kbd>Cmd</kbd> also works. With no such window open, the browser zooms the page as usual. When the terminal has focus, they change the terminal text size instead (see [Terminal](#terminal)).
 
 ## Copy
 
@@ -128,6 +128,7 @@ Inside the terminal:
 - <kbd>Ctrl+C</kbd> copies when text is selected. With no selection, it goes to the terminal as usual.
 - <kbd>Ctrl+Shift+C</kbd> always copies the selection.
 - <kbd>Ctrl+V</kbd> pastes from the clipboard.
+- <kbd>Ctrl++</kbd> and <kbd>Ctrl+-</kbd> make the terminal text larger or smaller, from 8 px to 32 px. <kbd>Ctrl+0</kbd> resets it. <kbd>Ctrl+_</kbd> still goes to Claude Code as undo.
 
 ## Sessions
 
