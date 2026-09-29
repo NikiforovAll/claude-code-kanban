@@ -1304,6 +1304,28 @@ body.booting .boot-splash {
   color: var(--text-secondary);
 }
 
+.sidebar-footer .footer-version {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sidebar-footer .footer-plugin-warning {
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--warning);
+  cursor: pointer;
+}
+
+.sidebar-footer .footer-plugin-warning:hover,
+.sidebar-footer .footer-plugin-warning:focus-visible {
+  filter: brightness(1.2);
+}
+
 .sidebar.collapsed {
   width: 48px;
 }

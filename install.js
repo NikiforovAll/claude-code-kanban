@@ -5,6 +5,7 @@ const path = require('node:path');
 const readline = require('node:readline');
 const { execSync } = require('node:child_process');
 const { getClaudeDir, claudeCliEnv, displayPath } = require('./lib/claude-dir');
+const { PLUGIN_ID } = require('./lib/plugin-status');
 
 const CLAUDE_DIR = getClaudeDir();
 const CLI_ENV = claudeCliEnv(CLAUDE_DIR);
@@ -128,7 +129,7 @@ async function runInstall({ pluginOnly = false } = {}) {
     const upd = runCLI('claude plugin marketplace update claude-code-kanban');
     if (!upd.ok) console.log(`    ${yellow('⚠')} Marketplace refresh failed: ${upd.error}`);
 
-    const inst = runCLI('claude plugin install claude-code-kanban@claude-code-kanban', ['already installed', 'already exists']);
+    const inst = runCLI(`claude plugin install ${PLUGIN_ID}`,['already installed', 'already exists']);
     const alreadyInstalled = inst.idempotent || /already installed/i.test(inst.output || '');
     if (inst.ok) {
       console.log(`    ${green('✓')} ${alreadyInstalled ? 'Already installed' : 'Plugin installed'}`);

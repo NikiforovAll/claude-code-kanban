@@ -15,6 +15,7 @@ const { createNetGuard } = require('./lib/net-guard');
 const { isContained } = require('./lib/contain');
 const { resolveScratchSubdir, listScratchDir } = require('./lib/scratch-files');
 const { fileUrlToPath } = require('./lib/file-url');
+const { pluginStatus } = require('./lib/plugin-status');
 
 const {
   readRecentMessages: _readRecentMessagesUncached,
@@ -3160,7 +3161,7 @@ app.get('/api/sessions/:sessionId/cached-image/:n', (req, res) => {
 // #region META_ROUTES
 app.get('/api/version', (_req, res) => {
   const pkg = require('./package.json');
-  res.json({ version: pkg.version });
+  res.json({ version: pkg.version, plugin: pluginStatus(CLAUDE_DIR) });
 });
 
 app.get('/api/config', (_req, res) => {

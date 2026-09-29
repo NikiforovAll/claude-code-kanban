@@ -11596,7 +11596,7 @@ msgContentEl.addEventListener('wheel', function (e) {
   }
 });
 
-const footerState = { version: null, limitsKey: null, timer: null };
+const footerState = { version: null, plugin: null, limitsKey: null, timer: null };
 function formatResetIn(epochSec) {
   if (!epochSec) return null;
   const ms = epochSec * 1000 - Date.now();
@@ -11642,12 +11642,45 @@ function renderSidebarFooter(rateLimits) {
   const children = [];
   if (footerState.version) {
     const v = document.createElement('span');
+    v.className = 'footer-version';
     v.textContent = `v${footerState.version}`;
+    const warn = pluginWarning(footerState.plugin);
+    if (warn) v.append(warn);
     children.push(v);
   }
   if (fh != null || sd != null) children.push(makeLimitSpan(rateLimits));
   el.replaceChildren(...children);
 }
+function pluginWarning(plugin) {
+  const problem =
+    plugin &&
+    {
+      missing: 'The claude-code-kanban plugin is not installed',
+      disabled: `The claude-code-kanban plugin ${plugin.installed} is disabled`,
+      mismatch: `Plugin ${plugin.installed} is installed, this board ships ${plugin.bundled}`,
+    }[plugin.state];
+  if (!problem) return null;
+  const fix =
+    plugin.state === 'disabled'
+      ? 'Enable it with /plugin in Claude Code.'
+      : `Click to copy: ${plugin.installCommand}\nThen restart open sessions, they keep the old hooks.`;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'footer-plugin-warning';
+  btn.textContent = '⚠';
+  btn.title = `${problem} (${plugin.configDir}).\n${fix}`;
+  btn.setAttribute('aria-label', problem);
+  if (plugin.state !== 'disabled') {
+    btn.addEventListener('click', () =>
+      navigator.clipboard
+        .writeText(plugin.installCommand)
+        .then(() => showToast('Install command copied', 'success'))
+        .catch(() => showToast('Could not copy the command', 'error')),
+    );
+  }
+  return btn;
+}
+
 function refreshRateLimits() {
   if (footerState.timer) return;
   footerState.timer = setTimeout(() => {
@@ -11674,6 +11707,7 @@ fetch('/api/version')
   .then((r) => r.json())
   .then((d) => {
     footerState.version = d.version;
+    footerState.plugin = d.plugin ?? null;
     renderSidebarFooter(null);
     refreshRateLimits();
   })
