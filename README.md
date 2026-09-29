@@ -59,7 +59,7 @@ Run `claude` in any project. You do not configure anything per project. Claude C
 - **Session log.** Every prompt, reply and tool call in order (<kbd>Shift</kbd>+<kbd>L</kbd>). Follow the newest message with <kbd>Shift</kbd>+<kbd>M</kbd>, and pin the messages that matter. [Session log and details](https://nikiforovall.blog/claude-code-kanban/guides/session-details/)
 - **Subagents.** The agents log lists each subagent with its model, status and run time. Open one to read its prompt and response. Team sessions get colored owner badges and an owner filter. [Subagents](https://nikiforovall.blog/claude-code-kanban/guides/subagents/)
 - **Session info and tool stats.** Model, branch, context window use, cost, and which tools ran. The sidebar footer shows your 5-hour and 7-day rate limit use.
-- **Zen mode.** <kbd>Shift</kbd>+<kbd>Z</kbd> shows only the current session in the sidebar, with its context use, scratchpad folder and linked documents.
+- **Zen mode.** <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> shows only the current session in the sidebar, with its context use, scratchpad folder and linked documents.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="website/public/shots/themes/ember-02-subagent-preview-dark.webp">

@@ -3371,7 +3371,7 @@ function renderSessions() {
 
     if (zenMode) {
       emptyMsg = 'Zen mode: no session open';
-      emptyHint = 'Press Shift+Z to leave zen mode, then open a session';
+      emptyHint = 'Press Ctrl+Shift+Z to leave zen mode, then open a session';
     } else if (searchQuery) {
       emptyMsg = `No results for "${searchQuery}"`;
       emptyHint = 'Try a different search term or clear the search';
@@ -5527,7 +5527,7 @@ const SHORTCUT_PAIRS = [
         { keys: ['['], label: 'Toggle sidebar' },
         { keys: ['T'], label: 'Toggle theme' },
         { keys: ['Shift', 'S'], combo: true, label: 'Storage manager' },
-        { keys: ['Shift', 'Z'], combo: true, label: 'Zen mode (current session only)' },
+        { keys: ['Ctrl', 'Shift', 'Z'], combo: true, label: 'Zen mode (current session only)' },
         { keys: ['Ctrl', '+'], combo: true, label: 'Larger modal text' },
         { keys: ['Ctrl', '−'], combo: true, label: 'Smaller modal text' },
         { keys: ['Ctrl', '0'], combo: true, label: 'Reset modal text size' },
@@ -8625,7 +8625,9 @@ function renderZenState() {
   if (!btn) return;
   btn.classList.toggle('active', zenMode);
   btn.setAttribute('aria-pressed', String(zenMode));
-  btn.title = zenMode ? 'Zen mode on — show all sessions (Shift+Z)' : 'Zen mode: current session only (Shift+Z)';
+  btn.title = zenMode
+    ? 'Zen mode on — show all sessions (Ctrl+Shift+Z)'
+    : 'Zen mode: current session only (Ctrl+Shift+Z)';
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
@@ -10327,11 +10329,19 @@ function terminalPaneFocused() {
   return document.getElementById('terminal-pane').contains(document.activeElement);
 }
 
+const TEXT_FIELD_SELECTOR = 'input, textarea, select, [contenteditable]';
+
 function terminalShortcut(e) {
   const ctrlAlt = e.ctrlKey && e.altKey && !e.shiftKey && !e.metaKey;
+  const ctrlShift = e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey;
   if (ctrlAlt && e.code === 'KeyS') return swapToPreviousSession;
   // Cancelling the default also stops Chrome's system print dialog, which this page has no use for.
-  if (e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey && e.code === 'KeyP') return toggleSessionPicker;
+  if (ctrlShift && e.code === 'KeyP') return toggleSessionPicker;
+  // Ctrl+Shift+Z is redo in a text field, so only the terminal's own textarea gives it up.
+  if (ctrlShift && e.code === 'KeyZ') {
+    const field = e.target?.closest?.(TEXT_FIELD_SELECTOR);
+    return field && !document.getElementById('terminal-pane').contains(field) ? null : toggleZenMode;
+  }
   if (ctrlAlt && (e.code === 'KeyN' || e.code === 'KeyR') && terminalAvailable()) {
     return () => openNewSession(null, e.code === 'KeyR');
   }
@@ -10441,7 +10451,7 @@ function takeTerminalFocus(sessionId) {
 // The terminal attaches asynchronously; by then the user may be typing elsewhere or reading a modal.
 function promptAwaitsUser(sessionId) {
   if (!sessions.find((s) => s.id === sessionId)?.hasWaitingForUser || isAnyModalOpen()) return false;
-  return !document.activeElement?.matches('input, textarea, select, [contenteditable]');
+  return !document.activeElement?.matches(TEXT_FIELD_SELECTOR);
 }
 
 function onTerminalShown(focus = true) {
