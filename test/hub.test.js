@@ -33,7 +33,6 @@ async function loadShim({ enabled = true, costUrl = null, marketplaceUrl = null,
     clearTimeout() {},
     open: (...args) => opened.push(args),
     appConfig: { costUrl, marketplaceUrl, memoryUrl },
-    CCK_CTRL_ALT_KEYS: new Set(['KeyN', 'KeyR', 'KeyS']),
     onHubActive: (active) => calls.push(['active', active]),
     filterProject: 'C:/p',
     filterByProject: (p) => calls.push(['filter', p]),
@@ -88,50 +87,41 @@ const KEYS = ['ctrl+alt+p', 'ctrl+alt+w', 'ctrl+alt+ArrowLeft', 'ctrl+alt+ArrowR
 const welcome = (actions) => ({ type: 'hub:welcome', protocol: 1, forward: KEYS, themes: [], actions });
 
 describe('hub key forwarding', () => {
-  it('forwards the old set, minus N, R and S, until the hub sends its keys', async () => {
+  it('forwards nothing until welcome', async () => {
     const shim = await loadShim();
-    assert.equal(shim.press({ ctrlKey: true, altKey: true, key: 'q', code: 'KeyQ' }), true);
-    assert.equal(shim.press({ altKey: true, key: '7', code: 'Digit7' }), true);
-    assert.equal(shim.press({ ctrlKey: true, altKey: true, key: 'ArrowLeft', code: 'ArrowLeft' }), true);
-    assert.equal(shim.press({ ctrlKey: true, altKey: true, key: 'n', code: 'KeyN' }), false);
-    assert.equal(shim.press({ ctrlKey: true, altKey: true, key: 's', code: 'KeyS' }), false);
-    assert.equal(shim.press({ ctrlKey: true, key: 'q', code: 'KeyQ' }), false);
+    assert.equal(shim.press({ ctrlKey: true, altKey: true, key: 'p', code: 'KeyP' }), false);
+    assert.equal(shim.press({ altKey: true, key: '1', code: 'Digit1' }), false);
   });
 
-  for (const [label, message] of [
-    ['hub:keys', { type: 'hub:keys', keys: KEYS }],
-    ['welcome.forward', welcome([])],
-  ]) {
-    it(`forwards only the listed combos after ${label}`, async () => {
-      const shim = await loadShim();
-      shim.receive(message);
-      assert.equal(shim.press({ ctrlKey: true, altKey: true, key: 'p', code: 'KeyP' }), true);
-      assert.equal(shim.press({ ctrlKey: true, altKey: true, key: 'ArrowRight', code: 'ArrowRight' }), true);
-      assert.equal(shim.press({ altKey: true, key: '2', code: 'Digit2' }), true);
-      assert.equal(shim.press({ ctrlKey: true, altKey: true, key: 'q', code: 'KeyQ' }), false);
-      assert.equal(shim.press({ ctrlKey: true, altKey: true, key: 'n', code: 'KeyN' }), false);
-      assert.equal(shim.press({ altKey: true, key: '3', code: 'Digit3' }), false);
-      assert.equal(shim.press({ ctrlKey: true, altKey: true, shiftKey: true, key: 'P', code: 'KeyP' }), false);
-    });
-  }
+  it('forwards only the listed combos after welcome', async () => {
+    const shim = await loadShim();
+    shim.receive(welcome([]));
+    assert.equal(shim.press({ ctrlKey: true, altKey: true, key: 'p', code: 'KeyP' }), true);
+    assert.equal(shim.press({ ctrlKey: true, altKey: true, key: 'ArrowRight', code: 'ArrowRight' }), true);
+    assert.equal(shim.press({ altKey: true, key: '2', code: 'Digit2' }), true);
+    assert.equal(shim.press({ ctrlKey: true, altKey: true, key: 'q', code: 'KeyQ' }), false);
+    assert.equal(shim.press({ ctrlKey: true, altKey: true, key: 'n', code: 'KeyN' }), false);
+    assert.equal(shim.press({ altKey: true, key: '3', code: 'Digit3' }), false);
+    assert.equal(shim.press({ ctrlKey: true, altKey: true, shiftKey: true, key: 'P', code: 'KeyP' }), false);
+  });
 
   it('names macOS composed characters by the physical key', async () => {
     const shim = await loadShim();
-    shim.receive({ type: 'hub:keys', keys: KEYS });
+    shim.receive(welcome([]));
     assert.equal(shim.press({ ctrlKey: true, altKey: true, key: 'π', code: 'KeyP' }), true);
     assert.equal(shim.press({ altKey: true, key: '¡', code: 'Digit1' }), true);
   });
 
-  it('ignores hub:keys from another origin or frame', async () => {
+  it('ignores a welcome from another origin or frame', async () => {
     const shim = await loadShim();
-    shim.receive({ type: 'hub:keys', keys: [] }, { origin: 'http://evil.example' });
-    shim.receive({ type: 'hub:keys', keys: [] }, { source: {} });
-    assert.equal(shim.press({ ctrlKey: true, altKey: true, key: 'q', code: 'KeyQ' }), true);
+    shim.receive(welcome([]), { origin: 'http://evil.example' });
+    shim.receive(welcome([]), { source: {} });
+    assert.equal(shim.press({ ctrlKey: true, altKey: true, key: 'p', code: 'KeyP' }), false);
   });
 
   it('hands the terminal back only the keys the hub gets', async () => {
     const shim = await loadShim();
-    shim.receive({ type: 'hub:keys', keys: KEYS });
+    shim.receive(welcome([]));
     assert.equal(shim.terminalKeeps({ ctrlKey: true, altKey: true, key: 'p', code: 'KeyP' }), false);
     assert.equal(shim.terminalKeeps({ ctrlKey: true, altKey: true, key: 'n', code: 'KeyN' }), true);
     assert.equal(shim.terminalKeeps({ ctrlKey: true, key: 'l', code: 'KeyL' }), true);
@@ -160,11 +150,11 @@ describe('hub state', () => {
     assert.deepEqual([...hello.subscribes].sort(), ['project.changed', 'theme.changed']);
   });
 
-  it('applies the legacy project and theme messages from a hub with no welcome', async () => {
+  it('ignores the v0 project and theme messages', async () => {
     const shim = await loadShim();
     shim.receive({ type: 'hub:project', project: 'C:/q', encoded: 'C--q', name: 'q' });
     shim.receive({ type: 'hub:theme', theme: 'light', colorTheme: 'nord' });
-    assert.deepEqual(shim.calls, [['filter', 'C:/q'], ['color', 'nord'], ['toggle', 'light']]);
+    assert.deepEqual(shim.calls, []);
   });
 });
 
@@ -182,20 +172,13 @@ describe('session.cost', () => {
     assert.equal(off.hub.can('session.cost'), false);
   });
 
-  it('falls back to hub:navigate when the hub sends no welcome', async () => {
-    const shim = await loadShim();
-    shim.hub.invoke('session.cost', { session: 'a b' });
+  it('cannot call it when the hub sends no welcome', async () => {
+    const shim = await loadShim({ costUrl: 'http://localhost:3543/' });
+    const result = shim.hub.invoke('session.cost', { session: 's1' });
     shim.endWait();
-    await shim.hub.invoke('session.cost', {});
-    const navs = shim.sent().filter((m) => m.type === 'hub:navigate');
-    assert.equal(shim.hub.can('session.cost'), true);
-    assert.deepEqual(
-      navs.map((m) => ({ ...m })),
-      [
-        { type: 'hub:navigate', app: 'cost', url: '?view=detail&session=a%20b' },
-        { type: 'hub:navigate', app: 'cost', url: undefined },
-      ],
-    );
+    assert.equal((await result).ok, false);
+    assert.equal(shim.hub.can('session.cost'), false);
+    assert.deepEqual(shim.opened, []);
   });
 
   it('opens --cost-url standalone, and cannot without it', async () => {
@@ -217,21 +200,6 @@ describe('project.plugins and project.memory', () => {
     shim.hub.invoke('project.plugins', { project: 'C:/p' });
     const call = shim.sent().find((m) => m.type === 'hub:invoke');
     assert.deepEqual({ ...call, id: 0 }, { type: 'hub:invoke', id: 0, action: 'project.plugins', params: { project: 'C:/p' } });
-  });
-
-  it('falls back to hub:navigate when the hub sends no welcome', async () => {
-    const shim = await loadShim();
-    shim.endWait();
-    await shim.hub.invoke('project.plugins', { project: 'C:/a b' });
-    await shim.hub.invoke('project.memory', {});
-    const navs = shim.sent().filter((m) => m.type === 'hub:navigate');
-    assert.deepEqual(
-      navs.map((m) => ({ ...m })),
-      [
-        { type: 'hub:navigate', app: 'marketplace', url: '?project=C%3A%2Fa+b' },
-        { type: 'hub:navigate', app: 'memory', url: undefined },
-      ],
-    );
   });
 
   it('opens the --*-url flags standalone, and cannot without them', async () => {

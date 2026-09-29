@@ -10245,9 +10245,6 @@ function filterByOwner(value) {
 // reattaches and the server replays the screen.
 const TERMINAL_TOKEN_KEY = 'terminal-token';
 const TERMINAL_TOKEN_RE = /^[0-9a-f]{64}$/;
-// Ctrl+Alt letters cck keeps instead of forwarding to the hub: New session, Resume session, and
-// Swap to the previous session.
-const CCK_CTRL_ALT_KEYS = new Set(['KeyN', 'KeyR', 'KeyS']);
 const TERMINAL_MODES_KEY = 'terminal-sessions';
 const TERMINAL_FONT_KEY = 'terminal-font-size';
 const TERMINAL_FONT_MIN = 8;
@@ -11868,12 +11865,6 @@ window.addEventListener('popstate', () => {
 const costDetail = (session) => `?view=detail&session=${encodeURIComponent(session)}`;
 const projectQuery = (project) => `?${new URLSearchParams({ project })}`;
 const hub = ClaudeHub.connect({
-  reserved: [...CCK_CTRL_ALT_KEYS].map((code) => `ctrl+alt+${code.slice(3).toLowerCase()}`),
-  legacy: {
-    'session.cost': (p) => ({ app: 'cost', url: p.session ? costDetail(p.session) : undefined }),
-    'project.plugins': (p) => ({ app: 'marketplace', url: p.project ? projectQuery(p.project) : undefined }),
-    'project.memory': (p) => ({ app: 'memory', url: p.project ? projectQuery(p.project) : undefined }),
-  },
   // A function, because the --*-url flags arrive with /api/config after connect.
   standalone: () => ({
     ...(appConfig.costUrl && {

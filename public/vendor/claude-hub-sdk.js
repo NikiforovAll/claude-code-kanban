@@ -1,5 +1,5 @@
-// claude-hub-sdk 0.0.0 (sha256 8ff4c950d349). Copied by npm run sdk:sync in claude-code-hub. Do not edit.
-// Claude Code Hub SDK: the app side of the hub protocol v1, with the v0 fallback.
+// claude-hub-sdk 0.0.0 (sha256 35f20e1ea00d). Copied by npm run sdk:sync in claude-code-hub. Do not edit.
+// Claude Code Hub SDK: the app side of the hub protocol v1.
 // A classic script. Load it as the first element in <body>, with no defer or async,
 // so the cached theme is on the page before the first paint (protocol section 6, rule 3).
 ((root) => {
@@ -16,9 +16,6 @@
     const mods = [e.ctrlKey && 'ctrl', e.altKey && 'alt', e.shiftKey && 'shift', e.metaKey && 'meta'];
     return [...mods, key].filter(Boolean).join('+');
   }
-
-  // What a hub with no key list expects (protocol section 11, legacy filter).
-  const LEGACY_COMBO = /^(?:ctrl\+alt\+(?:shift\+)?(?:meta\+)?Arrow(?:Left|Right)|ctrl\+alt\+[a-z]|alt\+[1-9])$/;
 
   function isVars(v) {
     return (
@@ -71,9 +68,8 @@
 
     if (framed) setVars(readVars());
 
-    function connect({ standalone = {}, legacy = {}, reserved = [] } = {}) {
+    function connect({ standalone = {} } = {}) {
       if (hub) return hub;
-      const reservedCombos = new Set(reserved);
       const topics = new Map();
       const activeFns = new Set();
       const statusFns = new Set();
@@ -84,16 +80,16 @@
       let status = 'connecting';
       let origin = null;
       let welcome = null;
-      let helloTopics = new Set();
       let forward = null;
       let themeBinding = null;
       let lastTheme = null;
       let nextId = 0;
 
       const waiting = () => status === 'connecting' || status === 'waiting';
-      const fallback = () => {
-        if (status !== 'standalone') return legacy;
-        return typeof standalone === 'function' ? standalone() : standalone;
+      const standaloneFn = (action) => {
+        if (status !== 'standalone') return null;
+        const fn = (typeof standalone === 'function' ? standalone() : standalone)[action];
+        return typeof fn === 'function' ? fn : null;
       };
 
       function post(msg) {
@@ -149,17 +145,6 @@
             if (typeof m.topic !== 'string') return;
             if (m.topic === 'theme.changed') return themeIn(m.payload);
             return emit(m.topic, m.payload);
-          case 'hub:theme':
-            if (welcome && helloTopics.has('theme.changed')) return;
-            if (welcome && !m.vars && welcome.themes.length) return;
-            return themeIn({ theme: m.theme, colorTheme: m.colorTheme, ...(m.vars ? { vars: m.vars } : {}) });
-          case 'hub:project':
-            if (welcome && helloTopics.has('project.changed')) return;
-            if (typeof m.encoded !== 'string' || !m.encoded) return;
-            return emit('project.changed', { project: m.project, encoded: m.encoded, name: m.name });
-          case 'hub:keys':
-            if (!welcome && Array.isArray(m.keys)) forward = strings(m.keys);
-            return;
           case 'hub:active':
             for (const fn of activeFns) fn(!!m.active);
             return;
@@ -183,10 +168,7 @@
       }
 
       function forwards(e) {
-        if (!origin) return false;
-        const combo = comboOf(e);
-        if (forward) return forward.has(combo);
-        return !reservedCombos.has(combo) && LEGACY_COMBO.test(combo);
+        return !!forward && forward.has(comboOf(e));
       }
 
       function onKeydown(e) {
@@ -209,15 +191,10 @@
           pending.set(id, resolve);
           return post({ type: 'hub:invoke', id, action, params });
         }
-        const table = fallback();
-        const target = typeof table[action] === 'function' ? table[action](params) : null;
+        const target = standaloneFn(action)?.(params);
         if (!target) return resolve({ ok: false, reason: 'unhandled' });
-        if (status === 'standalone') {
-          win.open(target, '_blank', 'noopener');
-          return resolve({ ok: true, handledBy: 'standalone' });
-        }
-        post({ type: 'hub:navigate', app: target.app, url: target.url });
-        resolve({ ok: true, handledBy: target.app });
+        win.open(target, '_blank', 'noopener');
+        resolve({ ok: true, handledBy: 'standalone' });
       }
 
       win.addEventListener('message', onMessage);
@@ -243,13 +220,13 @@
 
       Promise.all([config, loaded]).then(() => {
         if (!origin) return;
-        helloTopics = new Set(topics.keys());
-        post({ type: 'hub:hello', protocol: [1], subscribes: [...helloTopics] });
+        post({ type: 'hub:hello', protocol: [1], subscribes: [...topics.keys()] });
         setStatus('waiting');
+        // A hub older than protocol v1 never answers. The app then runs as if alone, with no hub calls.
         win.setTimeout(() => {
           if (welcome) return;
           adoptVars(null);
-          setStatus('legacy');
+          setStatus('unanswered');
         }, WELCOME_WAIT_MS);
       });
 
@@ -308,8 +285,7 @@
         },
         can(action) {
           if (status === 'live') return welcome.actions.has(action);
-          if (status === 'connecting') return false;
-          return typeof fallback()[action] === 'function';
+          return !!standaloneFn(action);
         },
         // For an element that eats keys before the document sees them, like a terminal.
         forwards,
