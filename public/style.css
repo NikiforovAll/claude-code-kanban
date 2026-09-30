@@ -7269,6 +7269,11 @@ pre.mermaid svg {
   background: var(--accent-dim);
 }
 
+/* An empty section shows only while a drag needs its ungroup drop zone. */
+.sessions-list:not(.sg-dragging-active) .sg-section-empty {
+  display: none;
+}
+
 .sessions-list.sg-dragging-active .sg-ungroup-zone {
   border: 1px dashed var(--accent);
   border-radius: 4px;

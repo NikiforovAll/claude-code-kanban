@@ -3508,12 +3508,13 @@ function renderSessions() {
     return `<span class="group-count" title="${active} active / ${arr.length} total">${active > 0 ? `<span class="group-count-active">${active}</span><span class="group-count-sep">/</span>` : ''}${arr.length}</span>`;
   };
   // `ungroup` marks the label as the drop target for pulling an item out of a named group.
-  const sectionHtml = (key, text, ungroup, body) => {
+  const sectionHtml = (key, text, ungroup, body, empty = false) => {
     const collapsed = collapsedProjectGroups.has(key);
     const escPath = escapeHtml(key);
     const title = ungroup ? 'Click to collapse — drop here to remove from a group' : 'Click to collapse';
-    return `<div class="sg-section-label sg-section-toggle${ungroup ? ' sg-ungroup-zone' : ''}${collapsed ? ' collapsed' : ''}" data-group-path="${escPath}" title="${escapeHtml(title)}">${groupChevronSvg(10)}<span>${text}</span></div>
-      <div class="sg-section-body${collapsed ? ' collapsed' : ''}" data-group-path="${escPath}">${body}</div>`;
+    const emptyCls = empty ? ' sg-section-empty' : '';
+    return `<div class="sg-section-label sg-section-toggle${ungroup ? ' sg-ungroup-zone' : ''}${collapsed ? ' collapsed' : ''}${emptyCls}" data-group-path="${escPath}" title="${escapeHtml(title)}">${groupChevronSvg(10)}<span>${text}</span></div>
+      <div class="sg-section-body${collapsed ? ' collapsed' : ''}${emptyCls}" data-group-path="${escPath}">${body}</div>`;
   };
 
   const renderGroupSessions = (sessions, pinKey) => {
@@ -3734,14 +3735,15 @@ function renderSessions() {
       }
     }
 
-    html += sectioned ? sectionHtml(SECTION_PROJECTS, 'Projects', true, projectsHtml) : projectsHtml;
+    const noProjects = sortedGroups.length === 0 && ungrouped.length === 0;
+    html += sectioned ? sectionHtml(SECTION_PROJECTS, 'Projects', true, projectsHtml, noProjects) : projectsHtml;
 
     sessionsList.innerHTML = html;
   } else {
     const sectioned = sessionGroups.length > 0 || transientGroups.size > 0;
     const restHtml =
       sectioned && collapsedProjectGroups.has(SECTION_SESSIONS) ? '' : sgRest.map(renderSessionCard).join('');
-    const tail = sectioned ? sectionHtml(SECTION_SESSIONS, 'Sessions', true, restHtml) : restHtml;
+    const tail = sectioned ? sectionHtml(SECTION_SESSIONS, 'Sessions', true, restHtml, sgRest.length === 0) : restHtml;
     sessionsList.innerHTML = html + sgSectionHtml(true) + tail;
   }
 
@@ -4910,6 +4912,7 @@ function getNavigableItems() {
   // into the body to reach the blocks inside.
   const walkTopLevel = (children) => {
     for (const el of children) {
+      if (el.classList.contains('sg-section-empty')) continue;
       if (
         el.classList.contains('project-group-header') ||
         el.classList.contains('session-group-header') ||
