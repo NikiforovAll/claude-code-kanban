@@ -3132,6 +3132,14 @@ body.booting .boot-splash {
   animation: boot-fade 0.3s ease-out 0.2s both;
 }
 
+.terminal-boot-slow {
+  display: none;
+}
+
+.terminal-boot.slow .terminal-boot-slow {
+  display: block;
+}
+
 /* Opacity, not visibility: a hidden textarea drops focus, and the terminal must keep it. */
 .terminal-pane:has(.terminal-boot.visible) .xterm {
   opacity: 0;
@@ -5666,7 +5674,8 @@ body.light .msg-assistant .msg-text {
 
 /* keycap chips: elevated fill + thicker bottom border reads as a key */
 .sp-hint kbd,
-.shortcuts kbd {
+.shortcuts kbd,
+.terminal-boot-slow kbd {
   display: inline-flex;
   align-items: center;
   justify-content: center;

@@ -10495,6 +10495,11 @@ function terminalPaneFocused() {
 
 const TEXT_FIELD_SELECTOR = 'input, textarea, select, [contenteditable]';
 
+function inPageField(e) {
+  const field = e.target?.closest?.(TEXT_FIELD_SELECTOR);
+  return !!field && !document.getElementById('terminal-pane').contains(field);
+}
+
 function terminalShortcut(e) {
   const ctrlAlt = e.ctrlKey && e.altKey && !e.shiftKey && !e.metaKey;
   const ctrlShift = e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey;
@@ -10504,13 +10509,11 @@ function terminalShortcut(e) {
     return () => adjustTerminalFontSize(Math.sign(zoom));
   }
   if (ctrlAlt && e.code === 'KeyS') return swapToPreviousSession;
+  if (matchKey(e, 'KeyR') && terminalConnectSlow() && wantsTerminal() && !inPageField(e)) return reconnectTerminal;
   // Cancelling the default also stops Chrome's system print dialog, which this page has no use for.
   if (ctrlShift && e.code === 'KeyP') return toggleSessionPicker;
   // Ctrl+Shift+Z is redo in a text field, so only the terminal's own textarea gives it up.
-  if (ctrlShift && e.code === 'KeyZ') {
-    const field = e.target?.closest?.(TEXT_FIELD_SELECTOR);
-    return field && !document.getElementById('terminal-pane').contains(field) ? null : toggleZenMode;
-  }
+  if (ctrlShift && e.code === 'KeyZ') return inPageField(e) ? null : toggleZenMode;
   if (ctrlAlt && (e.code === 'KeyN' || e.code === 'KeyR') && terminalAvailable()) {
     return () => openNewSession(null, e.code === 'KeyR');
   }
@@ -10876,20 +10879,42 @@ function hideTerminalPrompt() {
 
 const TERMINAL_BOOT_VERBS = ['Waking Claude…', 'Clawding…', 'Warming up the terminal…', 'Summoning the session…'];
 const TERMINAL_BOOT_MAX_MS = 15000;
+// The server answers `ready` as soon as the socket attaches, even before Claude draws, so a wait
+// this long is the connection: under the hub a loopback connect can hang until its timeout.
+const TERMINAL_SLOW_CONNECT_MS = 1500;
 let terminalBootTimer = null;
+let terminalSlowTimer = null;
 
 // A new PTY shows only a blinking cursor until Claude draws its first frame.
 function showTerminalBoot() {
   document.getElementById('terminal-boot-verb').textContent = pickRandom(TERMINAL_BOOT_VERBS);
   document.getElementById('terminal-boot').classList.add('visible');
   clearTimeout(terminalBootTimer);
-  terminalBootTimer = setTimeout(hideTerminalBoot, TERMINAL_BOOT_MAX_MS);
+  terminalBootTimer = setTimeout(() => {
+    if (!terminalConnectSlow()) hideTerminalBoot();
+  }, TERMINAL_BOOT_MAX_MS);
 }
 
 function hideTerminalBoot() {
   clearTimeout(terminalBootTimer);
   terminalBootTimer = null;
+  clearTerminalSlow();
   document.getElementById('terminal-boot').classList.remove('visible');
+}
+
+function clearTerminalSlow() {
+  clearTimeout(terminalSlowTimer);
+  terminalSlowTimer = null;
+  document.getElementById('terminal-boot').classList.remove('slow');
+}
+
+function terminalConnectSlow() {
+  return document.getElementById('terminal-boot').classList.contains('slow');
+}
+
+function reconnectTerminal() {
+  const id = termState.sessionId;
+  if (id) openTerminal(id, terminalOpenMode(id));
 }
 
 function showTerminalPrompt(sessionId, title, detail, choices, output = '') {
@@ -10987,6 +11012,11 @@ async function openTerminal(sessionId, mode, attempt = 0) {
   const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/api/terminal/ws`);
   ws.binaryType = 'arraybuffer';
   termState.ws = ws;
+  if (!attempt) {
+    terminalSlowTimer = setTimeout(() => {
+      if (termState.ws === ws) document.getElementById('terminal-boot').classList.add('slow');
+    }, TERMINAL_SLOW_CONNECT_MS);
+  }
   const spec = newSpecs.get(sessionId);
   let readyAt = 0;
   let refused = false;
@@ -11089,6 +11119,7 @@ function onTerminalMessage(sessionId, msg) {
     // The server has the prompt now; a later start of the same placeholder must not send it again.
     const spec = newSpecs.get(sessionId);
     if (spec) spec.prompt = null;
+    clearTerminalSlow();
     hideTerminalPrompt();
     setTerminalStatus('');
     setTerminalAttached(true);
