@@ -1,4 +1,4 @@
-// claude-hub-sdk 1.0.0 (sha256 17957c297dc7). Copied by npm run sdk:sync in claude-code-hub. Do not edit.
+// claude-hub-sdk 1.1.0 (sha256 0fed14faa670). Copied by npm run sdk:sync in claude-code-hub. Do not edit.
 // Claude Code Hub SDK: the app side of the hub protocol v1.
 // A classic script. Load it as the first element in <body>, with no defer or async,
 // so the cached theme is on the page before the first paint (protocol section 6, rule 3).
@@ -76,6 +76,7 @@
       const handlers = new Map();
       const pending = new Map();
       const tokenWaiters = new Set();
+      const themesFns = new Set();
       const queued = [];
       // Topic → payload: the latest publish before welcome.
       const outbox = new Map();
@@ -85,6 +86,7 @@
       let forward = null;
       let themeBinding = null;
       let lastTheme = null;
+      let swatchesPainted = false;
       let nextId = 0;
 
       const waiting = () => status === 'connecting' || status === 'waiting';
@@ -132,11 +134,35 @@
         emit('theme.changed', p);
       }
 
+      // The rules have the form scripts/generate-themes.mjs writes into each app's themes.css, so a
+      // built-in id gets the hub's swatch, which carries the user's change to that theme.
+      function pickerThemes() {
+        if (!swatchesPainted) {
+          swatchesPainted = true;
+          const vars = (s) =>
+            ['bg', 'accent', 'ink', 'border']
+              .filter((k) => typeof s?.[k] === 'string')
+              .map((k) => `--sw-${k}: ${s[k]};`)
+              .join(' ');
+          const style = doc.createElement('style');
+          style.textContent = welcome.themes
+            .map(
+              (t) =>
+                `.theme-swatch-${t.id} { ${vars(t.swatch?.dark)} }\nbody.light .theme-swatch-${t.id} { ${vars(t.swatch?.light)} }`,
+            )
+            .join('\n');
+          doc.head.appendChild(style);
+        }
+        return welcome.themes.map(({ id, label }) => ({ id, label }));
+      }
+
       function onWelcome(m) {
         if (m.protocol !== 1 || welcome) return;
         welcome = { actions: strings(m.actions), themes: Array.isArray(m.themes) ? m.themes : [] };
         forward = strings(m.forward);
         setStatus('live');
+        if (welcome.themes.length) for (const fn of themesFns) fn(pickerThemes());
+        themesFns.clear();
       }
 
       function onMessage(e) {
@@ -258,6 +284,16 @@
         onActive(fn) {
           activeFns.add(fn);
           return () => activeFns.delete(fn);
+        },
+        // Calls fn once with the hub's themes as [{id, label}], after it paints their picker swatches
+        // (protocol section 6, rule 5). Never when standalone, with no welcome, or when the hub has no themes.
+        onThemes(fn) {
+          if (!welcome) {
+            themesFns.add(fn);
+            return () => themesFns.delete(fn);
+          }
+          if (welcome.themes.length) fn(pickerThemes());
+          return () => {};
         },
         subscribe(topic, fn) {
           const fns = topicFns(topic);
