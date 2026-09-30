@@ -23,6 +23,7 @@ const {
   readCompactSummaries,
   findTerminatedTeammates,
   extractPromptFromTranscript,
+  extractAgentResultFromTranscript,
   readScratchpadCreations,
   updateLoopInfo,
   buildLoopInfoFromState
@@ -1378,5 +1379,40 @@ describe('buildAgentProgressMap: foreground agent usage chip', () => {
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('Parser: extractAgentResultFromTranscript', () => {
+  const toolUse = (name, input) =>
+    JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: `toolu_${name}`, name, input }] } });
+  const text = (t) => JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: t }] } });
+
+  function extract(lines) {
+    const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'parser-test-'));
+    const file = path.join(tmpDir, 'agent.jsonl');
+    writeFileSync(file, lines.join('\n') + '\n');
+    try {
+      return extractAgentResultFromTranscript(file);
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }
+
+  it('takes the message of a SubagentHandback call', () => {
+    assert.equal(extract([text('working'), toolUse('SubagentHandback', { message: 'I found 7 findings.' })]), 'I found 7 findings.');
+  });
+
+  it('formats a StructuredOutput call', () => {
+    assert.equal(extract([toolUse('StructuredOutput', { summary: 'ok', items: [1] })]), '### summary\n\nok\n\n### items\n\n```json\n[\n  1\n]\n```');
+  });
+
+  it('takes the last result call when there are several', () => {
+    const lines = [toolUse('SubagentHandback', { message: 'first' }), toolUse('StructuredOutput', { summary: 'last' })];
+    assert.equal(extract(lines), '### summary\n\nlast');
+  });
+
+  it('returns null without a result call or with an empty handback', () => {
+    assert.equal(extract([text('done')]), null);
+    assert.equal(extract([toolUse('SubagentHandback', { message: '' })]), null);
   });
 });

@@ -27,7 +27,7 @@ const {
   readScratchpadCreations,
   extractPromptFromTranscript,
   extractModelFromTranscript,
-  extractStructuredResultFromTranscript,
+  extractAgentResultFromTranscript,
   extractTranscriptStats,
   readFullToolResult,
   readUserImage,
@@ -2344,6 +2344,10 @@ app.get('/api/teams/:name', (req, res) => {
 });
 
 // API: Get agents for a session
+// The resultUnavailable latch is persisted on the agent record. Bump this when
+// extractAgentResultFromTranscript finds more, so agents latched earlier rescan once.
+const RESULT_SCAN = 2;
+
 app.get('/api/sessions/:sessionId/agents', (req, res) => {
   const sessionId = resolveSessionId(req.params.sessionId);
   const agentDir = path.join(AGENT_ACTIVITY_DIR, sessionId);
@@ -2504,22 +2508,23 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
     }
 
     // Workflow-spawned subagents given a schema end on a forced StructuredOutput
-    // tool call and never emit a text lastMessage — surface that structured result
-    // as the agent's response. Only stopped agents (complete transcript); latch
+    // tool call (background subagents on SubagentHandback) and never emit a text
+    // lastMessage — surface that result as the agent's response.
+    // Only stopped agents (complete transcript); latch
     // resultUnavailable so we tail-read at most once per agent. Workflow subagents
     // are exempt from the latch: the poll that flips them to "stopped" can beat the
     // transcript's final StructuredOutput line to disk, latching resultUnavailable
     // against an incomplete transcript — so always re-attempt for them, mirroring
     // the prompt/name/description reconcile above.
     const agentsNeedingResult = agents.filter(
-      (a) => !a.lastMessage && !isAgentLive(a) && (!a.resultUnavailable || a.type === 'workflow-subagent'),
+      (a) => !a.lastMessage && !isAgentLive(a) && (a.resultUnavailable !== RESULT_SCAN || a.type === 'workflow-subagent'),
     );
     if (agentsNeedingResult.length && meta.jsonlPath) {
       for (const agent of agentsNeedingResult) {
         let result = null;
-        try { result = extractStructuredResultFromTranscript(subagentJsonlForExtraction(meta, agent.agentId)); } catch (_) {}
+        try { result = extractAgentResultFromTranscript(subagentJsonlForExtraction(meta, agent.agentId)); } catch (_) {}
         if (result) agent.lastMessage = result;
-        else agent.resultUnavailable = true;
+        else agent.resultUnavailable = RESULT_SCAN;
         dirty.add(agent);
       }
     }

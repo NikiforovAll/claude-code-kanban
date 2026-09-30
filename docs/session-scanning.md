@@ -37,8 +37,11 @@ These run only when an API request is served (no background timer).
 | Task-map scan | `sessionToTaskListCache` | `TASK_MAP_SCAN_TTL = 5000` ms | `server.js:271` |
 | `readRecentMessages()` / session info | `messageCache` (keyed by mtime) | invalidates on file mtime change | `server.js:382` |
 | `updateLoopInfo()` (ScheduleWakeup / Cron* scan) | `loopInfoStateByPath` (per-path incremental state) | warmed by `projectsWatcher` events; request path is O(1) on hit | `lib/parsers.js` + `server.js` |
+| `extractAgentResultFromTranscript()` (subagent response) | saved on the agent record; a miss latches `resultUnavailable = RESULT_SCAN` | once per stopped agent and `RESULT_SCAN` value; workflow subagents retry until found | `lib/parsers.js` + `server.js` |
 | `getWorkflowInfoSummary()` (Workflow-tool script badge) | `workflowIndexCache` (`Map<sessionId, scripts[]>`) | `WORKFLOW_INDEX_TTL_MS = 5000` ms | `server.js` |
 | `readWorkflowJournal()` / `getWorkflowMeta()` (workflow run + live views) | `workflowJournalCache` / `workflowMetaCache` | `cachedByMtime`, keyed by file path | `server.js` |
+
+> `extractAgentResultFromTranscript()` fills the response of a subagent whose `lastMessage` is empty, because it ended on a tool call: the last `SubagentHandback` message or formatted `StructuredOutput` input in a 1 MB tail read of its transcript.
 
 > `readRecentMessages()` dispatches transcript lines by `type`. Besides `user`/`assistant`/`teammate`, it surfaces `queue-operation` (`operation: 'enqueue'`) lines as user messages flagged `queued: true`. Queued text lives at the top-level `content`, not under `message.content`, and is never re-emitted as a `type:'user'` line, so without this branch it never renders.
 
