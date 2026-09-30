@@ -802,6 +802,19 @@
     </div>
   </div>
 
+  <div id="project-picker-modal" class="modal-overlay top-aligned" onclick="closeProjectPicker()">
+    <div class="modal session-picker" onclick="event.stopPropagation()">
+      <input type="text" id="project-picker-input" class="form-input sp-input" placeholder="Filter by project..." autocomplete="off" spellcheck="false">
+      <div class="pp-chips">
+        <button type="button" class="pf-recent" id="pp-recent-chip" aria-pressed="false" title="List only projects active in the last 24h" onclick="ppToggleRecentOnly()">Recent</button>
+      </div>
+      <div class="sp-body">
+        <div id="project-picker-list" class="sp-list"></div>
+      </div>
+      <div class="sp-hint"><kbd>&uarr;</kbd><kbd>&darr;</kbd> move &middot; <kbd>Enter</kbd> filter &middot; <kbd>Alt</kbd><kbd>R</kbd> recent &middot; <kbd>Alt</kbd><kbd>C</kbd> reset filter &middot; <kbd>Esc</kbd> close</div>
+    </div>
+  </div>
+
   <div id="toast" class="toast"></div>
 </body>
 </html>

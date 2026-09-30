@@ -6076,6 +6076,17 @@ select.form-input option:checked {
   font-size: 11px;
 }
 
+.pp-chips {
+  display: flex;
+  gap: 6px;
+}
+
+.sp-row.recent .sp-name::before {
+  content: '•';
+  margin-right: 5px;
+  color: var(--accent-text);
+}
+
 /* #endregion */
 
 /* #region NEW_SESSION */

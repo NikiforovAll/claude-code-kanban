@@ -5529,6 +5529,7 @@ const SHORTCUT_PAIRS = [
       rows: [
         { keys: ['P'], label: 'Open plan' },
         { keys: ['Ctrl', 'Shift', 'P'], combo: true, label: 'Session picker' },
+        { keys: ['Shift', 'P'], combo: true, label: 'Project picker (this board)' },
         { keys: ['I'], label: 'Session info' },
         { keys: ['.'], label: 'Pin / unpin' },
         { keys: ['>'], label: 'Toggle sticky' },
@@ -6287,6 +6288,7 @@ const MODAL_CLOSERS = {
   'agent-modal': () => closeAgentModal(),
   'help-modal': () => closeHelpModal(),
   'session-picker-modal': () => closeSessionPicker(),
+  'project-picker-modal': () => closeProjectPicker(),
   'terminal-manager-modal': () => closeTerminalManager(),
   'new-session-modal': () => closeNewSession(),
 };
@@ -6405,6 +6407,11 @@ document.addEventListener('keydown', (e) => {
   if (e.code === 'KeyL' && e.shiftKey) {
     e.preventDefault();
     toggleMessagePanel();
+    return;
+  }
+  if (e.code === 'KeyP' && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+    e.preventDefault();
+    openProjectPicker();
     return;
   }
   if (e.code === 'KeyM' && e.shiftKey) {
@@ -9696,6 +9703,119 @@ function initSessionPicker() {
 }
 //#endregion
 
+//#region PROJECT_PICKER
+// Sets only this board's project filter; a later hub project.changed replaces it.
+let ppRows = [];
+let ppIdx = 0;
+let ppSource = null;
+let ppRecentOnly = false;
+
+async function openProjectPicker() {
+  const input = document.getElementById('project-picker-input');
+  input.value = '';
+  renderProjectPicker();
+  document.getElementById('project-picker-modal').classList.add('visible');
+  input.focus();
+  await refreshProjectList();
+  ppSource = (projectsCache || [])
+    .filter((p) => !p.temp)
+    .map((p) => ({ ...p, norm: normalizeProjectPath(p.path) }))
+    .sort((a, b) => (b.modifiedAt || '').localeCompare(a.modifiedAt || ''));
+  renderProjectPicker();
+}
+
+function ppToggleRecentOnly() {
+  ppRecentOnly = !ppRecentOnly;
+  document.getElementById('pp-recent-chip').setAttribute('aria-pressed', String(ppRecentOnly));
+  renderProjectPicker();
+  document.getElementById('project-picker-input').focus();
+}
+
+function ppSetProject(project) {
+  closeProjectPicker();
+  if (project !== filterProject) filterByProject(project);
+}
+
+function closeProjectPicker() {
+  hideModalOverlay('project-picker-modal');
+}
+
+function renderProjectPicker() {
+  const list = document.getElementById('project-picker-list');
+  const query = document.getElementById('project-picker-input').value.trim();
+  const source = ppSource || [];
+  const pool = ppRecentOnly ? source.filter((p) => recentProjects.has(p.path)) : source;
+  ppRows = query ? pool.filter((p) => fuzzyMatch(p.path, query)) : pool;
+  if (!ppRows.length) {
+    ppIdx = -1;
+    const empty = ppRecentOnly ? `No project active in the last ${RECENT_PROJECT_HOURS}h` : 'No project matches';
+    list.innerHTML = `<div class="sp-empty">${ppSource ? empty : 'Loading projects…'}</div>`;
+    return;
+  }
+  const current = filterProject && normalizeProjectPath(filterProject);
+  list.innerHTML = ppRows
+    .map((p, i) => {
+      const cls = `${p.norm === current ? ' current' : ''}${recentProjects.has(p.path) ? ' recent' : ''}`;
+      return `<button class="sp-row${cls}" data-idx="${i}">
+        <span class="sp-name">${escapeHtml(pathBasename(p.path))}</span>
+        <span class="sp-project">${escapeHtml(p.path)}</span>
+        ${p.modifiedAt ? `<span class="sp-time">${formatDate(p.modifiedAt)}</span>` : ''}
+      </button>`;
+    })
+    .join('');
+  const currentIdx = ppRows.findIndex((p) => p.norm === current);
+  ppSelect(query ? 0 : Math.max(0, currentIdx));
+}
+
+function ppSelect(idx) {
+  const list = document.getElementById('project-picker-list');
+  list.children[ppIdx]?.classList.remove('selected');
+  ppIdx = Math.min(Math.max(idx, 0), ppRows.length - 1);
+  const row = list.children[ppIdx];
+  row?.classList.add('selected');
+  row?.scrollIntoView({ block: 'nearest' });
+}
+
+function ppApply(idx) {
+  const row = ppRows[idx];
+  if (!row) return;
+  ppSetProject(row.path);
+}
+
+function initProjectPicker() {
+  const input = document.getElementById('project-picker-input');
+  input.addEventListener('input', renderProjectPicker);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeProjectPicker();
+    else if (matchKey(e, 'ArrowDown') || (e.ctrlKey && e.key === 'n')) ppSelect(ppIdx + 1);
+    else if (matchKey(e, 'ArrowUp') || (e.ctrlKey && !e.shiftKey && e.key === 'p')) ppSelect(ppIdx - 1);
+    else if (e.key === 'Enter') ppApply(ppIdx);
+    else if (e.altKey && !e.ctrlKey && !e.metaKey && e.code === 'KeyR') {
+      if (!e.repeat) ppToggleRecentOnly();
+    } else if (e.altKey && !e.ctrlKey && !e.metaKey && e.code === 'KeyC') ppSetProject(FILTER_DEFAULTS.project);
+    else return;
+    e.preventDefault();
+    e.stopPropagation();
+  });
+  document.getElementById('project-picker-list').addEventListener('click', (e) => {
+    const row = e.target.closest('.sp-row');
+    if (row) ppApply(Number(row.dataset.idx));
+  });
+  // Vimium's Escape only blurs the input; see initSessionPicker.
+  const modal = document.getElementById('project-picker-modal');
+  let pointerDown = false;
+  modal.addEventListener('mousedown', () => {
+    pointerDown = true;
+  });
+  document.addEventListener('mouseup', () => {
+    pointerDown = false;
+  });
+  input.addEventListener('blur', () => {
+    if (!pointerDown && modal.classList.contains('visible') && document.hasFocus()) closeProjectPicker();
+  });
+}
+//#endregion
+
 //#region PLAN
 function refreshOpenPlan() {
   if (!_planSessionId || !document.getElementById('plan-modal').classList.contains('visible')) return;
@@ -11612,6 +11732,7 @@ try {
 loadSessionGroups();
 initSessionGroupsDnd();
 initSessionPicker();
+initProjectPicker();
 try {
   const af = JSON.parse(store.getItem('activityFilter') || '[]');
   // biome-ignore lint/suspicious/useIterableCallbackReturn: forEach side-effect
