@@ -481,7 +481,7 @@ function loadLiveSessions(fresh = false) {
         try {
           const s = JSON.parse(readFileSync(path.join(SESSIONS_DIR, file), 'utf8'));
           if (s?.sessionId && s.kind === 'interactive') {
-            sessions.push({ sessionId: s.sessionId, pid: s.pid || null, cwd: s.cwd || null, startedAt: s.startedAt || 0, status: s.status || null });
+            sessions.push({ sessionId: s.sessionId, pid: s.pid || null, cwd: s.cwd || null, startedAt: s.startedAt || 0, status: s.status || null, name: s.name || null });
           }
         } catch (_) { /* skip invalid */ }
       }
@@ -500,6 +500,12 @@ function loadLiveSessions(fresh = false) {
 function isRegistryIdle(sessionId) {
   const live = loadLiveSessions().find(s => s.sessionId === sessionId);
   return live?.status === 'idle';
+}
+
+// The registry name is the address SendMessage and ListAgents use.
+function getPeerName(sessionId) {
+  const live = loadLiveSessions().find((s) => s.sessionId === sessionId && s.name && s.pid && isPidAlive(s.pid));
+  return live?.name ?? null;
 }
 
 // A registry file outlives a crashed claude, so the pid is probed rather than trusted.
@@ -1151,6 +1157,7 @@ function buildSessionObject(id, meta, overrides = {}) {
   return {
     id,
     name: getSessionDisplayName(id, meta),
+    peerName: getPeerName(id),
     slug: meta.slug || null,
     project: meta.project || null,
     cwd: meta.cwd || null,

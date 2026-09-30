@@ -3792,8 +3792,7 @@ function renderSession() {
   // happened to open the info modal or zen panel.
   loadSessionPads(currentSessionId);
 
-  const displayName =
-    session.customTitle || session.name || session.gitBranch || session.description || currentSessionId;
+  const displayName = session.name || session.description || currentSessionId;
 
   sessionTitle.textContent = displayName;
 
@@ -5575,7 +5574,7 @@ const SHORTCUT_PAIRS = [
       title: 'Copy',
       rows: [
         { keys: ['Shift', 'C'], combo: true, label: 'Session id' },
-        { keys: ['Ctrl', 'Shift', 'C'], combo: true, label: 'Resume command (claude -r <id>)' },
+        { keys: ['Ctrl', 'Shift', 'C'], combo: true, label: 'Session name (SendMessage address)' },
       ],
     },
     {
@@ -6630,11 +6629,16 @@ document.addEventListener('keydown', (e) => {
       showToast('No session selected');
       return;
     }
-    const text = e.ctrlKey ? `claude -r ${contextSid}` : contextSid;
-    const label = e.ctrlKey ? 'resume command' : 'session id';
+    const [text, label] = e.ctrlKey
+      ? [sessions.find((s) => s.id === contextSid)?.peerName, 'session name']
+      : [contextSid, 'session id'];
+    if (!text) {
+      showToast('No live session name: the session is not running');
+      return;
+    }
     navigator.clipboard
       .writeText(text)
-      .then(() => showToast(`Copied ${label}: ${contextSid.slice(0, 8)}`, 'success'))
+      .then(() => showToast(`Copied ${label}: ${e.ctrlKey ? text : text.slice(0, 8)}`, 'success'))
       .catch(() => showToast(`Failed to copy ${label}`));
     return;
   }
@@ -9266,6 +9270,9 @@ function showInfoModal(session, teamConfig, tasks, planContent, parentInfo) {
   // (tooltip + copy); `abbrev` only replaces the rendered text.
   const infoRows = [];
   infoRows.push(['Session', session.id, { openClaudeDir: true, openFile: session.jsonlPath }]);
+  if (session.peerName) {
+    infoRows.push(['Peer name', session.peerName]);
+  }
   if (parentInfo?.parentSessionId) {
     infoRows.push([
       parentInfo.relation === 'compact' ? 'Continued from' : 'Forked from',
