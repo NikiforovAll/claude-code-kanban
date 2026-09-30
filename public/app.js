@@ -2413,6 +2413,10 @@ function showToast(msg, type, action) {
   _toastTimer = setTimeout(hide, action ? 8000 : 2000);
 }
 
+function sendMessageAddress(peerName) {
+  return `SendMessage(${peerName})`;
+}
+
 async function copyWithFeedback(text, btn) {
   if (btn.dataset.copying) return;
   try {
@@ -6629,8 +6633,9 @@ document.addEventListener('keydown', (e) => {
       showToast('No session selected');
       return;
     }
+    const peerName = e.ctrlKey ? sessions.find((s) => s.id === contextSid)?.peerName : null;
     const [text, label] = e.ctrlKey
-      ? [sessions.find((s) => s.id === contextSid)?.peerName, 'session name']
+      ? [peerName && sendMessageAddress(peerName), 'session name']
       : [contextSid, 'session id'];
     if (!text) {
       showToast('No live session name: the session is not running');
@@ -9269,12 +9274,12 @@ function showInfoModal(session, teamConfig, tasks, planContent, parentInfo) {
   let html = '';
 
   // Session & project details as compact key-value rows
-  // Each row: [label, value, { openPath?, abbrev? }] — `value` is authoritative
-  // (tooltip + copy); `abbrev` only replaces the rendered text.
+  // Each row: [label, value, { openPath?, abbrev?, copy? }] — `value` is authoritative
+  // (tooltip + copy); `abbrev` only replaces the rendered text, `copy` the copied text.
   const infoRows = [];
   infoRows.push(['Session', session.id, { openClaudeDir: true, openFile: session.jsonlPath }]);
   if (session.peerName) {
-    infoRows.push(['Peer name', session.peerName]);
+    infoRows.push(['Peer name', session.peerName, { copy: sendMessageAddress(session.peerName) }]);
   }
   if (parentInfo?.parentSessionId) {
     infoRows.push([
@@ -9329,7 +9334,7 @@ function showInfoModal(session, teamConfig, tasks, planContent, parentInfo) {
     } else {
       html += `<span style="${plainStyle}" title="${escapeHtml(value)}">${escapeHtml(opts?.abbrev || value)}</span>`;
     }
-    const copyBtn = `<button onclick="copyWithFeedback('${escAttrJs(value)}', this)" title="Copy">${ICON_COPY}</button>`;
+    const copyBtn = `<button onclick="copyWithFeedback('${escAttrJs(opts?.copy || value)}', this)" title="Copy">${ICON_COPY}</button>`;
     let openBtn = '';
     if (opts?.openClaudeDir || opts?.openPath) {
       const folder = opts.openClaudeDir ? '' : escapeHtml(opts.openPath);
