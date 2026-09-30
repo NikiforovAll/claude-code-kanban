@@ -9758,8 +9758,7 @@ function renderProjectPicker() {
   const current = filterProject && normalizeProjectPath(filterProject);
   list.innerHTML = ppRows
     .map((p, i) => {
-      const cls = `${p.norm === current ? ' current' : ''}${recentProjects.has(p.path) ? ' recent' : ''}`;
-      return `<button class="sp-row${cls}" data-idx="${i}">
+      return `<button class="sp-row${p.norm === current ? ' current' : ''}${recentProjects.has(p.path) ? ' recent' : ''}" data-idx="${i}">
         <span class="sp-name">${escapeHtml(pathBasename(p.path))}</span>
         <span class="sp-project">${escapeHtml(p.path)}</span>
         ${p.modifiedAt ? `<span class="sp-time">${formatDate(p.modifiedAt)}</span>` : ''}
