@@ -8705,12 +8705,10 @@ function renderZenState() {
     : 'Zen mode: current session only (Ctrl+Shift+Z)';
 }
 
-// biome-ignore lint/correctness/noUnusedVariables: used in HTML
 function filterBySessions(value) {
   if (value === sessionFilter) return;
-  sessionFilter = value;
+  setSessionFilter(value);
   resetSessionPage();
-  if (value !== 'active') activityFilter.clear();
   renderFilterState();
   updateUrl();
   // Instant feedback from cached data, then refetch — the cached list was fetched
@@ -8719,6 +8717,11 @@ function filterBySessions(value) {
   renderSessions();
   renderActivityChip();
   fetchSessions(false);
+}
+
+function setSessionFilter(value) {
+  sessionFilter = value;
+  if (value !== 'active') activityFilter.clear();
 }
 
 function projectFilterText() {
@@ -9741,9 +9744,12 @@ function ppToggleRecentOnly() {
   document.getElementById('project-picker-input').focus();
 }
 
-function ppSetProject(project) {
+// One fetch for both filters: two in a row could land out of order.
+function ppSetFilters(project, session) {
   closeProjectPicker();
-  if (project !== filterProject) filterByProject(project);
+  if (project === filterProject) return filterBySessions(session);
+  setSessionFilter(session);
+  filterByProject(project);
 }
 
 function closeProjectPicker() {
@@ -9788,7 +9794,7 @@ function ppSelect(idx) {
 function ppApply(idx) {
   const row = ppRows[idx];
   if (!row) return;
-  ppSetProject(row.path);
+  ppSetFilters(row.path, ppRecentOnly ? 'active' : 'all');
 }
 
 function initProjectPicker() {
@@ -9801,7 +9807,8 @@ function initProjectPicker() {
     else if (e.key === 'Enter') ppApply(ppIdx);
     else if (e.altKey && !e.ctrlKey && !e.metaKey && e.code === 'KeyR') {
       if (!e.repeat) ppToggleRecentOnly();
-    } else if (e.altKey && !e.ctrlKey && !e.metaKey && e.code === 'KeyC') ppSetProject(FILTER_DEFAULTS.project);
+    } else if (e.altKey && !e.ctrlKey && !e.metaKey && e.code === 'KeyC')
+      ppSetFilters(FILTER_DEFAULTS.project, FILTER_DEFAULTS.session);
     else return;
     e.preventDefault();
     e.stopPropagation();
