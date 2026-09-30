@@ -5105,7 +5105,7 @@ function activateSelectedSession(items) {
   }
 }
 
-function setFocusZone(zone) {
+function setFocusZone(zone, target) {
   clearKbSelection();
   clearTaskSelection();
 
@@ -5114,8 +5114,11 @@ function setFocusZone(zone) {
     expandSidebar();
     const items = getNavigableItems();
     if (items.length > 0) {
+      const targetIdx = target ? items.indexOf(target) : -1;
       const activeIdx = items.findIndex((el) => el.classList.contains('active'));
-      if (activeIdx >= 0) {
+      if (targetIdx >= 0) {
+        selectSessionByIndex(targetIdx, items);
+      } else if (activeIdx >= 0) {
         selectSessionByIndex(activeIdx);
       } else if (selectedSessionKbId) {
         const restoredIdx = items.findIndex((el) => getKbId(el) === selectedSessionKbId);
@@ -5145,6 +5148,18 @@ function setFocusZone(zone) {
     }
   }
 }
+
+// A pointer click puts the keyboard cursor on the row, unless a task card or the terminal holds it.
+// Enter's el.click() arrives with detail 0 and already has the cursor.
+sessionsList.addEventListener('click', (e) => {
+  if (e.detail === 0 || e.target.closest(SG_ACTION_SELECTOR)) return;
+  const el = e.target.closest(
+    '.session-item, .project-group-header, .session-group-header, .pinned-sub-header, .sg-section-toggle',
+  );
+  if (!el) return;
+  const taskInUse = selectedTaskId && selectedSessionId === (el.dataset.sessionId || currentSessionId);
+  if (focusZone === 'sidebar' || (!taskInUse && !terminalPaneFocused())) setFocusZone('sidebar', el);
+});
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
 function getAvailableTasksOptions(currentTaskId = null) {
