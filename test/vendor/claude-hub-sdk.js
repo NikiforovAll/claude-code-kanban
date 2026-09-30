@@ -1,4 +1,4 @@
-// claude-hub-sdk 0.0.0 (sha256 35f20e1ea00d). Copied by npm run sdk:sync in claude-code-hub. Do not edit.
+// claude-hub-sdk 1.0.0 (sha256 17957c297dc7). Copied by npm run sdk:sync in claude-code-hub. Do not edit.
 // Claude Code Hub SDK: the app side of the hub protocol v1.
 // A classic script. Load it as the first element in <body>, with no defer or async,
 // so the cached theme is on the page before the first paint (protocol section 6, rule 3).
@@ -77,6 +77,8 @@
       const pending = new Map();
       const tokenWaiters = new Set();
       const queued = [];
+      // Topic → payload: the latest publish before welcome.
+      const outbox = new Map();
       let status = 'connecting';
       let origin = null;
       let welcome = null;
@@ -99,7 +101,10 @@
       function setStatus(next) {
         status = next;
         for (const fn of statusFns) fn(next);
-        if (!waiting()) for (const run of queued.splice(0)) run();
+        if (waiting()) return;
+        for (const run of queued.splice(0)) run();
+        for (const [topic, payload] of outbox) hub.publish(topic, payload);
+        outbox.clear();
       }
 
       function emit(topic, payload) {
@@ -276,6 +281,11 @@
         },
         handle(action, fn) {
           handlers.set(action, fn);
+        },
+        // The topic must be in the app's manifest `publishes`. Before welcome, only the latest payload per topic waits.
+        publish(topic, payload) {
+          if (status === 'live') post({ type: 'hub:publish', topic, payload });
+          else if (waiting()) outbox.set(topic, payload);
         },
         invoke(action, params = {}) {
           return new Promise((resolve) => {

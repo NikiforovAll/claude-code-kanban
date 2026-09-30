@@ -34,6 +34,9 @@ async function loadShim({ enabled = true, costUrl = null, marketplaceUrl = null,
     open: (...args) => opened.push(args),
     appConfig: { costUrl, marketplaceUrl, memoryUrl },
     onHubActive: (active) => calls.push(['active', active]),
+    sessions: [],
+    currentSessionId: null,
+    isSessionActive: (s) => !!s.live,
     filterProject: 'C:/p',
     filterByProject: (p) => calls.push(['filter', p]),
     setColorTheme: (id) => {
@@ -155,6 +158,44 @@ describe('hub state', () => {
     shim.receive({ type: 'hub:project', project: 'C:/q', encoded: 'C--q', name: 'q' });
     shim.receive({ type: 'hub:theme', theme: 'light', colorTheme: 'nord' });
     assert.deepEqual(shim.calls, []);
+  });
+});
+
+describe('session.changed', () => {
+  const show = (shim, id) => {
+    shim.context.currentSessionId = id;
+    vm.runInContext('schedulePublishSession()', shim.context);
+    shim.endWait();
+  };
+  const published = (shim) => JSON.parse(JSON.stringify(shim.sent().filter((m) => m.type === 'hub:publish')));
+
+  it('publishes each new session once, a placeholder only once it is real, and null for none', async () => {
+    const shim = await loadShim();
+    shim.receive(welcome([]));
+    shim.context.sessions = [
+      { id: 's1', project: 'C:/p', name: 'one', gitBranch: 'main', live: true },
+      { id: 's2', project: 'C:/q' },
+      { id: 'new', placeholder: true },
+    ];
+    show(shim, 's1');
+    show(shim, 's1');
+    show(shim, 'new');
+    vm.runInContext("cliOpenedId = 's2'", shim.context);
+    show(shim, 's2');
+    show(shim, null);
+    assert.deepEqual(published(shim), [
+      {
+        type: 'hub:publish',
+        topic: 'session.changed',
+        payload: { sessionId: 's1', project: 'C:/p', name: 'one', gitBranch: 'main', live: true, source: 'user' },
+      },
+      {
+        type: 'hub:publish',
+        topic: 'session.changed',
+        payload: { sessionId: 's2', project: 'C:/q', name: null, gitBranch: null, live: false, source: 'cli' },
+      },
+      { type: 'hub:publish', topic: 'session.changed', payload: null },
+    ]);
   });
 });
 

@@ -4,6 +4,7 @@
   "name": "Kanban",
   "icon": "columns",
   "run": { "entry": "server.js", "defaultPort": 3541 },
+  "publishes": ["session.changed"],
   "provides": {
     "projects": { "path": "/api/projects" },
     "terminal": { "liveWork": "/api/terminals" }

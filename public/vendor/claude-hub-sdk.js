@@ -1,4 +1,4 @@
-// claude-hub-sdk 0.0.0 (sha256 4c28932f90f3). Copied by npm run sdk:sync in claude-code-hub. Do not edit.
+// claude-hub-sdk 1.0.0 (sha256 17957c297dc7). Copied by npm run sdk:sync in claude-code-hub. Do not edit.
 // Claude Code Hub SDK stub: what an app serves when no hub runs it. Under a hub, the hub hands the
 // app its real SDK (client.js) in place of this file. The API must match client.js; a test checks it.
 ((root) => {
@@ -23,6 +23,7 @@
         subscribe: () => off,
         bindTheme: () => off,
         handle() {},
+        publish() {},
         invoke(action, params = {}) {
           const target = standaloneFn(action)?.(params);
           if (!target) return Promise.resolve({ ok: false, reason: 'unhandled' });

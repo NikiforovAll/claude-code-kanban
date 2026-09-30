@@ -184,6 +184,7 @@ function updateUrl() {
   history.replaceState(null, '', url);
   persistLastView();
   syncTerminal();
+  schedulePublishSession();
 }
 
 const LAST_VIEW_KEY = 'lastView';
@@ -290,6 +291,7 @@ async function fetchSessions(includeTasks = true) {
       sessions = mergePlaceholders(newSessions);
       renderSessions();
       renderActivityChip();
+      schedulePublishSession();
     }
     // A list too short to scroll gives no scroll event, so fill it until it can scroll.
     if (sessionsHasMore) setTimeout(loadMoreIfNearEnd);
@@ -534,9 +536,7 @@ async function fetchTasks(sessionId) {
     const newTasks = await res.json();
 
     const hash = JSON.stringify(newTasks);
-    if (sessionId === currentSessionId && hash === lastCurrentTasksHash) {
-      return;
-    }
+    if (sessionId === currentSessionId && hash === lastCurrentTasksHash) return;
     lastCurrentTasksHash = hash;
 
     currentTasks = newTasks;
@@ -6985,6 +6985,7 @@ function handleSessionOpenEvent(data) {
     stickySessionIds.add(id);
   }
   setSessionDismissed(id, false);
+  cliOpenedId = id;
   fetchTasks(id);
 }
 
@@ -10410,6 +10411,8 @@ function filterByOwner(value) {
 // leaving the session view or switching sessions drops only the socket; coming back
 // reattaches and the server replays the screen.
 const TERMINAL_TOKEN_KEY = 'terminal-token';
+// Every config dir's board is served on the hub's one kanban origin, so sessionStorage is shared.
+const TERMINAL_FOCUS_KEY = nsKey('terminal-focus');
 const TERMINAL_TOKEN_RE = /^[0-9a-f]{64}$/;
 const TERMINAL_MODES_KEY = 'terminal-sessions';
 const TERMINAL_FONT_KEY = 'terminal-font-size';
@@ -10983,6 +10986,34 @@ function syncCloseGuard() {
 window.addEventListener('beforeunload', (e) => {
   if (termState.closeGuard && !hub.inHub) e.preventDefault();
 });
+
+// A config-dir switch in the hub reloads this page, and coming back should put the cursor where it was.
+// The hub's palette takes focus first and clears activeElement here, so the last focus inside this
+// page is tracked instead; focus leaving the frame keeps it.
+let terminalHadFocus = false;
+document.addEventListener('focusin', () => {
+  terminalHadFocus = terminalPaneFocused();
+});
+document.addEventListener('focusout', (e) => {
+  if (e.relatedTarget) return;
+  setTimeout(() => {
+    if (document.hasFocus()) terminalHadFocus = terminalPaneFocused();
+  });
+});
+window.addEventListener('pagehide', () => {
+  try {
+    if (termState.attached && termState.shown && terminalHadFocus) {
+      sessionStorage.setItem(TERMINAL_FOCUS_KEY, currentSessionId);
+    } else sessionStorage.removeItem(TERMINAL_FOCUS_KEY);
+  } catch (_) {}
+});
+
+function restoreTerminalFocus(sessionId) {
+  try {
+    if (sessionStorage.getItem(TERMINAL_FOCUS_KEY) === sessionId) termState.focusNext = true;
+    sessionStorage.removeItem(TERMINAL_FOCUS_KEY);
+  } catch (_) {}
+}
 
 // The terminal stands in for the board, so it takes the board zone however focus arrives
 // (Tab, Alt+`, a click); leaveTerminalPane hands it back to the sidebar.
@@ -12007,6 +12038,7 @@ fetch('/api/config')
         showNoSession();
       }
     } else if (urlState.session) {
+      restoreTerminalFocus(urlState.session);
       await fetchTasks(urlState.session);
     } else {
       const last = loadLastView();
@@ -12017,6 +12049,7 @@ fetch('/api/config')
           showNoSession();
         }
       } else if (last?.view === 'session' && last.session && sessions.some((s) => s.id === last.session)) {
+        restoreTerminalFocus(last.session);
         await fetchTasks(last.session);
       } else {
         showNoSession();
@@ -12078,6 +12111,37 @@ const hub = ClaudeHub.connect({
 });
 
 hub.onActive((active) => onHubActive(active));
+
+// session.changed goes out once the switch settles, so arrowing through the list sends one event.
+let publishTimer = 0;
+let publishedSessionId;
+let cliOpenedId = null;
+
+function schedulePublishSession() {
+  clearTimeout(publishTimer);
+  publishTimer = setTimeout(publishSession, 150);
+}
+
+function publishSession() {
+  if (currentSessionId === publishedSessionId) return;
+  const s = currentSessionId ? sessions.find((x) => x.id === currentSessionId) : null;
+  // A placeholder publishes once its real row replaces it.
+  if (currentSessionId && (!s || s.placeholder)) return;
+  publishedSessionId = currentSessionId;
+  const source = currentSessionId === cliOpenedId ? 'cli' : 'user';
+  cliOpenedId = null;
+  hub.publish(
+    'session.changed',
+    s && {
+      sessionId: s.id,
+      project: s.project,
+      name: s.name || null,
+      gitBranch: s.gitBranch || null,
+      live: isSessionActive(s),
+      source,
+    },
+  );
+}
 
 // The help modal stops click propagation, so the document handler below never sees this link.
 // The service worker can pair a cached page that lacks the link with this script.
