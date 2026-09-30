@@ -12079,6 +12079,13 @@ const hub = ClaudeHub.connect({
 
 hub.onActive((active) => onHubActive(active));
 
+// The help modal stops click propagation, so the document handler below never sees this link.
+// The service worker can pair a cached page that lacks the link with this script.
+document.getElementById('help-docs')?.addEventListener('click', (e) => {
+  e.preventDefault();
+  hub.openExternal(e.currentTarget.href);
+});
+
 document.addEventListener('click', (e) => {
   if (!hub.inHub) return;
   const a = e.target.closest?.('a[href]');

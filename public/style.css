@@ -5607,6 +5607,25 @@ body.light .msg-assistant .msg-text {
   font-size: 14px;
 }
 
+.help-docs {
+  margin: 0 12px 0 auto;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-decoration: none;
+  white-space: nowrap;
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.help-docs:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
 /* One shared grid for both halves (key | label | spacer | key | label): each key
    gutter is sized by its column's widest combo, and left/right rows share row
    tracks, so paired groups line up — a shorter group just leaves empty rows.
