@@ -57,7 +57,7 @@ CCK_TERMINAL='{"enabled":true,"fontSize":14}' npx claude-code-kanban
 |---|---|---|
 | `enabled` | `false` | Turns on the terminal. `--enable-terminal` does the same. |
 | `shell` | Platform default | Shell to run. `--terminal-shell` and `CCK_TERMINAL_SHELL` win over it. |
-| `maxSessions` | `20` | Most terminals open at the same time. |
+| `maxSessions` | `30` | Most terminals open at the same time. |
 | `fontFamily` | Built-in font | Terminal font. |
 | `fontSize` | `13` | Font size in pixels. |
 | `scrollback` | `5000` | Lines kept in the scrollback buffer. |

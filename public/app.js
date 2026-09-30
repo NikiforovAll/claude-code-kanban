@@ -434,25 +434,24 @@ function isSessionLive(s) {
 const ACTIVITY_PREDICATES = {
   waiting: isWaitingSession,
   active: isActiveSession,
+  terminal: (s) => runningTerminals.has(s.id),
 };
 
-let lastChipKey = '';
+let lastChipHtml = '';
 
 function renderActivityChip() {
   const container = document.getElementById('activity-chips');
   if (!container) return;
 
-  let waiting = 0;
-  let active = 0;
+  const counts = { waiting: 0, active: 0, terminal: 0 };
   for (const s of sessions) {
     if (dismissedSessionIds.has(s.id)) continue;
-    if (s.hasWaitingForUser) waiting++;
-    else if (s.inProgress > 0 || s.hasRecentLog || s.hasRunningAgents) active++;
+    for (const kind in counts) if (ACTIVITY_PREDICATES[kind](s)) counts[kind]++;
   }
-
-  const key = `${waiting}|${active}|${dismissedSessionIds.size}|${[...activityFilter].sort().join(',')}`;
-  if (key === lastChipKey) return;
-  lastChipKey = key;
+  const { waiting, active, terminal: terminals } = counts;
+  const showTerminals = terminalAvailable();
+  const maxTerminals = appConfig.terminal?.maxSessions;
+  const nearCap = showTerminals && runningTerminals.size >= maxTerminals * 0.8;
 
   const chips = [
     {
@@ -468,14 +467,27 @@ function renderActivityChip() {
       title: `${active} session${active === 1 ? '' : 's'} with running work or recent activity`,
     },
   ];
+  if (showTerminals) {
+    chips.push({
+      kind: 'terminal',
+      count: terminals,
+      label: nearCap ? `${runningTerminals.size}/${maxTerminals}` : `${terminals}`,
+      title: nearCap
+        ? `${runningTerminals.size} of ${maxTerminals} terminals open; end some to start more`
+        : `${terminals} session${terminals === 1 ? '' : 's'} running in a terminal here`,
+      icon: ICON_TERMINAL,
+      warn: nearCap,
+    });
+  }
 
-  container.innerHTML = chips
+  const html = chips
     .map((c) => {
       const isOn = activityFilter.has(c.kind);
       const classes = [
         'activity-chip',
         `activity-${c.kind}`,
-        c.count === 0 ? 'activity-zero' : '',
+        c.count === 0 && !c.warn ? 'activity-zero' : '',
+        c.warn ? 'activity-warn' : '',
         isOn ? 'activity-filter-on' : '',
       ]
         .filter(Boolean)
@@ -487,12 +499,15 @@ function renderActivityChip() {
           onclick="setActivityFilter('${escAttrJs(c.kind)}')"
           aria-pressed="${isOn ? 'true' : 'false'}"
           title="${escapeHtml(c.title + hint)}">
-          <span class="activity-dot"></span>
+          ${c.icon ? `<span class="activity-icon">${c.icon}</span>` : '<span class="activity-dot"></span>'}
           <span class="activity-label">${escapeHtml(c.label)}</span>
         </button>
       `;
     })
     .join('');
+  if (html === lastChipHtml) return;
+  lastChipHtml = html;
+  container.innerHTML = html;
 }
 
 function toggleActivityKind(kind) {
@@ -3302,7 +3317,7 @@ function getFilteredSessions() {
     // Skip pinned sessions — they are prepended separately below (lines ~2180) to preserve stable position.
     const filteredIds = new Set(filteredSessions.map((s) => s.id));
     for (const id of [revealedPlanSessionId, revealedStorageSessionId, currentSessionId]) {
-      if (id && !filteredIds.has(id) && !isAnyPinned(id)) {
+      if (id && !filteredIds.has(id) && !(isAnyPinned(id) && activityFilter.size === 0)) {
         const session = sessions.find((s) => s.id === id);
         if (session) {
           const insertAt = filteredSessions.findIndex((s) => s.modifiedAt < session.modifiedAt);
@@ -3321,7 +3336,9 @@ function getFilteredSessions() {
 
   if (activityFilter.size > 0) {
     const preds = [...activityFilter].map((k) => ACTIVITY_PREDICATES[k]).filter(Boolean);
-    if (preds.length) filteredSessions = filteredSessions.filter((s) => preds.some((p) => p(s)));
+    if (preds.length) {
+      filteredSessions = filteredSessions.filter((s) => s.id === currentSessionId || preds.some((p) => p(s)));
+    }
   }
 
   if (searchQuery) {
@@ -11463,6 +11480,7 @@ async function loadTerminals() {
   const res = await fetch('/api/terminals', { cache: 'no-store' });
   const list = (await res.json()).sessions || [];
   runningTerminals = new Set(list.map((t) => t.id));
+  renderActivityChip();
   return list;
 }
 
@@ -11470,6 +11488,7 @@ function setRunningTerminals(ids) {
   runningTerminals = new Set(ids);
   if (ids.some((id) => !sessions.some((s) => s.id === id))) fetchSessions(false).catch(() => {});
   else renderSessions();
+  renderActivityChip();
 }
 
 function showSessionTerminal(sessionId) {

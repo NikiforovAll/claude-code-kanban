@@ -75,7 +75,7 @@
 
       <!-- Tasks -->
       <div class="sidebar-section flex-1">
-        <div class="section-header" onclick="toggleSection('sessions-filters', 'sessions-chevron')" style="cursor: pointer;">
+        <div class="section-header">
           <span class="section-header-label">Sessions</span>
           <span id="filter-summary" class="filter-summary" title=""></span>
           <span class="section-header-actions">
@@ -117,9 +117,16 @@
                 <path d="M3.51 15a9 9 0 1 0 2.13-9.36L3 8"/>
               </svg>
             </button>
-            <svg id="sessions-chevron" class="collapse-chevron" viewBox="0 0 24 24">
-              <path d="M6 9l6 6 6-6"/>
-            </svg>
+            <button
+              class="icon-btn section-btn"
+              onclick="toggleSection('sessions-filters', 'sessions-chevron')"
+              title="Show or hide search and filters"
+              aria-label="Show or hide search and filters"
+            >
+              <svg id="sessions-chevron" class="collapse-chevron" viewBox="0 0 24 24">
+                <path d="M6 9l6 6 6-6"/>
+              </svg>
+            </button>
           </span>
           <div id="filter-menu" class="filter-menu" onclick="event.stopPropagation()">
             <div class="pf-field">

@@ -109,9 +109,9 @@ PORT=8080 npx claude-code-kanban
 
 ### 429: too many terminals
 
-**Symptom.** A new terminal fails with `20 terminals are open; end one first`.
+**Symptom.** A new terminal fails with `30 terminals are open; end one first`.
 
-**Fix.** End a terminal in the Terminals manager (<kbd>Ctrl+Shift+&#96;</kbd>), or raise `maxSessions` in the `CCK_TERMINAL` JSON, for example `CCK_TERMINAL='{"enabled":true,"maxSessions":30}' npx claude-code-kanban`. See [Configuration](/claude-code-kanban/reference/configuration/).
+**Fix.** End a terminal in the Terminals manager (<kbd>Ctrl+Shift+&#96;</kbd>), or raise `maxSessions` in the `CCK_TERMINAL` JSON, for example `CCK_TERMINAL='{"enabled":true,"maxSessions":50}' npx claude-code-kanban`. Inside Claude Code Hub, set it in the `terminal` block of `~/.claude-hub/config.json`, for example `"terminal": {"maxSessions": 50}`, then restart the hub. See [Configuration](/claude-code-kanban/reference/configuration/).
 
 ## A board move does not reach Claude
 

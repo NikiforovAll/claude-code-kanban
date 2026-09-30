@@ -232,6 +232,7 @@ describe('ptyEnv', () => {
 describe('readTerminalConfig', () => {
   it('is off by default and turns on from the flag or the hub block', () => {
     assert.equal(readTerminalConfig({ argv: [], env: {} }).enabled, false);
+    assert.equal(readTerminalConfig({ argv: [], env: {} }).maxSessions, 30);
     assert.equal(readTerminalConfig({ argv: ['--enable-terminal'], env: {} }).enabled, true);
     const c = readTerminalConfig({ argv: [], env: { CCK_TERMINAL: '{"enabled":true,"maxSessions":2,"noFlicker":false}' } });
     assert.equal(c.enabled, true);

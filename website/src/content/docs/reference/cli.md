@@ -276,7 +276,7 @@ Started d_1a2b3c4d5e6f (session <uuid>) in <cwd> [group]
 `dispatch start` reads the terminal token from `<config-dir>/.cck/terminal-tokens/<port>.json`, where `<port>` is the port of the board it reaches. The server writes that file only when the terminal is on. Without it the command fails with `No terminal token for <dir> at <board-url>. The cck server must be running with the terminal enabled.` Other refusals:
 
 - `403 folder is not a known project or a folder picked in this run` when the folder is not a known project.
-- `429 20 terminals are open; end one first` when all terminals are in use (20 by default).
+- `429 30 terminals are open; end one first` when all terminals are in use (30 by default).
 - `400 invalid name`, `invalid worktree name`, `invalid model` or `invalid prompt` when a value is not valid or the spec is longer than 32 KB.
 - A group name that is not kebab-case. The CLI suggests a fixed name, for example `try --group auth-refactor`.
 

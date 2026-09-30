@@ -232,6 +232,25 @@ body::before {
   animation: pulse 2.5s ease-in-out infinite;
 }
 
+.activity-icon {
+  display: inline-flex;
+  margin: 0 -2px;
+  color: var(--chip-color, var(--accent));
+}
+.activity-icon svg {
+  width: 11px;
+  height: 11px;
+}
+.activity-chip.activity-zero .activity-icon {
+  color: var(--text-muted);
+}
+.activity-chip.activity-warn {
+  --chip-color: var(--warning);
+  background: var(--warning-dim);
+  border-color: color-mix(in srgb, var(--chip-color) 60%, var(--border));
+  color: var(--chip-color);
+}
+
 .sidebar.collapsed .activity-chips {
   display: none;
 }
