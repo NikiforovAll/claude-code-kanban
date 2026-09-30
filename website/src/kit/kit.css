@@ -4,6 +4,23 @@
   --font-mono: 'IBM Plex Mono', ui-monospace, Consolas, monospace;
   --sl-font: var(--font-sans);
   --sl-font-mono: var(--font-mono);
+  --sl-content-width: 48rem;
+  --sl-line-height: 1.65;
+  --sl-text-h1: var(--sl-text-4xl);
+  --sl-text-h2: 1.75rem;
+  --sl-text-h3: 1.25rem;
+  --sl-text-h4: var(--sl-text-lg);
+  --sl-color-bg-inline-code: color-mix(in srgb, var(--c-ink1) 7%, transparent);
+}
+
+@media (min-width: 100rem) {
+  :root {
+    --sl-content-width: 56rem;
+  }
+  /* Starlight pushes the column against the table of contents; centered, the spare width splits on both sides. */
+  .main-pane {
+    --sl-content-margin-inline: auto;
+  }
 }
 
 body {
@@ -12,10 +29,108 @@ body {
 
 /* Starlight docs: the app's display serif for page titles and section headings. */
 h1#_top,
-.sl-markdown-content :is(h1, h2, h3) {
+.sl-markdown-content :is(h1, h2) {
   font-family: var(--font-display);
   font-weight: 600;
   letter-spacing: -0.01em;
+}
+
+.sl-markdown-content .sl-heading-wrapper.level-h2 {
+  margin-top: 2.25rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--c-border);
+}
+
+.sl-markdown-content .sl-heading-wrapper.level-h3 {
+  margin-top: 2rem;
+}
+
+.sl-markdown-content .sl-heading-wrapper.level-h2 + .sl-heading-wrapper.level-h3 {
+  margin-top: 1rem;
+}
+
+.sl-markdown-content code:not(:where(.not-content *, pre *)) {
+  padding: 0.1em 0.35em;
+  border-radius: 0.3em;
+}
+
+.sl-markdown-content :is(p, li) > code:not(:where(.not-content *)) {
+  overflow-wrap: anywhere;
+}
+
+.sl-markdown-content table:not(:where(.not-content *)) {
+  width: 100%;
+  border: 1px solid var(--c-border);
+  border-radius: 0.5rem;
+  border-collapse: separate;
+  font-size: var(--sl-text-sm);
+  line-height: 1.55;
+}
+
+/* Starlight makes tables display: block so they scroll on phones; on wider screens that stops them filling the column. */
+@media (min-width: 50rem) {
+  .sl-markdown-content table:not(:where(.not-content *)) {
+    display: table;
+  }
+}
+
+.sl-markdown-content :is(th, td):not(:where(.not-content *)) {
+  padding: 0.6rem 0.9rem;
+  vertical-align: top;
+}
+
+.sl-markdown-content tr:last-child td:not(:where(.not-content *)) {
+  border-bottom: 0;
+}
+
+.sl-markdown-content th:not(:where(.not-content *)) {
+  background: var(--c-surface);
+  color: var(--c-ink2);
+  font-size: var(--sl-text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.sl-markdown-content thead th:first-child {
+  border-start-start-radius: 0.5rem;
+}
+
+.sl-markdown-content thead th:last-child {
+  border-start-end-radius: 0.5rem;
+}
+
+.sl-markdown-content tbody tr:hover td:not(:where(.not-content *)) {
+  background: var(--c-hover);
+}
+
+.sl-markdown-content td:first-child:not(:where(.not-content *)) {
+  color: var(--c-ink1);
+  font-weight: 500;
+}
+
+.sl-markdown-content td:first-child code:not(:where(.not-content *)) {
+  white-space: nowrap;
+}
+
+.sl-markdown-content :is(ol, ul) > li > strong:first-child {
+  color: var(--c-ink1);
+}
+
+.sl-markdown-content pre:not(:where(.not-content *)) {
+  border-radius: 0.5rem;
+}
+
+.sl-markdown-content .starlight-aside {
+  border-radius: 0.5rem;
+  padding: 0.85rem 1.1rem;
+}
+
+.sl-markdown-content .starlight-aside--note {
+  --sl-color-asides-text-accent: var(--c-accent-ink);
+  --sl-color-asides-border: var(--c-accent);
+  background: var(--c-accent-dim);
 }
 
 header .site-title {
