@@ -289,6 +289,7 @@ async function fetchSessions(includeTasks = true) {
     if (sessionsHash !== lastSessionsHash) {
       lastSessionsHash = sessionsHash;
       sessions = mergePlaceholders(newSessions);
+      markOpenSessionRead();
       renderSessions();
       renderActivityChip();
       schedulePublishSession();
@@ -300,6 +301,17 @@ async function fetchSessions(includeTasks = true) {
   } catch (error) {
     console.error('Failed to fetch sessions:', error);
   }
+}
+
+// The Stop hook leaves _stop.json when a session ends its turn; deleting it marks the session read.
+function markOpenSessionRead() {
+  if (!currentSessionId || viewMode !== 'session' || !isOnScreen()) return;
+  const session = sessions.find((s) => s.id === currentSessionId);
+  if (!session?.unread) return;
+  session.unread = false;
+  fetch(`/api/sessions/${encodeURIComponent(currentSessionId)}/read`, { method: 'POST' }).catch((e) =>
+    console.error('[markOpenSessionRead]', e),
+  );
 }
 
 async function loadSearchTasks() {
@@ -570,6 +582,7 @@ async function fetchTasks(sessionId) {
     if (lastSessionId !== sessionId) setSwapPair(sessionId, lastSessionId);
     const switched = sessionId !== currentSessionId;
     currentSessionId = sessionId;
+    markOpenSessionRead();
     if (switched) autoRevealLog(sessionId, newTasks.length === 0);
     currentPins = loadPins(sessionId);
     ownerFilter = '';
@@ -3474,7 +3487,7 @@ function renderSessions() {
     const tempClass = session.hasRecentLog || session.inProgress || session.hasWaitingForUser ? 'warm' : 'stale';
     const sid = escAttrJs(session.id);
     return `
-          <button onclick="openSession('${sid}')" draggable="true" data-session-id="${escapeHtml(session.id)}" class="session-item ${isActive ? 'active' : ''} ${session.hasWaitingForUser ? 'permission-pending' : ''} ${tempClass} ${showCtx ? 'has-context' : ''}" title="${escapeHtml(tooltip)}">
+          <button onclick="openSession('${sid}')" draggable="true" data-session-id="${escapeHtml(session.id)}" class="session-item ${isActive ? 'active' : ''} ${session.hasWaitingForUser ? 'permission-pending' : ''} ${session.unread ? 'unread' : ''} ${tempClass} ${showCtx ? 'has-context' : ''}" title="${escapeHtml(tooltip)}">
             <span class="session-pin-btn${pinClass}" onclick="event.stopPropagation();toggleSessionPin('${sid}')" title="${pinTitle} session">${pinState === 'sticky' ? SESSION_STAR_SVG : SESSION_PIN_SVG}</span>
             <div class="session-name">${escapeHtml(sessionName)}</div>
             ${projectHtml ? `<div class="session-secondary">${projectHtml}</div>` : ''}
@@ -7688,7 +7701,7 @@ function setupEventSource() {
       if (data.type === 'dispatch-update') onDispatchUpdate();
 
       if (data.type === 'agent-update') {
-        pendingAgentSessionIds.add(data.sessionId);
+        if (!data.unreadOnly) pendingAgentSessionIds.add(data.sessionId);
         clearTimeout(agentRefreshTimer);
         agentRefreshTimer = setTimeout(() => {
           if (skipOffScreen()) return;
@@ -7740,6 +7753,7 @@ function setupEventSource() {
 
   // When cck comes back on screen (tab visible or hub:active), catch up immediately
   async function catchUp() {
+    markOpenSessionRead();
     if (!isOnScreen() || !missedWhileHidden) return;
     missedWhileHidden = false;
     // The full refresh below covers whatever the pending debounces would have fetched.

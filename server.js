@@ -214,7 +214,7 @@ function readAgentJsonl(filePath) {
 }
 
 // Agent-activity record files in a session dir, excluding the `_`-prefixed sidecars
-// (_waiting.json, _name-*). Returns [] if the dir is missing/unreadable.
+// (_waiting.json, _stop.json, _name-*). Returns [] if the dir is missing/unreadable.
 function listAgentFiles(agentDir) {
   try {
     return readdirSync(agentDir).filter((f) => f.endsWith('.jsonl') && !f.startsWith('_'));
@@ -374,13 +374,18 @@ function getSessionLogStat(meta) {
 }
 
 function checkAgentStatus(agentDir, stale, logMtime, isTeam) {
-  const result = { hasActive: false, hasRunning: false, waitingForUser: null };
-  if (!existsSync(agentDir)) return result;
-  result.waitingForUser = checkWaitingForUser(agentDir, logMtime);
+  const result = { hasActive: false, hasRunning: false, waitingForUser: null, unread: false };
+  let names;
+  try { names = readdirSync(agentDir); } catch { return result; }
+  if (names.includes('_waiting.json')) result.waitingForUser = checkWaitingForUser(agentDir, logMtime);
   if (result.waitingForUser) result.hasActive = true;
-  if (stale && !isTeam) return result;
+  const stopped = names.includes('_stop.json');
+  if (stale && !isTeam) {
+    result.unread = stopped;
+    return result;
+  }
   try {
-    for (const file of readdirSync(agentDir).filter(f => f.endsWith('.jsonl') && !f.startsWith('_'))) {
+    for (const file of names.filter(f => f.endsWith('.jsonl') && !f.startsWith('_'))) {
       try {
         const agent = readAgentJsonl(path.join(agentDir, file));
         // Idle agents never mark a session active (an idle teammate lingers and
@@ -393,6 +398,7 @@ function checkAgentStatus(agentDir, stale, logMtime, isTeam) {
       } catch { /* skip invalid */ }
     }
   } catch { /* ignore */ }
+  result.unread = stopped && !result.hasRunning;
   return result;
 }
 
@@ -1177,6 +1183,7 @@ function buildSessionObject(id, meta, overrides = {}) {
     hasActiveAgents: false,
     hasRunningAgents: false,
     hasWaitingForUser: false,
+    unread: false,
     hasRecentLog: hasRecentLogActivity(id, logAge),
     hasRecentActivity: hasVisibleLogActivity(id, logAge),
     jsonlPath: meta.jsonlPath || null,
@@ -1274,6 +1281,7 @@ app.get('/api/sessions', async (req, res) => {
             hasActiveAgents: agentStatus.hasActive,
             hasRunningAgents: agentStatus.hasRunning,
             hasWaitingForUser: !!agentStatus.waitingForUser,
+            unread: agentStatus.unread,
             tasksDir: sessionPath,
             ...planInfo
           }));
@@ -1322,6 +1330,7 @@ app.get('/api/sessions', async (req, res) => {
               hasActiveAgents: agentStatus.hasActive,
               hasRunningAgents: agentStatus.hasRunning,
               hasWaitingForUser: !!agentStatus.waitingForUser,
+              unread: agentStatus.unread,
               tasksDir: customTaskDir,
               sharedTaskList: taskListName,
             }));
@@ -1360,6 +1369,7 @@ app.get('/api/sessions', async (req, res) => {
           hasActiveAgents: metaAgentStatus.hasActive,
           hasRunningAgents: metaAgentStatus.hasRunning,
           hasWaitingForUser: !!metaAgentStatus.waitingForUser,
+          unread: metaAgentStatus.unread,
         }));
       }
     }
@@ -1431,6 +1441,7 @@ app.get('/api/sessions', async (req, res) => {
                 hasActiveAgents: agentStatus.hasActive,
                 hasRunningAgents: agentStatus.hasRunning,
                 hasWaitingForUser: !!agentStatus.waitingForUser,
+                unread: agentStatus.unread,
               });
               attachTeamTasks(card, teamTaskDir, dir.name, counts);
               sessionsMap.set(leaderId, card);
@@ -2581,17 +2592,26 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
   }
 });
 
-function clearWaitingFile(sessionId) {
-  try { unlinkSync(path.join(AGENT_ACTIVITY_DIR, sessionId, '_waiting.json')); }
+function clearActivityMarker(sessionId, file) {
+  try { unlinkSync(path.join(AGENT_ACTIVITY_DIR, sessionId, file)); }
   catch (e) { if (e.code !== 'ENOENT') throw e; }
 }
 
 app.post('/api/sessions/:sessionId/waiting/discard', (req, res) => {
   try {
-    clearWaitingFile(resolveSessionId(req.params.sessionId));
+    clearActivityMarker(resolveSessionId(req.params.sessionId), '_waiting.json');
     res.json({ ok: true });
   } catch {
     res.status(500).json({ error: 'Failed to discard waiting' });
+  }
+});
+
+app.post('/api/sessions/:sessionId/read', (req, res) => {
+  try {
+    clearActivityMarker(resolveSessionId(req.params.sessionId), '_stop.json');
+    res.json({ ok: true });
+  } catch {
+    res.status(500).json({ error: 'Failed to mark session read' });
   }
 });
 
@@ -2630,7 +2650,7 @@ app.post('/api/sessions/:sessionId/agents/:agentId/stop', (req, res) => {
     agent.stoppedAt = new Date().toISOString();
     const stopEvt = { agentId, type: agent.type, event: 'user-stop', status: 'stopped', stoppedAt: agent.stoppedAt, updatedAt: agent.stoppedAt };
     writeFileSync(agentFile, `${readFileSync(agentFile, 'utf8') + JSON.stringify(stopEvt)}\n`, 'utf8'); // sync — response depends on write
-    clearWaitingFile(sessionId);
+    clearActivityMarker(sessionId, '_waiting.json');
     res.json({ ok: true });
   } catch {
     res.status(500).json({ error: 'Failed to stop agent' });
@@ -4038,7 +4058,7 @@ const AGENT_FILE_CAP = 20;
 
 agentActivityWatcher.on('all', (event, filePath) => {
   const base = path.basename(filePath);
-  const isAgentEvent = filePath.endsWith('.jsonl') || base === '_waiting.json';
+  const isAgentEvent = filePath.endsWith('.jsonl') || base === '_waiting.json' || base === '_stop.json';
   if ((event === 'add' || event === 'change' || event === 'unlink') && isAgentEvent) {
     const relativePath = path.relative(AGENT_ACTIVITY_DIR, filePath);
     const sessionId = relativePath.split(path.sep)[0];
@@ -4059,7 +4079,8 @@ agentActivityWatcher.on('all', (event, filePath) => {
         }
       } catch { /* ignore */ }
     }
-    broadcast({ type: 'agent-update', sessionId });
+    const unreadOnly = base === '_stop.json';
+    broadcast({ type: 'agent-update', sessionId, unreadOnly });
     // For team sessions, also broadcast with team name so frontend picks it up
     if (existsSync(TEAMS_DIR)) {
       try {
@@ -4067,7 +4088,7 @@ agentActivityWatcher.on('all', (event, filePath) => {
         for (const td of teamDirs) {
           const cfg = loadTeamConfig(td.name);
           if (cfg && cfg.leadSessionId === sessionId) {
-            broadcast({ type: 'agent-update', sessionId: td.name });
+            broadcast({ type: 'agent-update', sessionId: td.name, unreadOnly });
             break;
           }
         }

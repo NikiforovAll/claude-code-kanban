@@ -37,10 +37,17 @@ if [ "$EVENT" = "SessionStart" ]; then
   exit 0
 fi
 
-# PostToolUse / non-waiting PreToolUse: clear waiting state
+# Stop: the session finished its turn. The marker means unread; the board deletes it on open.
+if [ "$EVENT" = "Stop" ]; then
+  DIR="$CCK_ACTIVITY/$SESSION_ID"
+  [ -d "$DIR" ] || mkdir -p "$DIR"
+  : > "$DIR/_stop.json"
+  exit 0
+fi
+
+# PostToolUse / non-waiting PreToolUse: clear waiting state, and unread since the session is working again
 if [ "$EVENT" = "PostToolUse" ] || { [ "$EVENT" = "PreToolUse" ] && [ "$TOOL_NAME" != "AskUserQuestion" ] && [ "$TOOL_NAME" != "ExitPlanMode" ]; }; then
-  WFILE="$CCK_ACTIVITY/$SESSION_ID/_waiting.json"
-  rm -f "$WFILE"
+  rm -f "$CCK_ACTIVITY/$SESSION_ID/_waiting.json" "$CCK_ACTIVITY/$SESSION_ID/_stop.json"
   [ "$EVENT" = "PostToolUse" ] && exit 0
 fi
 

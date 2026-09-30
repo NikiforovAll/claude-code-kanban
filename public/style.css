@@ -981,6 +981,15 @@ body.booting .boot-splash {
   padding-right: 22px;
 }
 
+.session-item.unread::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-left: 3px solid var(--accent);
+  border-radius: inherit;
+  pointer-events: none;
+}
+
 .session-indicators .pulse,
 .wf-live-name .pulse,
 .session-waiting .pulse {

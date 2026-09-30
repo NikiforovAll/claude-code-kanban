@@ -76,6 +76,14 @@ echo "SubagentStart (no type):"
 run_hook '{"session_id":"s3","agent_id":"a-internal","hook_event_name":"SubagentStart","tool_name":"","agent_type":""}'
 assert_no_file "$ACTIVITY_DIR/s3/a-internal.jsonl" "skips agent with no type"
 
+# ─── Stop ───────────────────────────────────────────────────────
+echo "Stop:"
+
+run_hook '{"session_id":"s-stop","hook_event_name":"Stop","stop_hook_active":false}'
+assert_file "$ACTIVITY_DIR/s-stop/_stop.json" "creates _stop.json"
+run_hook '{"session_id":"s-stop","agent_id":"","hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{},"agent_type":""}'
+assert_no_file "$ACTIVITY_DIR/s-stop/_stop.json" "PostToolUse clears _stop.json"
+
 # ─── SubagentStop ───────────────────────────────────────────────
 echo "SubagentStop:"
 

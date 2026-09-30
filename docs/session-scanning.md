@@ -15,7 +15,7 @@ All defined in `server.js`. Each watcher emits an SSE event to connected clients
 | `teamsWatcher` | `TEAMS_DIR` | — | config change | team reload |
 | `projectsWatcher` | `PROJECTS_DIR` | 2 | `*.jsonl` add/change/unlink | `metadata-update` (invalidates session metadata cache) |
 | `plansWatcher` | `PLANS_DIR` | 0 | `*.md` add/change/unlink | `metadata-update`, `plan-update` |
-| `agentActivityWatcher` | `AGENT_ACTIVITY_DIR` | 2 | `*.jsonl` / `_waiting.json` | `agent-update` (with team-leader fan-out) |
+| `agentActivityWatcher` | `AGENT_ACTIVITY_DIR` | 2 | `*.jsonl` / `_waiting.json` / `_stop.json` | `agent-update` (with team-leader fan-out; `unreadOnly` for `_stop.json`, which refreshes the list but not the message log) |
 | `contextStatusWatcher` | `CONTEXT_STATUS_DIR` | 0 | `*.json` | context status broadcast |
 
 Notable options:
@@ -128,7 +128,7 @@ The same registry entry gives a running session its `name`, the address SendMess
 
 Pinned IDs (regular pins, sticky pins, revealed-plan, revealed-storage, focused `currentSessionId`) bypass the probe and always get full enrichment. The post-filter at the end of the handler stays as a safety net but operates on a now-small map.
 
-Cost: per-candidate work is one `statSync`, one `getTaskCounts` map lookup, one `checkAgentStatus` file check. ~690 candidates → ~5 survivors hit `buildSessionObject`.
+Cost: per-candidate work is one `statSync`, one `getTaskCounts` map lookup, one `checkAgentStatus` `readdirSync` of the session's activity dir (it answers `_waiting.json`, `_stop.json` and the agent files from one listing). ~690 candidates → ~5 survivors hit `buildSessionObject`.
 
 ### 3c. Team-leader enrichment & auto self-team filtering
 
