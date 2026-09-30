@@ -565,7 +565,8 @@ async function fetchTasks(sessionId) {
     if (revealedStorageSessionId && sessionId !== revealedStorageSessionId) {
       revealedStorageSessionId = null;
     }
-    if (currentSessionId && currentSessionId !== sessionId) deferredPinPlacement.delete(currentSessionId);
+    if (currentSessionId && currentSessionId !== sessionId && deferredPinPlacement.delete(currentSessionId))
+      expandPinnedFor(currentSessionId);
     if (lastSessionId !== sessionId) setSwapPair(sessionId, lastSessionId);
     const switched = sessionId !== currentSessionId;
     currentSessionId = sessionId;
@@ -1930,6 +1931,7 @@ function toggleSessionPin(sessionId) {
   } else {
     pinnedSessionIds.add(sessionId);
     if (sessionId === currentSessionId) deferredPinPlacement.add(sessionId);
+    expandPinnedFor(sessionId);
   }
   savePinnedSessions();
   offloadSessionPin(sessionId);
@@ -1968,6 +1970,7 @@ function handleSessionPinEvent({ id, state }) {
     pinnedSessionIds.add(id);
     stickySessionIds.add(id);
   }
+  expandPinnedFor(id);
   savePinnedSessions();
   renderSessions();
 }
@@ -3545,7 +3548,7 @@ function renderSessions() {
     const gIdlePinned = gPinned.filter((s) => !isSessionActive(s));
     const gUnpinned = sessions.filter((s) => !isPlacedPinned(s.id) || isSessionActive(s) || isPlacedSticky(s.id));
     const pinCollapsed = collapsedProjectGroups.has(pinKey);
-    if (gIdlePinned.length === 0 && !pinCollapsed) return gUnpinned.map(renderSessionCard).join('');
+    if (gIdlePinned.length === 0) return gUnpinned.map(renderSessionCard).join('');
     return (
       '<div class="pinned-sub-section">' +
       '<div class="pinned-sub-header' +
@@ -5041,14 +5044,11 @@ function expandActiveGroups({ onlyNew = false } = {}) {
 // it (pinned, not sticky, idle — see renderGroupSessions), and — since which section holds it
 // depends on the view — every section header. Returns whether anything changed.
 function uncollapseFor(session) {
-  const project = session.project || '__ungrouped__';
   const group = sgGroupForSession(session);
-  const inPinned = isPlacedPinned(session.id) && !isPlacedSticky(session.id) && !isSessionActive(session);
   const keys = [
-    project,
-    inPinned && pinKey(project),
+    session.project || '__ungrouped__',
+    ...pinnedCollapseKeys(session),
     group && sgKey(group.id),
-    group && inPinned && `__pinned_group_${group.id}__`,
     SECTION_GROUPS,
     SECTION_PROJECTS,
     SECTION_SESSIONS,
@@ -5058,6 +5058,24 @@ function uncollapseFor(session) {
     if (key && collapsedProjectGroups.delete(key)) changed = true;
   }
   return changed;
+}
+
+function pinnedCollapseKeys(session) {
+  if (!isPlacedPinned(session.id) || isPlacedSticky(session.id) || isSessionActive(session)) return [];
+  const group = sgGroupForSession(session);
+  const host = sgHostOf(group, session);
+  return [pinKey(session.project || '__ungrouped__'), host && pinKey(host), group && `__pinned_group_${group.id}__`];
+}
+
+// A card that moves into a collapsed Pinned sub-section would vanish from under the click.
+function expandPinnedFor(sessionId) {
+  const session = sessions.find((s) => s.id === sessionId);
+  if (!session) return;
+  let changed = false;
+  for (const key of pinnedCollapseKeys(session)) {
+    if (key && collapsedProjectGroups.delete(key)) changed = true;
+  }
+  if (changed) persistCollapsedGroups();
 }
 
 function isGroupHeader(el) {
