@@ -981,13 +981,25 @@ body.booting .boot-splash {
   padding-right: 22px;
 }
 
-.session-item.unread::before {
+.session-item.unread::before,
+.session-item.permission-pending::before {
   content: '';
   position: absolute;
   inset: -1px;
   border-left: 3px solid var(--accent);
   border-radius: inherit;
   pointer-events: none;
+}
+
+.session-item.permission-pending::before {
+  border-left-color: var(--warning);
+  animation: agent-badge-pulse 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .session-item.permission-pending::before {
+    animation: none;
+  }
 }
 
 .session-indicators .pulse,
