@@ -1,0 +1,496 @@
+---
+type Line =
+  | { kind: 'prompt'; text: string }
+  | { kind: 'tool'; name: string; arg: string; result?: string }
+  | { kind: 'text'; text: string }
+  | { kind: 'event'; text: string }
+  | { kind: 'code'; lang: 'diff' | 'text'; text: string };
+
+type Scene = { id: string; tab: string; cwd?: string; lines: Line[] };
+
+const dispatchSkill: Line = { kind: 'tool', name: 'Skill', arg: 'kanban-dispatch', result: 'Armed the dispatch inbox' };
+const guide: Line = { kind: 'tool', name: 'Bash', arg: 'claude-code-kanban skills get dispatch', result: 'Write the spec, start, collect' };
+
+const scenes: Scene[] = [
+  {
+    id: 'dispatch',
+    tab: 'Hand off',
+    lines: [
+      { kind: 'prompt', text: '/kanban-dispatch fix the flaky checkout test in api/ and report back' },
+      dispatchSkill,
+      guide,
+      {
+        kind: 'text',
+        text: 'The new session sees only the spec, so I write down the target, the change, the limits, and how to check it.',
+      },
+      { kind: 'tool', name: 'Write', arg: 'spec.md' },
+      {
+        kind: 'code',
+        lang: 'text',
+        text: `Target:      api/test/checkout.test.js and the code it covers
+Change:      make "applies the coupon" pass on every run
+Constraints: keep the public API of api/checkout.js
+Acceptance:  npm test -- checkout passes 10 times in a row`,
+      },
+      {
+        kind: 'tool',
+        name: 'Bash',
+        arg: 'claude-code-kanban dispatch start --cwd ~/dev/shop --spec-file spec.md --name fix-flaky-checkout --group checkout --peer shop-main --report --json',
+        result: 'dispatch d_4f1c9a2b7e01, session 7c2e9b10',
+      },
+      {
+        kind: 'text',
+        text: 'fix-flaky-checkout runs in the checkout group of your sidebar. I keep working, and its report comes back to this session.',
+      },
+      {
+        kind: 'event',
+        text: 'cck:1 dispatch.succeeded d_4f1c9a2b7e01 session=7c2e9b10 summary=The test raced the price cache. It now waits for the cache to load. No other test changed.',
+      },
+      { kind: 'tool', name: 'Bash', arg: 'npm test -- checkout', result: '14 passed' },
+      { kind: 'text', text: 'I checked the report: the test passes, and the change is in api/test/checkout.test.js only.' },
+    ],
+  },
+  {
+    id: 'parallel',
+    tab: 'Parallel',
+    lines: [
+      { kind: 'prompt', text: '/kanban-dispatch upgrade express to v5 in api, web and worker, one session each' },
+      dispatchSkill,
+      guide,
+      {
+        kind: 'text',
+        text: 'The three packages are in one repo, so each session gets its own worktree. I start all three, then collect.',
+      },
+      {
+        kind: 'tool',
+        name: 'Bash',
+        arg: 'claude-code-kanban dispatch start --cwd ~/dev/shop --spec-file api.md --name express5-api --group express-5 --worktree --report --json',
+        result: 'dispatch d_91ab03c4d5e6',
+      },
+      { kind: 'tool', name: 'Bash', arg: 'claude-code-kanban dispatch start … --name express5-web …', result: 'dispatch d_2c7f80e1a9b3' },
+      { kind: 'tool', name: 'Bash', arg: 'claude-code-kanban dispatch start … --name express5-worker …', result: 'dispatch d_e05d6b1f7a28' },
+      { kind: 'tool', name: 'Bash', arg: 'claude-code-kanban dispatch wait --timeout 15m --json', result: '2 settled, 1 running' },
+      { kind: 'tool', name: 'Bash', arg: 'claude-code-kanban session peek e05d6b1f --limit 20', result: 'express5-worker is running its tests' },
+      {
+        kind: 'text',
+        text: 'api and web are done, and their tests pass in their worktrees. worker is still at work, so I wait for it again.',
+      },
+    ],
+  },
+  {
+    id: 'follow',
+    tab: 'Follow',
+    lines: [
+      { kind: 'prompt', text: '/claude-code-kanban:kanban-follow' },
+      { kind: 'text', text: 'I follow the board now. Move one of my cards and I act on it.' },
+      { kind: 'event', text: 'cck:1 task.moved 4 pending>in_progress subject="Add a rate limit to /login"' },
+      { kind: 'tool', name: 'Read', arg: 'api/routes/login.js' },
+      { kind: 'tool', name: 'Edit', arg: 'api/routes/login.js' },
+      {
+        kind: 'code',
+        lang: 'diff',
+        text: `+const limit = rateLimit({ windowMs: 60_000, max: 5 });
+-router.post('/login', login);
++router.post('/login', limit, login);`,
+      },
+      { kind: 'tool', name: 'TaskUpdate', arg: '4, completed', result: 'The card moved to Completed' },
+      { kind: 'text', text: '/login now allows 5 tries a minute. The card is in Completed.' },
+    ],
+  },
+  {
+    id: 'preview',
+    tab: 'Preview',
+    lines: [
+      { kind: 'prompt', text: '/kanban preview _plans/rate-limit.md' },
+      { kind: 'tool', name: 'Skill', arg: 'kanban', result: 'Board verbs for this session' },
+      { kind: 'tool', name: 'Bash', arg: 'claude-code-kanban help preview-doc', result: 'Flags and examples' },
+      {
+        kind: 'tool',
+        name: 'Bash',
+        arg: 'claude-code-kanban preview-doc _plans/rate-limit.md --session 3f8a0c52',
+        result: 'Opened in the preview',
+      },
+      {
+        kind: 'text',
+        text: 'The plan is open in the preview on your board. To attach a file to this session with no modal, type /kanban link.',
+      },
+    ],
+  },
+  {
+    id: 'link',
+    tab: 'Link',
+    lines: [
+      { kind: 'prompt', text: '/kanban link the PR you just opened and the plan' },
+      { kind: 'tool', name: 'Skill', arg: 'kanban', result: 'Board verbs for this session' },
+      { kind: 'tool', name: 'Bash', arg: 'gh pr view --json url', result: 'github.com/acme/shop/pull/482' },
+      {
+        kind: 'tool',
+        name: 'Bash',
+        arg: 'claude-code-kanban link-doc https://github.com/acme/shop/pull/482 --session 3f8a0c52',
+        result: 'Linked to the session',
+      },
+      { kind: 'tool', name: 'Bash', arg: 'claude-code-kanban link-doc _plans/rate-limit.md --session 3f8a0c52', result: 'Linked to the session' },
+      {
+        kind: 'text',
+        text: 'Both are linked under this session in your sidebar, and nothing opened on your screen. The PR opens in a new tab, and the plan in the preview.',
+      },
+    ],
+  },
+  {
+    id: 'pin',
+    tab: 'Pin',
+    lines: [
+      { kind: 'prompt', text: '/kanban pin this session so it stays on top' },
+      { kind: 'tool', name: 'Skill', arg: 'kanban', result: 'Board verbs for this session' },
+      { kind: 'tool', name: 'Bash', arg: 'claude-code-kanban session pin 3f8a0c52 --sticky', result: 'Pinned as sticky' },
+      {
+        kind: 'text',
+        text: 'This session now always shows, at the top of your sidebar. Type /kanban unpin to clear it.',
+      },
+    ],
+  },
+  {
+    id: 'search',
+    tab: 'Search',
+    lines: [
+      { kind: 'prompt', text: '/kanban search the session where we fixed the login redirect, and open it' },
+      { kind: 'tool', name: 'Skill', arg: 'kanban', result: 'Board verbs for this session' },
+      { kind: 'tool', name: 'Bash', arg: 'claude-code-kanban session search "login redirect"', result: '2 sessions: fix-login-redirect, auth-refactor' },
+      { kind: 'tool', name: 'Bash', arg: 'claude-code-kanban session peek 9d41e7a0 --limit 20', result: 'The redirect fix and its tests, 3 days ago' },
+      { kind: 'tool', name: 'Bash', arg: 'claude-code-kanban session open 9d41e7a0', result: 'Focused on the board' },
+      {
+        kind: 'text',
+        text: 'fix-login-redirect is the one: it changed api/routes/auth.js and added the redirect tests. It is open on your board.',
+      },
+    ],
+  },
+];
+
+const highlight = (lang: string, text: string) =>
+  text
+    .split('\n')
+    .map((raw) => {
+      const esc = raw.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      if (lang === 'diff' && raw.startsWith('+')) return `<span class="add">${esc}</span>`;
+      if (lang === 'diff' && raw.startsWith('-')) return `<span class="del">${esc}</span>`;
+      return esc;
+    })
+    .join('\n');
+---
+
+<div class="term" data-term>
+  <div class="bar">
+    <div class="tabs" role="tablist" aria-label="Examples">
+      {
+        scenes.map((s, i) => (
+          <button
+            type="button"
+            role="tab"
+            id={`sk-tab-${s.id}`}
+            aria-controls={`sk-panel-${s.id}`}
+            aria-selected={i === 0 ? 'true' : 'false'}
+            tabindex={i === 0 ? 0 : -1}
+          >
+            {s.tab}
+          </button>
+        ))
+      }
+    </div>
+  </div>
+  <div class="screen">
+    {
+      scenes.map((s, i) => (
+        <div class="scene" role="tabpanel" id={`sk-panel-${s.id}`} aria-labelledby={`sk-tab-${s.id}`} hidden={i !== 0}>
+          <p class="cwd">{s.cwd ?? '~/dev/shop'}</p>
+          {s.lines.map((l) =>
+            l.kind === 'prompt' ? (
+              <p class="ln prompt">
+                <span class="caret" aria-hidden="true">›</span>
+                <span class="typed" data-text={l.text}>{l.text}</span>
+              </p>
+            ) : l.kind === 'tool' ? (
+              <div class="ln tool">
+                <p>
+                  <span class="dot" aria-hidden="true">●</span>
+                  <b>{l.name}</b>(<span class="arg">{l.arg}</span>)
+                </p>
+                {l.result && (
+                  <p class="res">
+                    <span aria-hidden="true">⎿ </span>
+                    {l.result}
+                  </p>
+                )}
+              </div>
+            ) : l.kind === 'text' ? (
+              <p class="ln text">
+                <span class="dot reply" aria-hidden="true">●</span>
+                <span>{l.text}</span>
+              </p>
+            ) : l.kind === 'event' ? (
+              <p class="ln event">{l.text}</p>
+            ) : (
+              <pre class={`ln code ${l.lang}`} set:html={highlight(l.lang, l.text)} />
+            ),
+          )}
+        </div>
+      ))
+    }
+  </div>
+</div>
+
+<script>
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+  for (const term of document.querySelectorAll<HTMLElement>('[data-term]')) {
+    const tabs = [...term.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+    const panels = [...term.querySelectorAll<HTMLElement>('[role="tabpanel"]')];
+    const prompts = [...term.querySelectorAll<HTMLElement>('.typed')];
+    let timers: number[] = [];
+    const later = (fn: () => void, ms: number) => timers.push(window.setTimeout(fn, ms));
+
+    const play = (panel: HTMLElement) => {
+      for (const t of timers) clearTimeout(t);
+      timers = [];
+      for (const p of prompts) {
+        p.textContent = p.dataset.text ?? '';
+        p.classList.remove('typing');
+      }
+      const lines = [...panel.querySelectorAll<HTMLElement>('.ln')];
+      if (reduce.matches) {
+        for (const l of lines) l.classList.remove('wait');
+        return;
+      }
+      const typed = panel.querySelector('.typed') as HTMLElement;
+      const text = typed.textContent ?? '';
+      for (const l of lines) l.classList.add('wait');
+      typed.textContent = '';
+      typed.classList.add('typing');
+      lines[0].classList.remove('wait');
+      let i = 0;
+      const type = () => {
+        typed.textContent = text.slice(0, ++i);
+        if (i < text.length) return void later(type, 22);
+        typed.classList.remove('typing');
+        lines.slice(1).forEach((l, n) => later(() => l.classList.remove('wait'), 450 + n * 380));
+      };
+      later(type, 250);
+    };
+
+    const seen = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((e) => e.isIntersecting)) return;
+        seen.disconnect();
+        play(panels[0]);
+      },
+      { threshold: 0.4 },
+    );
+    seen.observe(term);
+
+    const select = (i: number) => {
+      seen.disconnect();
+      tabs.forEach((t, n) => {
+        t.setAttribute('aria-selected', String(n === i));
+        t.tabIndex = n === i ? 0 : -1;
+        panels[n].hidden = n !== i;
+      });
+      play(panels[i]);
+    };
+
+    tabs.forEach((tab, i) => {
+      tab.addEventListener('click', () => select(i));
+      tab.addEventListener('keydown', (e) => {
+        const step = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+        if (!step) return;
+        e.preventDefault();
+        const next = (i + step + tabs.length) % tabs.length;
+        tabs[next].focus();
+        select(next);
+      });
+    });
+  }
+</script>
+
+<style>
+  .term {
+    min-width: 0;
+    border: 1px solid var(--c-border);
+    border-radius: 0.625rem;
+    background: var(--c-field);
+    overflow: hidden;
+    font-family: var(--font-mono);
+    box-shadow: 0 1.5rem 3rem -2rem color-mix(in srgb, var(--c-ink1) 45%, transparent);
+  }
+  .bar {
+    background: var(--c-surface);
+    border-bottom: 1px solid var(--c-border);
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+  }
+  .tabs {
+    display: flex;
+    min-width: max-content;
+  }
+  .tabs button {
+    font: 500 0.8125rem/1 var(--font-mono);
+    color: var(--c-ink3);
+    background: transparent;
+    border: 0;
+    border-right: 1px solid var(--c-border);
+    padding: 0.875rem 1.125rem;
+    cursor: pointer;
+    position: relative;
+    transition:
+      background-color 0.2s,
+      color 0.2s;
+  }
+  .tabs button:hover {
+    color: var(--c-ink1);
+    background: var(--c-hover);
+  }
+  .tabs button[aria-selected='true'] {
+    color: var(--c-ink1);
+    background: var(--c-field);
+  }
+  .tabs button[aria-selected='true']::after {
+    content: '';
+    position: absolute;
+    inset: auto 0 -1px;
+    height: 2px;
+    background: var(--c-accent);
+  }
+  .tabs button:focus-visible {
+    outline: 2px solid var(--c-accent);
+    outline-offset: -2px;
+  }
+
+  .screen {
+    display: grid;
+    padding: 1.25rem 1.375rem 1.5rem;
+    font-size: 0.8125rem;
+    line-height: 1.6;
+    color: var(--c-ink2);
+  }
+  .scene {
+    grid-area: 1 / 1;
+    display: grid;
+    gap: 0.75rem;
+    align-content: start;
+    min-width: 0;
+  }
+  .scene[hidden] {
+    display: grid;
+    visibility: hidden;
+  }
+  .scene p {
+    margin: 0;
+  }
+  .cwd {
+    color: var(--c-muted);
+    font-size: 0.75rem;
+  }
+
+  .ln {
+    transition:
+      opacity 0.35s ease,
+      translate 0.35s ease;
+  }
+  .ln.wait {
+    opacity: 0;
+    translate: 0 0.25rem;
+  }
+
+  .prompt {
+    display: flex;
+    gap: 0.625rem;
+    padding: 0.625rem 0.875rem;
+    border: 1px solid var(--c-border);
+    border-radius: 0.375rem;
+    background: var(--c-surface);
+    color: var(--c-ink1);
+  }
+  .caret {
+    color: var(--c-accent-ink);
+    font-weight: 600;
+  }
+  .typed.typing::after {
+    content: '';
+    display: inline-block;
+    width: 0.5em;
+    height: 1.1em;
+    margin-left: 1px;
+    vertical-align: text-bottom;
+    background: var(--c-accent);
+    animation: blink 1s steps(1) infinite;
+  }
+  @keyframes blink {
+    50% {
+      opacity: 0;
+    }
+  }
+
+  .dot {
+    color: var(--c-accent);
+    margin-right: 0.5rem;
+  }
+  .dot.reply {
+    color: var(--c-ink1);
+  }
+  .tool b {
+    color: var(--c-ink1);
+    font-weight: 600;
+  }
+  .arg {
+    color: var(--c-ink2);
+    overflow-wrap: anywhere;
+  }
+  .res {
+    color: var(--c-muted);
+    padding-left: 1.125rem;
+  }
+  .text {
+    display: flex;
+    color: var(--c-ink1);
+    font-family: var(--font-sans);
+    font-size: 0.875rem;
+  }
+  .text .dot {
+    font-family: var(--font-mono);
+  }
+  .event {
+    padding: 0.375rem 0.75rem;
+    border: 1px dashed var(--c-border);
+    border-radius: 0.375rem;
+    color: var(--c-accent-ink);
+    font-size: 0.75rem;
+    overflow-wrap: anywhere;
+  }
+
+  .code {
+    margin: 0 0 0 1.125rem;
+    padding: 0.75rem 0.875rem;
+    border-left: 2px solid var(--c-border);
+    background: var(--c-surface);
+    border-radius: 0 0.375rem 0.375rem 0;
+    font: inherit;
+    font-size: 0.75rem;
+    color: var(--c-ink2);
+    overflow-x: auto;
+    white-space: pre;
+  }
+  .code :global(.add) {
+    color: var(--c-accent-ink);
+  }
+  .code :global(.del) {
+    color: var(--c-muted);
+  }
+
+  @media (max-width: 40rem) {
+    .screen {
+      padding: 1rem;
+    }
+    .code {
+      margin-left: 0;
+    }
+  }
+</style>

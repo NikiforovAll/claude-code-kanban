@@ -7,6 +7,7 @@ import ThemeDial from '../kit/ThemeDial.astro';
 import Lightbox from '../kit/Lightbox.astro';
 import Video from '../kit/Video.astro';
 import FamilyFooter from '../kit/FamilyFooter.astro';
+import SkillsDemo from '../components/landing/SkillsDemo.astro';
 import { family, url } from '../kit/family';
 
 const GITHUB = 'https://github.com/NikiforovAll/claude-code-kanban';
@@ -85,7 +86,7 @@ const setup = [
   {
     title: 'Install the hooks',
     cmd: 'npx claude-code-kanban --install',
-    body: 'The hooks report subagents, waiting prompts, and live activity. Your existing settings stay as they are.',
+    body: 'The hooks report subagents, waiting prompts, and live activity. The same plugin adds the board skills. Your existing settings stay as they are.',
   },
   { title: 'Start the board', cmd: INSTALL },
   { title: 'Use Claude Code as usual', cmd: 'claude', body: 'Tasks, agents, and messages appear on the board.' },
@@ -196,6 +197,21 @@ const setup = [
             ))
           }
         </div>
+      </section>
+
+      <section class="half" aria-labelledby="skills">
+        <div class="half-head">
+          <h2 id="skills">Skills</h2>
+          <p>
+            Three skills let Claude Code use the board too. An agent can start sessions for the work it hands off, act on
+            the cards you move, show or link a file, pin a session, and find an old one.
+          </p>
+          <p class="aside">
+            Step 1 of the setup below installs the skills with the hooks. Then type <code>/kanban-dispatch</code> and
+            your task.
+          </p>
+        </div>
+        <SkillsDemo />
       </section>
 
       <section class="groups" aria-labelledby="groups">
