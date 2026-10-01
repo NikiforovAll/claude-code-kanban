@@ -961,6 +961,22 @@ body.booting .boot-splash {
   background: var(--success);
 }
 
+.session-item.warm.idle .session-time {
+  color: var(--text-tertiary);
+}
+
+.session-item.warm.idle .session-time::before {
+  background: var(--text-tertiary);
+}
+
+.session-item.warm.permission-pending .session-time {
+  color: var(--warning);
+}
+
+.session-item.warm.permission-pending .session-time::before {
+  background: var(--warning);
+}
+
 .session-item.stale .session-time {
   color: var(--text-muted);
 }

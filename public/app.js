@@ -3489,9 +3489,14 @@ function renderSessions() {
     const bookmarksCount = loadPins(session.id).length;
     const hasScratchpad = _hasScratchpad(_sessionScratchpadKey(session.id));
     const tempClass = session.hasRecentLog || session.inProgress || session.hasWaitingForUser ? 'warm' : 'stale';
+    // Open tasks keep an idle session warm, but the green dot is for a session that is working.
+    const idleClass =
+      tempClass === 'warm' && !session.hasWaitingForUser && !session.hasRecentLog && !session.hasRunningAgents
+        ? 'idle'
+        : '';
     const sid = escAttrJs(session.id);
     return `
-          <button onclick="openSession('${sid}')" draggable="true" data-session-id="${escapeHtml(session.id)}" class="session-item ${isActive ? 'active' : ''} ${session.hasWaitingForUser ? 'permission-pending' : ''} ${session.unread ? 'unread' : ''} ${tempClass} ${showCtx ? 'has-context' : ''}" title="${escapeHtml(tooltip)}">
+          <button onclick="openSession('${sid}')" draggable="true" data-session-id="${escapeHtml(session.id)}" class="session-item ${isActive ? 'active' : ''} ${session.hasWaitingForUser ? 'permission-pending' : ''} ${session.unread ? 'unread' : ''} ${tempClass} ${idleClass} ${showCtx ? 'has-context' : ''}" title="${escapeHtml(tooltip)}">
             <span class="session-pin-btn${pinClass}" onclick="event.stopPropagation();toggleSessionPin('${sid}')" title="${pinTitle} session">${pinState === 'sticky' ? SESSION_STAR_SVG : SESSION_PIN_SVG}</span>
             <div class="session-name">${escapeHtml(sessionName)}</div>
             ${projectHtml ? `<div class="session-secondary">${projectHtml}</div>` : ''}
