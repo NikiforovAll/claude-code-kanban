@@ -62,6 +62,7 @@ CCK_TERMINAL='{"enabled":true,"fontSize":14}' npx claude-code-kanban
 | `fontSize` | `13` | Font size in pixels. |
 | `scrollback` | `5000` | Lines kept in the scrollback buffer. |
 | `noFlicker` | `true` | Sets `CLAUDE_CODE_NO_FLICKER=1` for each `claude` the terminal starts. Set `false` to turn it off. |
+| `restore` | `false` | Resumes the terminals that were open when the server last stopped. `--restore-terminals` does the same. See [Restore terminals on start](/claude-code-kanban/guides/embedded-terminal/#restore-terminals-on-start). |
 
 For shell values and the default shell, see [Choose the shell](/claude-code-kanban/guides/embedded-terminal/#choose-the-shell). The terminal needs the optional dependency `@lydell/node-pty`. If it does not load, the terminal is not available and the server logs the reason.
 

@@ -1,11 +1,11 @@
 const { describe, it, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { spawn } = require('node:child_process');
-const { mkdtempSync, readFileSync, rmSync } = require('node:fs');
+const { mkdtempSync, readFileSync, realpathSync, rmSync } = require('node:fs');
 const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
-const { shellArgs, readTerminalConfig, resolveShell, claudeArgsFor, parseNewSpec, findPickProcess, ptyEnv } = require('../lib/terminal');
+const { createTerminalService, shellArgs, readTerminalConfig, resolveShell, claudeArgsFor, parseNewSpec, findPickProcess, ptyEnv } = require('../lib/terminal');
 
 let WebSocket = null;
 let ptyAvailable = false;
@@ -20,7 +20,9 @@ const SESSION = '11111111-2222-3333-4444-555555555555';
 const SHELL = process.platform === 'win32' ? 'cmd.exe' : 'sh';
 
 function startServer(extraArgs) {
-  const dir = mkdtempSync(path.join(os.tmpdir(), 'cck-term-'));
+  // os.tmpdir() can be an 8.3 short path, and libuv's Windows watcher asserts on an event
+  // under one (fs-event.c), which kills the server the first time it writes to .cck.
+  const dir = realpathSync.native(mkdtempSync(path.join(os.tmpdir(), 'cck-term-')));
   const child = spawn(process.execPath, [path.join(__dirname, '..', 'server.js'), ...extraArgs], {
     env: { ...process.env, PORT: '0', CLAUDE_CONFIG_DIR: dir, CCK_TERMINAL_TOKEN: TOKEN, CLAUDE_HUB: '' },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -239,6 +241,11 @@ describe('readTerminalConfig', () => {
     assert.equal(c.maxSessions, 2);
     assert.equal(c.noFlicker, false);
   });
+  it('restores terminals only when asked', () => {
+    assert.equal(readTerminalConfig({ argv: [], env: {} }).restore, false);
+    assert.equal(readTerminalConfig({ argv: ['--restore-terminals'], env: {} }).restore, true);
+    assert.equal(readTerminalConfig({ argv: [], env: { CCK_TERMINAL: '{"restore":true}' } }).restore, true);
+  });
   it('takes the shell from the flag, then the env var, then the hub block', () => {
     const env = { CCK_TERMINAL: '{"shell":"pwsh"}', CCK_TERMINAL_SHELL: 'gitbash' };
     assert.equal(readTerminalConfig({ argv: [], env }).shell, 'gitbash');
@@ -376,6 +383,85 @@ describe('terminal endpoint', { skip: !ptyAvailable }, () => {
     await until(() => os.getPriority(pid) === PRIORITY_NORMAL, 'shell restored');
     const del = await api(port, 'DELETE', `/api/terminals/${SESSION}`, { origin: `http://localhost:${port}`, 'x-terminal-token': TOKEN });
     assert.equal(del.status, 204);
+  });
+});
+
+function fakePty() {
+  const spawned = [];
+  return {
+    spawned,
+    spawn(_file, args) {
+      let onExit = () => {};
+      const p = {
+        pid: 100000 + spawned.length, args,
+        onData() {}, onExit(cb) { onExit = cb; }, write() {}, resize() {}, pause() {}, resume() {},
+        kill() { setImmediate(() => onExit({ exitCode: 0 })); },
+      };
+      spawned.push(p);
+      return p;
+    },
+  };
+}
+
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+describe('terminal restore', () => {
+  const A = 'aaaaaaaa-0000-0000-0000-000000000001';
+  const B = 'aaaaaaaa-0000-0000-0000-000000000002';
+  const ELSEWHERE = 'aaaaaaaa-0000-0000-0000-000000000003';
+  const UNKNOWN = 'aaaaaaaa-0000-0000-0000-000000000004';
+  const GAP_MS = 60;
+  const SAVE_MS = 20;
+
+  function service(restore, initial) {
+    const store = { data: initial, loads: 0, saves: 0 };
+    const pty = fakePty();
+    const t = createTerminalService({
+      config: { enabled: true, restore, shell: SHELL, maxSessions: 30, scrollback: 100 },
+      net: { EXPOSED: false },
+      pty,
+      token: TOKEN,
+      load: () => { store.loads++; return store.data; },
+      save: (data) => { store.saves++; store.data = data; },
+      restoreGapMs: GAP_MS,
+      saveDelayMs: SAVE_MS,
+      claudeDir: os.tmpdir(),
+      which: (n) => n,
+      isLiveElsewhere: (id) => id === ELSEWHERE,
+      resolveCwd: (id) => ([A, B, ELSEWHERE].includes(id) ? os.tmpdir() : null),
+      liveSessions: () => [],
+    });
+    return { t, pty, store };
+  }
+
+  it('resumes the saved terminals one at a time and keeps the list in step', async () => {
+    const { t, pty, store } = service(true, { sessions: [A, ELSEWHERE, UNKNOWN, 'not-a-uuid', B] });
+    t.restore();
+    assert.deepEqual(t.list().map((s) => s.id), [A]);
+    await wait(GAP_MS + SAVE_MS * 3);
+    assert.deepEqual(t.list().map((s) => s.id).sort(), [A, B]);
+    assert.ok(pty.spawned.every((p) => p.args.join(' ').includes('--resume')));
+    assert.deepEqual(store.data.sessions.sort(), [A, B]);
+
+    const saves = store.saves;
+    assert.equal(t.end(A, TOKEN), null);
+    await wait(SAVE_MS * 3);
+    assert.deepEqual(store.data.sessions, [B]);
+    assert.equal(store.saves, saves + 1);
+
+    t.shutdown();
+    await wait(SAVE_MS * 3);
+    assert.deepEqual(store.data.sessions, [B]);
+  });
+
+  it('neither reads the list nor starts anything when restore is off', async () => {
+    const { t, pty, store } = service(false, { sessions: [A] });
+    t.restore();
+    await wait(SAVE_MS * 3);
+    assert.equal(store.loads, 0);
+    assert.equal(pty.spawned.length, 0);
+    assert.deepEqual(store.data.sessions, [A]);
+    t.shutdown();
   });
 });
 

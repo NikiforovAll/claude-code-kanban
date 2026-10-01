@@ -123,6 +123,16 @@ Press <kbd>Ctrl+Shift+&#96;</kbd>, or press <kbd>Shift</kbd> and click the termi
 
 **End all** appears when two or more terminals run. By default the server allows 30 terminals at the same time.
 
+## Restore terminals on start
+
+Terminals run in the server, so a page reload keeps them. A server restart ends them. To resume them on the next start, use `--restore-terminals`, or set `"restore": true` in `CCK_TERMINAL`. Inside Claude Code Hub, set it in the `terminal` block of `~/.claude-hub/config.json`:
+
+```json
+"terminal": { "restore": true }
+```
+
+The server keeps the list of open terminals in `<config-dir>/.cck/terminals.json`. A few seconds after start, once it has scanned the sessions, it runs `claude --resume` for each one, two seconds apart, without waiting for a page to open. A session shows as running, and a click attaches to it. The server skips a session that runs in another terminal or has no transcript. A terminal you end leaves the list. Fork and shell terminals are not restored, nor is a resume picker until you pick a session in it. A resumed session waits at its prompt and does not continue a turn that the restart cut off.
+
 ## Choose the shell
 
 The terminal starts a shell and runs Claude Code in it. To pick the shell, use `--terminal-shell <value>` or the `CCK_TERMINAL_SHELL` environment variable. The value is one of:

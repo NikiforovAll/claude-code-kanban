@@ -94,6 +94,7 @@ const LINKED_DOCS_FILE = path.join(CCK_DIR, 'linked-docs.json');
 const SERVER_INFO_FILE = path.join(CCK_DIR, 'server.json');
 const TERMINAL_TOKENS_DIR = path.join(CCK_DIR, 'terminal-tokens');
 const SESSION_CACHE_FILE = path.join(CCK_DIR, 'session-cache.json');
+const TERMINALS_FILE = path.join(CCK_DIR, 'terminals.json');
 // os.tmpdir() can be an 8.3 short path on Windows; transcripts record the long form.
 const TEMP_ROOT = (() => {
   try { return realpathSync.native(os.tmpdir()); } catch { return os.tmpdir(); }
@@ -3226,6 +3227,10 @@ const terminal = createTerminalService({
   claudeDir: CLAUDE_DIR,
   isDefaultDir: isDefaultClaudeDir(CLAUDE_DIR),
   token: process.env.CCK_TERMINAL_TOKEN,
+  load: () => {
+    try { return JSON.parse(readFileSync(TERMINALS_FILE, 'utf8')); } catch { return null; }
+  },
+  save: (data) => writeJsonAtomic(TERMINALS_FILE, data),
   which: whichSync,
   isLiveElsewhere: isSessionProcessAlive,
   // The project, not the last cwd: `claude --resume` finds a session under the
@@ -4202,6 +4207,8 @@ async function prewarmCaches() {
   const t0 = Date.now();
   try {
     const metadata = loadSessionMetadata();
+    // Here, not at listen: resolving a saved session needs this scan, which startup defers.
+    terminal.restore();
 
     let sliceStart = Date.now();
     for (const meta of Object.values(metadata)) {
