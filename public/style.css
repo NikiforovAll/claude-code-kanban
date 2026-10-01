@@ -6130,6 +6130,21 @@ select.form-input option:checked {
   color: var(--text-primary);
 }
 
+.sp-pin {
+  flex: none;
+  line-height: 0;
+}
+
+.sp-pin.pinned svg {
+  fill: var(--accent);
+  stroke: var(--accent);
+}
+
+.sp-pin.sticky svg {
+  fill: var(--warning);
+  stroke: var(--warning);
+}
+
 .sp-row:not(.outside) + .sp-row.outside {
   margin-top: 8px;
 }

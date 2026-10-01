@@ -9783,6 +9783,13 @@ function spDotHtml(session) {
   return isActiveSession(session) ? SP_DOTS.active : SP_DOTS.idle;
 }
 
+function spPinHtml(session) {
+  const state = getSessionPinState(session.id);
+  if (state === 'sticky') return `<span class="sp-pin sticky" title="Sticky">${SESSION_STAR_SVG}</span>`;
+  if (state === 'pinned') return `<span class="sp-pin pinned" title="Pinned">${SESSION_PIN_SVG}</span>`;
+  return '';
+}
+
 function renderSessionPicker() {
   const list = document.getElementById('session-picker-list');
   const query = document.getElementById('session-picker-input').value.trim();
@@ -9812,6 +9819,7 @@ function renderSessionPicker() {
       return `<button class="sp-row${s.id === currentSessionId ? ' current' : ''}${outside ? ' outside' : ''}" data-idx="${i}" title="${escapeHtml(s.project ? `${s.id}\n${s.project}` : s.id)}">
         ${spDotHtml(s)}
         <span class="sp-name">${escapeHtml(sessionDisplayName(s))}</span>
+        ${spPinHtml(s)}
         <span class="sp-project">${escapeHtml(project)}</span>
         ${s.gitBranch ? `<span class="sp-branch">${escapeHtml(s.gitBranch)}</span>` : ''}
         <span class="sp-count">${s.completed}/${s.taskCount}</span>
