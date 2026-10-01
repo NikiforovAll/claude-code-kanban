@@ -5580,147 +5580,216 @@ async function confirmDelete() {
 //#endregion
 
 //#region HELP
-// Each entry pairs a left and a right group onto the same grid rows, so their
-// headings sit level and the shorter group just leaves empty rows.
-// `combo` joins the keys with a plus (a chord) instead of listing them as
-// alternatives; `hub` marks rows that only work inside Claude Code Hub.
-const SHORTCUT_PAIRS = [
-  [
-    {
-      title: 'Navigate',
-      rows: [
-        { keys: ['↓'], label: 'Next item' },
-        { keys: ['↑'], label: 'Previous item' },
-        { keys: ['←'], label: 'Left column / collapse group' },
-        { keys: ['→'], label: 'Right column / expand group' },
-        { keys: ['Tab'], label: 'Switch sidebar ↔ board' },
-        { keys: ['Enter', 'Space'], label: 'Open selected item' },
-      ],
-    },
-    {
-      title: 'Session',
-      rows: [
-        { keys: ['P'], label: 'Open plan' },
-        { keys: ['Ctrl', 'Shift', 'P'], combo: true, label: 'Session picker' },
-        { keys: ['Shift', 'P'], combo: true, label: 'Project picker (this board)' },
-        { keys: ['I'], label: 'Session info' },
-        { keys: ['.'], label: 'Pin / unpin' },
-        { keys: ['>'], label: 'Toggle sticky' },
-        { keys: ['Shift', 'F10'], combo: true, label: 'Move to group (or Menu key)' },
-        { keys: ['Ctrl', 'D'], combo: true, label: 'Dismiss session' },
-        { keys: ['Shift', 'L'], combo: true, label: 'Toggle session log' },
-        { keys: ['Shift', 'M'], combo: true, label: 'Open last message' },
-        { keys: ['↑', '↓'], label: 'Previous / next message in detail' },
-        { keys: ['Ctrl', 'Enter'], combo: true, label: 'Allow / approve the waiting prompt' },
-      ],
-    },
-  ],
-  [
-    {
-      title: 'Board',
-      rows: [
-        { keys: ['Enter'], label: 'Toggle task detail panel' },
-        { keys: ['D'], label: 'Delete selected task' },
-        { keys: ['N'], label: 'Toggle scratchpad (in the sidebar: the item under the cursor)' },
-        { keys: ['R'], label: 'Refresh data' },
-        { keys: ['Esc'], label: 'Close panel / clear selection' },
-      ],
-    },
-    {
-      title: 'View',
-      rows: [
-        { keys: ['['], label: 'Toggle sidebar' },
-        { keys: ['T'], label: 'Toggle theme' },
-        { keys: ['Shift', 'S'], combo: true, label: 'Storage manager' },
-        { keys: ['Ctrl', 'Shift', 'Z'], combo: true, label: 'Zen mode (current session only)' },
-        { keys: ['Ctrl', '+'], combo: true, label: 'Larger modal text' },
-        { keys: ['Ctrl', '−'], combo: true, label: 'Smaller modal text' },
-        { keys: ['Ctrl', '0'], combo: true, label: 'Reset modal text size' },
-        { keys: ['?'], label: 'Show this help' },
-      ],
-    },
-  ],
-  [
-    {
-      title: 'Copy',
-      rows: [
-        { keys: ['Shift', 'C'], combo: true, label: 'Session id' },
-        { keys: ['Ctrl', 'Shift', 'C'], combo: true, label: 'Session name (SendMessage address)' },
-      ],
-    },
-    {
-      title: 'Hub',
-      hub: true,
-      rows: [
-        { keys: ['M'], label: 'Jump to marketplace' },
-        { keys: ['$'], label: 'Jump to cost' },
-        { keys: ['Ctrl', 'M'], combo: true, label: 'Jump to memory' },
-        { keys: ['Ctrl', 'Alt', '←/→'], combo: true, label: 'Previous / next hub app' },
-        { keys: ['Alt', '1…9'], combo: true, label: 'Jump to hub app by number' },
-        { keys: ['Ctrl', 'Alt', 'P'], combo: true, label: 'Project picker' },
-      ],
-    },
-  ],
-  [
-    {
-      title: 'Terminal',
-      rows: [
-        { keys: ['Ctrl', '`'], combo: true, label: 'Show / hide terminal' },
-        { keys: ['Alt', '`'], combo: true, label: 'Focus terminal / page' },
-        { keys: ['Alt', 'Shift', '`'], combo: true, label: 'End and close terminal' },
-        { keys: ['Ctrl', 'Shift', '`'], combo: true, label: 'All terminals' },
-        { keys: ['Ctrl', '+/−/0'], combo: true, label: 'Terminal text size' },
-      ],
-    },
-    {
-      title: 'Sessions',
-      rows: [
-        { keys: ['Ctrl', 'Alt', 'N'], combo: true, label: 'New session' },
-        { keys: ['Ctrl', 'Alt', 'R'], combo: true, label: 'Resume session (claude -r)' },
-        { keys: ['Ctrl', 'Alt', 'S'], combo: true, label: 'Swap to previous session' },
-      ],
-    },
-  ],
+// Each tab shows its groups two to a row; a pair shares grid rows, so the two headings sit level and
+// the shorter group leaves empty rows. `combo` joins the keys with a plus (a chord) instead of
+// listing them as alternatives. The `hub` tab only works inside Claude Code Hub.
+const SHORTCUT_TABS = [
+  {
+    title: 'Board',
+    groups: [
+      {
+        title: 'Navigate',
+        rows: [
+          { keys: ['↓'], label: 'Next item' },
+          { keys: ['↑'], label: 'Previous item' },
+          { keys: ['←'], label: 'Left column / collapse group' },
+          { keys: ['→'], label: 'Right column / expand group' },
+          { keys: ['Tab'], label: 'Switch sidebar ↔ board' },
+          { keys: ['Enter', 'Space'], label: 'Open selected item' },
+        ],
+      },
+      {
+        title: 'Board',
+        rows: [
+          { keys: ['Enter'], label: 'Toggle task detail panel' },
+          { keys: ['D'], label: 'Delete selected task' },
+          { keys: ['N'], label: 'Toggle scratchpad (in the sidebar: the item under the cursor)' },
+          { keys: ['R'], label: 'Refresh data' },
+          { keys: ['Esc'], label: 'Close panel / clear selection' },
+        ],
+      },
+      {
+        title: 'View',
+        rows: [
+          { keys: ['['], label: 'Toggle sidebar' },
+          { keys: ['T'], label: 'Toggle theme' },
+          { keys: ['Shift', 'S'], combo: true, label: 'Storage manager' },
+          { keys: ['Ctrl', 'Shift', 'Z'], combo: true, label: 'Zen mode (current session only)' },
+          { keys: ['Ctrl', '+'], combo: true, label: 'Larger modal text' },
+          { keys: ['Ctrl', '−'], combo: true, label: 'Smaller modal text' },
+          { keys: ['Ctrl', '0'], combo: true, label: 'Reset modal text size' },
+          { keys: ['?'], label: 'Show this help' },
+        ],
+      },
+      {
+        title: 'Copy',
+        rows: [
+          { keys: ['Shift', 'C'], combo: true, label: 'Session id' },
+          { keys: ['Ctrl', 'Shift', 'C'], combo: true, label: 'Session name (SendMessage address)' },
+        ],
+      },
+    ],
+  },
+  {
+    title: 'Session',
+    groups: [
+      {
+        title: 'Session',
+        rows: [
+          { keys: ['P'], label: 'Open plan' },
+          { keys: ['Ctrl', 'Shift', 'P'], combo: true, label: 'Session picker' },
+          { keys: ['Shift', 'P'], combo: true, label: 'Project picker (this board)' },
+          { keys: ['I'], label: 'Session info' },
+          { keys: ['.'], label: 'Pin / unpin' },
+          { keys: ['>'], label: 'Toggle sticky' },
+          { keys: ['Shift', 'F10'], combo: true, label: 'Move to group (or Menu key)' },
+          { keys: ['Ctrl', 'D'], combo: true, label: 'Dismiss session' },
+          { keys: ['Shift', 'L'], combo: true, label: 'Toggle session log' },
+          { keys: ['Shift', 'M'], combo: true, label: 'Open last message' },
+          { keys: ['↑', '↓'], label: 'Previous / next message in detail' },
+          { keys: ['Ctrl', 'Enter'], combo: true, label: 'Allow / approve the waiting prompt' },
+        ],
+      },
+      {
+        title: 'Sessions',
+        rows: [
+          { keys: ['Ctrl', 'Alt', 'N'], combo: true, label: 'New session' },
+          { keys: ['Ctrl', 'Alt', 'R'], combo: true, label: 'Resume session (claude -r)' },
+          { keys: ['Ctrl', 'Alt', 'S'], combo: true, label: 'Swap to previous session' },
+        ],
+      },
+    ],
+  },
+  {
+    title: 'Terminal',
+    groups: [
+      {
+        title: 'Terminal',
+        rows: [
+          { keys: ['Ctrl', '`'], combo: true, label: 'Show / hide terminal' },
+          { keys: ['Alt', '`'], combo: true, label: 'Focus terminal / page' },
+          { keys: ['Alt', 'Shift', '`'], combo: true, label: 'End and close terminal' },
+          { keys: ['Ctrl', 'Shift', '`'], combo: true, label: 'All terminals' },
+          { keys: ['Ctrl', '+/−/0'], combo: true, label: 'Terminal text size' },
+        ],
+      },
+    ],
+  },
+  {
+    title: 'Hub',
+    hub: true,
+    groups: [
+      {
+        title: 'Hub',
+        rows: [
+          { keys: ['M'], label: 'Jump to marketplace' },
+          { keys: ['$'], label: 'Jump to cost' },
+          { keys: ['Ctrl', 'M'], combo: true, label: 'Jump to memory' },
+          { keys: ['Ctrl', 'Alt', '←/→'], combo: true, label: 'Previous / next hub app' },
+          { keys: ['Alt', '1…9'], combo: true, label: 'Jump to hub app by number' },
+          { keys: ['Ctrl', 'Alt', 'P'], combo: true, label: 'Project picker' },
+        ],
+      },
+    ],
+  },
 ];
-
-const EMPTY_GROUP = { title: '', rows: [] };
 
 // Interleaves each pair's rows left-then-right so CSS grid auto-placement lands
 // them on shared row tracks (see .shortcuts in style.css).
-function buildHelpShortcuts() {
+function buildHelpShortcuts(groups) {
   const cells = [];
-  SHORTCUT_PAIRS.forEach(([left, right = EMPTY_GROUP], pair) => {
+  for (let pair = 0; pair < groups.length; pair += 2) {
     const first = pair === 0 ? ' sc-first' : '';
     const sides = [
-      [left, 'sc-l'],
-      [right, 'sc-r'],
-    ];
-    const head = (g, side) =>
-      g.title ? `<div class="${escapeHtml(`sc-group ${side}${first}${g.hub ? ' sc-hub' : ''}`)}">${g.title}</div>` : '';
-    cells.push(sides.map(([g, side]) => head(g, side)).join(''));
-    for (let i = 0; i < Math.max(left.rows.length, right.rows.length); i++) {
+      [groups[pair], 'sc-l'],
+      [groups[pair + 1], 'sc-r'],
+    ].filter(([g]) => g);
+    for (const [g, side] of sides)
+      cells.push(`<div class="${escapeHtml(`sc-group ${side}${first}`)}">${escapeHtml(g.title)}</div>`);
+    for (let i = 0; i < Math.max(...sides.map(([g]) => g.rows.length)); i++) {
       for (const [group, side] of sides) {
         const row = group.rows[i];
         if (!row) continue;
         const sep = row.combo ? '<span class="sc-plus">+</span>' : '<span class="sc-or">/</span>';
         const keys = row.keys.map((k) => `<kbd>${escapeHtml(k)}</kbd>`).join(sep);
-        const cls = side + (group.hub ? ' sc-hub' : '');
-        cells.push(
-          `<dt class="${escapeHtml(cls)}">${keys}</dt><dd class="${escapeHtml(cls)}">${escapeHtml(row.label)}</dd>`,
-        );
+        const label = escapeHtml(row.label);
+        cells.push(`<dt class="${escapeHtml(side)}">${keys}</dt><dd class="${escapeHtml(side)}">${label}</dd>`);
       }
     }
-  });
+  }
   return cells.join('');
 }
 
-function showHelpModal() {
-  const modal = document.getElementById('help-modal');
-  const list = document.getElementById('help-shortcuts');
-  if (!list.childElementCount) list.innerHTML = buildHelpShortcuts();
-  list.classList.toggle('sc-standalone', !hub.inHub);
-  modal.classList.add('visible');
+let helpTab = 0;
+const helpFilter = document.getElementById('help-filter');
+
+// Hub keys do nothing outside Claude Code Hub, so the standalone board drops that tab.
+const helpTabs = () => SHORTCUT_TABS.filter((t) => hub.inHub || !t.hub);
+
+// The matching rows of every tab, in their groups.
+function filteredShortcutGroups(query) {
+  return helpTabs()
+    .flatMap((t) => t.groups)
+    .map((g) => ({ title: g.title, rows: g.rows.filter((r) => fuzzyMatch(`${r.label} ${r.keys.join(' ')}`, query)) }))
+    .filter((g) => g.rows.length);
 }
+
+function renderHelp() {
+  const tabs = helpTabs();
+  helpTab = Math.min(helpTab, tabs.length - 1);
+  const query = helpFilter.value.trim();
+  document.getElementById('help-tabs').innerHTML = tabs
+    .map((t, i) => {
+      const on = !query && i === helpTab;
+      return `<button type="button" role="tab" class="help-tab${on ? ' active' : ''}" aria-selected="${escapeHtml(String(on))}" data-idx="${i}">${escapeHtml(t.title)}</button>`;
+    })
+    .join('');
+  const groups = query ? filteredShortcutGroups(query) : tabs[helpTab].groups;
+  document.getElementById('help-shortcuts').innerHTML = groups.length
+    ? buildHelpShortcuts(groups)
+    : `<div class="sc-empty">No shortcut matches "${escapeHtml(query)}"</div>`;
+}
+
+function clearHelpFilter() {
+  helpFilter.value = '';
+  renderHelp();
+}
+
+function selectHelpTab(idx) {
+  helpTab = idx;
+  clearHelpFilter();
+}
+
+function showHelpModal() {
+  clearHelpFilter();
+  document.getElementById('help-modal').classList.add('visible');
+  helpFilter.focus();
+}
+
+document.getElementById('help-tabs').addEventListener('click', (e) => {
+  const tab = e.target.closest('[data-idx]');
+  if (!tab) return;
+  selectHelpTab(Number(tab.dataset.idx));
+  helpFilter.focus();
+});
+
+helpFilter.addEventListener('input', renderHelp);
+
+// The page's key handler skips text fields, so the filter handles its own Esc and tab keys.
+helpFilter.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    e.stopPropagation();
+    if (helpFilter.value) clearHelpFilter();
+    else closeHelpModal();
+    return;
+  }
+  const step = matchKey(e, 'ArrowLeft') ? -1 : matchKey(e, 'ArrowRight') ? 1 : 0;
+  if (!step || helpFilter.value) return;
+  e.preventDefault();
+  const n = helpTabs().length;
+  selectHelpTab((helpTab + step + n) % n);
+});
 
 function closeHelpModal() {
   const modal = document.getElementById('help-modal');

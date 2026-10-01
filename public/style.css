@@ -5635,6 +5635,7 @@ body.light .msg-assistant .msg-text {
    the viewport cap. */
 .modal-help {
   max-width: 900px;
+  height: min(700px, 90vh);
   padding: 16px 20px 20px;
   display: flex;
   flex-direction: column;
@@ -5670,7 +5671,7 @@ body.light .msg-assistant .msg-text {
    gutter is sized by its column's widest combo, and left/right rows share row
    tracks, so paired groups line up — a shorter group just leaves empty rows.
    Cells opt into a half via sc-l / sc-r; the markup is generated from
-   SHORTCUT_PAIRS in app.js. */
+   SHORTCUT_TABS in app.js. */
 .shortcuts {
   margin: 0;
   display: grid;
@@ -5757,10 +5758,31 @@ body.light .msg-assistant .msg-text {
   font-size: 11px;
 }
 
-/* Hub jumps are no-ops outside Claude Code Hub, so the standalone board hides
-   that whole column rather than listing keys that do nothing. */
-.shortcuts.sc-standalone .sc-hub {
-  display: none;
+.shortcuts .sc-empty {
+  grid-column: 1 / -1;
+  padding: 24px 0;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.help-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.help-tabs {
+  display: flex;
+}
+
+.help-bar .help-filter {
+  margin: 0 0 6px auto;
+  width: 220px;
+  padding: 4px 10px;
+  font-size: 12px;
 }
 
 @keyframes live-border-pulse {
@@ -6635,7 +6657,8 @@ select.form-input option:checked {
   flex-shrink: 0;
 }
 
-.storage-tab {
+.storage-tab,
+.help-tab {
   background: none;
   border: none;
   color: var(--text-secondary);
@@ -6649,11 +6672,13 @@ select.form-input option:checked {
     border-color 0.15s;
 }
 
-.storage-tab:hover {
+.storage-tab:hover,
+.help-tab:hover {
   color: var(--text-primary);
 }
 
-.storage-tab.active {
+.storage-tab.active,
+.help-tab.active {
   color: var(--accent);
   border-bottom-color: var(--accent);
 }
