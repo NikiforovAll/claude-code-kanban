@@ -559,6 +559,7 @@ let lastCurrentTasksHash = '';
 
 async function fetchTasks(sessionId) {
   try {
+    const refresh = viewMode === 'session' && sessionId === currentSessionId;
     viewMode = 'session';
     document.getElementById('message-toggle')?.style.removeProperty('display');
     const res = await fetch(`/api/sessions/${sessionId}`);
@@ -588,13 +589,17 @@ async function fetchTasks(sessionId) {
     currentSessionId = sessionId;
     markOpenSessionRead();
     if (switched) autoRevealLog(sessionId, newTasks.length === 0);
-    currentPins = loadPins(sessionId);
-    ownerFilter = '';
-    resetMessageScrollState();
-    for (const k of Object.keys(ownerColorCache)) delete ownerColorCache[k];
-    for (const k of Object.keys(teamColorMap)) delete teamColorMap[k];
-    sessionJustSelected = true;
-    resetAgentState();
+    // A task change in the open session must not reset the messages, the agents or the owner
+    // filter: that reset rebuilds the panels and reads as a reload after each card move.
+    if (!refresh) {
+      currentPins = loadPins(sessionId);
+      ownerFilter = '';
+      resetMessageScrollState();
+      for (const k of Object.keys(ownerColorCache)) delete ownerColorCache[k];
+      for (const k of Object.keys(teamColorMap)) delete teamColorMap[k];
+      sessionJustSelected = true;
+      resetAgentState();
+    }
     updateUrl();
     renderSession();
     renderSessions();
@@ -4018,7 +4023,7 @@ function renderKanban() {
   // away mid-typing -- leave the column alone until the input is gone.
   if (!addingTask) {
     const addTile = canAddTask()
-      ? `<button type="button" class="column-add${pending.length ? '' : ' empty'}" onclick="startAddTask(this)">${plusIcon}<span>Add task</span></button>`
+      ? `<button type="button" class="column-add${pending.length ? '' : ' empty'}" onclick="startAddTask(this)" title="You can also ask the agent to add tasks with its TaskCreate tool. Make sure CLAUDE_CODE_ENABLE_TASKS is set in its environment.">${plusIcon}<span>Add task</span></button>`
       : '';
     writes.push([
       pendingTasks,
@@ -4201,17 +4206,21 @@ async function onColumnDrop(e) {
     (t) => t.id === taskId && (t._taskDir === sessionId || (t.sessionId || currentSessionId) === sessionId),
   );
   if (!task || task.status === newStatus) return;
+  const oldStatus = task.status;
+  task.status = newStatus;
+  renderKanban();
   try {
     const res = await fetch(`/api/tasks/${sessionId}/${taskId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: newStatus }),
     });
-    if (res.ok) {
-      task.status = newStatus;
-      renderKanban();
-    }
+    if (res.ok) return;
   } catch (_) {}
+  if (task.status === newStatus) {
+    task.status = oldStatus;
+    renderKanban();
+  }
 }
 
 //#endregion
