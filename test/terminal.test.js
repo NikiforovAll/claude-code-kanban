@@ -404,6 +404,11 @@ function fakePty() {
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
+async function until(check, timeoutMs = 2000) {
+  const end = Date.now() + timeoutMs;
+  while (!check() && Date.now() < end) await wait(10);
+}
+
 describe('terminal restore', () => {
   const A = 'aaaaaaaa-0000-0000-0000-000000000001';
   const B = 'aaaaaaaa-0000-0000-0000-000000000002';
@@ -437,14 +442,14 @@ describe('terminal restore', () => {
     const { t, pty, store } = service(true, { sessions: [A, ELSEWHERE, UNKNOWN, 'not-a-uuid', B] });
     t.restore();
     assert.deepEqual(t.list().map((s) => s.id), [A]);
-    await wait(GAP_MS + SAVE_MS * 3);
+    await until(() => t.list().length === 2 && store.data.sessions.length === 2);
     assert.deepEqual(t.list().map((s) => s.id).sort(), [A, B]);
     assert.ok(pty.spawned.every((p) => p.args.join(' ').includes('--resume')));
     assert.deepEqual(store.data.sessions.sort(), [A, B]);
 
     const saves = store.saves;
     assert.equal(t.end(A, TOKEN), null);
-    await wait(SAVE_MS * 3);
+    await until(() => store.saves > saves);
     assert.deepEqual(store.data.sessions, [B]);
     assert.equal(store.saves, saves + 1);
 
