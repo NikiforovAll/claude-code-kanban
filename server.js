@@ -3219,6 +3219,32 @@ function isAllowedFolder(dir) {
   try { return known && statSync(dir).isDirectory(); } catch { return false; }
 }
 
+// Restore runs before the first full metadata scan, so until that scan has run a session's
+// folder is read from its own JSONL, by the same rules the scan uses.
+function resolveSessionFolder(id) {
+  if (lastMetadataRefresh || !isSafeId(id)) {
+    const meta = loadSessionMetadata()[id];
+    return meta ? meta.project || meta.cwd || null : null;
+  }
+  try {
+    for (const dir of readdirSync(PROJECTS_DIR, { withFileTypes: true })) {
+      if (!dir.isDirectory()) continue;
+      const jsonlPath = path.join(PROJECTS_DIR, dir.name, `${id}.jsonl`);
+      if (!existsSync(jsonlPath)) continue;
+      let indexProject = null;
+      try {
+        const index = JSON.parse(readFileSync(path.join(PROJECTS_DIR, dir.name, 'sessions-index.json'), 'utf8'));
+        indexProject = (index.entries || []).find((e) => e.projectPath)?.projectPath || null;
+      } catch {}
+      const info = readSessionInfoFromJsonl(jsonlPath);
+      const folder = indexProject || info.projectPath || info.cwd;
+      if (folder) return folder;
+    }
+  } catch {}
+  const meta = loadSessionMetadata()[id];
+  return meta ? meta.project || meta.cwd || null : null;
+}
+
 let listenPort = null;
 const terminal = createTerminalService({
   config: readTerminalConfig({ getArgValue }),
@@ -3235,10 +3261,7 @@ const terminal = createTerminalService({
   isLiveElsewhere: isSessionProcessAlive,
   // The project, not the last cwd: `claude --resume` finds a session under the
   // project dir it started in, and cwd drifts into subdirectories.
-  resolveCwd: (id) => {
-    const meta = loadSessionMetadata()[id];
-    return meta ? meta.project || meta.cwd || null : null;
-  },
+  resolveCwd: resolveSessionFolder,
   isAllowedFolder,
   liveSessions: () => loadLiveSessions(true),
   onChange: () => broadcast({ type: 'terminals-update', ids: terminal.list().map((t) => t.id) }),
@@ -4207,8 +4230,6 @@ async function prewarmCaches() {
   const t0 = Date.now();
   try {
     const metadata = loadSessionMetadata();
-    // Here, not at listen: resolving a saved session needs this scan, which startup defers.
-    terminal.restore();
 
     let sliceStart = Date.now();
     for (const meta of Object.values(metadata)) {
@@ -4249,6 +4270,7 @@ async function prewarmCaches() {
     if (process.argv.includes('--open')) {
       import('open').then(open => open.default(`http://localhost:${actualPort}`));
     }
+    terminal.restore();
     setTimeout(startPrewarm, PREWARM_FALLBACK_MS).unref();
   };
 
