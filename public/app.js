@@ -304,14 +304,18 @@ async function fetchSessions(includeTasks = true) {
 }
 
 // The Stop hook leaves _stop.json when a session ends its turn; deleting it marks the session read.
-function markOpenSessionRead() {
-  if (!currentSessionId || viewMode !== 'session' || !isOnScreen()) return;
-  const session = sessions.find((s) => s.id === currentSessionId);
+function markSessionRead(sessionId) {
+  const session = sessions.find((s) => s.id === sessionId);
   if (!session?.unread) return;
   session.unread = false;
-  fetch(`/api/sessions/${encodeURIComponent(currentSessionId)}/read`, { method: 'POST' }).catch((e) =>
-    console.error('[markOpenSessionRead]', e),
+  document.querySelector(`.session-item[data-session-id="${CSS.escape(sessionId)}"]`)?.classList.remove('unread');
+  fetch(`/api/sessions/${encodeURIComponent(sessionId)}/read`, { method: 'POST' }).catch((e) =>
+    console.error('[markSessionRead]', e),
   );
+}
+
+function markOpenSessionRead() {
+  if (currentSessionId && viewMode === 'session' && isOnScreen()) markSessionRead(currentSessionId);
 }
 
 async function loadSearchTasks() {
@@ -10681,6 +10685,7 @@ function openSession(sessionId) {
   const alreadyOpen = sessionId === currentSessionId && viewMode === 'session' && termState.shown;
   if (!alreadyOpen) termState.openedByUser = sessionId;
   else if (termState.attached && promptAwaitsUser(sessionId)) focusTerminalPane();
+  markSessionRead(sessionId);
   return fetchTasks(sessionId);
 }
 
