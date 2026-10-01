@@ -241,10 +241,9 @@ describe('readTerminalConfig', () => {
     assert.equal(c.maxSessions, 2);
     assert.equal(c.noFlicker, false);
   });
-  it('restores terminals only when asked', () => {
-    assert.equal(readTerminalConfig({ argv: [], env: {} }).restore, false);
-    assert.equal(readTerminalConfig({ argv: ['--restore-terminals'], env: {} }).restore, true);
-    assert.equal(readTerminalConfig({ argv: [], env: { CCK_TERMINAL: '{"restore":true}' } }).restore, true);
+  it('restores terminals unless the block turns it off', () => {
+    assert.equal(readTerminalConfig({ argv: [], env: {} }).restore, true);
+    assert.equal(readTerminalConfig({ argv: [], env: { CCK_TERMINAL: '{"restore":false}' } }).restore, false);
   });
   it('takes the shell from the flag, then the env var, then the hub block', () => {
     const env = { CCK_TERMINAL: '{"shell":"pwsh"}', CCK_TERMINAL_SHELL: 'gitbash' };

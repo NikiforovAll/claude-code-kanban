@@ -36,7 +36,6 @@ Claude Task Kanban running at http://localhost:3541
 | `--open` | | Opens the board in your browser after the server starts. |
 | `--dir <path>` | `CLAUDE_CONFIG_DIR`, then `CLAUDE_DIR` | Claude config dir to read. Default `~/.claude`. A leading `~` expands to your home dir. |
 | `--enable-terminal` | `CCK_TERMINAL='{"enabled":true}'` | Turns on the [embedded terminal](/claude-code-kanban/guides/embedded-terminal/). It is off by default when Claude Code Kanban runs alone. |
-| `--restore-terminals` | `CCK_TERMINAL='{"restore":true}'` | Resumes the terminals that were open when the server last stopped. See [Restore terminals on start](/claude-code-kanban/guides/embedded-terminal/#restore-terminals-on-start). |
 | `--terminal-shell <value>` | `CCK_TERMINAL_SHELL` | Shell for the terminal: `gitbash`, a program on `PATH` (`pwsh`, `cmd`, `zsh`) or a path. Default on Windows is `pwsh`, then `powershell`. Elsewhere it is `$SHELL`, then `/bin/sh`. |
 | `--host <addr>` | `HOST` | Address to listen on. Default `127.0.0.1`. |
 | `--allowed-hosts=<list>` | `ALLOWED_HOSTS` | Comma-separated extra `Host` header values to accept. |
