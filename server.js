@@ -16,6 +16,7 @@ const { isContained } = require('./lib/contain');
 const { resolveScratchSubdir, listScratchDir } = require('./lib/scratch-files');
 const { fileUrlToPath } = require('./lib/file-url');
 const { pluginStatus } = require('./lib/plugin-status');
+const { getAutoCompact } = require('./lib/auto-compact');
 
 const {
   readRecentMessages: _readRecentMessagesUncached,
@@ -40,8 +41,9 @@ const { inlineHtmlAssets, MIME_BY_EXT } = require('./lib/inline-assets');
 const { buildDecision, decisionFileName, isDecisionFile, approvalsFrom, boardRefusal } = require('./lib/approvals');
 const { getClaudeDir, getArgValue, storageNamespace, isDefaultClaudeDir } = require('./lib/claude-dir');
 const { createTerminalService, readTerminalConfig } = require('./lib/terminal');
-const { createDispatchRegistry, formatPreamble, formatDispatchLine, isPeerName } = require('./lib/dispatch');
+const { createDispatchRegistry, formatPreamble, formatDispatchLine, isPeerName, DISPATCH_OUTCOME } = require('./lib/dispatch');
 const { createGroupStore, isGroupName, suggestGroupName } = require('./lib/dispatch-groups');
+const { createDispatchedStore, listTranscriptIds, pruneSessionDirs, retentionMs } = require('./lib/retention');
 const { createLinkedDocStore, linkUrl } = require('./lib/linked-docs');
 const { pickFolder } = require('./lib/folder-dialog');
 const { loadSessionCache, saveSessionCache } = require('./lib/session-cache');
@@ -90,6 +92,7 @@ const AGENT_ACTIVITY_DIR = path.join(CCK_DIR, 'agent-activity');
 const CONTEXT_STATUS_DIR = path.join(CCK_DIR, 'context-status');
 const PINS_FILE = path.join(CCK_DIR, 'pins.json');
 const DISPATCH_GROUPS_FILE = path.join(CCK_DIR, 'dispatch-groups.json');
+const DISPATCHED_FILE = path.join(CCK_DIR, 'dispatched.json');
 const LINKED_DOCS_FILE = path.join(CCK_DIR, 'linked-docs.json');
 const SERVER_INFO_FILE = path.join(CCK_DIR, 'server.json');
 const TERMINAL_TOKENS_DIR = path.join(CCK_DIR, 'terminal-tokens');
@@ -200,6 +203,7 @@ const WAITING_RESOLVE_GRACE_MS = 15 * 1000;
 const CTX_CLEANUP_MAX_AGE_MS = 2 * 60 * 60 * 1000;
 const CLEANUP_MAX_AGE_MS = 2 * 24 * 60 * 60 * 1000;
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
+const RETENTION_FIRST_RUN_MS = 5 * 60 * 1000;
 // #endregion
 
 // #region AGENT_ACTIVITY
@@ -284,6 +288,11 @@ function isGhostAgent(agent) {
 
 function getContextStatus(sessionId, meta) {
   return contextStatusCache.get(sessionId) || (meta?.teamLeaderId ? contextStatusCache.get(meta.teamLeaderId) : null) || null;
+}
+
+function getContextFields(sessionId, meta) {
+  const contextStatus = getContextStatus(sessionId, meta);
+  return { contextStatus, autoCompact: contextStatus ? getAutoCompact(CLAUDE_DIR, meta?.project) : null };
 }
 
 function isAgentFresh(agent) {
@@ -1191,7 +1200,7 @@ function buildSessionObject(id, meta, overrides = {}) {
     tasksDir: null,
     projectDir: meta.jsonlPath ? path.dirname(meta.jsonlPath) : null,
     scratchpadDir: getScratchpadDir(id, meta),
-    contextStatus: getContextStatus(id, meta),
+    ...getContextFields(id, meta),
     ...getPlanInfo(meta.slug),
     ...getWorkflowInfoSummary(id),
     ...overrides,
@@ -1520,10 +1529,7 @@ app.get('/api/sessions', async (req, res) => {
     // Backfill contextStatus for already-built sessions that are pinned
     for (const pid of pinnedIds) {
       const s = sessionsMap.get(pid);
-      if (s && !s.contextStatus) {
-        const meta = metadata[pid];
-        s.contextStatus = getContextStatus(pid, meta);
-      }
+      if (s && !s.contextStatus) Object.assign(s, getContextFields(pid, metadata[pid]));
     }
 
     // Ensure pinned sessions are in the map even if they weren't discovered
@@ -1750,7 +1756,7 @@ app.get('/api/sessions/:sessionId/plan', async (req, res) => {
     if (!existsSync(planPath)) return res.json({ content: null });
 
     const content = await fs.readFile(planPath, 'utf8');
-    res.json({ content, slug });
+    res.json({ content, slug, path: planPath });
   } catch (error) {
     console.error('Error reading plan:', error);
     res.status(500).json({ error: 'Failed to read plan' });
@@ -3318,9 +3324,17 @@ app.get('/vendor/xterm/:file', (req, res) => {
 // #endregion
 
 // #region DISPATCH
+const dispatched = createDispatchedStore({
+  load: () => {
+    try { return JSON.parse(readFileSync(DISPATCHED_FILE, 'utf8')); } catch { return null; }
+  },
+  save: (data) => writeJsonAtomic(DISPATCHED_FILE, data),
+});
+
 const dispatches = createDispatchRegistry({
   onSettle: (r) => {
     if (r.parent && r.report) enqueueSessionEvent(topicKey('dispatch', r.parent), formatDispatchLine(r));
+    if (r.session) dispatched.settle(r.session, r.status);
     broadcast({ type: 'dispatch-update' });
   },
 });
@@ -3343,17 +3357,19 @@ const linkedDocs = createLinkedDocStore({
 
 // The board places a session from these alone, so it never has to move it later.
 // `startedBy` lets it follow a starter the user put in a named group, which only the
-// browser knows; it goes once the dispatch settles.
+// browser knows; it goes once the dispatch settles. `dispatched` stays for the card's marker.
 function withDispatchPlacement(sessions) {
   const groups = dispatchGroups.snapshot();
-  const starters = new Map(
-    dispatches.list().filter((r) => r.status === 'running' && r.parent && r.session).map((r) => [r.session, r.parent]),
-  );
-  if (!groups.size && !starters.size) return sessions;
   return sessions.map((s) => {
     const dispatchGroup = groups.get(s.id);
-    const startedBy = starters.get(s.id);
-    return dispatchGroup || startedBy ? { ...s, dispatchGroup, startedBy } : s;
+    const marker = dispatched.get(s.id);
+    if (!dispatchGroup && !marker) return s;
+    return {
+      ...s,
+      dispatchGroup,
+      startedBy: marker?.status === 'running' ? marker.parent || undefined : undefined,
+      dispatched: marker ? { parent: marker.parent, outcome: DISPATCH_OUTCOME[marker.status] } : undefined,
+    };
   });
 }
 
@@ -3377,6 +3393,7 @@ app.post('/api/dispatch', (req, res) => {
     return res.status(started.status).json({ error: started.error });
   }
   dispatches.attach(r.id, { session: started.id, cwd: started.cwd });
+  dispatched.record(started.id, parent);
   // The starter stays where it is: moving it would jump it under the user.
   if (target) dispatchGroups.join(target, [started.id], parent);
   broadcast({ type: 'dispatch-update' });
@@ -3458,7 +3475,14 @@ app.get('/api/tasks/all', async (_req, res) => {
   }
 });
 
-const { enqueueSessionEvent, formatTaskMoved, handleSessionEvents, topicKey } = require('./lib/session-events');
+const {
+  enqueueSessionEvent,
+  formatReviewSubmitted,
+  formatTaskMoved,
+  handleSessionEvents,
+  hasSessionListener,
+  topicKey,
+} = require('./lib/session-events');
 app.get('/api/sessions/:sessionId/events', handleSessionEvents);
 
 // API: Create a task
@@ -3912,6 +3936,102 @@ app.get('/api/file/resolve', async (req, res) => {
 
 // #endregion
 
+// #region REVIEW
+// API: Send review comments on something the board shows (a file preview today) to a
+// session. The source is described, not interpreted, so a new kind of preview needs a
+// client change only. The batch is always written to a file: the doorbell is lossy and
+// carries one line, and the file is what each route points at.
+const REVIEW_DIR = path.join(CCK_DIR, 'reviews');
+const REVIEW_KIND_RE = /^[a-z]{1,20}$/;
+const REVIEW_MAX_COMMENTS = 50;
+const REVIEW_MAX_CHARS = 4000;
+
+function parseReviewBody(body) {
+  const { source, comments } = body || {};
+  if (!source || !REVIEW_KIND_RE.test(source.kind)) throw previewError(400, 'source.kind is required');
+  // The label is pasted into the terminal; an ESC could end bracketed paste and submit text.
+  const label = String(source.label || '')
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: strips control characters on purpose
+    .replace(/[\x00-\x1f\x7f]/g, ' ')
+    .trim()
+    .slice(0, 200);
+  if (!label) throw previewError(400, 'source.label is required');
+  if (!Array.isArray(comments) || !comments.length || comments.length > REVIEW_MAX_COMMENTS) {
+    throw previewError(400, `comments must hold 1 to ${REVIEW_MAX_COMMENTS} items`);
+  }
+  const field = (v, max) => (typeof v === 'string' && v.trim() ? v.trim().replace(/\s+/g, ' ').slice(0, max) : null);
+  // Element and selector are printed inside a markdown code span.
+  const code = (v, max) => field(v, max)?.replace(/`/g, "'") || null;
+  const items = comments.map((c) => ({
+    quote: String(c?.quote || '').trim().slice(0, REVIEW_MAX_CHARS),
+    comment: String(c?.comment || '').trim().slice(0, REVIEW_MAX_CHARS),
+    heading: field(c?.heading, 200),
+    line: Number.isInteger(c?.line) && c.line > 0 ? c.line : null,
+    element: code(c?.element, 300),
+    selector: code(c?.selector, 500),
+  }));
+  if (items.some((c) => !c.comment)) throw previewError(400, 'every comment needs text');
+  return { kind: source.kind, label, path: source.kind === 'file' ? source.path : null, items };
+}
+
+function formatReviewMarkdown(src, items) {
+  const parts = [
+    `# Review of ${src.path || src.label}`,
+    '',
+    "Each comment is the user's instruction about the quoted text. A quote missing from the source means the source changed after the review: say so.",
+  ];
+  items.forEach((c, i) => {
+    const where = [c.line && `line ${c.line}`, c.heading && `under "${c.heading}"`].filter(Boolean).join(', ');
+    parts.push('', `## ${i + 1}${where ? ` (${where})` : ''}`, '');
+    if (c.element) parts.push(`Element: \`${c.element}\`${c.selector ? ` at \`${c.selector}\`` : ''}`, '');
+    if (c.quote) parts.push(...c.quote.split(/\r?\n/).map((l) => `> ${l}`), '');
+    parts.push(c.comment);
+  });
+  return `${parts.join('\n')}\n`;
+}
+
+function isWaitingOnUser(sessionId) {
+  const meta = loadSessionMetadata()[sessionId] || {};
+  return !!checkWaitingForUser(path.join(AGENT_ACTIVITY_DIR, sessionId), getSessionLogStat(meta).mtime);
+}
+
+app.post('/api/sessions/:sessionId/review', async (req, res) => {
+  try {
+    const sessionId = req.params.sessionId;
+    if (!isUUID(sessionId)) return res.status(400).json({ error: 'invalid session id' });
+    const src = parseReviewBody(req.body);
+    if (src.kind === 'file') {
+      src.path = resolvePreviewPath(src.path);
+      if (!src.path) return res.status(400).json({ error: 'source.path is required for a file' });
+      await statFileTarget(src.path);
+    }
+
+    const markdown = formatReviewMarkdown(src, src.items);
+    const dir = path.join(REVIEW_DIR, sessionId);
+    await fs.mkdir(dir, { recursive: true });
+    const file = path.join(dir, `${Date.now()}.md`);
+    await fs.writeFile(file, markdown);
+
+    let delivered = null;
+    if (hasSessionListener(sessionId)) {
+      enqueueSessionEvent(sessionId, formatReviewSubmitted(src.items.length, src.label, file));
+      delivered = 'doorbell';
+    } else if (
+      terminal.authorized(req.get('x-terminal-token')) &&
+      terminal.isRunning(sessionId) &&
+      !isWaitingOnUser(sessionId)
+    ) {
+      if (terminal.paste(sessionId, `Address my review comments on ${src.label}: ${file}`)) delivered = 'terminal';
+    }
+    res.json({ delivered, file, markdown });
+  } catch (error) {
+    if (!error.status) console.error('Error in POST /api/sessions/:id/review:', error);
+    res.status(error.status || 500).json({ error: error.message || 'Review failed' });
+  }
+});
+
+// #endregion
+
 // #region SSE
 // SSE endpoint for live updates
 app.get('/api/events', (req, res) => {
@@ -4201,10 +4321,27 @@ async function cleanupAgentActivity() {
   } catch { /* agent-activity dir may not exist */ }
 }
 
+// Dispatch markers and reviews: see docs/retention.md.
+async function runRetention() {
+  try {
+    const opts = { known: await listTranscriptIds(PROJECTS_DIR), maxAgeMs: retentionMs(CLAUDE_DIR) };
+    const markers = dispatched.prune(opts);
+    const reviews = await pruneSessionDirs(REVIEW_DIR, opts);
+    if (markers || reviews) console.log(`[retention] removed ${markers} dispatch markers, ${reviews} reviews`);
+  } catch (e) {
+    console.warn('[retention] failed:', e.message);
+  }
+}
+
 cleanupAgentActivity();
 cleanupContextStatus();
 setInterval(cleanupAgentActivity, CLEANUP_INTERVAL_MS);
 setInterval(cleanupContextStatus, 30 * 60 * 1000);
+// Later than the startup scan and prewarm, so the first sweep never competes with them.
+setTimeout(() => {
+  runRetention();
+  setInterval(runRetention, CLEANUP_INTERVAL_MS);
+}, RETENTION_FIRST_RUN_MS);
 
 // Warm the metadata + loop-info caches in the background so the first user
 // request lands warm. The cheap-probe in /api/sessions skips per-session

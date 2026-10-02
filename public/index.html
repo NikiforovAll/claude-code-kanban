@@ -16,9 +16,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="apple-touch-icon" href="/icons/icon-192.png">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Playfair+Display:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/fonts/fonts.css">
   <link rel="stylesheet" href="/style.css">
   <link rel="stylesheet" href="/themes.css">
   <script defer src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js" integrity="sha384-948ahk4ZmxYVYOc+rxN1H2gM1EJ2Duhp7uHtZ4WSLkV4Vtx5MUqnV+l7u9B+jFv+" crossorigin="anonymous"></script>
@@ -429,7 +427,7 @@
 
   <!-- File Preview Modal (markdown rendered inline, HTML in a sandboxed iframe) -->
   <div id="preview-modal" class="modal-overlay" style="z-index:10002;" onclick="closePreviewModal()">
-    <div class="modal preview-modal-dialog" onclick="event.stopPropagation()">
+    <div class="modal preview-modal-dialog review-host" onclick="event.stopPropagation()">
       <div class="modal-header">
         <h3 class="modal-title" id="preview-modal-title">Preview</h3>
         <div style="display:flex;gap:4px;align-items:center;">
@@ -448,7 +446,10 @@
         </div>
       </div>
       <div class="modal-body">
-        <div id="preview-modal-body" class="rendered-md modal-zoomable"></div>
+        <div class="preview-split">
+          <div id="preview-modal-body" class="rendered-md modal-zoomable"></div>
+          <aside id="preview-review-panel" class="review-panel" hidden></aside>
+        </div>
         <div id="preview-modal-meta"></div>
       </div>
     </div>
@@ -476,23 +477,23 @@
     </div>
   </div>
 
-  <!-- Delete Confirmation Modal -->
-  <div id="delete-confirm-modal" class="modal-overlay" onclick="closeDeleteConfirmModal()">
+  <!-- Confirmation Modal -->
+  <div id="confirm-modal" class="modal-overlay" onclick="closeConfirmModal?.(false)">
     <div class="modal modal-sm" onclick="event.stopPropagation()">
       <div class="modal-header">
-        <h3 class="modal-title">Delete Task</h3>
-        <button class="modal-close" aria-label="Close dialog" onclick="closeDeleteConfirmModal()">
+        <h3 id="confirm-modal-title" class="modal-title"></h3>
+        <button class="modal-close" aria-label="Close dialog" onclick="closeConfirmModal?.(false)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M18 6L6 18M6 6l12 12"/>
           </svg>
         </button>
       </div>
       <div class="modal-body">
-        <p id="delete-confirm-message" style="margin: 0; color: var(--text-primary);"></p>
+        <p id="confirm-modal-message" style="margin: 0; color: var(--text-primary);"></p>
       </div>
       <div class="modal-footer">
-        <button id="delete-cancel-btn" class="btn btn-secondary" onclick="closeDeleteConfirmModal()">Cancel</button>
-        <button id="delete-confirm-btn" class="btn btn-danger" onclick="confirmDelete()">Delete</button>
+        <button id="confirm-cancel-btn" class="btn btn-secondary" onclick="closeConfirmModal?.(false)">Cancel</button>
+        <button id="confirm-ok-btn" class="btn btn-danger" onclick="closeConfirmModal?.(true)"></button>
       </div>
     </div>
   </div>
@@ -551,7 +552,7 @@
 
   <!-- Plan Modal (stacked on top of info modal) -->
   <div id="plan-modal" class="modal-overlay plan-modal-overlay" onclick="closePlanModal()">
-    <div class="modal plan-modal" onclick="event.stopPropagation()">
+    <div class="modal plan-modal review-host" onclick="event.stopPropagation()">
       <div class="modal-header">
         <h3 id="plan-modal-title" class="modal-title">Plan</h3>
         <div style="display:flex;align-items:center;gap:4px;">
@@ -571,7 +572,12 @@
           </button>
         </div>
       </div>
-      <div id="plan-modal-body" class="modal-body detail-desc rendered-md modal-zoomable"></div>
+      <div class="modal-body">
+        <div class="preview-split">
+          <div id="plan-modal-body" class="detail-desc rendered-md modal-zoomable"></div>
+          <aside id="plan-review-panel" class="review-panel" hidden></aside>
+        </div>
+      </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" onclick="closePlanModal()">Close</button>
       </div>

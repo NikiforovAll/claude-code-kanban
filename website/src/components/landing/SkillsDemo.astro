@@ -8,7 +8,7 @@ type Line =
 
 type Scene = { id: string; tab: string; cwd?: string; lines: Line[] };
 
-const dispatchSkill: Line = { kind: 'tool', name: 'Skill', arg: 'kanban-dispatch', result: 'Armed the dispatch inbox' };
+const dispatchSkill: Line = { kind: 'tool', name: 'Skill', arg: 'dispatch', result: 'Armed the dispatch inbox' };
 const guide: Line = { kind: 'tool', name: 'Bash', arg: 'claude-code-kanban skills get dispatch', result: 'Write the spec, start, collect' };
 
 const scenes: Scene[] = [
@@ -16,7 +16,7 @@ const scenes: Scene[] = [
     id: 'dispatch',
     tab: 'Hand off',
     lines: [
-      { kind: 'prompt', text: '/kanban-dispatch fix the flaky checkout test in api/ and report back' },
+      { kind: 'prompt', text: '/dispatch fix the flaky checkout test in api/ and report back' },
       dispatchSkill,
       guide,
       {
@@ -44,7 +44,7 @@ Acceptance:  npm test -- checkout passes 10 times in a row`,
       },
       {
         kind: 'event',
-        text: 'cck:1 dispatch.succeeded d_4f1c9a2b7e01 session=7c2e9b10 summary=The test raced the price cache. It now waits for the cache to load. No other test changed.',
+        text: '[kanban board] Dispatch d_4f1c9a2b7e01 (session 7c2e9b10) reported success. Summary: The test raced the price cache. It now waits for the cache to load. No other test changed.',
       },
       { kind: 'tool', name: 'Bash', arg: 'npm test -- checkout', result: '14 passed' },
       { kind: 'text', text: 'I checked the report: the test passes, and the change is in api/test/checkout.test.js only.' },
@@ -54,7 +54,7 @@ Acceptance:  npm test -- checkout passes 10 times in a row`,
     id: 'parallel',
     tab: 'Parallel',
     lines: [
-      { kind: 'prompt', text: '/kanban-dispatch upgrade express to v5 in api, web and worker, one session each' },
+      { kind: 'prompt', text: '/dispatch upgrade express to v5 in api, web and worker, one session each' },
       dispatchSkill,
       guide,
       {
@@ -81,9 +81,9 @@ Acceptance:  npm test -- checkout passes 10 times in a row`,
     id: 'follow',
     tab: 'Follow',
     lines: [
-      { kind: 'prompt', text: '/claude-code-kanban:kanban-follow' },
+      { kind: 'prompt', text: '/claude-code-kanban:follow' },
       { kind: 'text', text: 'I follow the board now. Move one of my cards and I act on it.' },
-      { kind: 'event', text: 'cck:1 task.moved 4 pending>in_progress subject="Add a rate limit to /login"' },
+      { kind: 'event', text: '[kanban board] The user moved task 4 "Add a rate limit to /login" from pending to in_progress.' },
       { kind: 'tool', name: 'Read', arg: 'api/routes/login.js' },
       { kind: 'tool', name: 'Edit', arg: 'api/routes/login.js' },
       {

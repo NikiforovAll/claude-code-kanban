@@ -33,6 +33,7 @@ These run only when an API request is served (no background timer).
 | `loadSessionMetadata()` | `sessionMetadataCache` | `METADATA_CACHE_TTL = 10000` ms (per-path dirty set for hot updates) | `server.js:389` |
 | `readSessionInfoFromJsonl()` | `sessionInfoCache` + `customTitleCache` | per path, valid while `sameFileGrown` (same inode, not shorter, and a new mtime only with new bytes); `slug`+`projectPath`+`logicalParentUuid`+`compactBoundaryUuid` pinned, `cwd` and title refreshed from appended bytes only; saved to disk, see [Persistent session cache](#3a-persistent-session-cache) | `lib/parsers.js` |
 | `getGitBranch(cwd)` | `gitBranchCache` | `GIT_BRANCH_TTL_MS = 30000` ms, keyed by `cwd` | `server.js` |
+| `getAutoCompact(claudeDir, project)` (compaction window for the context bar; runs only for sessions with `contextStatus`) | `fileCache`, one entry per settings file: `<config dir>/settings.json`, `<project>/.claude/settings.json`, `<project>/.claude/settings.local.json`; misses cached too | keyed by `mtimeMs`: one `statSync` per file per call, a read only after a change | `lib/auto-compact.js`, cache in `lib/claude-settings.js` |
 | `resolveWorktree(dir)` | `worktreeCache` | no TTL — keyed by `dir`, misses cached too, capped at `WORKTREE_CACHE_MAX = 500` | `server.js` |
 | Task-map scan | `sessionToTaskListCache` | `TASK_MAP_SCAN_TTL = 5000` ms | `server.js:271` |
 | `readRecentMessages()` / session info | `messageCache` (keyed by mtime) | invalidates on file mtime change | `server.js:382` |

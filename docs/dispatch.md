@@ -1,6 +1,6 @@
 # Dispatch
 
-`claude-code-kanban dispatch start` lets one Claude Code session start another through cck. The new session runs in cck's embedded terminal, so the user can open it at any time. It is an ordinary session: the board shows no parent, tree, or dispatch status.
+`claude-code-kanban dispatch start` lets one Claude Code session start another through cck. The new session runs in cck's embedded terminal, so the user can open it at any time. It is an ordinary session, not a child: the board shows no tree. Its card carries a marker instead: `/api/sessions` carries `dispatched: {parent, outcome}`, and the card shows a send icon whose tooltip names the starter and the outcome, and whose click reveals the starter. The markers are kept in `<config dir>/.cck/dispatched.json` (`lib/retention.js`), so they outlive the dispatch record and a restart, and they expire with the session's transcript (see `docs/retention.md`).
 
 ## Flow
 
@@ -8,14 +8,14 @@
 starter  dispatch start --cwd <dir> --spec-file <f> --name <n> --group <g> [--peer <p>] [--report] [--model <m>] [--worktree [n]]
 cck      POST /api/dispatch -> record + terminal.startNew(prompt) -> {dispatch, session, cwd, group}
 started  (only with --report) dispatch done <id> --cap <cap> --outcome succeeded|failed --summary <text>
-starter  dispatch wait [<id>...] --timeout 15m, or a pushed line from the kanban-dispatch postman
+starter  dispatch wait [<id>...] --timeout 15m, or a pushed line from the dispatch postman
 ```
 
-- The starter id comes from `CLAUDE_CODE_SESSION_ID` and is stored as `parent`. It routes a report to the starter's inbox and lets the board follow the starter into a named group. The board never shows it.
+- The starter id comes from `CLAUDE_CODE_SESSION_ID` and is stored as `parent`. It routes a report to the starter's inbox and lets the board follow the starter into a named group. The board shows the starter's name, not the id, in the send icon's tooltip.
 - `POST /api/dispatch` needs the terminal token, which the CLI reads from `<config dir>/.cck/terminal-tokens/<port>.json` for the board it reaches (`CCK_URL`, `PORT`, then `server.json`). Each board writes its own file, so two boards on one config dir do not overwrite each other's token. `done` needs only the per-dispatch capability from the preamble; the started session never holds the terminal token.
 - With neither `--report` nor `--peer` the prompt is the task alone. Otherwise it starts with a preamble (`formatPreamble`): `--peer` names the starter's Claude Code peer to ask with `SendMessage`, and `--report` adds the exact `done` command. The peer name goes into the prompt verbatim, so the server accepts only `isPeerName` values.
 - Records are in memory (`lib/dispatch.js`). The terminals die with the server, so a restart loses nothing that could still settle. A session whose terminal ends before `done` settles as `exited`.
-- A report is pushed to the starter only with `--report`, on the `dispatch` doorbell topic, so a `kanban-dispatch` postman never gets `task.moved` lines.
+- A report is pushed to the starter only with `--report`, on the `dispatch` doorbell topic, so a `dispatch` postman never gets task-move lines.
 
 ## Placement
 

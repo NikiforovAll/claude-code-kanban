@@ -1,0 +1,47 @@
+---
+title: Review comments
+description: Comment on a previewed file or the plan of a session and send the comments to Claude.
+---
+
+import Shot from '../../../kit/Shot.astro';
+import Lightbox from '../../../kit/Lightbox.astro';
+
+You can comment on a file in the Preview dialog or on the plan in the plan dialog, and send all the comments to the session in one step. Each comment quotes the text it is about, so Claude knows what to change.
+
+<Shot src="shots/12-review-comments.webp" alt="The Preview dialog on a Markdown plan with three highlighted phrases and a side panel that lists the three comments, with Discard and Send buttons" />
+
+## What takes comments
+
+- Markdown, HTML and text files in the Preview dialog. See [Linked documents](/claude-code-kanban/guides/session-details/#linked-documents) for how to open one.
+- The plan of a session in the plan dialog. Press <kbd>P</kbd> to open it.
+
+Images do not take comments.
+
+## Add comments
+
+1. Select text in the file. A **Comment** button shows next to the selection.
+2. Click **Comment**, type your comment and press <kbd>Ctrl+Enter</kbd> to add it. The text you selected gets a highlight.
+3. Add more comments. The dialog gets wider, and a side panel lists each comment under the text it quotes.
+
+In the side panel:
+
+- Hover a card to highlight its text in the file. Click the card to scroll to that text.
+- Click **×** to remove one comment, or **Discard** to remove all of them.
+
+In a text file, each comment records its line number. In an HTML file, it records the element and the CSS selector of the selection.
+
+Comments you have not sent stay with the file and the session. Close the dialog and open the file again, and they are still there. A page reload removes them.
+
+## Send
+
+Click **Send**. The board writes the comments to a Markdown file in `<config-dir>/.cck/reviews/<session id>/`. Then it gives them to the session in the first way that works:
+
+1. If the session ran [`/claude-code-kanban:follow`](/claude-code-kanban/guides/plugin-skills/#follow), Claude gets a line that points at the review file.
+2. Else, if the session runs in the [embedded terminal](/claude-code-kanban/guides/embedded-terminal/) and does not wait on a prompt, the board pastes a request that points at the review file into the terminal.
+3. Else, the board copies the review to the clipboard and shows a toast. Paste the review into the session yourself. Click **Copy again** if the clipboard lost it.
+
+After a send, the dialog closes and the comments are cleared. If the send fails, the dialog stays open and keeps the comments.
+
+The review file starts with a short note for Claude, then has one section for each comment: where it is, the quoted text and your comment. If the file changed after you commented, Claude says that a quote is missing. A review file lives as long as the transcript of its session.
+
+<Lightbox />

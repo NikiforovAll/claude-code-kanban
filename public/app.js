@@ -260,7 +260,7 @@ let lastTasksHash = '';
 //#endregion
 
 //#region DATA_FETCHING
-async function fetchSessions(includeTasks = true) {
+async function fetchSessions(includeTasks = true, focusId = currentSessionId) {
   try {
     const allPinnedIds = new Set([...pinnedSessionIds, ...stickySessionIds]);
     if (revealedPlanSessionId) allPinnedIds.add(revealedPlanSessionId);
@@ -269,7 +269,7 @@ async function fetchSessions(includeTasks = true) {
     // The focused session must come back whatever the filters say: renderSession and the
     // info modal both look it up in `sessions` and bail when it is absent, so a session
     // opened from outside the current filter would leave the view on the previous one.
-    const includeParam = currentSessionId ? `&include=${encodeURIComponent(currentSessionId)}` : '';
+    const includeParam = focusId ? `&include=${encodeURIComponent(focusId)}` : '';
     const projectParam =
       filterProject === '__recent__'
         ? `&recentHours=${RECENT_PROJECT_HOURS}`
@@ -1727,6 +1727,8 @@ const ICON_AGENT_ACTIVE =
 const ICON_TERMINAL =
   '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>';
 const TERMINAL_TITLE = 'Running in a terminal here';
+const ICON_DISPATCHED =
+  '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z"/><path d="m21.854 2.147-10.94 10.939"/></svg>';
 const ICON_CHAT =
   '<svg class="msg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
 const TOOL_ICONS = {
@@ -1974,16 +1976,24 @@ function offloadSessionPin(sessionId) {
   }).catch(() => {});
 }
 
+function clearSessionPin(sessionId) {
+  pinnedSessionIds.delete(sessionId);
+  stickySessionIds.delete(sessionId);
+  deferredPinPlacement.delete(sessionId);
+}
+
+function unpinSession(sessionId) {
+  clearSessionPin(sessionId);
+  savePinnedSessions();
+  offloadSessionPin(sessionId);
+  renderSessions();
+}
+
 function toggleSessionPin(sessionId) {
-  if (pinnedSessionIds.has(sessionId)) {
-    pinnedSessionIds.delete(sessionId);
-    stickySessionIds.delete(sessionId);
-    deferredPinPlacement.delete(sessionId);
-  } else {
-    pinnedSessionIds.add(sessionId);
-    if (sessionId === currentSessionId) deferredPinPlacement.add(sessionId);
-    expandPinnedFor(sessionId);
-  }
+  if (pinnedSessionIds.has(sessionId)) return unpinSession(sessionId);
+  pinnedSessionIds.add(sessionId);
+  if (sessionId === currentSessionId) deferredPinPlacement.add(sessionId);
+  expandPinnedFor(sessionId);
   savePinnedSessions();
   offloadSessionPin(sessionId);
   renderSessions();
@@ -1991,9 +2001,7 @@ function toggleSessionPin(sessionId) {
 
 function toggleSessionSticky(sessionId) {
   if (stickySessionIds.has(sessionId)) {
-    stickySessionIds.delete(sessionId);
-    pinnedSessionIds.delete(sessionId);
-    deferredPinPlacement.delete(sessionId);
+    clearSessionPin(sessionId);
   } else {
     pinnedSessionIds.add(sessionId);
     stickySessionIds.add(sessionId);
@@ -2013,9 +2021,7 @@ function isPlacedSticky(id) {
 
 function handleSessionPinEvent({ id, state }) {
   if (!id) return;
-  pinnedSessionIds.delete(id);
-  stickySessionIds.delete(id);
-  deferredPinPlacement.delete(id);
+  clearSessionPin(id);
   if (state === 'pinned') pinnedSessionIds.add(id);
   if (state === 'sticky') {
     pinnedSessionIds.add(id);
@@ -2456,14 +2462,21 @@ let _manualRefreshing = false;
 
 //#region TOAST
 // `action` ({label, onClick}) adds a button and keeps the toast up long enough to reach it.
-function showToast(msg, type, action) {
+function showToast(msg, type, action, hint) {
   const el = document.getElementById('toast');
   clearTimeout(_toastTimer);
   el.style.transition = 'none';
   el.classList.remove('visible', 'toast-success', 'toast-error', 'toast-info', 'has-action');
   void el.offsetHeight;
   el.style.transition = '';
-  el.textContent = msg;
+  if (hint) {
+    const text = document.createElement('div');
+    const hintEl = document.createElement('div');
+    hintEl.className = 'toast-hint';
+    hintEl.textContent = hint;
+    text.append(msg, hintEl);
+    el.replaceChildren(text);
+  } else el.textContent = msg;
   const hide = () => el.classList.remove('visible', 'has-action');
   if (action) {
     const btn = document.createElement('button');
@@ -3507,15 +3520,6 @@ function renderSessions() {
     const projectHtml = renderProjectIdentity(session);
 
     const gitBranch = session.gitBranch ? escapeHtml(session.gitBranch) : null;
-    const createdDisplay = session.createdAt ? formatDate(session.createdAt) : '';
-    const modifiedDisplay = formatDate(session.modifiedAt);
-    const timeDisplay =
-      session.createdAt && createdDisplay !== modifiedDisplay
-        ? `Created ${createdDisplay} · Modified ${modifiedDisplay}`
-        : modifiedDisplay;
-    const tooltip = [session.id, session.project, timeDisplay, gitBranch ? `Branch: ${gitBranch}` : '']
-      .filter(Boolean)
-      .join(' | ');
     const isTeam = session.isTeam;
     const memberCount = session.memberCount || 0;
 
@@ -3539,14 +3543,20 @@ function renderSessions() {
         : '';
     const justFinishedClass = isJustFinished(session) ? 'just-finished' : '';
     const sid = escAttrJs(session.id);
+    const progressHtml =
+      total > 0
+        ? `<div class="session-progress" title="${escapeHtml(session.completed)} of ${total} tasks done"><div class="progress-bar"><div class="progress-fill" style="width: ${percent}%"></div></div><span class="progress-text">${session.completed}/${total}</span></div>`
+        : '';
+    const metricsHtml = progressHtml + (showCtx ? renderContextBar(session) : '');
     return `
-          <button onclick="openSession('${sid}')" draggable="true" data-session-id="${escapeHtml(session.id)}" class="session-item ${isActive ? 'active' : ''} ${session.hasWaitingForUser ? 'permission-pending' : ''} ${session.unread ? 'unread' : ''} ${tempClass} ${idleClass} ${justFinishedClass} ${showCtx ? 'has-context' : ''}" title="${escapeHtml(tooltip)}">
+          <button onclick="openSession('${sid}')" draggable="true" data-session-id="${escapeHtml(session.id)}" class="session-item ${isActive ? 'active' : ''} ${session.hasWaitingForUser ? 'permission-pending' : ''} ${session.unread ? 'unread' : ''} ${tempClass} ${idleClass} ${justFinishedClass}">
             <span class="session-pin-btn${pinClass}" onclick="event.stopPropagation();toggleSessionPin('${sid}')" title="${pinTitle} session">${pinState === 'sticky' ? SESSION_STAR_SVG : SESSION_PIN_SVG}</span>
             <div class="session-name">${escapeHtml(sessionName)}</div>
             ${projectHtml ? `<div class="session-secondary">${projectHtml}</div>` : ''}
             ${gitBranch ? `<div class="session-branch">${gitBranch}</div>` : ''}
-            ${session.planTitle ? `<div class="session-plan">${escapeHtml(session.planTitle)}</div>` : ''}
-            <div class="session-progress">
+            ${metricsHtml ? `<div class="session-metrics">${metricsHtml}</div>` : ''}
+            <div class="session-footer">
+              <div class="session-time">${formatDate(session.modifiedAt)}</div>
               <span class="session-indicators">
                 ${isTeam ? `<span class="team-badge" title="${memberCount} team members"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>${memberCount}</span>` : ''}
                 ${isTeam || session.project || showCtx ? `<span class="team-info-btn" onclick="event.stopPropagation(); showSessionInfoModal('${sid}')" title="View session info"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></span>` : ''}
@@ -3558,16 +3568,13 @@ function renderSessions() {
                 ${session.hasPlan && !session.planSourceSessionId ? `<span class="plan-indicator" onclick="event.stopPropagation(); openPlanForSession('${sid}')" title="View plan">${ICON_PLAN}</span>` : ''}
                 ${session.planSourceSessionId ? `<span class="plan-indicator" title="Implements plan — click to reveal plan session" onclick="event.stopPropagation(); revealPlanSession('${escAttrJs(session.planSourceSessionId)}')">${ICON_PLAN}</span>` : ''}
                 ${session.sharedTaskList ? `<span class="shared-tasklist-badge" title="Shared task list: ${escapeHtml(session.sharedTaskList)}">${linkSvg(12)}</span>` : ''}
+                ${session.dispatched ? `<span class="dispatched-badge"${session.dispatched.parent ? ` onclick="event.stopPropagation(); revealSession('${escAttrJs(session.dispatched.parent)}')"` : ''} title="${escapeHtml(dispatchedTitle(session.dispatched))}">${ICON_DISPATCHED}</span>` : ''}
                 ${runningTerminals.has(session.id) ? `<span class="terminal-badge" onclick="event.stopPropagation(); showSessionTerminal('${escAttrJs(session.id)}')" title="${TERMINAL_TITLE}">${ICON_TERMINAL}</span>` : ''}
                 ${session.hasWaitingForUser ? `<span class="agent-badge agent-badge-waiting" title="Waiting for user">${ICON_AGENT_WAITING}</span>` : ''}
                 ${session.hasRunningAgents && !session.hasWaitingForUser ? `<span class="agent-badge agent-badge-active" title="Agents running">${ICON_AGENT_ACTIVE}</span>` : ''}
                 ${isLive || session.hasRunningAgents ? `<span class="pulse" title="${isLive ? 'Live' : 'Active agents'}"></span>` : ''}
               </span>
-              <div class="progress-bar"><div class="progress-fill" style="width: ${percent}%"></div></div>
-              <span class="progress-text">${session.completed}/${total}</span>
             </div>
-            ${showCtx ? renderContextBar(session.contextStatus) : ''}
-            <div class="session-time">${formatDate(session.modifiedAt)}</div>
           </button>
         `;
   };
@@ -3577,7 +3584,7 @@ function renderSessions() {
   if (zenMode) {
     sessionsList.innerHTML = `${renderSessionCard(zenSession)}
       <div class="zen-panel">
-        ${renderContextDetail(zenSession.contextStatus, { tokens: false }) || '<div class="zen-panel-empty">No context data for this session</div>'}
+        ${renderContextDetail(zenSession, { tokens: false }) || '<div class="zen-panel-empty">No context data for this session</div>'}
         ${renderScratchpadRow(zenSession)}
         ${renderLinkedDocsHtml(zenSession.id)}
         ${renderArtifactsHtml(zenSession.id)}
@@ -3591,7 +3598,7 @@ function renderSessions() {
   }
 
   const groupPinned = store.getItem('groupPinnedSessions') !== 'false';
-  const pinWeight = (s) => (isPlacedSticky(s.id) ? 2 : isPlacedPinned(s.id) && !isSessionActive(s) ? 1 : 0);
+  const pinWeight = (s) => (isPlacedSticky(s.id) ? 2 : isInPinnedGroup(s) ? 1 : 0);
   const pinSort = (a, b) => pinWeight(b) - pinWeight(a);
   const countHtml = (arr) => {
     const active = arr.reduce((n, s) => n + (isSessionActive(s) ? 1 : 0), 0);
@@ -3609,12 +3616,10 @@ function renderSessions() {
 
   const renderGroupSessions = (sessions, pinKey) => {
     if (!groupPinned || pinnedSessionIds.size === 0) return sessions.map(renderSessionCard).join('');
-    const gPinned = sessions.filter((s) => isPlacedPinned(s.id) && !isPlacedSticky(s.id));
-    if (gPinned.length === 0) return sessions.map(renderSessionCard).join('');
-    const gIdlePinned = gPinned.filter((s) => !isSessionActive(s));
-    const gUnpinned = sessions.filter((s) => !isPlacedPinned(s.id) || isSessionActive(s) || isPlacedSticky(s.id));
+    const gIdlePinned = sessions.filter(isInPinnedGroup);
+    if (gIdlePinned.length === 0) return sessions.map(renderSessionCard).join('');
+    const gUnpinned = sessions.filter((s) => !isInPinnedGroup(s));
     const pinCollapsed = collapsedProjectGroups.has(pinKey);
-    if (gIdlePinned.length === 0) return gUnpinned.map(renderSessionCard).join('');
     return (
       '<div class="pinned-sub-section">' +
       '<div class="pinned-sub-header' +
@@ -4349,6 +4354,12 @@ function sgTransientGroup(name) {
     transientGroups.set(name, group);
   }
   return group;
+}
+
+function dispatchedTitle({ parent, outcome }) {
+  const starter = parent && sessions.find((s) => s.id === parent);
+  const by = starter ? sessionDisplayName(starter) : 'another session';
+  return `Started by ${by}${outcome ? ` · ${outcome}` : ''}${parent ? ' — click to reveal it' : ''}`;
 }
 
 // A user group with the same name takes the session in, so Keep does not split a group in two.
@@ -5131,7 +5142,7 @@ function uncollapseFor(session) {
 }
 
 function pinnedCollapseKeys(session) {
-  if (!isPlacedPinned(session.id) || isPlacedSticky(session.id) || isSessionActive(session)) return [];
+  if (!isInPinnedGroup(session)) return [];
   const group = sgGroupForSession(session);
   const host = sgHostOf(group, session);
   return [pinKey(session.project || '__ungrouped__'), host && pinKey(host), group && `__pinned_group_${group.id}__`];
@@ -5507,10 +5518,6 @@ function closeDetailPanel() {
   taskHighlightDimmed = false;
 }
 
-let deleteTaskId = null;
-let deleteSessionId = null;
-let deleteModalKeyHandler = null;
-
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
 function showBlockedTaskModal(task) {
   const messageDiv = document.getElementById('blocked-task-message');
@@ -5555,62 +5562,47 @@ function closeBlockedTaskModal() {
 //#endregion
 
 //#region DELETE_TASK
-function deleteTask(taskId, sessionId) {
-  const task = currentTasks.find((t) => t.id === taskId);
-  if (!task) return;
+// Set while #confirm-modal is open; settles the open confirmModal() promise.
+let closeConfirmModal = null;
 
-  deleteTaskId = taskId;
-  deleteSessionId = sessionId;
-
-  const message = document.getElementById('delete-confirm-message');
-  message.textContent = `Delete task "${task.subject}"? This cannot be undone.`;
-
-  const modal = document.getElementById('delete-confirm-modal');
+function confirmModal({ title, message, okLabel }) {
+  const modal = document.getElementById('confirm-modal');
+  document.getElementById('confirm-modal-title').textContent = title;
+  document.getElementById('confirm-modal-message').textContent = message;
+  const buttons = [document.getElementById('confirm-cancel-btn'), document.getElementById('confirm-ok-btn')];
+  buttons[1].textContent = okLabel;
   modal.classList.add('visible');
+  buttons[1].focus();
 
-  const buttons = [document.getElementById('delete-cancel-btn'), document.getElementById('delete-confirm-btn')];
-  let focusIdx = 1;
-  buttons[focusIdx].focus();
-
-  deleteModalKeyHandler = (e) => {
-    if (e.key === 'Escape') {
+  const onKey = (e) => {
+    if (matchKey(e, 'ArrowLeft', 'ArrowRight')) {
       e.preventDefault();
-      closeDeleteConfirmModal();
-    } else if (matchKey(e, 'ArrowLeft')) {
-      e.preventDefault();
-      focusIdx = 0;
-      buttons[focusIdx].focus();
-    } else if (matchKey(e, 'ArrowRight')) {
-      e.preventDefault();
-      focusIdx = 1;
-      buttons[focusIdx].focus();
+      buttons[e.key === 'ArrowLeft' ? 0 : 1].focus();
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      buttons[focusIdx].click();
+      (document.activeElement === buttons[0] ? buttons[0] : buttons[1]).click();
     }
   };
-  document.addEventListener('keydown', deleteModalKeyHandler);
+  document.addEventListener('keydown', onKey);
+  return new Promise((resolve) => {
+    closeConfirmModal = (ok) => {
+      modal.classList.remove('visible');
+      document.removeEventListener('keydown', onKey);
+      closeConfirmModal = null;
+      resolve(ok);
+    };
+  });
 }
 
-function closeDeleteConfirmModal() {
-  const modal = document.getElementById('delete-confirm-modal');
-  modal.classList.remove('visible');
-  deleteTaskId = null;
-  deleteSessionId = null;
-  if (deleteModalKeyHandler) {
-    document.removeEventListener('keydown', deleteModalKeyHandler);
-    deleteModalKeyHandler = null;
-  }
-}
-
-// biome-ignore lint/correctness/noUnusedVariables: used in HTML
-async function confirmDelete() {
-  if (!deleteTaskId || !deleteSessionId) return;
-
-  const taskId = deleteTaskId;
-  const sessionId = deleteSessionId;
-
-  closeDeleteConfirmModal();
+async function deleteTask(taskId, sessionId) {
+  const task = currentTasks.find((t) => t.id === taskId);
+  if (!task) return;
+  const ok = await confirmModal({
+    title: 'Delete Task',
+    message: `Delete task "${task.subject}"? This cannot be undone.`,
+    okLabel: 'Delete',
+  });
+  if (!ok) return;
 
   try {
     const res = await fetch(`/api/tasks/${sessionId}/${taskId}`, {
@@ -5696,7 +5688,7 @@ const SHORTCUT_TABS = [
           { keys: ['.'], label: 'Pin / unpin' },
           { keys: ['>'], label: 'Toggle sticky' },
           { keys: ['Shift', 'F10'], combo: true, label: 'Move to group (or Menu key)' },
-          { keys: ['Ctrl', 'D'], combo: true, label: 'Dismiss session' },
+          { keys: ['Ctrl', 'D'], combo: true, label: 'Dismiss session (pinned: to Pinned group)' },
           { keys: ['Shift', 'L'], combo: true, label: 'Toggle session log' },
           { keys: ['Shift', 'M'], combo: true, label: 'Open last message' },
           { keys: ['↑', '↓'], label: 'Previous / next message in detail' },
@@ -6177,8 +6169,7 @@ async function _storageViewSession(id) {
 }
 
 function _storageUnpinSession(id) {
-  pinnedSessionIds.delete(id);
-  stickySessionIds.delete(id);
+  clearSessionPin(id);
   savePinnedSessions();
   renderSessions();
   _renderStorageTab();
@@ -6463,6 +6454,47 @@ function matchKey(e, ...keys) {
   return keys.some((k) => e.key === k || e.code === k);
 }
 
+function dismissSessionFromList(sid) {
+  const prevIdx = selectedSessionIdx;
+  if (!setSessionDismissed(sid, true)) return;
+  const newItems = getNavigableItems();
+  if (isAnyPinned(sid)) {
+    const pinnedIdx = newItems.findIndex((el) => el.dataset?.sessionId === sid);
+    if (pinnedIdx >= 0) selectSessionByIndex(pinnedIdx, newItems);
+    return;
+  }
+  const targetIdx = newItems.length > 0 ? Math.max(0, prevIdx - 1) : -1;
+  // If the dismissed session is currently open, navigate to the previous one
+  if (currentSessionId === sid || selectedSessionId === sid) {
+    selectedSessionId = null;
+    if (targetIdx >= 0) {
+      const targetSid = newItems[targetIdx]?.dataset?.sessionId;
+      if (targetSid) {
+        fetchTasks(targetSid).then(() => selectSessionByIndex(targetIdx, getNavigableItems()));
+      } else {
+        showNoSession();
+        selectSessionByIndex(targetIdx, getNavigableItems());
+      }
+    } else {
+      showNoSession();
+    }
+  } else if (targetIdx >= 0) {
+    selectSessionByIndex(targetIdx, newItems);
+  }
+}
+
+async function dismissStickySession(sid) {
+  const session = sessions.find((s) => s.id === sid);
+  const ok = await confirmModal({
+    title: 'Remove Sticky Pin',
+    message: `"${session ? sessionDisplayName(session) : sid.slice(0, 8)}" has a sticky pin. Remove the pin and dismiss the session?`,
+    okLabel: 'Unpin and dismiss',
+  });
+  if (!ok) return;
+  unpinSession(sid);
+  dismissSessionFromList(sid);
+}
+
 const MODAL_ESC_PRIORITY = [
   'preview-modal',
   'msg-detail-modal',
@@ -6488,6 +6520,7 @@ const MODAL_CLOSERS = {
   'project-picker-modal': () => closeProjectPicker(),
   'terminal-manager-modal': () => closeTerminalManager(),
   'new-session-modal': () => closeNewSession(),
+  'confirm-modal': () => closeConfirmModal?.(false),
 };
 
 document.addEventListener('keydown', (e) => {
@@ -6795,27 +6828,8 @@ document.addEventListener('keydown', (e) => {
   }
   if (e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey && e.key === 'd') {
     e.preventDefault();
-    const prevIdx = selectedSessionIdx;
-    if (!contextSid || !setSessionDismissed(contextSid, true)) return;
-    const newItems = getNavigableItems();
-    const targetIdx = newItems.length > 0 ? Math.max(0, prevIdx - 1) : -1;
-    // If the dismissed session is currently open, navigate to the previous one
-    if (currentSessionId === contextSid || selectedSessionId === contextSid) {
-      selectedSessionId = null;
-      if (targetIdx >= 0) {
-        const targetSid = newItems[targetIdx]?.dataset?.sessionId;
-        if (targetSid) {
-          fetchTasks(targetSid).then(() => selectSessionByIndex(targetIdx, getNavigableItems()));
-        } else {
-          showNoSession();
-          selectSessionByIndex(targetIdx, getNavigableItems());
-        }
-      } else {
-        showNoSession();
-      }
-    } else if (targetIdx >= 0) {
-      selectSessionByIndex(targetIdx, newItems);
-    }
+    if (!contextSid) return;
+    (stickySessionIds.has(contextSid) ? dismissStickySession : dismissSessionFromList)(contextSid);
     return;
   }
   if (e.code === 'KeyC' && e.shiftKey && !e.altKey && !e.metaKey) {
@@ -6865,6 +6879,484 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
+//#endregion
+
+//#region REVIEW
+// Comments on rendered content, sent to a session as one batch. Drafts outlive the view in
+// this tab, keyed by session and source, so closing a preview loses nothing. Highlights use
+// the CSS Custom Highlight API, which marks ranges without touching the DOM the renderer
+// built; a draft restored on reopen has no mark and shows in the panel only.
+//
+// An HTML preview is an iframe on an opaque origin, so its selection is out of reach from
+// here. `reviewBridge` runs inside the frame and reports each selection over postMessage;
+// the frame keeps its own ranges and marks them by id. A page whose CSP forbids inline
+// scripts gets no comments.
+const reviewDrafts = new Map();
+const reviewHighlight = typeof Highlight === 'function' && CSS.highlights ? new Highlight() : null;
+const reviewHotHighlight = reviewHighlight ? new Highlight() : null;
+if (reviewHighlight) {
+  CSS.highlights.set('review', reviewHighlight);
+  CSS.highlights.set('review-hot', reviewHotHighlight);
+}
+const REVIEW_MSG = 'cck-review:';
+let activeReview = null;
+let reviewMarkSeq = 0;
+let reviewPopMode = null;
+let reviewHoverAt = null;
+let reviewHoverFrame = 0;
+
+function reviewKey(sessionId, source) {
+  return `${sessionId}|${source.kind}|${source.path ? canonicalPath(source.path) : source.label}`;
+}
+
+function reviewItems() {
+  return (activeReview && reviewDrafts.get(activeReview.key)) || [];
+}
+
+// `context(range)` adds view-specific citation fields to a comment on the host DOM;
+// `onSent()` runs after a batch is delivered.
+function mountReview({ contentEl, panelEl, hostEl, source, frame, context, onSent, sessionId = currentSessionId }) {
+  unmountReview();
+  if (!sessionId) return;
+  const ctl = new AbortController();
+  const { signal } = ctl;
+  const key = reviewKey(sessionId, source);
+  activeReview = {
+    contentEl,
+    panelEl,
+    hostEl,
+    source,
+    frame,
+    context,
+    onSent,
+    sessionId,
+    key,
+    ctl,
+    hot: null,
+  };
+  if (!frame) {
+    contentEl.addEventListener('mouseup', () => setTimeout(offerReviewComment, 0), { signal });
+    contentEl.addEventListener('mousemove', (e) => queueReviewHover(e.clientX, e.clientY), { signal });
+  }
+  window.addEventListener('message', onReviewFrameMessage, { signal });
+  document.addEventListener('mousedown', closeReviewPop, { signal });
+  document.addEventListener('scroll', closeReviewOffer, { capture: true, signal });
+  panelEl.addEventListener('click', onReviewPanelClick, { signal });
+  panelEl.addEventListener('mouseover', onReviewPanelHover, { signal });
+  panelEl.addEventListener('mouseleave', () => setReviewHot(null), { signal });
+  renderReviewPanel();
+}
+
+// With `ownPanel`, unmounts only the review that panel holds, so a modal under another one keeps it.
+function unmountReview(ownPanel) {
+  if (ownPanel && activeReview?.panelEl !== ownPanel) return;
+  closeReviewPop();
+  if (!activeReview) return;
+  const { ctl, panelEl, hostEl } = activeReview;
+  ctl.abort();
+  for (const c of reviewItems()) {
+    c.range = null;
+    c.frameId = 0;
+  }
+  panelEl.replaceChildren();
+  panelEl.hidden = true;
+  hostEl?.classList.remove('has-review');
+  activeReview = null;
+  reviewHighlight?.clear();
+  reviewHotHighlight?.clear();
+}
+
+// The three helpers below are also handed to `reviewBridge` as source text, so each must use
+// only its arguments and the globals of whichever document it runs in.
+function reviewTextBefore(root, container, offset) {
+  const before = root.ownerDocument.createRange();
+  before.setStart(root, 0);
+  before.setEnd(container, offset);
+  return before.toString();
+}
+
+function reviewHeadingBefore(root, node) {
+  let found = null;
+  for (const h of root.querySelectorAll('h1, h2, h3, h4, h5, h6')) {
+    if (h.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING || h.contains(node)) found = h;
+    else break;
+  }
+  return found?.textContent.trim().slice(0, 200) || undefined;
+}
+
+function reviewRangeAt(x, y, entries) {
+  const at = document.caretPositionFromPoint?.(x, y);
+  if (!at?.offsetNode) return null;
+  for (const [key, range] of entries) if (range?.isPointInRange(at.offsetNode, at.offset)) return key;
+  return null;
+}
+
+function queueReviewHover(x, y) {
+  reviewHoverAt = [x, y];
+  if (reviewHoverFrame) return;
+  reviewHoverFrame = requestAnimationFrame(() => {
+    reviewHoverFrame = 0;
+    const marked = reviewItems().filter((c) => c.range);
+    if (!marked.length) return;
+    const [hx, hy] = reviewHoverAt;
+    setReviewHot(
+      reviewRangeAt(
+        hx,
+        hy,
+        marked.map((c) => [c, c.range]),
+      ),
+      true,
+    );
+  });
+}
+
+function setReviewHot(c, fromText) {
+  if (!activeReview || activeReview.hot === c) return;
+  activeReview.hot = c;
+  reviewHotHighlight?.clear();
+  if (c?.range) reviewHotHighlight?.add(c.range);
+  if (activeReview.frame) postToReviewFrame('hot', c?.frameId || 0);
+  const { panelEl } = activeReview;
+  panelEl.querySelector('.review-card.hot')?.classList.remove('hot');
+  const i = reviewItems().indexOf(c);
+  const card = i >= 0 ? panelEl.querySelector(`.review-card[data-i="${i}"]`) : null;
+  card?.classList.add('hot');
+  if (fromText) card?.scrollIntoView({ block: 'nearest' });
+}
+
+function reviewSelection() {
+  const sel = window.getSelection();
+  if (!activeReview || !sel || sel.isCollapsed || !sel.rangeCount) return null;
+  const range = sel.getRangeAt(0);
+  if (!activeReview.contentEl.contains(range.commonAncestorContainer)) return null;
+  const quote = sel.toString().trim();
+  if (!quote) return null;
+  return { quote, range: range.cloneRange(), rect: range.getBoundingClientRect() };
+}
+
+function onReviewFrameMessage(e) {
+  const frameWin = activeReview?.frame?.contentWindow;
+  const type =
+    typeof e.data?.type === 'string' && e.data.type.startsWith(REVIEW_MSG) && e.data.type.slice(REVIEW_MSG.length);
+  if (!frameWin || e.source !== frameWin || !type) return;
+  if (type === 'clear') return closeReviewOffer();
+  if (type === 'hover') {
+    return setReviewHot((e.data.id && reviewItems().find((c) => c.frameId === e.data.id)) || null, true);
+  }
+  if (type !== 'select' || typeof e.data.quote !== 'string' || !e.data.quote.trim()) return;
+  const box = activeReview.frame.getBoundingClientRect();
+  const r = e.data.rect || {};
+  const rect = { left: box.left + (r.left || 0), top: box.top + (r.top || 0), bottom: box.top + (r.bottom || 0) };
+  const c = e.data.context || {};
+  const context = { heading: c.heading, element: c.element, selector: c.selector };
+  const pos = Number.isFinite(e.data.pos) ? e.data.pos : 0;
+  showReviewOffer({ quote: e.data.quote.trim(), context, pos, rect, inFrame: true });
+}
+
+function postToReviewFrame(type, id) {
+  activeReview?.frame?.contentWindow?.postMessage({ type: REVIEW_MSG + type, id }, '*');
+}
+
+// Runs inside the preview iframe as source text, so it must not close over anything outside
+// its own body and arguments.
+function reviewBridge(textBefore, headingBefore, rangeAt) {
+  const P = 'cck-review:';
+  const marks = new Map();
+  let pending = null;
+  let hotId = 0;
+  let hoverAt = null;
+  let hoverFrame = 0;
+  const hl = typeof Highlight === 'function' && CSS.highlights ? new Highlight() : null;
+  const hot = hl ? new Highlight() : null;
+  if (hl) {
+    CSS.highlights.set('cck-review', hl);
+    CSS.highlights.set('cck-review-hot', hot);
+    const style = document.createElement('style');
+    style.textContent =
+      '::highlight(cck-review){background-color:rgba(240,180,41,.35)}::highlight(cck-review-hot){background-color:rgba(240,180,41,.7)}';
+    (document.head || document.documentElement).append(style);
+  }
+  const send = (msg) => parent.postMessage({ ...msg, type: P + msg.type }, '*');
+  const describe = (node) => {
+    const el = node.nodeType === 1 ? node : node.parentElement;
+    if (!el) return {};
+    const cls = [...el.classList].slice(0, 3);
+    const attrs = [el.tagName.toLowerCase()];
+    if (el.id) attrs.push(`id=${JSON.stringify(el.id)}`);
+    if (cls.length) attrs.push(`class=${JSON.stringify(cls.join(' '))}`);
+    const element = `<${attrs.join(' ')}>`;
+    const parts = [];
+    for (let n = el; n && n !== document.body && n.nodeType === 1; n = n.parentElement) {
+      if (n.id) {
+        parts.unshift(`#${n.id}`);
+        break;
+      }
+      const tag = n.tagName.toLowerCase();
+      const same = n.parentElement ? [...n.parentElement.children].filter((s) => s.tagName === n.tagName) : [];
+      parts.unshift(same.length > 1 ? `${tag}:nth-of-type(${same.indexOf(n) + 1})` : tag);
+    }
+    return { element, selector: parts.join(' > '), heading: headingBefore(document, el) };
+  };
+  document.addEventListener('mouseup', () =>
+    setTimeout(() => {
+      const sel = getSelection();
+      const quote = sel && !sel.isCollapsed && sel.rangeCount ? sel.toString().trim() : '';
+      if (!quote) {
+        pending = null;
+        return;
+      }
+      pending = sel.getRangeAt(0).cloneRange();
+      const r = pending.getBoundingClientRect();
+      send({
+        type: 'select',
+        quote,
+        pos: textBefore(document.body, pending.startContainer, pending.startOffset).length,
+        rect: { left: r.left, top: r.top, bottom: r.bottom },
+        context: describe(pending.commonAncestorContainer),
+      });
+    }, 0),
+  );
+  document.addEventListener('mousemove', (e) => {
+    if (!marks.size && !hotId) return;
+    hoverAt = [e.clientX, e.clientY];
+    if (hoverFrame) return;
+    hoverFrame = requestAnimationFrame(() => {
+      hoverFrame = 0;
+      const id = rangeAt(hoverAt[0], hoverAt[1], marks) || 0;
+      if (id !== hotId) {
+        hotId = id;
+        send({ type: 'hover', id });
+      }
+    });
+  });
+  const clear = () => {
+    if (pending) send({ type: 'clear' });
+  };
+  document.addEventListener('mousedown', clear);
+  document.addEventListener('scroll', clear, true);
+  addEventListener('message', (e) => {
+    if (e.source !== parent || typeof e.data?.type !== 'string' || !e.data.type.startsWith(P)) return;
+    const type = e.data.type.slice(P.length);
+    const range = marks.get(e.data.id);
+    if (type === 'mark' && pending) {
+      marks.set(e.data.id, pending);
+      hl?.add(pending);
+      pending = null;
+      getSelection().removeAllRanges();
+    } else if (type === 'hot') {
+      hot?.clear();
+      if (range) hot?.add(range);
+    } else if (type === 'unmark' && range) {
+      hl?.delete(range);
+      hot?.delete(range);
+      marks.delete(e.data.id);
+    } else if (type === 'reveal' && range) {
+      range.startContainer.parentElement?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+  });
+}
+
+const REVIEW_BRIDGE_TAG = `<script>(${reviewBridge})(${reviewTextBefore}, ${reviewHeadingBefore}, ${reviewRangeAt});</script>`;
+
+function reviewPopEl() {
+  let el = document.getElementById('review-pop');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'review-pop';
+    el.addEventListener('mousedown', (e) => e.stopPropagation());
+    el.addEventListener('click', (e) => e.stopPropagation());
+    document.body.append(el);
+  }
+  return el;
+}
+
+function placeReviewPop(el, r) {
+  el.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - el.offsetWidth - 8))}px`;
+  const below = r.bottom + 6;
+  el.style.top = `${below + el.offsetHeight > window.innerHeight ? Math.max(8, r.top - el.offsetHeight - 6) : below}px`;
+}
+
+function closeReviewPop() {
+  if (!reviewPopMode) return;
+  reviewPopMode = null;
+  const el = reviewPopEl();
+  el.className = '';
+  el.replaceChildren();
+}
+
+function closeReviewOffer() {
+  if (reviewPopMode === 'offer') closeReviewPop();
+}
+
+function offerReviewComment() {
+  const picked = reviewSelection();
+  if (picked) showReviewOffer(picked);
+  else if (reviewPopMode !== 'editor') closeReviewPop();
+}
+
+function showReviewOffer(picked) {
+  const el = reviewPopEl();
+  reviewPopMode = 'offer';
+  el.className = 'visible offer';
+  el.innerHTML = `<button type="button" class="review-offer-btn">Comment</button>`;
+  el.firstElementChild.addEventListener('click', () => openReviewEditor(picked));
+  placeReviewPop(el, picked.rect);
+}
+
+function openReviewEditor(picked) {
+  const el = reviewPopEl();
+  reviewPopMode = 'editor';
+  el.className = 'visible editor';
+  el.innerHTML = `<div class="review-pop-quote">${escapeHtml(picked.quote.slice(0, 200))}</div>
+    <textarea rows="3" placeholder="Comment (Ctrl+Enter to add)"></textarea>
+    <div class="review-pop-actions"><button type="button" data-act="cancel">Cancel</button><button type="button" data-act="add" class="primary">Add</button></div>`;
+  const ta = el.querySelector('textarea');
+  const add = () => {
+    const comment = ta.value.trim();
+    if (!comment) return ta.focus();
+    addReviewComment(picked, comment);
+  };
+  ta.addEventListener('keydown', (e) => {
+    e.stopPropagation();
+    if (e.key === 'Escape') closeReviewPop();
+    else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) add();
+  });
+  el.querySelector('[data-act="cancel"]').addEventListener('click', closeReviewPop);
+  el.querySelector('[data-act="add"]').addEventListener('click', add);
+  placeReviewPop(el, picked.rect);
+  ta.focus();
+}
+
+function addReviewComment(picked, comment) {
+  if (!activeReview) return;
+  const { key, contentEl } = activeReview;
+  let item;
+  if (picked.inFrame) {
+    item = {
+      quote: picked.quote,
+      comment,
+      context: picked.context,
+      pos: picked.pos,
+      range: null,
+      frameId: ++reviewMarkSeq,
+    };
+    postToReviewFrame('mark', item.frameId);
+  } else {
+    const { range } = picked;
+    const context = {
+      heading: reviewHeadingBefore(contentEl, range.startContainer),
+      ...activeReview.context?.(range),
+    };
+    const pos = reviewTextBefore(contentEl, range.startContainer, range.startOffset).length;
+    item = { quote: picked.quote, comment, context, pos, range, frameId: 0 };
+    reviewHighlight?.add(range);
+    window.getSelection()?.removeAllRanges();
+  }
+  if (!reviewDrafts.has(key)) reviewDrafts.set(key, []);
+  const items = reviewDrafts.get(key);
+  items.push(item);
+  items.sort((a, b) => a.pos - b.pos);
+  closeReviewPop();
+  renderReviewPanel();
+}
+
+function unmarkReviewItem(c) {
+  if (c.range) reviewHighlight?.delete(c.range);
+  else if (c.frameId) postToReviewFrame('unmark', c.frameId);
+}
+
+function revealReviewItem(c) {
+  if (c.range) c.range.startContainer.parentElement?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  else if (c.frameId) postToReviewFrame('reveal', c.frameId);
+}
+
+function removeReviewComment(c) {
+  const items = reviewItems();
+  const i = items.indexOf(c);
+  if (i < 0) return;
+  items.splice(i, 1);
+  unmarkReviewItem(c);
+  if (activeReview.hot === c) setReviewHot(null);
+  if (!items.length) reviewDrafts.delete(activeReview.key);
+  renderReviewPanel();
+}
+
+function clearReviewDrafts(key = activeReview?.key) {
+  for (const c of reviewDrafts.get(key) || []) unmarkReviewItem(c);
+  reviewDrafts.delete(key);
+  setReviewHot(null);
+  renderReviewPanel();
+}
+
+function onReviewPanelClick(e) {
+  const act = e.target.closest('[data-act]')?.dataset.act;
+  if (act === 'send') return sendReview();
+  if (act === 'discard') return clearReviewDrafts();
+  const card = e.target.closest('.review-card');
+  const c = card && reviewItems()[Number(card.dataset.i)];
+  if (!c) return;
+  if (e.target.closest('.review-remove')) removeReviewComment(c);
+  else revealReviewItem(c);
+}
+
+function onReviewPanelHover(e) {
+  const card = e.target.closest('.review-card');
+  setReviewHot((card && reviewItems()[Number(card.dataset.i)]) || null);
+}
+
+function renderReviewPanel() {
+  if (!activeReview) return;
+  const { panelEl, hostEl } = activeReview;
+  const items = reviewItems();
+  panelEl.hidden = !items.length;
+  hostEl?.classList.toggle('has-review', items.length > 0);
+  if (!items.length) return panelEl.replaceChildren();
+  panelEl.innerHTML = `<div class="review-panel-head">
+      <span>${items.length} comment${items.length > 1 ? 's' : ''}</span>
+      <button type="button" data-act="discard" class="review-discard">Discard</button>
+      <button type="button" data-act="send" class="primary">Send</button>
+    </div>
+    <ol class="review-panel-list">${items
+      .map((c, i) => {
+        return `<li class="review-card${c === activeReview.hot ? ' hot' : ''}" data-i="${i}" title="Show in the document">
+        <button type="button" class="review-remove" title="Remove" aria-label="Remove">×</button>
+        <div class="review-card-quote">${escapeHtml(c.quote.slice(0, 300))}</div>
+        <div class="review-card-comment">${escapeHtml(c.comment)}</div></li>`;
+      })
+      .join('')}</ol>`;
+}
+
+async function sendReview() {
+  if (!activeReview) return;
+  const { sessionId, source, key, onSent } = activeReview;
+  const items = reviewItems();
+  if (!items.length) return;
+  try {
+    const res = await terminalFetch(`/api/sessions/${encodeURIComponent(sessionId)}/review`, 'POST', {
+      source,
+      comments: items.map(({ quote, comment, context }) => ({ quote, comment, ...context })),
+    });
+    const data = await res.json();
+    if (!res.ok) return showToast(data.error || 'Review failed', 'error');
+    if (data.delivered === 'doorbell') showToast('Sent to session', 'success');
+    else if (data.delivered === 'terminal') showToast('Pasted into the terminal: press Enter there to send', 'info');
+    else {
+      const { markdown } = data;
+      const copy = () => navigator.clipboard.writeText(markdown).catch(() => {});
+      await copy();
+      showToast(
+        'Review copied. Paste it into the session.',
+        'info',
+        { label: 'Copy again', onClick: copy },
+        'Run /claude-code-kanban:follow there to send reviews directly.',
+      );
+    }
+    clearReviewDrafts(key);
+    if (activeReview?.key === key) onSent?.();
+  } catch {
+    showToast('Failed to send the review', 'error');
+  }
+}
 //#endregion
 
 //#region MARKDOWN_PREVIEW
@@ -6984,7 +7476,9 @@ function renderHtmlPreview(bodyEl, content) {
   frame.className = 'preview-html-frame';
   frame.setAttribute('sandbox', 'allow-scripts allow-popups');
   frame.setAttribute('referrerpolicy', 'no-referrer');
-  frame.srcdoc = content;
+  // After the document's end the parser still adds the script to <body>, and it runs after
+  // the page's own scripts.
+  frame.srcdoc = content + REVIEW_BRIDGE_TAG;
   bodyEl.appendChild(frame);
 }
 
@@ -7048,6 +7542,22 @@ function openPreviewModal(filePath, content, kind) {
   document.getElementById('preview-modal-meta').textContent = filePath;
   document.getElementById('preview-modal').classList.add('visible');
   updatePreviewLinkBtn();
+  if (kind === 'image') return unmountReview();
+  mountReview({
+    contentEl: bodyEl,
+    panelEl: document.getElementById('preview-review-panel'),
+    hostEl: document.querySelector('#preview-modal .modal'),
+    source: { kind: 'file', label: fileName, path: filePath },
+    frame: isHtml ? bodyEl.querySelector('iframe') : null,
+    context: kind === 'text' ? (range) => ({ line: sourceLineOf(bodyEl, range) }) : null,
+    onSent: closePreviewModal,
+  });
+}
+
+function sourceLineOf(bodyEl, range) {
+  const code = bodyEl.querySelector('.preview-source code');
+  if (!code?.contains(range.startContainer)) return undefined;
+  return reviewTextBefore(code, range.startContainer, range.startOffset).split('\n').length;
 }
 
 function isPreviewLinkedToCurrentSession() {
@@ -7098,6 +7608,7 @@ function refreshInfoModalLinkedDocs() {
 }
 
 function closePreviewModal() {
+  unmountReview(document.getElementById('preview-review-panel'));
   hideModalOverlay('preview-modal');
   // Empty the body so an iframe preview is destroyed and its scripts/timers stop.
   document.getElementById('preview-modal-body').innerHTML = '';
@@ -7965,20 +8476,30 @@ function renderMarkers(markers) {
 }
 
 function formatTokens(k) {
-  if (k >= 1000) return `${(k / 1000).toFixed(1)}M`;
+  if (k >= 1000) return `${(k / 1000).toFixed(1).replace(/\.0$/, '')}M`;
   if (k < 1) return (k * 1000).toFixed(0);
   return `${Math.round(k)}K`;
 }
 
-function getCtx(raw) {
+// session.autoCompact ({window, pct} from the session's settings) makes the compaction point the
+// bar's full scale, because the status line reports the model's full window regardless.
+function getCtx(session) {
+  const raw = session?.contextStatus;
+  const autoCompact = session?.autoCompact;
   if (!raw) return null;
   const cw = raw.context_window || {};
-  const size = cw.context_window_size || 0;
-  const pct = cw.used_percentage || 0;
+  const modelSize = cw.context_window_size || 0;
   const model = raw.model || {};
   const modelName = model.display_name || model.id || '';
   const thresholds = getModelThresholds(modelName);
-  const usedTokens = size > 0 ? (pct / 100) * size : 0;
+  const usedTokens = modelSize > 0 ? ((cw.used_percentage || 0) / 100) * modelSize : 0;
+  const compactAt =
+    modelSize > 0 && autoCompact
+      ? (Math.min(modelSize, autoCompact.window || modelSize) * (autoCompact.pct || 100)) / 100
+      : 0;
+  const compacts = compactAt > 0 && compactAt < modelSize;
+  const size = compacts ? compactAt : modelSize;
+  const pct = compacts ? Math.min(100, (usedTokens / size) * 100) : cw.used_percentage || 0;
   const markers =
     size > 0
       ? [
@@ -7989,8 +8510,10 @@ function getCtx(raw) {
       : [];
   return {
     pct,
-    remaining: cw.remaining_percentage || 100 - pct,
+    remaining: 100 - pct,
     size,
+    modelSize,
+    compacts,
     usedTokens,
     modelName,
     inputTokens: cw.total_input_tokens || 0,
@@ -7999,18 +8522,23 @@ function getCtx(raw) {
   };
 }
 
-function renderContextBar(raw) {
-  const ctx = getCtx(raw);
+function renderContextBar(session) {
+  const ctx = getCtx(session);
   if (!ctx) return '';
   const color = getContextColor(ctx.usedTokens, ctx.modelName);
+  const fmt = (n) => formatTokens(n / 1000);
+  const used = fmt(ctx.usedTokens);
+  const title = ctx.compacts
+    ? `Context: ${used} of ${fmt(ctx.size)} tokens before auto-compact (model window ${fmt(ctx.modelSize)})`
+    : `Context: ${used}${ctx.size ? ` of ${fmt(ctx.size)}` : ''} tokens`;
   return `
-        <div class="context-bar" style="display:block">
+        <div class="context-bar" title="${escapeHtml(title)}">
           <div class="context-bar-track">
             <div class="context-bar-fill" style="width:${ctx.pct}%;background:${color}"></div>
             ${renderMarkers(ctx.markers)}
           </div>
           <div class="context-bar-labels">
-            <span style="color:${color}">${Math.round(ctx.pct)}% (${formatTokens(ctx.usedTokens / 1000)})</span>
+            <span style="color:${color}">${Math.round(ctx.pct)}% (${used})</span>
             <span>${Math.round(ctx.remaining)}% free</span>
           </div>
         </div>`;
@@ -8021,9 +8549,10 @@ function formatCost(usd) {
   return `$${usd.toFixed(2)}`;
 }
 
-function renderContextDetail(raw, { tokens = true } = {}) {
-  const ctx = getCtx(raw);
+function renderContextDetail(session, { tokens = true } = {}) {
+  const ctx = getCtx(session);
   if (!ctx) return '';
+  const raw = session.contextStatus;
   const totalK = ctx.size / 1000;
   const color = getContextColor(ctx.usedTokens, ctx.modelName);
 
@@ -8052,7 +8581,7 @@ function renderContextDetail(raw, { tokens = true } = {}) {
           </div>
           <div class="detail-context-summary">
             <span style="color:${color}">${Math.round(ctx.pct)}% used</span>
-            <span>${formatTokens((ctx.pct / 100) * totalK)} / ${formatTokens(totalK)}</span>
+            <span${ctx.compacts ? ` title="Auto-compact window · model window ${escapeHtml(formatTokens(ctx.modelSize / 1000))}"` : ''}>${formatTokens(ctx.usedTokens / 1000)} / ${formatTokens(totalK)}</span>
           </div>
           <div class="detail-context-stats">
             ${tokenRows}
@@ -8290,6 +8819,11 @@ function showWaitingDetail() {
 
 function isSessionActive(s) {
   return s.hasRecentLog || s.inProgress > 0 || s.hasActiveAgents || s.hasWaitingForUser;
+}
+
+// An active pinned session renders outside the Pinned group until the user dismisses it.
+function isInPinnedGroup(s) {
+  return isPlacedPinned(s.id) && !isPlacedSticky(s.id) && (!isSessionActive(s) || dismissedSessionIds.has(s.id));
 }
 
 const SESSION_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -9394,7 +9928,10 @@ async function showSessionInfoModal(sessionId) {
   const planPromise = fetch(`/api/sessions/${sessionId}/plan`)
     .then((r) => (r.ok ? r.json() : null))
     .catch(() => null)
-    .then((data) => data?.content || null);
+    .then((data) => {
+      if (data?.content) _pendingPlanPath = data.path || null;
+      return data?.content || null;
+    });
 
   const tasksPromise =
     cachedTasks.length > 0
@@ -9418,6 +9955,7 @@ async function showSessionInfoModal(sessionId) {
 
 let _infoModalSessionId = null;
 let _pendingPlanContent = null;
+let _pendingPlanPath = null;
 
 function updateStickyBtnState() {
   const stickyBtn = document.getElementById('session-info-sticky-btn');
@@ -9542,7 +10080,7 @@ function showInfoModal(session, teamConfig, tasks, planContent, parentInfo) {
 
   if (session.contextStatus) {
     html += `<hr style="border: none; border-top: 1px solid var(--border); margin: 12px 0;">`;
-    html += renderContextDetail(session.contextStatus);
+    html += renderContextDetail(session);
   }
 
   if (planContent) {
@@ -10061,10 +10599,11 @@ function refreshOpenPlan() {
   fetch(`/api/sessions/${_planSessionId}/plan`)
     .then((r) => (r.ok ? r.json() : null))
     .then((data) => {
-      if (data?.content) {
+      if (data?.content && (data.content !== _pendingPlanContent || data.path !== _pendingPlanPath)) {
         _pendingPlanContent = data.content;
-        const body = document.getElementById('plan-modal-body');
-        body.innerHTML = renderMarkdown(_pendingPlanContent);
+        _pendingPlanPath = data.path || null;
+        document.getElementById('plan-modal-body').innerHTML = renderMarkdown(_pendingPlanContent);
+        mountPlanReview();
       }
     })
     .catch(() => {});
@@ -10383,6 +10922,7 @@ function openPlanForSession(sid) {
     .then((data) => {
       if (data?.content) {
         _pendingPlanContent = data.content;
+        _pendingPlanPath = data.path || null;
         _planSessionId = sid;
         openPlanModal();
       }
@@ -10403,10 +10943,12 @@ function openPlanModal() {
     document.querySelector('#plan-modal .modal-footer').prepend(controls);
   }
   document.getElementById('plan-modal').classList.add('visible');
+  mountPlanReview();
   const keyHandler = (e) => {
     if (e.key === 'Escape') {
       e.preventDefault();
       e.stopPropagation();
+      if (reviewPopMode) return closeReviewPop();
       closePlanModal();
       document.removeEventListener('keydown', keyHandler, true);
     }
@@ -10414,7 +10956,20 @@ function openPlanModal() {
   document.addEventListener('keydown', keyHandler, true);
 }
 
+function mountPlanReview() {
+  if (!_pendingPlanPath || !_planSessionId) return;
+  mountReview({
+    contentEl: document.getElementById('plan-modal-body'),
+    panelEl: document.getElementById('plan-review-panel'),
+    hostEl: document.querySelector('#plan-modal .modal'),
+    source: { kind: 'file', label: pathBasename(_pendingPlanPath), path: _pendingPlanPath },
+    sessionId: _planSessionId,
+    onSent: closePlanModal,
+  });
+}
+
 function closePlanModal() {
+  unmountReview(document.getElementById('plan-review-panel'));
   hideModalOverlay('plan-modal');
 }
 
@@ -11571,6 +12126,7 @@ function placeholderSession(id, spec) {
     name: spec.name || PLACEHOLDER_NAMES[spec.mode] || PLACEHOLDER_NAMES.new,
     dispatchGroup: spec.group || undefined,
     startedBy: spec.startedBy || undefined,
+    dispatched: spec.mode === 'dispatch' ? { parent: spec.startedBy || null } : undefined,
     project: spec.cwd,
     worktree: spec.worktree ? { repo: spec.cwd, name: spec.worktree === true ? 'new' : spec.worktree } : null,
     modifiedAt: new Date(spec.startedAt).toISOString(),
@@ -12234,7 +12790,12 @@ fetch('/api/config')
   })
   .catch(() => {})
   .then(restorePendingSessions)
-  .then(() => fetchSessions())
+  .then(() =>
+    fetchSessions(
+      true,
+      urlState.projectView ? null : urlState.session || (lastView?.view === 'session' ? lastView.session : null),
+    ),
+  )
   .then(async () => {
     if (urlState.projectView) {
       try {

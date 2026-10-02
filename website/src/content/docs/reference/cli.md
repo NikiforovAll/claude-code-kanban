@@ -318,7 +318,7 @@ The server keeps dispatch records in memory. A server restart clears them. It ke
 claude-code-kanban skills get <name>
 ```
 
-Prints a guide that ships with this version. The only guide now is `dispatch`, which the [kanban-dispatch skill](/claude-code-kanban/guides/plugin-skills/) loads. An unknown name prints the known names.
+Prints a guide that ships with this version. The only guide now is `dispatch`, which the [dispatch skill](/claude-code-kanban/guides/plugin-skills/) loads. An unknown name prints the known names.
 
 ## Environment used by the CLI
 

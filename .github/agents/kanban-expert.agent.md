@@ -31,7 +31,7 @@ SSE debouncing: 500ms for tasks, 2s for metadata.
 - **XSS safety** — `escapeHtml()` for user data, `DOMPurify.sanitize(marked.parse(...))` for markdown
 - **No framework** — vanilla JS, CSS variables for dark/light theming
 - **`#region` markers** — VS Code foldable blocks in `app.js` and `style.css`
-- **CDN dependencies** — marked.js, DOMPurify, highlight.js, Google Fonts
+- **CDN dependencies** — marked.js, DOMPurify, highlight.js (fonts are bundled in `public/fonts/`)
 
 ## Server Components
 

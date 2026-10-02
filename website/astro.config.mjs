@@ -31,6 +31,7 @@ export default defineConfig({
 						{ label: 'Session log and details', slug: 'guides/session-details' },
 						{ label: 'Subagents', slug: 'guides/subagents' },
 						{ label: 'Answer prompts from the board', slug: 'guides/waiting-prompts' },
+						{ label: 'Review comments', slug: 'guides/review-comments' },
 						{ label: 'Embedded terminal', slug: 'guides/embedded-terminal' },
 						{ label: 'Session groups', slug: 'guides/session-groups' },
 						{ label: 'Dispatch tasks to other sessions', slug: 'guides/dispatch' },

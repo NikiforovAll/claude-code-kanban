@@ -43,6 +43,7 @@
   --ansi-bright-cyan: #7ddede;
   --mono: 'IBM Plex Mono', monospace;
   --serif: 'Playfair Display', serif;
+  --sans: Arial, Helvetica, sans-serif;
   --card-gap: 7px;
   /* the name's supporting lines read as one unit with it, so they sit tighter
      than the gap separating the card's independent rows */
@@ -70,6 +71,13 @@ body {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
 }
 
 body {
@@ -1001,6 +1009,7 @@ body.booting .boot-splash {
 }
 
 .session-name {
+  font-family: var(--sans);
   font-size: 14px;
   font-weight: 500;
   color: var(--text-primary);
@@ -1069,6 +1078,7 @@ body.booting .boot-splash {
 }
 
 .session-secondary {
+  font-family: var(--sans);
   font-size: 12px;
   font-weight: 450;
   color: var(--text-tertiary);
@@ -1108,26 +1118,36 @@ body.booting .boot-splash {
   text-overflow: ellipsis;
 }
 
-.session-plan {
-  font-size: 10px;
-  color: var(--plan);
-  margin-top: var(--card-gap-tight);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 .session-item.plan-reveal {
   outline: 1.5px solid var(--plan);
   background: var(--plan-dim);
+}
+
+.session-metrics {
+  display: flex;
+  flex-direction: column;
+  gap: var(--card-gap);
+  margin-top: var(--card-gap);
+  line-height: 1;
 }
 
 .session-progress {
   display: flex;
   align-items: center;
   gap: 9px;
+}
+
+.session-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   margin-top: var(--card-gap);
-  line-height: 1;
+  min-height: 18px;
+}
+
+.session-footer .session-time {
+  min-width: 0;
 }
 
 .progress-bar {
@@ -1158,12 +1178,15 @@ body.booting .boot-splash {
   font-variant-numeric: tabular-nums;
 }
 
-.context-bar {
-  display: none;
-  margin-top: var(--card-gap);
-}
-.has-context .context-bar {
-  display: block;
+.context-bar-labels {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--text-tertiary);
+  white-space: nowrap;
 }
 .context-bar-track {
   height: 2px;
@@ -1188,15 +1211,6 @@ body.booting .boot-splash {
   z-index: 2;
   border-radius: 1px;
 }
-.context-bar-labels {
-  display: flex;
-  justify-content: space-between;
-  margin-top: 2px;
-  font-size: 10px;
-  font-family: var(--font-mono);
-  color: var(--text-tertiary);
-}
-
 .detail-context {
   margin-bottom: 16px;
 }
@@ -1314,7 +1328,6 @@ body.booting .boot-splash {
   font-size: 11px;
   font-weight: 450;
   color: var(--text-tertiary);
-  margin-top: var(--card-gap);
 }
 
 .session-latest-msg {
@@ -2430,6 +2443,7 @@ body.booting .boot-splash {
 .plan-indicator,
 .loop-badge,
 .workflow-badge,
+.dispatched-badge,
 .terminal-badge {
   width: 18px;
   height: 18px;
@@ -3759,6 +3773,10 @@ body.booting .boot-splash {
 .toast-action:hover {
   background: var(--accent-dim);
 }
+.toast-hint {
+  margin-top: 2px;
+  color: var(--text-muted);
+}
 .toast.toast-success {
   border-color: var(--success);
   color: var(--success);
@@ -3821,9 +3839,6 @@ body.booting .boot-splash {
 .rendered-md th {
   background: var(--bg-hover);
   font-weight: 600;
-}
-.rendered-md tr:hover td {
-  background: var(--bg-hover);
 }
 .rendered-md hr {
   margin: 0.8em 0;
@@ -4650,6 +4665,12 @@ body.booting .boot-splash {
 .terminal-badge:hover {
   color: var(--accent, var(--text-primary));
 }
+.dispatched-badge:not([onclick]) {
+  cursor: default;
+}
+.dispatched-badge[onclick]:hover {
+  color: var(--accent, var(--text-primary));
+}
 .agent-badge-waiting {
   color: var(--warning);
   animation: agent-badge-pulse 1.6s ease-in-out infinite;
@@ -5225,6 +5246,7 @@ body.booting .boot-splash {
 
 /* #region LIGHT_THEME */
 body.light {
+  --on-accent: white;
   --bg-deep: #e8e6e3;
   --bg-surface: #efede9;
   --bg-elevated: #fbfaf9;
@@ -5466,9 +5488,27 @@ body.light .msg-assistant .msg-text {
   max-height: 92vh;
 }
 
+/* The comment panel opens beside the content, so the dialog grows by `--review-extra`
+   instead of squeezing what is under review. */
+.modal.review-host {
+  --review-panel-w: 320px;
+  --review-extra: 0px;
+}
+
+.review-host .modal-body {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+#plan-modal .modal:not(.fullscreen):not(.user-sized) {
+  width: min(calc(60vw + var(--review-extra)), 96vw);
+  max-width: min(calc(60vw + var(--review-extra)), 96vw);
+}
+
 .modal.preview-modal-dialog {
-  width: 90vw;
-  max-width: 1200px;
+  width: min(calc(90vw + var(--review-extra)), 96vw);
+  max-width: calc(1200px + var(--review-extra));
   max-height: 90vh;
   display: flex;
   flex-direction: column;
@@ -5483,9 +5523,6 @@ body.light .msg-assistant .msg-text {
 
 .preview-modal-dialog .modal-body {
   flex: 0 1 auto;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
 }
 
 #msg-detail-body,
@@ -5565,9 +5602,43 @@ body.light .msg-assistant .msg-text {
    floor (same rule as .fullscreen) — short content still collapses. min()
    keeps a size saved on a large screen inside the current viewport. */
 .modal.user-sized:not(.fullscreen) {
-  width: min(var(--user-modal-w), 98vw);
-  max-width: min(var(--user-modal-w), 98vw);
+  width: min(calc(var(--user-modal-w) + var(--review-extra, 0px)), 98vw);
+  max-width: min(calc(var(--user-modal-w) + var(--review-extra, 0px)), 98vw);
   max-height: min(var(--user-modal-h), 95vh);
+}
+
+.modal.review-host.has-review {
+  --review-extra: var(--review-panel-w);
+}
+
+/* Not on user-sized dialogs: the grip drag sets the width on every move and must not lag. */
+.modal.review-host:not(.user-sized) {
+  transition:
+    width 150ms ease-out,
+    max-width 150ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .modal.review-host {
+    transition: none;
+  }
+}
+
+.preview-split {
+  display: flex;
+  gap: 14px;
+  flex: 0 1 auto;
+  min-height: 0;
+}
+
+.preview-html .preview-split {
+  flex: 1 1 auto;
+}
+
+.preview-split > #preview-modal-body,
+.preview-split > #plan-modal-body {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .preview-html .modal-body,
@@ -6022,6 +6093,172 @@ select.form-input option:checked {
   outline-offset: 2px;
 }
 
+/* #endregion */
+
+/* #region REVIEW */
+::highlight(review) {
+  background-color: var(--warning-dim);
+}
+
+::highlight(review-hot) {
+  background-color: color-mix(in srgb, var(--warning) 45%, transparent);
+}
+
+#review-pop {
+  display: none;
+  position: fixed;
+  z-index: 10010;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+#review-pop.visible {
+  display: block;
+}
+
+#review-pop.editor {
+  width: 320px;
+  padding: 8px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+}
+
+#review-pop textarea {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 6px 0;
+  padding: 6px;
+  resize: vertical;
+  font: inherit;
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.review-pop-quote,
+.review-card-quote {
+  overflow: hidden;
+  padding-left: 8px;
+  color: var(--text-muted);
+  border-left: 2px solid var(--warning);
+}
+
+.review-pop-quote {
+  max-height: 3.2em;
+}
+
+.review-pop-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+#review-pop button,
+.review-panel button {
+  padding: 3px 10px;
+  font: inherit;
+  color: var(--text-primary);
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+#review-pop button.primary,
+.review-panel button.primary {
+  color: var(--on-accent, var(--bg-deep));
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.review-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 calc(var(--review-panel-w) - 14px);
+  min-height: 0;
+  padding-left: 12px;
+  font-family: var(--mono);
+  font-size: 12px;
+  border-left: 1px solid var(--border);
+}
+
+.review-panel[hidden] {
+  display: none;
+}
+
+.review-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: 8px;
+}
+
+.review-panel-head span {
+  flex: 1;
+  color: var(--text-muted);
+}
+
+.review-panel-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.review-panel button.review-discard,
+.review-panel button.review-remove {
+  padding: 3px 4px;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+}
+
+.review-panel button.review-discard:hover,
+.review-panel button.review-discard:focus-visible {
+  color: var(--text-primary);
+  text-decoration: underline;
+}
+
+.review-card {
+  position: relative;
+  padding: 8px 24px 10px 0;
+  cursor: pointer;
+}
+
+.review-card + .review-card {
+  border-top: 1px solid var(--border);
+}
+
+.review-card-quote {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  margin-bottom: 4px;
+  border-left-color: var(--warning-dim);
+}
+
+.review-card:hover .review-card-quote,
+.review-card.hot .review-card-quote {
+  color: var(--text-primary);
+  border-left-color: var(--warning);
+}
+
+.review-card-comment {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.review-panel button.review-remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  padding: 0 6px;
+}
 /* #endregion */
 
 /* #region SESSION_PICKER */
@@ -6921,6 +7158,7 @@ select.form-input option:checked {
 /* #region MEDIA_QUERIES */
 @media (prefers-color-scheme: light) {
   body:not(.dark-forced) {
+    --on-accent: white;
     --bg-deep: #e8e6e3;
     --bg-surface: #efede9;
     --bg-elevated: #fbfaf9;
@@ -7190,7 +7428,7 @@ pre.mermaid svg {
   font-size: 10px;
   color: var(--text-muted);
   padding: 0 10px 0 28px;
-  font-family: 'IBM Plex Mono', monospace;
+  font-family: var(--mono);
   overflow: hidden;
   max-height: 0;
   opacity: 0;

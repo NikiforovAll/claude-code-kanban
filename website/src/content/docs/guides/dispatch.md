@@ -125,12 +125,12 @@ The server keeps dispatch records in memory. A server restart loses them, and it
 
 ## Dispatch from Claude
 
-The `kanban-dispatch` plugin skill lets Claude start and collect dispatches for you. Ask Claude to dispatch or delegate a task. The skill loads the guide with `claude-code-kanban skills get dispatch`, so Claude uses the commands that your installed version accepts.
+The `dispatch` plugin skill lets Claude start and collect dispatches for you. Ask Claude to dispatch or delegate a task. The skill loads the guide with `claude-code-kanban skills get dispatch`, so Claude uses the commands that your installed version accepts.
 
 The skill also arms an inbox for the session. When a dispatch started with `--report` settles, a line arrives in the session on its own:
 
 ```text
-cck:1 dispatch.<succeeded|failed|exited> <dispatch-id> session=<uuid> summary=<text>
+[kanban board] Dispatch <dispatch-id> (session <uuid>) <reported success|reported failure|ended without a report>. Summary: <text>
 ```
 
 For setup and the other skills, see [Claude Code plugin skills](/claude-code-kanban/guides/plugin-skills/). For every flag, see the [CLI reference](/claude-code-kanban/reference/cli/).

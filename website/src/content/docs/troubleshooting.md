@@ -119,7 +119,7 @@ PORT=8080 npx claude-code-kanban
 
 **Cause.** The server queues each move, but a session gets the queue only after you arm the doorbell monitor. Moves made before that are discarded. Adding a task by hand sends no notice at all.
 
-**Fix.** Run `/claude-code-kanban:kanban-follow` in the session first, then move the card. See [Claude Code plugin skills](/claude-code-kanban/guides/plugin-skills/).
+**Fix.** Run `/claude-code-kanban:follow` in the session first, then move the card. See [Claude Code plugin skills](/claude-code-kanban/guides/plugin-skills/).
 
 ## Prompt buttons are missing
 
