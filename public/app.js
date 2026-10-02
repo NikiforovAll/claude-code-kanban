@@ -3297,7 +3297,7 @@ let revealedStorageSessionId = null;
 
 // Opens a session and scrolls the sidebar to it, refetching first when the id
 // fell outside the session list the current filters asked for.
-async function revealSession(id, { open = fetchTasks } = {}) {
+async function revealSession(id) {
   // Explicit opens restore a dismissed session; activity and auto-follow do not.
   setSessionDismissed(id, false);
   let session = sessions.find((s) => s.id === id);
@@ -3316,7 +3316,7 @@ async function revealSession(id, { open = fetchTasks } = {}) {
   const uncollapsed = session ? uncollapseFor(session) : false;
   if (uncollapsed) persistCollapsedGroups();
   expandSidebar();
-  await open(id);
+  await openSession(id);
   // fetchTasks skips its render when the session and task hash are unchanged.
   if (uncollapsed) renderSessions();
   const el = document.querySelector(`.session-item[data-session-id="${escSel(id)}"]`);
@@ -10773,7 +10773,7 @@ async function swapToPreviousSession() {
   const target = currentSessionId === lastSessionId ? previousSessionId : lastSessionId;
   if (!target || target === currentSessionId) return;
   if (terminalPaneFocused()) termState.focusNext = true;
-  await revealSession(target, { open: openSession });
+  await revealSession(target);
 }
 
 // Esc belongs to Claude, so leaving the terminal without hiding it needs its own key.
