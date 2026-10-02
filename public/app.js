@@ -465,10 +465,13 @@ function scheduleJustFinishedExpiry() {
   }
   if (next === Infinity) return;
   justFinishedTimer = setTimeout(() => {
-    if (skipOffScreen()) return;
-    renderSessions();
-    if (isSessionPickerOpen()) renderSessionPicker();
+    if (!skipOffScreen()) renderSessionViews();
   }, next + 50);
+}
+
+function renderSessionViews() {
+  renderSessions();
+  if (isSessionPickerOpen()) renderSessionPicker();
 }
 
 const ACTIVITY_PREDICATES = {
@@ -1723,6 +1726,7 @@ const ICON_AGENT_ACTIVE =
   '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/><line x1="8" y1="16" x2="8" y2="16"/><line x1="16" y1="16" x2="16" y2="16"/></svg>';
 const ICON_TERMINAL =
   '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>';
+const TERMINAL_TITLE = 'Running in a terminal here';
 const ICON_CHAT =
   '<svg class="msg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
 const TOOL_ICONS = {
@@ -3554,7 +3558,7 @@ function renderSessions() {
                 ${session.hasPlan && !session.planSourceSessionId ? `<span class="plan-indicator" onclick="event.stopPropagation(); openPlanForSession('${sid}')" title="View plan">${ICON_PLAN}</span>` : ''}
                 ${session.planSourceSessionId ? `<span class="plan-indicator" title="Implements plan — click to reveal plan session" onclick="event.stopPropagation(); revealPlanSession('${escAttrJs(session.planSourceSessionId)}')">${ICON_PLAN}</span>` : ''}
                 ${session.sharedTaskList ? `<span class="shared-tasklist-badge" title="Shared task list: ${escapeHtml(session.sharedTaskList)}">${linkSvg(12)}</span>` : ''}
-                ${runningTerminals.has(session.id) ? `<span class="terminal-badge" onclick="event.stopPropagation(); showSessionTerminal('${escAttrJs(session.id)}')" title="Running in a terminal here">${ICON_TERMINAL}</span>` : ''}
+                ${runningTerminals.has(session.id) ? `<span class="terminal-badge" onclick="event.stopPropagation(); showSessionTerminal('${escAttrJs(session.id)}')" title="${TERMINAL_TITLE}">${ICON_TERMINAL}</span>` : ''}
                 ${session.hasWaitingForUser ? `<span class="agent-badge agent-badge-waiting" title="Waiting for user">${ICON_AGENT_WAITING}</span>` : ''}
                 ${session.hasRunningAgents && !session.hasWaitingForUser ? `<span class="agent-badge agent-badge-active" title="Agents running">${ICON_AGENT_ACTIVE}</span>` : ''}
                 ${isLive || session.hasRunningAgents ? `<span class="pulse" title="${isLive ? 'Live' : 'Active agents'}"></span>` : ''}
@@ -9811,21 +9815,28 @@ function spMatches(session, query) {
 }
 
 // Spelled out rather than interpolated so the class never comes from a variable.
-const SP_DOTS = {
-  waiting: '<span class="activity-dot waiting"></span>',
-  live: '<span class="activity-dot live"></span>',
-  active: '<span class="activity-dot active"></span>',
-  justFinished: '<span class="activity-dot just-finished"></span>',
-  recent: '<span class="activity-dot recent"></span>',
-  idle: '<span class="activity-dot idle"></span>',
+const SP_STATES = {
+  waiting: '<span class="sp-state waiting">',
+  live: '<span class="sp-state live">',
+  active: '<span class="sp-state active">',
+  justFinished: '<span class="sp-state just-finished">',
+  recent: '<span class="sp-state recent">',
+  idle: '<span class="sp-state idle">',
 };
 
+const SP_DOT = '<span class="activity-dot"></span>';
+const SP_TERMINAL = `<span class="sp-terminal" title="${TERMINAL_TITLE}">${ICON_TERMINAL}</span>`;
+
+function spState(session) {
+  if (isWaitingSession(session)) return 'waiting';
+  if (isSessionLive(session)) return 'live';
+  if (isActiveSession(session)) return 'active';
+  if (isJustFinished(session)) return 'justFinished';
+  return session.hasRecentActivity || session.inProgress > 0 ? 'recent' : 'idle';
+}
+
 function spDotHtml(session) {
-  if (isWaitingSession(session)) return SP_DOTS.waiting;
-  if (isSessionLive(session)) return SP_DOTS.live;
-  if (isActiveSession(session)) return SP_DOTS.active;
-  if (isJustFinished(session)) return SP_DOTS.justFinished;
-  return session.hasRecentActivity || session.inProgress > 0 ? SP_DOTS.recent : SP_DOTS.idle;
+  return `${SP_STATES[spState(session)]}${runningTerminals.has(session.id) ? SP_TERMINAL : SP_DOT}</span>`;
 }
 
 function spPinHtml(session) {
@@ -11662,7 +11673,7 @@ async function loadTerminals() {
 function setRunningTerminals(ids) {
   runningTerminals = new Set(ids);
   if (ids.some((id) => !sessions.some((s) => s.id === id))) fetchSessions(false).catch(() => {});
-  else renderSessions();
+  else renderSessionViews();
   renderActivityChip();
 }
 

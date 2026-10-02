@@ -971,7 +971,7 @@ body.booting .boot-splash {
 
 /* Declared on the element, not :root, so it picks up body.light's --success. */
 .session-item.just-finished,
-.sp-row .activity-dot.just-finished {
+.sp-state.just-finished {
   --success-faded: color-mix(in srgb, var(--success) 35%, var(--text-muted));
 }
 
@@ -6118,29 +6118,46 @@ select.form-input option:checked {
   border-color: var(--accent);
 }
 
-.sp-row .activity-dot.live {
-  background: var(--success);
+.sp-state {
+  flex: none;
+  width: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
 }
 
-.sp-row .activity-dot.active {
-  background: var(--accent);
+.sp-state.live {
+  color: var(--success);
 }
 
-.sp-row .activity-dot.waiting {
-  background: var(--warning);
+.sp-state.active {
+  color: var(--accent);
 }
 
-.sp-row .activity-dot.just-finished {
-  background: var(--success-faded);
+.sp-state.waiting {
+  color: var(--warning);
 }
 
-.sp-row .activity-dot.recent {
-  background: var(--text-tertiary);
+.sp-state.just-finished {
+  color: var(--success-faded);
 }
 
-.sp-row .activity-dot.idle {
+.sp-state.recent {
+  color: var(--text-tertiary);
+}
+
+.sp-state.idle {
+  color: var(--text-muted);
+}
+
+.sp-state .activity-dot {
+  background: currentColor;
+}
+
+.sp-state.idle .activity-dot {
   background: transparent;
-  border: 1px solid var(--text-muted);
+  border: 1px solid currentColor;
 }
 
 .sp-name,
