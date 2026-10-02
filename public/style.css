@@ -969,6 +969,20 @@ body.booting .boot-splash {
   background: var(--text-tertiary);
 }
 
+/* Declared on the element, not :root, so it picks up body.light's --success. */
+.session-item.just-finished,
+.sp-row .activity-dot.just-finished {
+  --success-faded: color-mix(in srgb, var(--success) 35%, var(--text-muted));
+}
+
+.session-item.warm.idle.just-finished .session-time {
+  color: var(--success-faded);
+}
+
+.session-item.warm.idle.just-finished .session-time::before {
+  background: var(--success-faded);
+}
+
 .session-item.warm.permission-pending .session-time {
   color: var(--warning);
 }
@@ -6116,6 +6130,19 @@ select.form-input option:checked {
   background: var(--warning);
 }
 
+.sp-row .activity-dot.just-finished {
+  background: var(--success-faded);
+}
+
+.sp-row .activity-dot.recent {
+  background: var(--text-tertiary);
+}
+
+.sp-row .activity-dot.idle {
+  background: transparent;
+  border: 1px solid var(--text-muted);
+}
+
 .sp-name,
 .sp-project,
 .sp-branch {
@@ -6132,6 +6159,9 @@ select.form-input option:checked {
 
 .sp-pin {
   flex: none;
+  width: 14px;
+  display: flex;
+  justify-content: center;
   line-height: 0;
 }
 

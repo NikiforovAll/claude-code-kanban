@@ -1580,7 +1580,7 @@ app.get('/api/sessions', async (req, res) => {
     if (recentHours > 0) {
       const cutoff = Date.now() - recentHours * 3600 * 1000;
       const activity = projectActivity();
-      sessions = sessions.filter(s => (activity.get(s.project) || 0) > cutoff || includeIds.has(s.id));
+      sessions = sessions.filter(s => (activity.get(s.project) || 0) > cutoff || pinnedIds.has(s.id));
     }
 
     const paged = limit !== null && limit > 0;

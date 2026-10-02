@@ -446,6 +446,30 @@ function isActiveSession(s) {
 function isSessionLive(s) {
   return !!s.hasRecentLog && Date.now() - Date.parse(s.modifiedAt) <= LIVE_INDICATOR_MS;
 }
+function isJustFinished(s) {
+  return (
+    !isWaitingSession(s) &&
+    !isActiveSession(s) &&
+    !!s.hasRecentActivity &&
+    Date.now() - Date.parse(s.modifiedAt) < JUST_NOW_MS
+  );
+}
+
+// The JUST_NOW_MS mark is a client-side boundary; no server update arrives when a session crosses it.
+let justFinishedTimer = null;
+function scheduleJustFinishedExpiry() {
+  clearTimeout(justFinishedTimer);
+  let next = Infinity;
+  for (const s of sessions) {
+    if (isJustFinished(s)) next = Math.min(next, Date.parse(s.modifiedAt) + JUST_NOW_MS - Date.now());
+  }
+  if (next === Infinity) return;
+  justFinishedTimer = setTimeout(() => {
+    if (skipOffScreen()) return;
+    renderSessions();
+    if (isSessionPickerOpen()) renderSessionPicker();
+  }, next + 50);
+}
 
 const ACTIVITY_PREDICATES = {
   waiting: isWaitingSession,
@@ -619,6 +643,7 @@ async function fetchTasks(sessionId) {
 const WAITING_TTL_MS = 30 * 60 * 1000;
 const AGENT_LOG_MAX = 8;
 const LIVE_INDICATOR_MS = 10 * 1000;
+const JUST_NOW_MS = 60 * 1000;
 // #endregion
 
 function resetAgentState() {
@@ -3356,7 +3381,12 @@ function getFilteredSessions() {
     // The open session keeps its row even when it belongs to another project, so that
     // revealing one by id has something to scroll to. Same exemption the active branch
     // above already makes, for the same reason.
-    filteredSessions = filteredSessions.filter((s) => matchesProjectFilter(s.project) || s.id === currentSessionId);
+    filteredSessions = filteredSessions.filter(
+      (s) =>
+        matchesProjectFilter(s.project) ||
+        s.id === currentSessionId ||
+        (filterProject === '__recent__' && isAnyPinned(s.id)),
+    );
   }
 
   if (activityFilter.size > 0) {
@@ -3425,6 +3455,7 @@ function renderSessions() {
   // Rebuilding the list under the pointer cancels an in-flight drop and would swallow a
   // half-typed group name, and the SSE path can fire at any moment — defer instead.
   if (sgDrag || sgIsEditing() || zenPanelIsEditing()) return;
+  scheduleJustFinishedExpiry();
   refreshProjectList();
 
   // Zen narrows the rendered list only — the session picker keeps calling getFilteredSessions()
@@ -3493,15 +3524,19 @@ function renderSessions() {
     const linkedDocsCount = getSessionPreviewPaths(session.id).length;
     const bookmarksCount = loadPins(session.id).length;
     const hasScratchpad = _hasScratchpad(_sessionScratchpadKey(session.id));
-    const tempClass = session.hasRecentLog || session.inProgress || session.hasWaitingForUser ? 'warm' : 'stale';
+    const tempClass =
+      session.hasRecentLog || session.hasRecentActivity || session.inProgress || session.hasWaitingForUser
+        ? 'warm'
+        : 'stale';
     // Open tasks keep an idle session warm, but the green dot is for a session that is working.
     const idleClass =
       tempClass === 'warm' && !session.hasWaitingForUser && !session.hasRecentLog && !session.hasRunningAgents
         ? 'idle'
         : '';
+    const justFinishedClass = isJustFinished(session) ? 'just-finished' : '';
     const sid = escAttrJs(session.id);
     return `
-          <button onclick="openSession('${sid}')" draggable="true" data-session-id="${escapeHtml(session.id)}" class="session-item ${isActive ? 'active' : ''} ${session.hasWaitingForUser ? 'permission-pending' : ''} ${session.unread ? 'unread' : ''} ${tempClass} ${idleClass} ${showCtx ? 'has-context' : ''}" title="${escapeHtml(tooltip)}">
+          <button onclick="openSession('${sid}')" draggable="true" data-session-id="${escapeHtml(session.id)}" class="session-item ${isActive ? 'active' : ''} ${session.hasWaitingForUser ? 'permission-pending' : ''} ${session.unread ? 'unread' : ''} ${tempClass} ${idleClass} ${justFinishedClass} ${showCtx ? 'has-context' : ''}" title="${escapeHtml(tooltip)}">
             <span class="session-pin-btn${pinClass}" onclick="event.stopPropagation();toggleSessionPin('${sid}')" title="${pinTitle} session">${pinState === 'sticky' ? SESSION_STAR_SVG : SESSION_PIN_SVG}</span>
             <div class="session-name">${escapeHtml(sessionName)}</div>
             ${projectHtml ? `<div class="session-secondary">${projectHtml}</div>` : ''}
@@ -4451,9 +4486,9 @@ function sgHeaderHtml(group, countHtml) {
   const actions = group.transient
     ? `<span class="sg-action sg-keep" title="Keep this group after its sessions end">Keep</span>
           <span class="sg-action sg-delete" title="Delete group (sessions return to Projects)">&times;</span>`
-    : `${headerPadBtnHtml(_groupScratchpadKey(group.id), group.name)}
-          <span class="sg-action sg-rename" title="Rename group"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></span>
-          <span class="sg-action sg-delete" title="Delete group (members return to Projects)">&times;</span>`;
+    : `<span class="sg-action sg-rename" title="Rename group"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></span>
+          <span class="sg-action sg-delete" title="Delete group (members return to Projects)">&times;</span>
+          ${headerPadBtnHtml(_groupScratchpadKey(group.id), group.name)}`;
   return `
         <div ${attrs} data-group-path="${escapeHtml(sgKey(group.id))}">
           ${groupChevronSvg()}
@@ -8283,7 +8318,7 @@ function formatDate(dateStr) {
   const now = new Date();
   const diff = now - date;
 
-  if (diff < 60000) return 'just now';
+  if (diff < JUST_NOW_MS) return 'just now';
   if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
   if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
   return date.toLocaleDateString();
@@ -9704,8 +9739,12 @@ function closeSessionPicker({ refocus = true } = {}) {
   if (refocus && spFromTerminal && wantsTerminal()) focusTerminalPane();
 }
 
+function isSessionPickerOpen() {
+  return document.getElementById('session-picker-modal').classList.contains('visible');
+}
+
 function toggleSessionPicker() {
-  if (document.getElementById('session-picker-modal').classList.contains('visible')) closeSessionPicker();
+  if (isSessionPickerOpen()) closeSessionPicker();
   else openSessionPicker();
 }
 
@@ -9776,20 +9815,24 @@ const SP_DOTS = {
   waiting: '<span class="activity-dot waiting"></span>',
   live: '<span class="activity-dot live"></span>',
   active: '<span class="activity-dot active"></span>',
-  idle: '<span class="activity-dot"></span>',
+  justFinished: '<span class="activity-dot just-finished"></span>',
+  recent: '<span class="activity-dot recent"></span>',
+  idle: '<span class="activity-dot idle"></span>',
 };
 
 function spDotHtml(session) {
   if (isWaitingSession(session)) return SP_DOTS.waiting;
   if (isSessionLive(session)) return SP_DOTS.live;
-  return isActiveSession(session) ? SP_DOTS.active : SP_DOTS.idle;
+  if (isActiveSession(session)) return SP_DOTS.active;
+  if (isJustFinished(session)) return SP_DOTS.justFinished;
+  return session.hasRecentActivity || session.inProgress > 0 ? SP_DOTS.recent : SP_DOTS.idle;
 }
 
 function spPinHtml(session) {
   const state = getSessionPinState(session.id);
   if (state === 'sticky') return `<span class="sp-pin sticky" title="Sticky">${SESSION_STAR_SVG}</span>`;
   if (state === 'pinned') return `<span class="sp-pin pinned" title="Pinned">${SESSION_PIN_SVG}</span>`;
-  return '';
+  return '<span class="sp-pin"></span>';
 }
 
 function renderSessionPicker() {
@@ -9821,11 +9864,11 @@ function renderSessionPicker() {
       return `<button class="sp-row${s.id === currentSessionId ? ' current' : ''}${outside ? ' outside' : ''}" data-idx="${i}" title="${escapeHtml(s.project ? `${s.id}\n${s.project}` : s.id)}">
         ${spDotHtml(s)}
         <span class="sp-name">${escapeHtml(sessionDisplayName(s))}</span>
-        ${spPinHtml(s)}
         <span class="sp-project">${escapeHtml(project)}</span>
         ${s.gitBranch ? `<span class="sp-branch">${escapeHtml(s.gitBranch)}</span>` : ''}
         <span class="sp-count">${s.completed}/${s.taskCount}</span>
         <span class="sp-time">${formatDate(s.modifiedAt)}</span>
+        ${spPinHtml(s)}
       </button>`;
     })
     .join('');
