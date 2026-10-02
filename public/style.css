@@ -488,9 +488,8 @@ body::before {
 
 .section-header-label {
   flex: 0 0 auto;
+  font-size: 12px;
   font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
 }
 
 /* Non-default filters, spelled out in the header so folding them into the popover
@@ -7306,8 +7305,6 @@ pre.mermaid svg {
   font-size: 11px;
   font-weight: 600;
   color: var(--text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
 }
 
 .project-group-header:first-child {
@@ -7559,10 +7556,8 @@ pre.mermaid svg {
 .sg-section-label {
   padding: 10px 10px 2px;
   margin-top: 10px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.6px;
-  text-transform: uppercase;
   color: var(--text-muted);
   user-select: none;
 }
