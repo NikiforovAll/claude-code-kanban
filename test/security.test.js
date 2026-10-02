@@ -1,6 +1,6 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } = require('fs');
+const { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync, existsSync } = require('fs');
 const os = require('os');
 const path = require('path');
 
@@ -88,16 +88,18 @@ describe('isContained', { skip: !contain }, () => {
     }
   });
 
-  it('is case-insensitive on win32 only', () => {
+  it('folds case where the file system does', () => {
     const base = tmp();
     try {
       const root = path.join(base, 'Root');
       mkdirSync(root);
       writeFileSync(path.join(root, 'x.md'), 'x');
-      // On win32 the same file reached through differing case is the same file;
-      // on posix ROOT and Root are distinct directories.
+      // The same file reached through differing case is the same file on a case-insensitive file
+      // system: Windows, and macOS by default. On a case-sensitive one (Linux, or APFS formatted
+      // that way) ROOT and Root are distinct directories. Ask the file system which it is.
       const shouted = path.join(base, 'ROOT', 'x.md');
-      assert.equal(isContained(shouted, root), isWin);
+      const folds = isWin || existsSync(shouted);
+      assert.equal(isContained(shouted, root), folds);
     } finally {
       rmSync(base, { recursive: true, force: true });
     }
