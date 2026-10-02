@@ -11,7 +11,7 @@
 //
 // The lines we print carry board text (the card subject and description), which the
 // session is told to read as the user's own brief. That is only safe because we are armed
-// by an explicit `kanban-follow` invocation: the user asked to follow the board before anything the
+// by an explicit `follow` invocation: the user asked to follow the board before anything the
 // board says can reach the model.
 
 const fs = require('fs');
@@ -29,7 +29,7 @@ const RETRY_MS = 15000;
 // Windows sometimes fails a loopback connect with ETIMEDOUT while the board is up, so that
 // error gets a few short waits before the normal one.
 const CONNECT_RETRY_MS = [250, 500, 1000, 2000];
-// `--topic dispatch` is the kanban-dispatch inbox: reports from sessions this one started.
+// `--topic dispatch` is the dispatch inbox: reports from sessions this one started.
 const TOPIC = process.argv.includes('--topic') ? process.argv[process.argv.indexOf('--topic') + 1] : null;
 // A dispatch report is a result, not an instruction, so a late attach still wants it.
 const KEEP_BACKLOG = process.argv.includes('--keep-backlog');

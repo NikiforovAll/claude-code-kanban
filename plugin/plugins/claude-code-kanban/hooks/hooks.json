@@ -6,7 +6,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/agent-spy.sh",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/agent-spy.sh\"",
+            "shell": "bash",
             "timeout": 5
           }
         ]
@@ -18,7 +19,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/agent-spy.sh",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/agent-spy.sh\"",
+            "shell": "bash",
             "timeout": 5
           }
         ]
@@ -30,7 +32,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/agent-spy.sh",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/agent-spy.sh\"",
+            "shell": "bash",
             "timeout": 5
           }
         ]
@@ -42,7 +45,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/agent-spy.sh",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/agent-spy.sh\"",
+            "shell": "bash",
             "timeout": 5
           }
         ]
@@ -54,7 +58,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/agent-spy.sh",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/agent-spy.sh\"",
+            "shell": "bash",
             "timeout": 5
           }
         ]
@@ -66,7 +71,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/approval-gate.sh",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/approval-gate.sh\"",
+            "shell": "bash",
             "timeout": 86400
           }
         ]
@@ -78,7 +84,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/agent-spy.sh",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/scripts/agent-spy.sh\"",
+            "shell": "bash",
             "timeout": 5
           }
         ]

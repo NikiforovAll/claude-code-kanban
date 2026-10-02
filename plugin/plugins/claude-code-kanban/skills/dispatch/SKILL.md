@@ -1,5 +1,5 @@
 ---
-name: kanban-dispatch
+name: dispatch
 description: Dispatch a task to another Claude Code session through the kanban board (cck), fire-and-forget or with a report back. Use when the user asks to dispatch, delegate, or start a session for a task, or to collect or check on a dispatched session's result.
 argument-hint: '<task> [--report] [--group <name>] [--model haiku|sonnet|opus|fable] [--worktree [name]]'
 ---
@@ -11,7 +11,7 @@ This file only points at the guide. The guide ships with the `claude-code-kanban
 Invoking this skill also arms this session's dispatch inbox: when a session you dispatched with `--report` reports or exits, a line arrives here:
 
 ```
-cck:1 dispatch.<succeeded|failed|exited> <dispatch-id> session=<uuid> summary=<text>
+[kanban board] Dispatch <dispatch-id> (session <uuid>) <reported success|reported failure|ended without a report>. Summary: <text>
 ```
 
 Load the guide before running any dispatch command:

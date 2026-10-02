@@ -38,7 +38,7 @@ Tell the user the session name, its group, and the dispatch id, then carry on wi
 
 The started session settles with one report, `succeeded` or `failed`, or as `exited` when its terminal ends first. Start every independent dispatch first, then collect. Two channels, use either or both:
 
-- **Inbox:** this skill armed it. Lines `cck:1 dispatch.<status> <id> ...` arrive on their own while you keep working.
+- **Inbox:** this skill armed it. Lines `[kanban board] Dispatch <id> (session <uuid>) ...` arrive on their own while you keep working.
 - **Wait:** block until one settles.
 
 ```bash

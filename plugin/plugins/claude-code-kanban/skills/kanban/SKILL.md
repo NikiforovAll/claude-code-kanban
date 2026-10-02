@@ -29,7 +29,7 @@ claude-code-kanban help <command> <subcommand> # flags and examples
 | `view` / `peek` | `session view <id>`, `session peek <id>` |
 | tasks, projects | `task list`, `project list` |
 
-To be driven *by* the board instead — card moves arriving as instructions — the user types `/claude-code-kanban:kanban-follow`.
+To be driven *by* the board instead — card moves arriving as instructions — the user types `/claude-code-kanban:follow`.
 
 ## Troubleshooting
 
