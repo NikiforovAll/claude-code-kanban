@@ -10,7 +10,8 @@
     #host { height: 100%; }
     #host .xterm { height: 100%; }
     /* xterm.css paints the viewport #000; it shows below the last row when the height is not a whole number of rows. */
-    #host .xterm .xterm-viewport { background-color: var(--bg, transparent); }
+    /* xterm draws its own scrollbar; the viewport's native one would show at the bottom-right corner. */
+    #host .xterm .xterm-viewport { background-color: var(--bg, transparent); scrollbar-width: none; }
   </style>
   <!-- For ClaudeHub.comboOf only. In <head>, where there is no body yet for the SDK to paint theme vars on. -->
   <script src="/vendor/claude-hub-sdk.js"></script>
