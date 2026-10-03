@@ -6602,11 +6602,21 @@ function dismissSessionFromList(sid) {
     if (pinnedIdx >= 0) selectSessionByIndex(pinnedIdx, newItems);
     return;
   }
+  // Ctrl+Alt+S would reveal the dismissed session, and revealing restores it.
+  const forget = (x) => (x === sid ? null : x);
+  const fallback = currentSessionId === sid && lastSessionId === sid ? previousSessionId : null;
+  setSwapPair(forget(lastSessionId), forget(previousSessionId));
   const targetIdx = newItems.length > 0 ? Math.max(0, prevIdx - 1) : -1;
   // If the dismissed session is currently open, navigate to the previous one
   if (currentSessionId === sid || selectedSessionId === sid) {
     selectedSessionId = null;
-    if (targetIdx >= 0) {
+    if (fallback && !dismissedSessionIds.has(fallback) && sessions.some((s) => s.id === fallback)) {
+      revealSession(fallback).then(() => {
+        const items = getNavigableItems();
+        const idx = items.findIndex((el) => el.dataset?.sessionId === fallback);
+        if (idx >= 0) selectSessionByIndex(idx, items);
+      });
+    } else if (targetIdx >= 0) {
       const targetSid = newItems[targetIdx]?.dataset?.sessionId;
       if (targetSid) {
         fetchTasks(targetSid).then(() => selectSessionByIndex(targetIdx, getNavigableItems()));
@@ -10388,7 +10398,8 @@ function openSessionFromInfo(sessionId) {
 async function toggleDismissSession(sessionId) {
   const dismiss = !dismissedSessionIds.has(sessionId);
   if (dismiss && !(await confirmDismissBlockers(sessionId))) return;
-  setSessionDismissed(sessionId, dismiss);
+  if (dismiss) dismissSessionFromList(sessionId);
+  else setSessionDismissed(sessionId, false);
 }
 
 function updateDismissBtnState() {
