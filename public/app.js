@@ -1699,6 +1699,8 @@ let pinnedCollapsed = false;
 
 const PIN_SVG =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>';
+const DETAIL_EDIT_SVG =
+  '<svg class="detail-edit-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
 const MSG_ICON_USER =
   '<svg class="msg-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>';
 const MSG_ICON_ASSISTANT =
@@ -4003,11 +4005,13 @@ function renderProjectView() {
 }
 
 // Claude Code keeps a blocker's id in blockedBy after the blocker completes.
-function openBlockers(task) {
+function findSiblingTask(task, id) {
   const list = (t) => t.sessionId || t._taskDir;
-  return (task.blockedBy || []).filter(
-    (id) => currentTasks.find((t) => t.id === id && list(t) === list(task))?.status !== 'completed',
-  );
+  return currentTasks.find((t) => t.id === id && list(t) === list(task));
+}
+
+function openBlockers(task) {
+  return (task.blockedBy || []).filter((id) => findSiblingTask(task, id)?.status !== 'completed');
 }
 
 function renderTaskCard(task) {
@@ -4032,7 +4036,7 @@ function renderTaskCard(task) {
           aria-label="${escapeHtml(task.subject)} — ${task.status.replace('_', ' ')}">
           <div class="task-id">
             <span>#${taskId}</span>
-            ${isBlocked ? '<span class="task-badge blocked">Blocked</span>' : ''}
+            ${isBlocked ? `<span class="task-blocked" title="Blocked">waiting on ${blockers.map((id) => `#${escapeHtml(id)}`).join(' ')}</span>` : ''}
             ${
               task.owner
                 ? (
@@ -4046,7 +4050,6 @@ function renderTaskCard(task) {
           </div>
           <div class="task-title">${escapeHtml(task.subject)}</div>
           ${task.status === 'in_progress' && task.activeForm ? `<div class="task-active">${escapeHtml(task.activeForm)}</div>` : ''}
-          ${isBlocked ? `<div class="task-blocked">Waiting on ${blockers.map((id) => `#${id}`).join(', ')}</div>` : ''}
           ${task.description ? `<div class="task-desc">${escapeHtml(task.description.split('\n')[0])}</div>` : ''}
         </div>
       `;
@@ -5469,22 +5472,33 @@ async function showTaskDetail(taskId, sessionId = null) {
   const blockers = openBlockers(task);
   const isBlocked = blockers.length > 0;
   const actualSessionId = task.sessionId || sessionId || currentSessionId;
-
+  const isProjectView = viewMode === 'project';
+  const pencil = isProjectView ? '' : DETAIL_EDIT_SVG;
+  const editable = isProjectView ? '' : ' editable';
+  const depChip = (id, kind) => {
+    const dep = findSiblingTask(task, id);
+    const label = dep ? `#${id} ${dep.subject}` : `#${id}`;
+    return `<button type="button" class="detail-dep ${escapeHtml(kind)}" data-dep-id="${escapeHtml(id)}" title="${escapeHtml(label)}"><span class="dot"></span><span class="detail-dep-text">${escapeHtml(label)}</span></button>`;
+  };
+  const deps = [
+    isBlocked ? ['wait', 'Waiting on', blockers] : null,
+    task.blocks?.length ? ['next', 'Unblocks', task.blocks] : null,
+  ].filter(Boolean);
+  detailContent.classList.toggle('blocked', isBlocked && task.status === 'pending');
   detailContent.innerHTML = `
         <div class="detail-section">
-          <div class="detail-label">Task #${task.id}</div>
-          <h2 class="detail-title">${escapeHtml(task.subject)}</h2>
+          <div class="detail-label">Task #${task.id}${pencil}</div>
+          <h2 class="detail-title${escapeHtml(editable)}">${escapeHtml(task.subject)}</h2>
         </div>
 
         <div class="detail-section" style="display: flex; gap: 12px; align-items: center;">
           <div>${statusLabels[task.status] || ''}</div>
           ${task.owner ? `<div style="font-size: 13px; color: ${getOwnerColor(task.owner).color}; font-weight: 500;">${escapeHtml(task.owner)}</div>` : ''}
-          ${isBlocked && task.status !== 'in_progress' ? '<div style="font-size: 10px; color: var(--warning);">Blocked</div>' : ''}
         </div>
 
         <div class="detail-section">
-          <div class="detail-label">Description</div>
-          <div class="detail-desc">${task.description ? renderMarkdown(task.description) : '<em style="color: var(--text-muted);">No description</em>'}</div>
+          <div class="detail-label">Description${pencil}</div>
+          <div class="detail-desc${escapeHtml(editable)}">${task.description ? renderMarkdown(task.description) : '<em style="color: var(--text-muted);">No description</em>'}</div>
         </div>
 
         ${
@@ -5500,33 +5514,24 @@ async function showTaskDetail(taskId, sessionId = null) {
         }
 
         ${
-          isBlocked
+          deps.length
             ? `
         <div class="detail-section">
-          <div class="detail-label">Blocked By</div>
+          <div class="detail-label">Dependencies</div>
           <div class="detail-deps">
-            <div class="detail-box blocked"><strong>Blocked by:</strong> ${blockers.map((id) => `#${id}`).join(', ')}</div>
-          </div>
-        </div>`
-            : ''
-        }
-
-        ${
-          task.blocks && task.blocks.length > 0
-            ? `
-        <div class="detail-section">
-          <div class="detail-label">Blocks</div>
-          <div class="detail-deps">
-            <div class="detail-box blocks"><strong>Blocks:</strong> ${task.blocks.map((id) => `#${id}`).join(', ')}</div>
+            ${deps.map(([kind, label, ids]) => `<span class="detail-deps-label ${escapeHtml(kind)}">${label}</span><div class="detail-deps-list">${ids.map((id) => depChip(id, kind)).join('')}</div>`).join('')}
           </div>
         </div>`
             : ''
         }
       `;
 
+  for (const chip of detailContent.querySelectorAll('.detail-dep')) {
+    chip.onclick = () => showTaskDetail(chip.dataset.depId, actualSessionId);
+  }
+
   // Setup button handlers (read-only in project view)
   const deleteBtn = document.getElementById('delete-task-btn');
-  const isProjectView = viewMode === 'project';
   deleteBtn.style.display = isProjectView ? 'none' : '';
   if (!isProjectView) deleteBtn.onclick = () => deleteTask(task.id, actualSessionId);
 
@@ -5559,7 +5564,7 @@ function editTitle(titleEl, task, sessionId) {
     if (val && val !== task.subject) {
       await saveTaskField(task.id, sessionId, 'subject', val);
     } else {
-      showTaskDetail(task.id, sessionId);
+      await showTaskDetail(task.id, sessionId);
     }
   };
 
@@ -5569,6 +5574,18 @@ function editTitle(titleEl, task, sessionId) {
       save();
     }
     if (e.key === 'Escape') showTaskDetail(task.id, sessionId);
+    // Saving re-renders the panel and drops the input, so native Tab would land on <body>.
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      input.onblur = null;
+      const shift = e.shiftKey;
+      save().then(() => {
+        const target = shift
+          ? document.getElementById('delete-task-btn')
+          : detailContent.querySelector('.detail-dep') || document.getElementById('close-detail');
+        target?.focus();
+      });
+    }
   };
   input.onblur = () => save();
 }
@@ -5608,8 +5625,10 @@ function editDescription(descEl, task, sessionId) {
 
   saveBtn.onclick = save;
   cancelBtn.onclick = () => showTaskDetail(task.id, sessionId);
-  textarea.onkeydown = (e) => {
-    if (e.key === 'Escape') showTaskDetail(task.id, sessionId);
+  wrapper.onkeydown = (e) => {
+    if (e.key !== 'Escape') return;
+    e.stopPropagation();
+    showTaskDetail(task.id, sessionId);
   };
 }
 
@@ -5624,7 +5643,7 @@ async function saveTaskField(taskId, sessionId, field, value) {
     if (res.ok) {
       lastCurrentTasksHash = null;
       await fetchTasks(sessionId);
-      showTaskDetail(taskId, sessionId);
+      await showTaskDetail(taskId, sessionId);
     }
   } catch (error) {
     console.error('Failed to update task:', error);
@@ -6798,6 +6817,7 @@ document.addEventListener('keydown', (e) => {
   }
 
   // Tab toggles focus zone
+  if (e.key === 'Tab' && detailPanel.contains(e.target)) return;
   if (e.key === 'Tab') {
     e.preventDefault();
     // The terminal replaces the board, so it takes the board's place in the Tab cycle.
