@@ -592,6 +592,9 @@ let lastCurrentTasksHash = '';
 async function fetchTasks(sessionId) {
   try {
     const refresh = viewMode === 'session' && sessionId === currentSessionId;
+    // The PTY already runs, so the attach need not wait for the session fetch and the render after it.
+    if (!refresh && termState.sessionId !== sessionId && runningTerminals.has(sessionId) && wantsTerminalFor(sessionId))
+      openTerminal(sessionId, terminalOpenMode(sessionId));
     viewMode = 'session';
     document.getElementById('message-toggle')?.style.removeProperty('display');
     const res = await fetch(`/api/sessions/${sessionId}`);
@@ -11472,7 +11475,11 @@ function setTerminalMode(sessionId, on) {
 }
 
 function wantsTerminal() {
-  return terminalAvailable() && viewMode === 'session' && !!currentSessionId && terminalModes().has(currentSessionId);
+  return viewMode === 'session' && wantsTerminalFor(currentSessionId);
+}
+
+function wantsTerminalFor(sessionId) {
+  return terminalAvailable() && !!sessionId && terminalModes().has(sessionId);
 }
 
 function toggleTerminal() {
@@ -12060,13 +12067,16 @@ async function openTerminal(sessionId, mode, attempt = 0) {
   const socket = { id: ++terminalSocketSeq, sessionId, mode, attempt, readyAt: 0, refused: false };
   termState.socket = socket;
   if (!attempt) setTerminalStatus('');
-  try {
-    await ensureTerminalFrame();
-  } catch (e) {
-    if (termState.socket === socket) setTerminalStatus(e.message);
-    return;
+  // Even a settled await resumes only after the caller's render, so a loaded frame is used at once.
+  if (!termFrame.inited) {
+    try {
+      await ensureTerminalFrame();
+    } catch (e) {
+      if (termState.socket === socket) setTerminalStatus(e.message);
+      return;
+    }
+    if (termState.socket !== socket) return;
   }
-  if (termState.socket !== socket) return;
   if (!attempt) {
     showTerminalBoot();
     terminalSlowTimer = setTimeout(() => {
