@@ -385,7 +385,7 @@ describe('terminal endpoint', { skip: !ptyAvailable }, () => {
   });
 });
 
-function fakePty() {
+function fakePty({ holdExit = false } = {}) {
   const spawned = [];
   return {
     spawned,
@@ -394,7 +394,8 @@ function fakePty() {
       const p = {
         pid: 100000 + spawned.length, args,
         onData() {}, onExit(cb) { onExit = cb; }, write() {}, resize() {}, pause() {}, resume() {},
-        kill() { setImmediate(() => onExit({ exitCode: 0 })); },
+        exit() { onExit({ exitCode: 0 }); },
+        kill() { if (!holdExit) setImmediate(() => onExit({ exitCode: 0 })); },
       };
       spawned.push(p);
       return p;
@@ -466,6 +467,51 @@ describe('terminal restore', () => {
     assert.equal(pty.spawned.length, 0);
     assert.deepEqual(store.data.sessions, [A]);
     t.shutdown();
+  });
+});
+
+describe('terminal reopen', { skip: !WebSocket }, () => {
+  const A = 'aaaaaaaa-0000-0000-0000-000000000001';
+
+  it('starts a new PTY for an id whose ended PTY has not exited yet', async () => {
+    const pty = fakePty({ holdExit: true });
+    const t = createTerminalService({
+      config: { enabled: true, restore: false, shell: SHELL, maxSessions: 30, scrollback: 100 },
+      net: { EXPOSED: false, upgradeVerdict: () => null },
+      pty,
+      token: TOKEN,
+      claudeDir: os.tmpdir(),
+      which: (n) => n,
+      isLiveElsewhere: () => false,
+      resolveCwd: () => null,
+      liveSessions: () => [],
+    });
+    const server = http.createServer();
+    server.on('upgrade', (req, socket, head) => t.handleUpgrade(req, socket, head));
+    await new Promise((r) => server.listen(0, '127.0.0.1', r));
+    const port = server.address().port;
+    const sockets = [];
+    const ready = async () => {
+      const got = await session(port, { id: A, mode: 'shell' }, (g) => g.control.some((m) => m.t === 'ready'));
+      sockets.push(got.ws);
+      return got;
+    };
+    try {
+      const first = await ready();
+      assert.equal(first.control[0].attached, false);
+      assert.equal(t.end(A, TOKEN), null);
+
+      const second = await ready();
+      assert.equal(second.control[0].attached, false);
+      assert.equal(pty.spawned.length, 2);
+
+      pty.spawned[0].exit();
+      assert.deepEqual(t.list().map((s) => s.id), [A]);
+    } finally {
+      for (const ws of sockets) ws.terminate();
+      t.shutdown();
+      server.close();
+    }
   });
 });
 
