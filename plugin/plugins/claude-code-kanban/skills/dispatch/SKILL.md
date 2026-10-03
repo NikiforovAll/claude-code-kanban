@@ -1,7 +1,7 @@
 ---
 name: dispatch
 description: Dispatch a task to another Claude Code session through the kanban board (cck), fire-and-forget or with a report back. Use when the user asks to dispatch, delegate, or start a session for a task, or to collect or check on a dispatched session's result.
-argument-hint: '<task> [--report] [--group <name>] [--model haiku|sonnet|opus|fable] [--worktree [name]]'
+argument-hint: '<task> [--no-report] [--group <name>] [--model haiku|sonnet|opus|fable] [--worktree [name]]'
 ---
 
 # Kanban dispatch

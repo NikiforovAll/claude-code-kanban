@@ -2,7 +2,7 @@
 
 A dispatch is one Claude Code session that cck starts for a task, in its embedded terminal. It is an ordinary session, not a child: it shows in the sidebar like any other, and the user can open its terminal at any time.
 
-A dispatch is **fire-and-forget** by default: you hand the task off, and the user watches it in the sidebar. Add `--report` only when you need the outcome back: the user asked you to collect it, or your next step depends on it.
+A dispatch **reports back** by default: start it with `--report` and `--peer`, then collect and verify the outcome (With `--report`, below). When the user's request says `--no-report`, it is **fire-and-forget**: start it with neither flag (Fire-and-forget, below). `--no-report` lives only in the user's request; `dispatch start` has no such flag.
 
 ## Write the spec
 
@@ -19,12 +19,12 @@ Dispatch when the task can run on its own. Do the work yourself when it is small
 ## Start
 
 ```bash
-claude-code-kanban dispatch start --cwd <dir> --spec-file <spec.md> --name <name> --group <group> --peer <your-peer> [--report] --json
+claude-code-kanban dispatch start --cwd <dir> --spec-file <spec.md> --name <name> --group <group> --peer <your-peer> --report --json
 ```
 
 `claude-code-kanban help dispatch start` lists every flag (model, worktree, and the rest). `project list` shows the folders `--cwd` accepts. How to choose the values:
 
-- `--peer` is your own peer name: the first line of `ListAgents` ("This session is `<name>`"). Pass it whenever you have the `ListAgents` tool. cck then tells the started session to ask you with `SendMessage` instead of failing on a question. See [Peer](#peer).
+- `--peer` is your own peer name: the first line of `ListAgents` ("This session is `<name>`"). Pass it when you have the `ListAgents` tool. cck then tells the started session to ask you with `SendMessage` instead of failing on a question. See [Peer](#peer).
 - `--spec-file` over `--spec` for anything longer than a line: no shell quoting.
 - `--name` is what the user sees in the sidebar. Kebab-case, saying what the session does: `fix-login-redirect`, not `task-1`.
 - `--group` names the effort, in kebab-case (`auth-refactor`), and shows the new session under that sidebar group. This session stays where it is. Pass it on your first dispatch; later dispatches join the same group without it. A group goes away when its sessions end, unless the user pins a member or keeps the group.
@@ -32,7 +32,7 @@ claude-code-kanban dispatch start --cwd <dir> --spec-file <spec.md> --name <name
 
 ## Fire-and-forget
 
-Tell the user the session name, its group, and the dispatch id, then carry on with your own work or end your turn. The user follows the dispatch in the sidebar. With `--peer`, its questions still reach you as new turns.
+The started session gets the task alone and does not know your session exists. Tell the user the session name, its group, and the dispatch id. Your part ends with that message: the user follows the dispatch in the sidebar, and asks you when they want it checked.
 
 ## With `--report`
 
