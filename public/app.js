@@ -5698,9 +5698,9 @@ const SHORTCUT_TABS = [
       {
         title: 'Sessions',
         rows: [
-          { keys: ['Ctrl', 'Alt', 'N'], combo: true, label: 'New session' },
-          { keys: ['Ctrl', 'Alt', 'R'], combo: true, label: 'Resume session (claude -r)' },
-          { keys: ['Ctrl', 'Alt', 'S'], combo: true, label: 'Swap to previous session' },
+          { keys: ['Ctrl', 'Alt', 'N'], combo: true, hubMod: true, label: 'New session' },
+          { keys: ['Ctrl', 'Alt', 'R'], combo: true, hubMod: true, label: 'Resume session (claude -r)' },
+          { keys: ['Ctrl', 'Alt', 'S'], combo: true, hubMod: true, label: 'Swap to previous session' },
         ],
       },
     ],
@@ -5730,16 +5730,29 @@ const SHORTCUT_TABS = [
           { keys: ['M'], label: 'Jump to marketplace' },
           { keys: ['$'], label: 'Jump to cost' },
           { keys: ['Ctrl', 'M'], combo: true, label: 'Jump to memory' },
-          { keys: ['Ctrl', 'Alt', '←/→'], combo: true, label: 'Previous / next hub app' },
-          { keys: ['Alt', '1…9'], combo: true, label: 'Jump to hub app by number' },
-          { keys: ['Ctrl', 'Alt', 'P'], combo: true, label: 'Project picker' },
-          { keys: ['Ctrl', 'Alt', 'W'], combo: true, label: 'Config dir picker' },
-          { keys: ['Ctrl', 'Alt', 'A'], combo: true, label: 'App launcher' },
+          { keys: ['Ctrl', 'Alt', '←/→'], combo: true, hubMod: true, label: 'Previous / next hub app' },
+          { keys: ['Alt', '1…9'], combo: true, hubMod: true, label: 'Jump to hub app by number' },
+          { keys: ['Ctrl', 'Alt', 'P'], combo: true, hubMod: true, label: 'Project picker' },
+          { keys: ['Ctrl', 'Alt', 'W'], combo: true, hubMod: true, label: 'Config dir picker' },
+          { keys: ['Ctrl', 'Alt', 'A'], combo: true, hubMod: true, label: 'App launcher' },
         ],
       },
     ],
   },
 ];
+
+// macOS names Control, Option and Shift by their symbols.
+const IS_MAC = /^Mac/i.test(navigator.userAgentData?.platform || navigator.platform || '');
+const MAC_KEYS = { Ctrl: '⌃', Alt: '⌥', Shift: '⇧' };
+if (IS_MAC) document.getElementById('new-session-btn')?.setAttribute('title', 'New session (⌃⌥N)');
+
+// The keys of a help row as they read on this system. The hub's modifier is Ctrl+Alt, and on
+// macOS Control+Option for the tab numbers too (Windows and Linux use bare Alt for those).
+function helpKeys(row, mac = IS_MAC) {
+  if (!mac) return row.keys;
+  if (row.hubMod) return ['⌃', '⌥', ...row.keys.filter((k) => k !== 'Ctrl' && k !== 'Alt')];
+  return row.keys.map((k) => MAC_KEYS[k] || k);
+}
 
 // Interleaves each pair's rows left-then-right so CSS grid auto-placement lands
 // them on shared row tracks (see .shortcuts in style.css).
@@ -5758,7 +5771,9 @@ function buildHelpShortcuts(groups) {
         const row = group.rows[i];
         if (!row) continue;
         const sep = row.combo ? '<span class="sc-plus">+</span>' : '<span class="sc-or">/</span>';
-        const keys = row.keys.map((k) => `<kbd>${escapeHtml(k)}</kbd>`).join(sep);
+        const keys = helpKeys(row)
+          .map((k) => `<kbd>${escapeHtml(k)}</kbd>`)
+          .join(sep);
         const label = escapeHtml(row.label);
         cells.push(`<dt class="${escapeHtml(side)}">${keys}</dt><dd class="${escapeHtml(side)}">${label}</dd>`);
       }
@@ -11275,13 +11290,18 @@ function terminalPaneFocused() {
 
 const TEXT_FIELD_SELECTOR = 'input, textarea, select, [contenteditable]';
 
+// Kanban's own session keys (new, resume, swap) use the hub's modifier, so the hub leaves them alone.
+function hubModDown(e) {
+  return e.ctrlKey && e.altKey && !e.metaKey && !e.shiftKey;
+}
+
 function inPageField(e) {
   const field = e.target?.closest?.(TEXT_FIELD_SELECTOR);
   return !!field && !document.getElementById('terminal-pane').contains(field);
 }
 
 function terminalShortcut(e) {
-  const ctrlAlt = e.ctrlKey && e.altKey && !e.shiftKey && !e.metaKey;
+  const ctrlAlt = hubModDown(e);
   const ctrlShift = e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey;
   // Ctrl+_ is Claude Code's undo, so the zoom keys leave it to the terminal.
   const zoom = e.key === '_' ? undefined : zoomDelta(e);
