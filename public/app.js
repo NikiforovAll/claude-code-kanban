@@ -6622,16 +6622,28 @@ function dismissSessionFromList(sid) {
   }
 }
 
-async function dismissStickySession(sid) {
+async function confirmDismissBlockers(sid) {
+  const sticky = stickySessionIds.has(sid);
+  const terminal = runningTerminals.has(sid);
+  if (!sticky && !terminal) return true;
   const session = sessions.find((s) => s.id === sid);
-  const ok = await confirmModal({
-    title: 'Remove Sticky Pin',
-    message: `"${session ? sessionDisplayName(session) : sid.slice(0, 8)}" has a sticky pin. Remove the pin and dismiss the session?`,
-    okLabel: 'Unpin and dismiss',
-  });
-  if (!ok) return;
-  unpinSession(sid);
-  dismissSessionFromList(sid);
+  const name = session ? sessionDisplayName(session) : sid.slice(0, 8);
+  const has = [sticky && 'a sticky pin', terminal && 'a running terminal'].filter(Boolean).join(' and ');
+  const [title, verb, okLabel] =
+    sticky && terminal
+      ? ['Unpin and Close Terminal', 'Unpin, close the terminal', 'Unpin, close and dismiss']
+      : sticky
+        ? ['Remove Sticky Pin', 'Remove the pin', 'Unpin and dismiss']
+        : ['Close Terminal', 'Close the terminal', 'Close and dismiss'];
+  const ok = await confirmModal({ title, message: `"${name}" has ${has}. ${verb} and dismiss the session?`, okLabel });
+  if (!ok) return false;
+  if (sticky) unpinSession(sid);
+  if (terminal) closeTerminalSession(sid);
+  return true;
+}
+
+async function dismissSession(sid) {
+  if (await confirmDismissBlockers(sid)) dismissSessionFromList(sid);
 }
 
 const MODAL_ESC_PRIORITY = [
@@ -6969,7 +6981,7 @@ document.addEventListener('keydown', (e) => {
   if (e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey && e.key === 'd') {
     e.preventDefault();
     if (!contextSid) return;
-    (stickySessionIds.has(contextSid) ? dismissStickySession : dismissSessionFromList)(contextSid);
+    dismissSession(contextSid);
     return;
   }
   if (e.code === 'KeyC' && e.shiftKey && !e.altKey && !e.metaKey) {
@@ -10373,8 +10385,10 @@ function openSessionFromInfo(sessionId) {
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
-function toggleDismissSession(sessionId) {
-  setSessionDismissed(sessionId, !dismissedSessionIds.has(sessionId));
+async function toggleDismissSession(sessionId) {
+  const dismiss = !dismissedSessionIds.has(sessionId);
+  if (dismiss && !(await confirmDismissBlockers(sessionId))) return;
+  setSessionDismissed(sessionId, dismiss);
 }
 
 function updateDismissBtnState() {
