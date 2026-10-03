@@ -57,8 +57,8 @@ const { getParentVerdict, setParentVerdict } = require('./lib/parent-cache');
 
 if (process.argv.includes("--install") || process.argv.includes("--uninstall")) {
   const { runInstall, runUninstall } = require("./install");
-  const pluginOnly = process.argv.includes("--plugin-only");
-  (process.argv.includes("--install") ? runInstall({ pluginOnly }) : runUninstall())
+  const yes = process.argv.includes("--yes");
+  (process.argv.includes("--install") ? runInstall({ yes }) : runUninstall())
     .then(() => process.exit(0))
     .catch(e => { console.error(e.message); process.exit(1); });
 } else if (!require("./cli").runCli(process.argv)) {
@@ -138,7 +138,7 @@ function writePins(pins) {
   writeJsonAtomic(PINS_FILE, pins);
 }
 
-// Port discovery for out-of-process helpers (the postman monitor, approval-gate.sh).
+// Port discovery for out-of-process helpers (the postman monitor, the CLI).
 // The pid rides along so a reader can tell a live server from a file left behind by
 // a crashed one.
 function writeServerInfo(port) {
@@ -167,8 +167,8 @@ function ownerPid(file) {
   try { return JSON.parse(readFileSync(file, 'utf8')).pid ?? null; } catch (_) { return null; }
 }
 
-// A beacon that outlives its server disarms UI approvals silently: approval-gate.sh
-// probes the port, finds it closed and never waits. The hub spawns every sub-app on
+// A beacon that outlives its server sends the postman monitor and the CLI to a closed
+// port. The hub spawns every sub-app on
 // an ephemeral port, so a stale beacon never comes back on its own — drop ours on
 // the way out. Only when the file is still ours: a newer server on the same config
 // dir has already claimed it. The terminal token file goes the same way.
@@ -273,7 +273,10 @@ function checkWaitingForUser(agentDir, logMtime) {
       const age = Date.now() - waitTime;
       if (age >= PERMISSION_TTL_MS) return null;
       // After grace period, check if session resumed activity (user already responded)
-      if (logMtime && age >= WAITING_RESOLVE_GRACE_MS && logMtime > waitTime + WAITING_RESOLVE_GRACE_MS) return null;
+      if (movedOnSince(waitTime, logMtime)) return null;
+      // The mod sees the ask before auto mode's classifier decides it, and no dialog may follow.
+      // An ask from a settings rule always opens the dialog.
+      if (data.kind === 'permission' && !data.rule && loadSessionMetadata()[path.basename(agentDir)]?.permissionMode === 'auto') return null;
       // Opted out reads the same as lapsed to the board: the ask is only
       // answerable in the terminal, so no buttons.
       if (boardRefusal(data, approvalsConfig())) return { ...data, lapsed: true };
@@ -357,13 +360,25 @@ function getSessionLogStat(meta) {
   } catch { return { mtime: null, hasMessages: false }; }
 }
 
+// A transcript write past the grace window after a marker means the session went on.
+function movedOnSince(markerMs, logMtime) {
+  return !!logMtime && logMtime > markerMs + WAITING_RESOLVE_GRACE_MS;
+}
+
+// The mod cannot delete _stop.json when the session works again.
+function resumedSince(markerPath, logMtime) {
+  if (!logMtime) return false;
+  try { return movedOnSince(statSync(markerPath).mtimeMs, logMtime); }
+  catch { return true; }
+}
+
 function checkAgentStatus(agentDir, stale, logMtime, isTeam) {
   const result = { hasActive: false, hasRunning: false, waitingForUser: null, unread: false };
   let names;
   try { names = readdirSync(agentDir); } catch { return result; }
   if (names.includes('_waiting.json')) result.waitingForUser = checkWaitingForUser(agentDir, logMtime);
   if (result.waitingForUser) result.hasActive = true;
-  const stopped = names.includes('_stop.json');
+  const stopped = names.includes('_stop.json') && !resumedSince(path.join(agentDir, '_stop.json'), logMtime);
   if (stale && !isTeam) {
     result.unread = stopped;
     return result;
@@ -779,7 +794,10 @@ function cachedByMtime(cache, cacheKey, filePath, loadFn, fallback) {
     const entry = { data: loadFn(), mtime: st.mtimeMs, ts: Date.now() };
     if (typeof entry.data?.then === 'function') {
       entry.pending = true;
-      entry.data = entry.data.catch(() => fallback).finally(() => {
+      entry.data = entry.data.catch(() => {
+        if (cache.get(cacheKey) === entry) cache.delete(cacheKey);
+        return fallback;
+      }).finally(() => {
         entry.pending = false;
         entry.ts = Date.now();
       });
@@ -837,6 +855,7 @@ function refreshSessionMetadataPath(jsonlPath) {
   if (info.customTitle) existing.customTitle = info.customTitle;
   if (info.logicalParentUuid) existing.logicalParentUuid = info.logicalParentUuid;
   if (info.compactBoundaryUuid) existing.compactBoundaryUuid = info.compactBoundaryUuid;
+  existing.permissionMode = info.permissionMode;
   return true;
 }
 
@@ -923,7 +942,8 @@ function loadSessionMetadata() {
           customTitle: sessionInfo.customTitle || null,
           jsonlPath: jsonlPath,
           logicalParentUuid: sessionInfo.logicalParentUuid || null,
-          compactBoundaryUuid: sessionInfo.compactBoundaryUuid || null
+          compactBoundaryUuid: sessionInfo.compactBoundaryUuid || null,
+          permissionMode: sessionInfo.permissionMode
         };
         sessionIds.push(sessionId);
       }
@@ -2363,7 +2383,7 @@ app.get('/api/teams/:name', (req, res) => {
 // API: Get agents for a session
 // The resultUnavailable latch is persisted on the agent record. Bump this when
 // extractAgentResultFromTranscript finds more, so agents latched earlier rescan once.
-const RESULT_SCAN = 2;
+const RESULT_SCAN = 3;
 
 app.get('/api/sessions/:sessionId/agents', async (req, res) => {
   const sessionId = resolveSessionId(req.params.sessionId);
@@ -2620,10 +2640,10 @@ app.post('/api/sessions/:sessionId/read', (req, res) => {
   }
 });
 
-// UI-driven approvals: answers the ask approval-gate.sh is blocking on by
-// writing _decision-<id>.json next to the marker. The hook consumes and deletes
-// both files; a write for a hook that already gave up is accepted anyway (D13)
-// and left for cleanupAgentActivity's sweep.
+// UI-driven approvals: answers the ask the plugin's mod is polling for by writing
+// _decision-<id>.json next to the marker. The mod cannot delete files, so it clears
+// the marker and leaves the decision, and a write for an ask that is already over
+// is accepted anyway (D13); cleanupAgentActivity's sweep removes both kinds.
 app.post('/api/sessions/:sessionId/waiting/respond', (req, res) => {
   const sessionId = resolveSessionId(req.params.sessionId);
   const dir = path.join(AGENT_ACTIVITY_DIR, sessionId);
@@ -4300,9 +4320,8 @@ async function cleanupAgentActivity() {
           await fs.rm(dirPath, { recursive: true, force: true });
           continue;
         }
-        // Orphaned decision files: a terminal deny fires no hook event (D13), so a
-        // board answer for an already-gone gate is never consumed. The gate waits at
-        // most PERMISSION_TTL_MS, so anything older is unclaimable.
+        // Mods cannot delete files, so every decision file is swept here. The mod
+        // waits at most PERMISSION_TTL_MS, so anything older is unclaimable.
         for (const f of contents) {
           if (!isDecisionFile(f)) continue;
           const fp = path.join(dirPath, f);

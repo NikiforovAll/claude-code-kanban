@@ -82,7 +82,7 @@ You can answer permission prompts, questions and plans from the board. This is o
 |---|---|---|
 | `enabled` | `true` | Only an explicit `false` turns board answers off. A missing or broken file means defaults. |
 | `mode` | `"permission+question"` | `"permission+question"` lets the board answer permission asks, plans and questions. `"permission"` leaves questions to the terminal. |
-| `waitSeconds` | `1800` | How long the hook waits for an answer from the board. The maximum is `1800`. |
+| `waitSeconds` | `1800` | How long the plugin waits for an answer from the board. The maximum is `1800`. |
 
 Each config dir has its own file. See [Answer prompts from the board](/claude-code-kanban/guides/waiting-prompts/).
 
@@ -122,15 +122,15 @@ It also reads Claude Code scratchpad folders under `<os tmpdir>/claude`.
 
 ## Files it writes
 
-The server, the hooks and the installer keep their state in `<config-dir>/.cck/`:
+The server, the plugin and the installer keep their state in `<config-dir>/.cck/`:
 
 | Path | Written by | Contents |
 |---|---|---|
-| `agent-activity/<sessionId>/<agentId>.jsonl` | `agent-spy.sh` hook | Subagent start, idle and stop events |
+| `agent-activity/<sessionId>/<agentId>.jsonl` | Plugin mod (`activity.ts`) | Subagent start, idle and stop events |
 | `context-status/<sessionId>.json` | Plugin mod (`context.ts`) | Context use, cost and model for each session |
 | `pins.json` | Server | Copy of the browser's session pins, so the CLI can read them |
 | `dispatch-groups.json` | Server | Groups made with `dispatch start --group` |
-| `server.json` | Server | `{port, pid}` of the running server. The CLI and hooks use it to find the port. |
+| `server.json` | Server | `{port, pid}` of the running server. The CLI and the postman monitor use it to find the port. |
 | `terminal-tokens/<port>.json` | Server | Terminal token of the board on `<port>` (file mode 600), used by `dispatch start`. Written only when the terminal is available. One file per board, so two boards on one config dir each keep their own. |
 | `config.json` | You | Optional [UI approvals config](#ui-approvals-config) |
 | `plugin/` | Installer | Copy of the Claude Code plugin |

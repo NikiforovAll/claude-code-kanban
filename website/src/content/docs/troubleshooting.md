@@ -27,19 +27,15 @@ You can also add a task by hand. Open one session and use the **Add task** tile 
 
 **Symptom.** Tasks show, but the Agents Log stays empty, session cards never pulse, and sessions that wait for you get no highlight.
 
-**Cause.** The hooks are not installed, or `jq` is missing. The hook scripts use `jq` to parse JSON. The installer only warns when `jq` is missing, and setup continues.
+**Cause.** The plugin is not installed in this Claude config dir, or it is out of date.
 
-**Fix.**
+**Fix.** Run the installer again:
 
-1. Install `jq` if the installer warned "hook scripts require jq for JSON parsing".
-2. Run the installer again:
+```bash
+npx claude-code-kanban --install
+```
 
-   ```bash
-   npx claude-code-kanban --install
-   ```
-
-3. Make sure the installer and the server use the same Claude config dir. If you use a config dir other than `~/.claude`, pass the same `--dir=<path>` (or set `CLAUDE_CONFIG_DIR`) for `--install` and for the server.
-4. Start a new Claude Code session. The hooks apply to sessions that start after the install.
+Make sure the installer and the server use the same Claude config dir. If you use a config dir other than `~/.claude`, pass the same `--dir=<path>` (or set `CLAUDE_CONFIG_DIR`) for `--install` and for the server. Then start a new Claude Code session: the plugin applies to sessions that start after the install.
 
 See [Getting started](/claude-code-kanban/getting-started/) and [Configuration](/claude-code-kanban/reference/configuration/).
 
@@ -127,11 +123,11 @@ PORT=8080 npx claude-code-kanban
 
 **Cause.** One of these:
 
-- The ask did not come through `approval-gate.sh`, so the board cannot answer it. The hooks may be missing or out of date.
-- The ask lapsed. The hook holds an ask open for `waitSeconds`, 1800 seconds by default.
+- The ask did not come through the plugin's mod, so the board cannot answer it. The plugin may be missing or out of date.
+- The ask lapsed. The mod holds an ask open for `waitSeconds`, 1800 seconds by default.
 - UI approvals are off, or `mode` is `"permission"`, which leaves questions to the terminal.
 
-**Fix.** Answer in the terminal this time. Then check the `approvals` section of `<config-dir>/.cck/config.json`. Remove `"enabled": false`, or set `mode` to `"permission+question"`. If the hooks are missing, run `npx claude-code-kanban --install`. See [Answer prompts from the board](/claude-code-kanban/guides/waiting-prompts/).
+**Fix.** Answer in the terminal this time. Then check the `approvals` section of `<config-dir>/.cck/config.json`. Remove `"enabled": false`, or set `mode` to `"permission+question"`. If the plugin is missing, run `npx claude-code-kanban --install`. See [Answer prompts from the board](/claude-code-kanban/guides/waiting-prompts/).
 
 ## 403 on a custom hostname
 

@@ -79,7 +79,7 @@ Open that link to use the terminal. The token changes on each start unless you s
 | --- | --- |
 | `--install` | Installs the Claude Code plugin: hooks, skills and the mod that records context use and cost. |
 | `--uninstall` | Removes what `--install` added. |
-| `--plugin-only` | With `--install`: installs the plugin with no prompt. |
+| `--yes` | With `--install`: installs the plugin with no prompt. |
 | `--dir <path>` | Installs into or removes from another Claude config dir. `CLAUDE_CONFIG_DIR` works too. |
 
 ```bash
@@ -88,7 +88,7 @@ npx claude-code-kanban --uninstall
 npx claude-code-kanban --install --dir ~/.claude-work
 ```
 
-`--install` asks a `[Y/n]` question before each change. It stops if the `claude` CLI is missing, and only warns if `jq` is missing. For each install step and what `--uninstall` removes, see [Install the integration](/claude-code-kanban/getting-started/#install-the-integration).
+`--install` asks a `[Y/n]` question before it installs the plugin, unless you pass `--yes`. It stops if the `claude` CLI is missing. For each install step and what `--uninstall` removes, see [Install the integration](/claude-code-kanban/getting-started/#install-the-integration).
 
 ## How commands find the server
 

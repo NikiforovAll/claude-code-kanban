@@ -332,7 +332,7 @@ function printTopHelp() {
   console.log('  --dir <path>          Override Claude config dir (default ~/.claude); also targets --install/--uninstall');
   console.log('  --open                Open browser on start');
   console.log('  --install, --uninstall    Install or remove the plugin');
-  console.log('  --plugin-only         With --install: install without a prompt');
+  console.log('  --yes                 With --install: install without a prompt');
   console.log('\nEnvironment:');
   console.log('  CCK_URL               Server base URL, e.g. http://127.0.0.1:4795 (wins over PORT)');
   console.log('  PORT                  Server port (default: the one this config dir\'s server reports, else 3541)');

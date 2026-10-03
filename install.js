@@ -106,7 +106,7 @@ function copyDirSync(src, dest) {
   }
 }
 
-async function runInstall({ pluginOnly = false } = {}) {
+async function runInstall({ yes = false } = {}) {
   console.log(`\n  ${bold('claude-code-kanban')} — Plugin installer\n`);
   console.log(`  Claude config dir: ${dim(displayPath(CLAUDE_DIR))}\n`);
   let failed = false;
@@ -125,17 +125,9 @@ async function runInstall({ pluginOnly = false } = {}) {
     return;
   }
 
-  process.stdout.write('  Checking jq... ');
-  const jq = runCLI('jq --version');
-  if (jq.ok) {
-    console.log(green(`✓ found (${jq.output})`));
-  } else {
-    console.log(yellow('⚠ not found — hook scripts require jq for JSON parsing'));
-  }
-
   // 2. Copy plugin to stable location & register marketplace
   console.log(`\n  Plugin: ${dim(PLUGIN_DEST)}`);
-  if (pluginOnly || await prompt(`    Install claude-code-kanban plugin? [Y/n] `)) {
+  if (yes || await prompt(`    Install claude-code-kanban plugin? [Y/n] `)) {
     process.stdout.write(`    Copying plugin to ${displayPath(PLUGIN_DEST)}... `);
     try {
       clearFilesRecursive(PLUGIN_DEST);

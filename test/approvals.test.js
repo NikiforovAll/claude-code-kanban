@@ -25,7 +25,7 @@ describe('buildDecision — marker/id pairing (D8)', () => {
   });
 
   it('410 when the marker is not waiting', () => {
-    const r = buildDecision({ ...PERM_MARKER, status: 'resolved' }, { id: 'abc-123', behavior: 'allow' });
+    const r = buildDecision({ ...PERM_MARKER, status: 'cleared' }, { id: 'abc-123', behavior: 'allow' });
     assert.equal(r.status, 410);
   });
 
@@ -64,7 +64,7 @@ describe('buildDecision — permission decisions', () => {
     );
   });
 
-  it('passes through updatedPermissions and updatedInput, drops junk fields', () => {
+  it('passes through updatedInput, drops junk fields', () => {
     const { decision } = buildDecision(PERM_MARKER, {
       id: 'abc-123',
       behavior: 'allow',
@@ -75,8 +75,7 @@ describe('buildDecision — permission decisions', () => {
     });
     assert.deepEqual(decision, {
       behavior: 'allow',
-      updatedInput: { command: 'ls' },
-      updatedPermissions: [{ type: 'addRules' }]
+      updatedInput: { command: 'ls' }
     });
   });
 
@@ -160,9 +159,9 @@ describe('decisionFileName', () => {
   });
 });
 
-// Pins the parity with approval-gate.sh's own parse (default 1800, clamp 1800):
+// Pins the parity with the mod's own parse (boardWaitMs: default 1800, clamp 1800):
 // if either side changes alone, the board's lapse gating desyncs from the
-// hook's actual deadline.
+// mod's actual deadline.
 describe('waitSecondsFrom', () => {
   it('defaults to the gate default of 1800', () => {
     assert.equal(waitSecondsFrom(null), 1800);
@@ -184,7 +183,7 @@ describe('waitSecondsFrom', () => {
 });
 
 // The gate is on unless config.json says `approvals.enabled: false`; the hook
-// parses the same way (jq `== false`, not `//`, so an explicit false sticks).
+// parses the same way (`=== false`, so only an explicit false turns it off).
 describe('approvalsFrom', () => {
   it('defaults to on, permission+question, 1800 when config is absent or empty', () => {
     for (const cfg of [null, undefined, {}, { approvals: null }, { approvals: 'x' }]) {

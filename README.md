@@ -19,7 +19,7 @@ Watch the tour on YouTube: [light](https://youtu.be/QbvDBFyfC7s), [dark](https:/
 
 ## Getting started
 
-You need Node.js 20 or later, the `claude` CLI, and `jq` for the hook scripts.
+You need Node.js 20 or later and the `claude` CLI.
 
 ### 1. Install the integration (one time)
 

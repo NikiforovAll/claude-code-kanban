@@ -107,6 +107,10 @@ describe('Schema: Waiting JSON', () => {
   it('rejects without timestamp', () => {
     assert.ok(!validate({ status: 'waiting' }));
   });
+
+  it('accepts the cleared marker', () => {
+    assert.ok(validate({ status: 'cleared' }));
+  });
 });
 
 describe('Schema: Team Config', () => {
@@ -586,6 +590,29 @@ describe('Parser: readSessionInfoFromJsonl', () => {
     assert.equal(info.projectPath, null);
     assert.equal(info.gitBranch, null);
     assert.equal(info.customTitle, null);
+  });
+
+  it('reads permissionMode from the last prompt, permission-mode line or auto-mode attachment, as the file grows', () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'cck-mode-'));
+    const p = path.join(dir, 's.jsonl');
+    const prompt = (permissionMode) => `${JSON.stringify({ type: 'user', cwd: 'C:/proj', permissionMode, message: { role: 'user', content: 'hi' } })}\n`;
+    const toolResult = `${JSON.stringify({ type: 'user', cwd: 'C:/proj', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't', content: 'ok' }] } })}\n`;
+    const modeLine = (permissionMode) => `${JSON.stringify({ type: 'permission-mode', permissionMode })}\n`;
+    const attachment = (type) => `${JSON.stringify({ type: 'attachment', attachment: { type } })}\n`;
+    try {
+      writeFileSync(p, prompt('default') + toolResult + attachment('auto_mode'));
+      assert.equal(readSessionInfoFromJsonl(p).permissionMode, 'auto');
+      writeFileSync(p, prompt('default') + toolResult + attachment('auto_mode') + toolResult + attachment('auto_mode_exit'));
+      assert.equal(readSessionInfoFromJsonl(p).permissionMode, 'default');
+      writeFileSync(p, prompt('auto') + toolResult);
+      assert.equal(readSessionInfoFromJsonl(p).permissionMode, 'auto');
+      writeFileSync(p, prompt('auto') + toolResult + modeLine('default'));
+      assert.equal(readSessionInfoFromJsonl(p).permissionMode, 'default');
+      writeFileSync(p, prompt('auto') + toolResult + modeLine('default') + toolResult + prompt('auto'));
+      assert.equal(readSessionInfoFromJsonl(p).permissionMode, 'auto');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -1411,8 +1438,17 @@ describe('Parser: extractAgentResultFromTranscript', () => {
     assert.equal(extract(lines), '### summary\n\nlast');
   });
 
-  it('returns null without a result call or with an empty handback', () => {
-    assert.equal(extract([text('done')]), null);
+  it('falls back to the last assistant text without a result call', () => {
+    assert.equal(extract([text('working'), text('done')]), 'done');
+    assert.equal(extract([toolUse('SubagentHandback', { message: '' }), text('done')]), 'done');
+  });
+
+  it('prefers a result call over a later text', () => {
+    assert.equal(extract([toolUse('SubagentHandback', { message: 'found 7' }), text('bye')]), 'found 7');
+  });
+
+  it('returns null with no text and no result call', () => {
+    assert.equal(extract([toolUse('Read', { file_path: 'x' })]), null);
     assert.equal(extract([toolUse('SubagentHandback', { message: '' })]), null);
   });
 });

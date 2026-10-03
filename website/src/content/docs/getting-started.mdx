@@ -14,7 +14,6 @@ Claude Code Kanban shows your Claude Code sessions in the browser. Each session 
 
 - **Node.js 20 or later.**
 - **The `claude` CLI.** The installer runs `claude --version` first. If the command fails, the installer prints `claude CLI not found` and stops.
-- **`jq`.** The hook scripts use `jq` to parse JSON. If `jq` is missing, the installer shows a warning and continues, but the hooks cannot work until you install it.
 - **`@lydell/node-pty` (optional).** The embedded terminal needs this package. npm installs it as an optional dependency. If you turn on the terminal and the package does not load, the server prints `Terminal unavailable: <reason>`. The board works without it.
 
 ## Install the integration
@@ -37,7 +36,7 @@ If an earlier version of the installer added `context-status.sh` to your `status
 
 | Option | What it does |
 | --- | --- |
-| `--plugin-only` | With `--install`, installs the plugin with no prompt. |
+| `--yes` | With `--install`, installs the plugin with no prompt. |
 | `--dir=<path>` | Uses another Claude config dir. `CLAUDE_CONFIG_DIR` does the same. The plugin goes into that dir. |
 | `--uninstall` | Removes the plugin, its marketplace entry and the plugin copy. |
 
@@ -45,10 +44,10 @@ If you use `--dir` for the install, use the same `--dir` for `--uninstall` and w
 
 ### What the hooks give you
 
-The plugin adds two hook scripts:
+The plugin adds a mod. It runs when a session starts, when a subagent starts or finishes, at the end of each turn, and on each tool call:
 
-- `agent-spy.sh` runs on `SessionStart`, `SubagentStart`, `SubagentStop`, `TeammateIdle` and `PostToolUse`. It records subagents and session activity.
-- `approval-gate.sh` runs on `PermissionRequest`. It lets you answer permission prompts from the board.
+- It records subagents, session activity, and context use.
+- It shows permission prompts on the board and lets you answer them there.
 
 Without the hooks, the board shows tasks only. You get no agent log and no live activity indicators.
 

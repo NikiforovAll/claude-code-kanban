@@ -8,89 +8,52 @@ The Agent Log visualizes Claude Code subagent lifecycle events (start, stop, idl
 
 ```
 Claude Code spawns subagent
-  → hook (SubagentStart/SubagentStop/TeammateIdle) fires
-  → agent-spy.sh writes JSON to ~/.claude/agent-activity/{sessionId}/{agentId}.json
+  → mod event (agent.spawn / turn.complete / classic.TeammateIdle) fires
+  → the plugin's mod (hooks/activity.ts) appends a line to <config-dir>/.cck/agent-activity/{sessionId}/{agentId}.jsonl
   → chokidar detects file change
   → server broadcasts SSE "agent-update" event
   → frontend fetches updated agent list via REST API
   → renders Agent Log footer
 ```
 
-## Hook Events
+## Mod: `hooks/activity.ts`
 
-### Available Claude Code hook events
+The plugin's mod uses native mod events. It does not use `classic.*` where a native event exists, because on a machine with managed settings Claude Code's `cc-plugin-sec-default` skips user-tier mods on those events.
 
-| Event | Used | Purpose |
-|-------|------|---------|
-| `SubagentStart` | Yes | New subprocess spawned (Agent tool or team member) |
-| `SubagentStop` | Yes | Subprocess exits |
-| `TeammateIdle` | Yes | Team member waiting for work |
-| `PermissionRequest` | Yes | Agent needs user permission (also `AskUserQuestion` and `ExitPlanMode` asks) |
-| `PreToolUse` | No | Before tool execution (unregistered since v2.10 — questions and plans moved to `PermissionRequest`) |
-| `PostToolUse` | Yes | After tool execution (clears waiting state) |
-| `SessionStart` | No | Session begins |
-| `SessionEnd` | No | Session ends |
-| `Stop` | No | Agent finishes responding |
-| `TaskCompleted` | No | Task completes |
-| `PreCompact` | No | Before context compaction |
-| `Notification` | No | Notification sent |
-| `WorktreeCreate` | No | Git worktree created |
-| `WorktreeRemove` | No | Git worktree removed |
+| Mod event | What the mod writes |
+|---|---|
+| `session.start` | maps the session to `CLAUDE_CODE_TASK_LIST_ID` in `_task-maps/` |
+| `agent.spawn` (after the agent starts, for its `agentId`) | a `start` line with `status: "active"`, and the `_name-{name or type}.id` map |
+| `turn.complete` with an `agentId` | a `stop` line with `status: "stopped"`, only when the agent file exists (internal agents have none) |
+| `turn.complete` without one, not interrupted | the `_stop.json` unread marker |
+| `classic.TeammateIdle` | an `idle` line; it has no native event, so it does nothing under managed settings |
+| `tool.check` / `tool.call` | the `_waiting.json` marker and the board decision, see [ui-approvals.md](ui-approvals.md) |
 
-**Not available:** No `TeammateStart`, `TeammateStop`, or `SendMessage` hooks exist.
+`turn.complete` gives an empty `answer` for a subagent, so the stop line has an empty `lastMessage`, and the server takes the last assistant text from the subagent's transcript (`extractAgentResultFromTranscript`).
 
-### Hook input fields by event
+**File layout:** `<config-dir>/.cck/agent-activity/{sessionId}/{agentId}.jsonl` — one append-only file per agent, grouped by session. Each line is one lifecycle event; the server folds them last-key-wins, so a line leaves out a field it does not know (a stop line has no `type` or `startedAt`).
 
-**Common fields (all events):** `session_id`, `cwd`, `hook_event_name`, `transcript_path`, `permission_mode`
+**TeammateIdle:** It may have no `agent_id`. The mod then reads the `_name-{teammate_name}.id` map, and writes the line only when that agent file exists.
 
-| Event | Additional fields |
-|-------|------------------|
-| `SubagentStart` | `agent_id`, `agent_type` |
-| `SubagentStop` | `agent_id`, `agent_type`, `agent_transcript_path`, `last_assistant_message`, `stop_hook_active` |
-| `TeammateIdle` | `teammate_name`, `team_name` (**no** `agent_id` or `agent_type`) |
-| `PreToolUse` | `tool_name`, `tool_use_id`, `tool_input` |
-| `PostToolUse` | `tool_name`, `tool_use_id`, `tool_input`, `tool_response` |
-| `PermissionRequest` | `tool_name`, `tool_use_id`, `tool_input` |
+### Name→ID mapping
 
-Key discovery: `agent_transcript_path` (subagent's own JSONL path) is only available at `SubagentStop`, not `SubagentStart`.
+Team members get a new `agent_id` each time they wake up (each `SendMessage` creates a new subprocess).
 
-## Hook: `~/.claude/hooks/agent-spy.sh`
+1. `agent.spawn` writes `_name-{name or type}.id` containing the latest agent id
+2. `TeammateIdle` reads the mapping to find the agent file to update
 
-Configured in `~/.claude/settings.json` for four events: `SubagentStart`, `SubagentStop`, `TeammateIdle`, `PostToolUse`. The waiting-marker event — `PermissionRequest` (permissions, `AskUserQuestion`, and `ExitPlanMode` plan approval) — is handled by `approval-gate.sh`, which writes the same `_waiting.json` marker and optionally blocks for a board decision (see [ui-approvals.md](ui-approvals.md)).
+The mod cannot delete files, so each re-spawn leaves its earlier agent file in place.
 
-**File layout:** `~/.claude/agent-activity/{sessionId}/{agentId}.json` — one file per agent, grouped by session.
+### Agent file lines
 
-**SubagentStart:** Creates file with `status: "active"`. Skips internal agents (empty `agent_type`, e.g. AskUserQuestion). Also writes a name→ID mapping file `_name-{agent_type}.id` for TeammateIdle resolution. If the mapping pointed to a different ID, the old agent file is deleted **only if its status is not `active`** — this preserves parallel subagents of the same type while still deduplicating teammate re-spawns (which transition `active → idle → re-spawn`).
+Each line is one event. The server folds them in order, last key wins:
 
-**SubagentStop:** Overwrites file with `status: "stopped"`, preserves `startedAt` from existing file, captures `last_assistant_message`. Falls back to reading `type` from existing file if `agent_type` is empty.
-
-**TeammateIdle:** Has no `agent_id` — resolves it by reading the `_name-{teammate_name}.id` mapping file. Updates the agent file to `status: "idle"`, preserves `startedAt`.
-
-### Name→ID mapping (teammate dedup vs parallel subagents)
-
-Team members get a new `agent_id` each time they wake up (each `SendMessage` creates a new subprocess). To avoid duplicate agent entries while supporting parallel subagents:
-
-1. `SubagentStart` writes `_name-{type}.id` containing the `agent_id`
-2. If a mapping file already exists with a different ID, the old agent's status is checked:
-   - **`active`** → old file is **kept** (parallel subagent of the same type, e.g. multiple Explore agents)
-   - **`idle`/`stopped`/missing** → old file is **deleted** (teammate re-spawn)
-3. `TeammateIdle` reads the mapping to find the correct agent file to update
-
-**Why status-based:** Teammates transition `active → idle → re-spawn` — the old instance is always `idle` (not `active`) when the new one starts. Parallel subagents are `active` simultaneously.
-
-### Agent JSON schema
-
-```json
-{
-  "agentId": "a1b2c3...",
-  "type": "general-purpose",
-  "status": "active|idle|stopped",
-  "startedAt": "2026-03-01T17:00:00Z",
-  "updatedAt": "2026-03-01T17:00:30Z",
-  "stoppedAt": "2026-03-01T17:00:30Z",
-  "lastMessage": "Task completed. Summary: ..."
-}
+```jsonl
+{"agentId":"a1b2c3","type":"general-purpose","event":"start","status":"active","startedAt":"2026-03-01T17:00:00Z","updatedAt":"2026-03-01T17:00:00Z"}
+{"agentId":"a1b2c3","event":"stop","status":"stopped","stoppedAt":"2026-03-01T17:00:30Z","updatedAt":"2026-03-01T17:00:30Z"}
 ```
+
+The folded agent also gets `lastMessage`, from the transcript when the stop line has none.
 
 ## Team member lifecycle
 
@@ -100,37 +63,37 @@ Team members differ from regular subagents — they persist across multiple inte
 
 ```
 Team lead spawns teammate (Agent tool with name param)
-  → SubagentStart fires → agent file created (active) + mapping written
-  → SubagentStop fires → agent file updated (stopped)
-  → TeammateIdle fires → mapping lookup → agent file updated (idle)
+  → agent.spawn → agent file created (active) + mapping written
+  → turn.complete → stop line (stopped)
+  → TeammateIdle → mapping lookup → idle line
 
 Lead sends SendMessage to teammate
-  → SubagentStart fires → NEW agent ID, old file deleted, new file created (active)
-  → SubagentStop fires → agent file updated (stopped)
-  → TeammateIdle fires → mapping lookup → agent file updated (idle)
+  → agent.spawn → NEW agent ID, new file created (active); the old file stays
+  → turn.complete → stop line (stopped)
+  → TeammateIdle → mapping lookup → idle line
 
 Lead sends shutdown_request via SendMessage
-  → SubagentStart fires → new subprocess for shutdown
+  → agent.spawn → new subprocess for shutdown
   → Teammate approves → teammate_terminated in JSONL
   → Server detects termination → marks agent stopped
-  → No SubagentStop hook fires for terminated teammates
+  → No stop line is written for terminated teammates
 ```
 
 ### Key differences from regular subagents
 
 | Aspect | Regular Subagent | Team Member |
 |--------|-----------------|-------------|
-| Created by | `Agent` tool call | Team framework (also fires SubagentStart) |
+| Created by | `Agent` tool call | Team framework (also fires agent.spawn) |
 | Process lifetime | Single task, then exits | Persists across messages, goes idle between |
 | New agent_id per wake | No | Yes (each SendMessage creates new subprocess) |
 | Communication | Returns result to parent | SendMessage / `<teammate-message>` protocol |
 | Idle state | N/A | Normal — waiting for work |
-| Termination detection | SubagentStop hook | JSONL `teammate_terminated` protocol message |
+| Termination detection | turn.complete stop line | JSONL `teammate_terminated` protocol message |
 | Stale timeout | Applied (force-stopped after 15min) | **Exempt** — idle is normal state |
 
 ### SendMessage does NOT spawn a process
 
-When the lead uses `SendMessage`, **no new hook fires for the send itself**. The teammate's existing process receives the message. A new `SubagentStart` fires only when the teammate wakes up to process it.
+When the lead uses `SendMessage`, **no event fires for the send itself**. The teammate's existing process receives the message. A new `agent.spawn` fires only when the teammate wakes up to process it.
 
 ### Stale filtering exemption
 
@@ -152,10 +115,10 @@ Team sessions are detected by scanning `TEAMS_DIR` (`~/.claude/teams/`) after bu
 
 ### File watcher
 
-Watches `~/.claude/agent-activity/` (depth 2). On `add`/`change` of `.json` files:
+Watches `<config-dir>/.cck/agent-activity/` (depth 2). On `add`/`change`/`unlink` of a `.jsonl` file, `_waiting.json` or `_stop.json`:
 1. Broadcasts `{ type: "agent-update", sessionId }` via SSE
 2. For team sessions, also broadcasts with team name so frontend picks it up
-3. On `add`: enforces file cap (20 files per session), deletes oldest by mtime
+3. On `add` of a `.jsonl` file: enforces file cap (20 files per session), deletes oldest by mtime
 
 ### File cap
 
@@ -231,12 +194,10 @@ Team member prompts are wrapped in `<teammate-message teammate_id="..." summary=
 ## Known limitations
 
 - **chokidar `add` unreliable on Windows** — file creation events are dropped when multiple agents spawn in parallel. Mitigated by 3s poll interval.
-- `SubagentStop` is intermittently unreliable — may not fire for some agents. Mitigated by stale timeout.
-- `SubagentStop` does not fire for terminated teammates. Mitigated by server-side JSONL `teammate_terminated` detection.
-- Shutdown handshake spawns transient agent instances that never receive `SubagentStop`. Mitigated by temporal dedup filter + hook-level dedup for team members.
-- Hook `SubagentStart` does not provide agent prompt/description — only `agent_type` is available for identification. Prompt is extracted from the parent session's JSONL transcript (progress map) or the subagent's own transcript.
-- Hook `SubagentStart` does not provide `teammate_name` — cannot distinguish teammates from parallel subagents by field alone. Resolved by checking old agent's status (`active` = parallel, `idle`/`stopped` = re-spawn).
-- `TeammateIdle` provides no `agent_id` — resolved via name→ID mapping files written on `SubagentStart`.
-- Internal agents (e.g. AskUserQuestion) have empty `agent_type` and are excluded.
-- `agent_transcript_path` is only available at `SubagentStop`, not `SubagentStart`.
+- A stop line may be missing for some agents. Mitigated by stale timeout.
+- No stop line is written for terminated teammates. Mitigated by server-side JSONL `teammate_terminated` detection.
+- Shutdown handshake spawns transient agent instances that never get a stop line. Mitigated by temporal dedup filter.
+- The start line carries only the agent type, not the prompt. Prompt is extracted from the parent session's JSONL transcript (progress map) or the subagent's own transcript.
+- `TeammateIdle` may provide no `agent_id` — resolved via name→ID mapping files written on `agent.spawn`.
+- Internal agents (e.g. AskUserQuestion) get no file: `agent.spawn` does not fire for them, and the stop line is written only when the file exists.
 - Team member prompts contain `<teammate-message>` XML wrapper that must be stripped for display.

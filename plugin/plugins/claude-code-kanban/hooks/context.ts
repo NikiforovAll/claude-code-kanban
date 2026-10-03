@@ -29,13 +29,16 @@ export function toStatus(model: string, m: Measure, usage: ModelUsage | undefine
   }
 }
 
-async function cckDir($: EngineInterface) {
-  const [configDir, home, userProfile] = await Promise.all([
-    $.env.get('CLAUDE_CONFIG_DIR'),
-    $.env.get('HOME'),
-    $.env.get('USERPROFILE'),
-  ])
-  return configDir ? `${configDir}/.cck` : `${home ?? userProfile}/.claude/.cck`
+export const cckRoot = (configDir?: string, home?: string, userProfile?: string) =>
+  configDir ? `${configDir}/.cck` : `${home ?? userProfile}/.claude/.cck`
+
+let cck: Promise<string> | undefined
+
+function cckDir($: EngineInterface) {
+  cck ??= Promise.all([$.env.get('CLAUDE_CONFIG_DIR'), $.env.get('HOME'), $.env.get('USERPROFILE')]).then(
+    ([configDir, home, userProfile]) => cckRoot(configDir, home, userProfile),
+  )
+  return cck
 }
 
 let lastUsage: ModelUsage | undefined

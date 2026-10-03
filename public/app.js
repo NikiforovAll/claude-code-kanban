@@ -1541,7 +1541,7 @@ function renderWaitingBody(tool, params) {
 const PLAN_REJECT_MSG = 'Plan rejected from the kanban board.';
 
 // Answerable only when the marker carries a request id (written by
-// approval-gate.sh, which is polling for a decision) and the gate hasn't
+// the plugin's mod, which is polling for a decision) and the gate hasn't
 // lapsed past its wait window — older or lapsed markers are only answerable
 // in the terminal.
 function isWaitingAnswerable() {
@@ -1600,9 +1600,9 @@ function rejectWaitingPlan(inputId) {
   respondWaiting({ behavior: 'deny', message: feedback || PLAN_REJECT_MSG });
 }
 
-// UI-driven approvals: POST the decision the blocking approval-gate.sh hook is
-// polling for. First writer wins (D5) — a 409/410 means the ask was answered in
-// the terminal or superseded, so just drop the card.
+// UI-driven approvals: POST the decision the plugin's mod is polling for.
+// First writer wins (D5) — a 409/410 means the ask was answered in the
+// terminal or superseded, so just drop the card.
 async function respondWaiting(payload) {
   if (!currentSessionId || !currentWaiting?.id) return;
   try {

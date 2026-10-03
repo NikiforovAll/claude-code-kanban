@@ -62,8 +62,8 @@ describe('pluginStatus', () => {
   });
 
   it('names the config dir in the install command only when it is not the default', () => {
-    assert.equal(installCommand(path.join(os.homedir(), '.claude')), 'claude-code-kanban --install --plugin-only');
-    assert.equal(installCommand('C:/demo/.claude'), 'claude-code-kanban --install --plugin-only --dir "C:/demo/.claude"');
+    assert.equal(installCommand(path.join(os.homedir(), '.claude')), 'claude-code-kanban --install --yes');
+    assert.equal(installCommand('C:/demo/.claude'), 'claude-code-kanban --install --yes --dir "C:/demo/.claude"');
   });
 
   it('reads the manifest shipped in the package', () => {

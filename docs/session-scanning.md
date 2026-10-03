@@ -31,7 +31,7 @@ These run only when an API request is served (no background timer).
 | Function | Cache | TTL | Source |
 |---|---|---|---|
 | `loadSessionMetadata()` | `sessionMetadataCache` | `METADATA_CACHE_TTL = 10000` ms (per-path dirty set for hot updates) | `server.js:389` |
-| `readSessionInfoFromJsonl()` | `sessionInfoCache` + `customTitleCache` | per path, valid while `sameFileGrown` (same inode, not shorter, and a new mtime only with new bytes); `slug`+`projectPath`+`logicalParentUuid`+`compactBoundaryUuid` pinned, `cwd` and title refreshed from appended bytes only; saved to disk, see [Persistent session cache](#3a-persistent-session-cache) | `lib/parsers.js` |
+| `readSessionInfoFromJsonl()` | `sessionInfoCache` + `customTitleCache` | per path, valid while `sameFileGrown` (same inode, not shorter, and a new mtime only with new bytes); `slug`+`projectPath`+`logicalParentUuid`+`compactBoundaryUuid` pinned, `cwd`, title and `permissionMode` (the latest of a prompt line, an `auto_mode`/`auto_mode_exit` attachment or a `permission-mode` line, for the auto-mode waiting check) refreshed from appended bytes only; saved to disk, see [Persistent session cache](#3a-persistent-session-cache) | `lib/parsers.js` |
 | `getGitBranch(cwd)` | `gitBranchCache` | `GIT_BRANCH_TTL_MS = 30000` ms, keyed by `cwd` | `server.js` + `lib/git-branch.js` |
 | `getAutoCompact(claudeDir, project)` (compaction window for the context bar; runs only for sessions with `contextStatus`) | `fileCache`, one entry per settings file: `<config dir>/settings.json`, `<project>/.claude/settings.json`, `<project>/.claude/settings.local.json`; misses cached too | keyed by `mtimeMs`: one `statSync` per file per call, a read only after a change | `lib/auto-compact.js`, cache in `lib/claude-settings.js` |
 | `worktrees.resolve(dir)` | `createWorktreeStore` | hits saved to `.cck/worktrees.json`, pruned by the retention sweep; misses in memory, capped at 500 | `lib/worktrees.js` |
@@ -42,7 +42,7 @@ These run only when an API request is served (no background timer).
 | `getWorkflowInfoSummary()` (Workflow-tool script badge) | `workflowIndexCache` (`Map<sessionId, scripts[]>`) | `WORKFLOW_INDEX_TTL_MS = 5000` ms | `server.js` |
 | `readWorkflowJournal()` / `getWorkflowMeta()` (workflow run + live views) | `workflowJournalCache` / `workflowMetaCache` | `cachedByMtime`, keyed by file path | `server.js` |
 
-> `extractAgentResultFromTranscript()` fills the response of a subagent whose `lastMessage` is empty, because it ended on a tool call: the last `SubagentHandback` message or formatted `StructuredOutput` input in a 1 MB tail read of its transcript.
+> `extractAgentResultFromTranscript()` fills the response of a subagent whose `lastMessage` is empty: the last `SubagentHandback` message or formatted `StructuredOutput` input in a 1 MB tail read of its transcript, else its last assistant text. The text fallback is the usual path today, because the plugin's mod gets an empty `turn.complete` answer for a subagent; it stops running once that answer is filled.
 
 > `readRecentMessages()` dispatches transcript lines by `type`. Besides `user`/`assistant`/`teammate`, it surfaces `queue-operation` (`operation: 'enqueue'`) lines as user messages flagged `queued: true`. Queued text lives at the top-level `content`, not under `message.content`, and is never re-emitted as a `type:'user'` line, so without this branch it never renders.
 

@@ -17,6 +17,7 @@ The server builds these fields on every session object (`buildSessionObject` and
 | `hasRunningAgents` | A subagent has `status: 'active'` and is fresh (teams skip the freshness check). Idle agents never count. | `AGENT_TTL_MS`, 60 min |
 | `hasWaitingForUser` | A `_waiting.json` marker exists (permission prompt or question), and the transcript did not move on after it. | `PERMISSION_TTL_MS`, 30 min; resolved when the log is written more than `WAITING_RESOLVE_GRACE_MS` (15 s) after the marker |
 | `hasActiveAgents` | `hasRunningAgents` or `hasWaitingForUser`. | as above |
+| `unread` | A `_stop.json` marker exists (the plugin's mod writes it when a main turn completes; opening the session deletes it), and the transcript did not move on after it. | resolved when the log is written more than `WAITING_RESOLVE_GRACE_MS` (15 s) after the marker |
 
 When the transcript is older than `AGENT_STALE_MS` (30 min), the server skips the agent check for a non-team session. The waiting check still runs.
 

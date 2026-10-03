@@ -14,7 +14,7 @@ The board handles three kinds of ask:
 - A question from the `AskUserQuestion` tool.
 - A plan that waits for approval (`ExitPlanMode`).
 
-This feature needs the Claude Code Kanban plugin hooks. See [Getting started](/claude-code-kanban/getting-started/) to install them.
+This feature needs the Claude Code Kanban plugin. See [Getting started](/claude-code-kanban/getting-started/) to install them.
 
 <Shot themed="11-waiting-prompt" alt="A session log that ends with a waiting permission ask and its Allow and Deny buttons" />
 
@@ -42,17 +42,21 @@ The **x** on the log entry removes the ask from the board. It does not answer th
 
 ## The terminal stays live
 
-The prompt in the terminal stays open while the board waits. The first answer wins. If you answer in the terminal first, the ask usually leaves the board within about a second. If the hook cannot find the Claude Code session registry file, the ask can stay on the board until the session log shows new activity. If you then click a button on an old card, the board drops the card, and Claude Code gets no answer from the board.
+The prompt in the terminal stays open while the board waits. The first answer wins. If you answer in the terminal first, the ask leaves the board within about a second. If you then click a button on an old card, the board drops the card, and Claude Code gets no answer from the board.
+
+If you allow an ask on the board, the tool runs while the terminal prompt is still on screen, and the status line shows "Approved from the board — running". Do not answer the terminal prompt then. If you choose "Yes" there before the tool finishes, the tool runs twice.
 
 ## When the buttons do not show
 
-The board shows buttons only when it can answer the ask. That is true when the plugin's `approval-gate.sh` hook sent the ask and the hook still waits for a decision. In other cases the entry says "answer in the terminal". This happens when:
+The board shows buttons only when it can answer the ask. That is true when the plugin's mod sent the ask and still waits for a decision. In other cases the entry says "answer in the terminal". This happens when:
 
-- The hook stopped waiting after `waitSeconds`.
+- The mod stopped waiting after `waitSeconds`.
 - You turned UI approvals off.
 - The ask is a question and `mode` is `"permission"`.
 
 The board hides an ask 30 minutes after it starts.
+
+In auto mode, the board does not show permission asks, because the auto-mode classifier answers most of them. Asks from an `ask` rule in your settings, questions and plans still show. The board reads the mode from the session transcript, so a mode change with <kbd>Shift+Tab</kbd> applies after the next tool call.
 
 ## Auto-open
 
@@ -72,20 +76,19 @@ To turn UI approvals off:
 }
 ```
 
-Set `mode` to `"permission"` to leave questions to the terminal. `waitSeconds` sets how long the hook waits for a board decision, up to 1800 (30 minutes). For all fields and defaults, see [UI approvals config](/claude-code-kanban/reference/configuration/#ui-approvals-config).
+Set `mode` to `"permission"` to leave questions to the terminal. `waitSeconds` sets how long the plugin waits for a board decision, up to 1800 (30 minutes). For all fields and defaults, see [UI approvals config](/claude-code-kanban/reference/configuration/#ui-approvals-config).
 
 With UI approvals off, the board still shows each ask and its amber highlight. You answer it in the terminal.
 
 ## When the board cannot answer
 
-The hook never blocks a session because of a problem with the board. In these cases Claude Code asks in the terminal as usual:
+The terminal prompt stays open while the plugin waits for the board, so a problem with the board never blocks a session. You answer in the terminal when:
 
 - The Claude Code Kanban server is not running.
 - UI approvals are off, or the ask is a question in `"permission"` mode.
-- The decision file is empty or not valid.
 - No one answered on the board within `waitSeconds`.
 
-If the server restarts while an ask waits, the hook checks again every 5 seconds and waits up to 15 seconds for the board to come back, on the same port or a new one. If the server stops normally, the hook stops waiting at once.
+If the server restarts while an ask waits, the plugin keeps waiting, and the board can answer once it is back.
 
 See [Configuration](/claude-code-kanban/reference/configuration/) for other settings and [Keyboard shortcuts](/claude-code-kanban/reference/keyboard-shortcuts/) for all keys.
 
