@@ -5424,7 +5424,7 @@ body.light .msg-assistant .msg-text {
    fullscreen rule must win, same as for every other per-modal size. */
 .modal.msg-detail-dialog {
   width: 90vw;
-  max-width: 860px;
+  max-width: calc(860px + var(--review-extra));
   max-height: 90vh;
   display: flex;
   flex-direction: column;
@@ -5634,6 +5634,7 @@ body.light .msg-assistant .msg-text {
   flex: 1 1 auto;
 }
 
+.preview-split > #msg-detail-body,
 .preview-split > #preview-modal-body,
 .preview-split > #plan-modal-body {
   flex: 1 1 auto;
@@ -5835,7 +5836,8 @@ body.light .msg-assistant .msg-text {
 /* keycap chips: elevated fill + thicker bottom border reads as a key */
 .sp-hint kbd,
 .shortcuts kbd,
-.terminal-boot-slow kbd {
+.terminal-boot-slow kbd,
+.review-offer-btn kbd {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -6099,7 +6101,8 @@ select.form-input option:checked {
   background-color: var(--warning-dim);
 }
 
-::highlight(review-hot) {
+::highlight(review-hot),
+::highlight(review-pending) {
   background-color: color-mix(in srgb, var(--warning) 45%, transparent);
 }
 
@@ -6127,7 +6130,7 @@ select.form-input option:checked {
 #review-pop textarea {
   width: 100%;
   box-sizing: border-box;
-  margin: 6px 0;
+  margin: 0 0 6px;
   padding: 6px;
   resize: vertical;
   font: inherit;
@@ -6137,16 +6140,59 @@ select.form-input option:checked {
   border-radius: 4px;
 }
 
-.review-pop-quote,
+#review-pop.offer {
+  animation: review-offer-in 120ms ease-out;
+}
+
+#review-pop button.review-offer-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 4px 8px;
+  background: var(--bg-elevated);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+}
+
+#review-pop button.review-offer-btn:hover,
+#review-pop button.review-offer-btn:focus-visible {
+  border-color: var(--accent);
+}
+
+.review-offer-btn svg {
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  color: var(--accent);
+}
+
+.review-offer-btn kbd {
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  font-size: 10px;
+  color: var(--text-muted);
+  border-radius: 3px;
+}
+
+@keyframes review-offer-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #review-pop.offer {
+    animation: none;
+  }
+}
+
 .review-card-quote {
   overflow: hidden;
   padding-left: 8px;
   color: var(--text-muted);
   border-left: 2px solid var(--warning);
-}
-
-.review-pop-quote {
-  max-height: 3.2em;
 }
 
 .review-pop-actions {

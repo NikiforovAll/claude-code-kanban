@@ -393,7 +393,7 @@
 
   <!-- Message Detail Modal -->
   <div id="msg-detail-modal" class="modal-overlay" onclick="closeMsgDetailModal()">
-    <div class="modal msg-detail-dialog" onclick="event.stopPropagation()">
+    <div class="modal msg-detail-dialog review-host" onclick="event.stopPropagation()">
       <div class="modal-header">
         <h3 class="modal-title" id="msg-detail-title">Message</h3>
         <div style="display:flex;gap:4px;align-items:center;">
@@ -418,7 +418,10 @@
         </div>
       </div>
       <div class="modal-body" style="flex: 0 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden;">
-        <div id="msg-detail-body" class="rendered-md modal-zoomable"></div>
+        <div class="preview-split">
+          <div id="msg-detail-body" class="rendered-md modal-zoomable"></div>
+          <aside id="msg-review-panel" class="review-panel" hidden></aside>
+        </div>
         <div id="msg-detail-meta" style="margin-top: 12px; font-size: 11px; color: var(--text-muted); flex-shrink: 0;"></div>
       </div>
       <div id="msg-detail-waiting-footer"></div>

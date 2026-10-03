@@ -3969,7 +3969,7 @@ function formatReviewMarkdown(src, items) {
   const parts = [
     `# Review of ${src.path || src.label}`,
     '',
-    "Each comment is the user's instruction about the quoted text. A quote missing from the source means the source changed after the review: say so.",
+    `Each comment is the user's instruction about the quoted text.${src.path ? ' A quote missing from the source means the source changed after the review: say so.' : ''}`,
   ];
   items.forEach((c, i) => {
     const where = [c.line && `line ${c.line}`, c.heading && `under "${c.heading}"`].filter(Boolean).join(', ');

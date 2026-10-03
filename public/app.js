@@ -2048,6 +2048,7 @@ function isAnyPinned(sessionId) {
 }
 
 function _renderPinToDetail(pin) {
+  unmountMsgReview();
   const body = document.getElementById('msg-detail-body');
   const agentBtn = document.getElementById('msg-detail-agent-btn');
   agentBtn.style.display = 'none';
@@ -2263,11 +2264,10 @@ function showMsgDetail(idx) {
       body.innerHTML = userExtras || '<em>No content</em>';
     }
   }
-  const modal = document.getElementById('msg-detail-modal').querySelector('.modal');
-  autoSizeModal(modal, body);
-  modal.classList.toggle('live', msgDetailFollowLatest);
   const overlay = document.getElementById('msg-detail-modal');
-  overlay.classList.toggle('live-overlay', msgDetailFollowLatest);
+  const modal = overlay.querySelector('.modal');
+  autoSizeModal(modal, body);
+  setMsgDetailFollow(msgDetailFollowLatest);
 
   const meta = [formatDate(m.timestamp)];
   if (m.model) meta.unshift(m.model);
@@ -2276,9 +2276,34 @@ function showMsgDetail(idx) {
   currentPinDetailId = null;
   updateMsgDetailPinState();
   overlay.classList.add('visible');
+  mountReplyReview(m, body, modal);
+}
+
+function setMsgDetailFollow(on) {
+  msgDetailFollowLatest = on;
+  const overlay = document.getElementById('msg-detail-modal');
+  overlay.classList.toggle('live-overlay', on);
+  overlay.querySelector('.modal').classList.toggle('live', on);
+}
+
+function unmountMsgReview() {
+  unmountReview(document.getElementById('msg-review-panel'));
+}
+
+// Only the main session's replies: the agent has them in context, so a quote is enough.
+function mountReplyReview(m, body, modal) {
+  if (m.type !== 'assistant' || agentLogMode || !m.timestamp) return unmountMsgReview();
+  mountReview({
+    contentEl: body,
+    panelEl: document.getElementById('msg-review-panel'),
+    hostEl: modal,
+    source: { kind: 'reply', id: m.timestamp, label: `your reply at ${new Date(m.timestamp).toLocaleTimeString()}` },
+    onComment: () => setMsgDetailFollow(false),
+  });
 }
 
 function closeMsgDetailModal() {
+  unmountMsgReview();
   hideModalOverlay('msg-detail-modal');
   msgDetailFollowLatest = false;
   waitingDetailAutoOpened = false;
@@ -2895,8 +2920,9 @@ function autoSizeModal(modal, body) {
   // hasPre is already computed and short-circuits the textContent walk, which is
   // no longer cheap now that colourised output puts thousands of spans in there.
   const desired = hasTable ? 1100 : hasPre || body.textContent.length > 2000 ? 960 : 860;
-  const current = parseFloat(getComputedStyle(modal).maxWidth) || 0;
-  if (desired > current) modal.style.maxWidth = `${desired}px`;
+  const style = getComputedStyle(modal);
+  const current = (parseFloat(style.maxWidth) || 0) - (parseFloat(style.getPropertyValue('--review-extra')) || 0);
+  if (desired > current) modal.style.maxWidth = `calc(${desired}px + var(--review-extra, 0px))`;
 }
 
 function renderToolResultHtml(toolResult, isTruncated, fullResult, toolUseId) {
@@ -6988,9 +7014,11 @@ document.addEventListener('keydown', (e) => {
 const reviewDrafts = new Map();
 const reviewHighlight = typeof Highlight === 'function' && CSS.highlights ? new Highlight() : null;
 const reviewHotHighlight = reviewHighlight ? new Highlight() : null;
+const reviewPendingHighlight = reviewHighlight ? new Highlight() : null;
 if (reviewHighlight) {
   CSS.highlights.set('review', reviewHighlight);
   CSS.highlights.set('review-hot', reviewHotHighlight);
+  CSS.highlights.set('review-pending', reviewPendingHighlight);
 }
 const REVIEW_MSG = 'cck-review:';
 let activeReview = null;
@@ -7000,7 +7028,7 @@ let reviewHoverAt = null;
 let reviewHoverFrame = 0;
 
 function reviewKey(sessionId, source) {
-  return `${sessionId}|${source.kind}|${source.path ? canonicalPath(source.path) : source.label}`;
+  return `${sessionId}|${source.kind}|${source.path ? canonicalPath(source.path) : source.id || source.label}`;
 }
 
 function reviewItems() {
@@ -7008,8 +7036,18 @@ function reviewItems() {
 }
 
 // `context(range)` adds view-specific citation fields to a comment on the host DOM;
-// `onSent()` runs after a batch is delivered.
-function mountReview({ contentEl, panelEl, hostEl, source, frame, context, onSent, sessionId = currentSessionId }) {
+// `onComment()` runs after a comment is added; `onSent()` runs after a batch is delivered.
+function mountReview({
+  contentEl,
+  panelEl,
+  hostEl,
+  source,
+  frame,
+  context,
+  onComment,
+  onSent,
+  sessionId = currentSessionId,
+}) {
   unmountReview();
   if (!sessionId) return;
   const ctl = new AbortController();
@@ -7022,6 +7060,7 @@ function mountReview({ contentEl, panelEl, hostEl, source, frame, context, onSen
     source,
     frame,
     context,
+    onComment,
     onSent,
     sessionId,
     key,
@@ -7034,6 +7073,7 @@ function mountReview({ contentEl, panelEl, hostEl, source, frame, context, onSen
   }
   window.addEventListener('message', onReviewFrameMessage, { signal });
   document.addEventListener('mousedown', closeReviewPop, { signal });
+  document.addEventListener('keydown', onReviewOfferKey, { capture: true, signal });
   document.addEventListener('scroll', closeReviewOffer, { capture: true, signal });
   panelEl.addEventListener('click', onReviewPanelClick, { signal });
   panelEl.addEventListener('mouseover', onReviewPanelHover, { signal });
@@ -7162,12 +7202,14 @@ function reviewBridge(textBefore, headingBefore, rangeAt) {
   let hoverFrame = 0;
   const hl = typeof Highlight === 'function' && CSS.highlights ? new Highlight() : null;
   const hot = hl ? new Highlight() : null;
+  const pend = hl ? new Highlight() : null;
   if (hl) {
     CSS.highlights.set('cck-review', hl);
     CSS.highlights.set('cck-review-hot', hot);
+    CSS.highlights.set('cck-review-pending', pend);
     const style = document.createElement('style');
     style.textContent =
-      '::highlight(cck-review){background-color:rgba(240,180,41,.35)}::highlight(cck-review-hot){background-color:rgba(240,180,41,.7)}';
+      '::highlight(cck-review){background-color:rgba(240,180,41,.35)}::highlight(cck-review-hot),::highlight(cck-review-pending){background-color:rgba(240,180,41,.7)}';
     (document.head || document.documentElement).append(style);
   }
   const send = (msg) => parent.postMessage({ ...msg, type: P + msg.type }, '*');
@@ -7237,6 +7279,10 @@ function reviewBridge(textBefore, headingBefore, rangeAt) {
       hl?.add(pending);
       pending = null;
       getSelection().removeAllRanges();
+    } else if (type === 'pend' && pending) {
+      pend?.add(pending);
+    } else if (type === 'unpend') {
+      pend?.clear();
     } else if (type === 'hot') {
       hot?.clear();
       if (range) hot?.add(range);
@@ -7266,12 +7312,16 @@ function reviewPopEl() {
 
 function placeReviewPop(el, r) {
   el.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - el.offsetWidth - 8))}px`;
-  const below = r.bottom + 6;
-  el.style.top = `${below + el.offsetHeight > window.innerHeight ? Math.max(8, r.top - el.offsetHeight - 6) : below}px`;
+  const above = r.top - el.offsetHeight - 6;
+  el.style.top = `${above >= 8 ? above : r.bottom + 6}px`;
 }
 
 function closeReviewPop() {
   if (!reviewPopMode) return;
+  if (reviewPopMode === 'editor') {
+    reviewPendingHighlight?.clear();
+    if (activeReview?.frame) postToReviewFrame('unpend');
+  }
   reviewPopMode = null;
   const el = reviewPopEl();
   el.className = '';
@@ -7292,17 +7342,25 @@ function showReviewOffer(picked) {
   const el = reviewPopEl();
   reviewPopMode = 'offer';
   el.className = 'visible offer';
-  el.innerHTML = `<button type="button" class="review-offer-btn">Comment</button>`;
+  el.innerHTML = `<button type="button" class="review-offer-btn" title="Comment (C)">${ICON_CHAT}Comment<kbd>C</kbd></button>`;
   el.firstElementChild.addEventListener('click', () => openReviewEditor(picked));
   placeReviewPop(el, picked.rect);
+}
+
+function onReviewOfferKey(e) {
+  if (reviewPopMode !== 'offer' || !matchKey(e, 'c', 'C')) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  reviewPopEl().querySelector('.review-offer-btn').click();
 }
 
 function openReviewEditor(picked) {
   const el = reviewPopEl();
   reviewPopMode = 'editor';
   el.className = 'visible editor';
-  el.innerHTML = `<div class="review-pop-quote">${escapeHtml(picked.quote.slice(0, 200))}</div>
-    <textarea rows="3" placeholder="Comment (Ctrl+Enter to add)"></textarea>
+  if (picked.range) reviewPendingHighlight?.add(picked.range);
+  else if (picked.inFrame) postToReviewFrame('pend');
+  el.innerHTML = `<textarea rows="3" placeholder="Comment (Ctrl+Enter to add)"></textarea>
     <div class="review-pop-actions"><button type="button" data-act="cancel">Cancel</button><button type="button" data-act="add" class="primary">Add</button></div>`;
   const ta = el.querySelector('textarea');
   const add = () => {
@@ -7352,6 +7410,7 @@ function addReviewComment(picked, comment) {
   items.sort((a, b) => a.pos - b.pos);
   closeReviewPop();
   renderReviewPanel();
+  activeReview.onComment?.();
 }
 
 function unmarkReviewItem(c) {
@@ -8846,6 +8905,7 @@ function submitWaitingAnswers() {
 function showWaitingDetail() {
   if (!isWaitingFresh()) return;
   currentMsgDetailIdx = MSG_DETAIL_WAITING_IDX;
+  unmountMsgReview();
   msgHighlightDimmed = false;
   highlightSelectedMsg();
   // Follow-mode poll ticks re-run this whole render — carry any typed reject
@@ -8901,9 +8961,8 @@ function showWaitingDetail() {
   document.getElementById('msg-detail-agent-btn').style.display = 'none';
   const modal = document.getElementById('msg-detail-modal').querySelector('.modal');
   autoSizeModal(modal, body);
-  modal.classList.toggle('live', msgDetailFollowLatest);
+  setMsgDetailFollow(msgDetailFollowLatest);
   const overlay = document.getElementById('msg-detail-modal');
-  overlay.classList.toggle('live-overlay', msgDetailFollowLatest);
   const meta = [formatDate(currentWaiting.timestamp), 'waiting'];
   document.getElementById('msg-detail-meta').textContent = meta.join(' · ');
   currentPinDetailId = null;
