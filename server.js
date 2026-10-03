@@ -9,7 +9,7 @@ const _readline = require('node:readline');
 const chokidar = require('chokidar');
 const os = require('node:os');
 const crypto = require('node:crypto');
-const { spawnSync, spawn } = require('node:child_process');
+const { spawn } = require('node:child_process');
 const { assertOpenTarget, openInEditor, whichSync, exeBehindShim } = require('./lib/open-editor');
 const { createNetGuard } = require('./lib/net-guard');
 const { isContained } = require('./lib/contain');
@@ -46,6 +46,7 @@ const { createDispatchRegistry, formatPreamble, formatDispatchLine, isPeerName, 
 const { createGroupStore, isGroupName, suggestGroupName } = require('./lib/dispatch-groups');
 const { createDispatchedStore, scanTranscripts, pruneSessionDirs, retentionMs } = require('./lib/retention');
 const { createWorktreeStore } = require('./lib/worktrees');
+const { readGitBranch } = require('./lib/git-branch');
 const { createLinkedDocStore, linkUrl } = require('./lib/linked-docs');
 const { pickFolder } = require('./lib/folder-dialog');
 const { loadSessionCache, saveSessionCache } = require('./lib/session-cache');
@@ -313,7 +314,7 @@ function isAgentLive(agent) {
 // Claude Code records gitBranch from the launch-time repo and never updates it
 // when cwd shifts (Bash `cd`, submodule, sibling repo). Resolve on-demand from
 // the live cwd instead. Cached per-cwd with a short TTL so a list refresh
-// across N sessions sharing one cwd spawns git at most once per TTL window.
+// across N sessions sharing one cwd reads HEAD at most once per TTL window.
 const gitBranchCache = new Map();
 const GIT_BRANCH_TTL_MS = 30000;
 const GIT_BRANCH_CACHE_MAX = 500;
@@ -322,18 +323,7 @@ function getGitBranch(cwd) {
   const now = Date.now();
   const cached = gitBranchCache.get(cwd);
   if (cached && now - cached.ts < GIT_BRANCH_TTL_MS) return cached.branch;
-  let branch = null;
-  try {
-    // cwd rather than `-C <cwd>`: a path beginning with a dash would otherwise be
-    // read by git as an option.
-    const r = spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
-      cwd, encoding: 'utf8', timeout: 500, windowsHide: true
-    });
-    if (r.status === 0) {
-      const out = (r.stdout || '').trim();
-      if (out && out !== 'HEAD') branch = out;
-    }
-  } catch (_) {}
+  const branch = readGitBranch(cwd);
   gitBranchCache.set(cwd, { branch, ts: now });
   if (gitBranchCache.size > GIT_BRANCH_CACHE_MAX) {
     const firstKey = gitBranchCache.keys().next().value;
@@ -349,8 +339,8 @@ const worktrees = createWorktreeStore({
   save: (data) => writeJsonAtomic(WORKTREES_FILE, data),
 });
 
-// Only spawn git when cwd has diverged from the launch project — that's the
-// only case the JSONL value is wrong. Saves N spawns on a typical list build.
+// Only look up the branch when cwd has diverged from the launch project — that's
+// the only case the JSONL value is wrong.
 function resolveSessionGitBranch(meta) {
   if (meta.cwd && meta.project && meta.cwd !== meta.project) {
     return getGitBranch(meta.cwd) || meta.gitBranch || null;
