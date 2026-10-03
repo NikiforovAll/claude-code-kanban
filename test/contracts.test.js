@@ -421,85 +421,85 @@ describe('Parser: findTerminatedTeammates', () => {
 
   tmpDir = mkdtempSync(path.join(os.tmpdir(), 'cck-test-'));
 
-  it('returns empty map for non-existent file', () => {
-    const result = findTerminatedTeammates('/nonexistent/path.jsonl');
+  it('returns empty map for non-existent file', async () => {
+    const result = await findTerminatedTeammates('/nonexistent/path.jsonl');
     assert.deepEqual(result, new Map());
   });
 
-  it('detects teammate_terminated with from field', () => {
+  it('detects teammate_terminated with from field', async () => {
     const file = path.join(tmpDir, 'terminated-from.jsonl');
     writeFileSync(file, JSON.stringify({
       type: 'user',
       message: { role: 'user', content: '<teammate-message teammate_id="worker-1" summary="terminated">{"type":"teammate_terminated","from":"worker-1","message":"worker-1 has shut down"}</teammate-message>' },
       timestamp: '2026-03-05T10:00:00Z'
     }) + '\n');
-    const result = findTerminatedTeammates(file);
+    const result = await findTerminatedTeammates(file);
     assert.ok(result.has('worker-1'));
     assert.equal(result.size, 1);
     unlinkSync(file);
   });
 
-  it('extracts name from message first word when from is missing', () => {
+  it('extracts name from message first word when from is missing', async () => {
     const file = path.join(tmpDir, 'terminated-msg.jsonl');
     writeFileSync(file, JSON.stringify({
       type: 'user',
       message: { role: 'user', content: '<teammate-message teammate_id="w2" summary="terminated">{"type":"teammate_terminated","message":"alice has shut down"}</teammate-message>' },
       timestamp: '2026-03-05T10:00:00Z'
     }) + '\n');
-    const result = findTerminatedTeammates(file);
+    const result = await findTerminatedTeammates(file);
     assert.ok(result.has('alice'));
     unlinkSync(file);
   });
 
-  it('falls back to teammate_id when no from or message match', () => {
+  it('falls back to teammate_id when no from or message match', async () => {
     const file = path.join(tmpDir, 'terminated-tid.jsonl');
     writeFileSync(file, JSON.stringify({
       type: 'user',
       message: { role: 'user', content: '<teammate-message teammate_id="bob" summary="terminated">{"type":"teammate_terminated"}</teammate-message>' },
       timestamp: '2026-03-05T10:00:00Z'
     }) + '\n');
-    const result = findTerminatedTeammates(file);
+    const result = await findTerminatedTeammates(file);
     assert.ok(result.has('bob'));
     unlinkSync(file);
   });
 
-  it('detects shutdown_response with approve:true', () => {
+  it('detects shutdown_response with approve:true', async () => {
     const file = path.join(tmpDir, 'shutdown-approve.jsonl');
     writeFileSync(file, JSON.stringify({
       type: 'user',
       message: { role: 'user', content: '<teammate-message teammate_id="worker-3" summary="approved">{"type":"shutdown_response","from":"worker-3","approve":true}</teammate-message>' },
       timestamp: '2026-03-05T10:00:00Z'
     }) + '\n');
-    const result = findTerminatedTeammates(file);
+    const result = await findTerminatedTeammates(file);
     assert.ok(result.has('worker-3'));
     unlinkSync(file);
   });
 
-  it('ignores shutdown_response with approve:false', () => {
+  it('ignores shutdown_response with approve:false', async () => {
     const file = path.join(tmpDir, 'shutdown-reject.jsonl');
     writeFileSync(file, JSON.stringify({
       type: 'user',
       message: { role: 'user', content: '<teammate-message teammate_id="worker-4" summary="rejected">{"type":"shutdown_response","from":"worker-4","approve":false,"reason":"still working"}</teammate-message>' },
       timestamp: '2026-03-05T10:00:00Z'
     }) + '\n');
-    const result = findTerminatedTeammates(file);
+    const result = await findTerminatedTeammates(file);
     assert.equal(result.size, 0);
     unlinkSync(file);
   });
 
-  it('filters out system teammate_id', () => {
+  it('filters out system teammate_id', async () => {
     const file = path.join(tmpDir, 'terminated-system.jsonl');
     writeFileSync(file, JSON.stringify({
       type: 'user',
       message: { role: 'user', content: '<teammate-message teammate_id="system" summary="terminated">{"type":"teammate_terminated","from":"system"}</teammate-message>' },
       timestamp: '2026-03-05T10:00:00Z'
     }) + '\n');
-    const result = findTerminatedTeammates(file);
+    const result = await findTerminatedTeammates(file);
     assert.equal(result.size, 0);
     unlinkSync(file);
   });
 
-  it('handles multiple teammate-message tags in one JSONL line', () => {
+  it('handles multiple teammate-message tags in one JSONL line', async () => {
     const file = path.join(tmpDir, 'multi-terminated.jsonl');
     const content = '<teammate-message teammate_id="a1" summary="t1">{"type":"teammate_terminated","from":"alice"}</teammate-message>' +
       '<teammate-message teammate_id="b1" summary="t2">{"type":"shutdown_response","from":"bob","approve":true}</teammate-message>';
@@ -508,27 +508,27 @@ describe('Parser: findTerminatedTeammates', () => {
       message: { role: 'user', content: content },
       timestamp: '2026-03-05T10:00:00Z'
     }) + '\n');
-    const result = findTerminatedTeammates(file);
+    const result = await findTerminatedTeammates(file);
     assert.ok(result.has('alice'));
     assert.ok(result.has('bob'));
     assert.equal(result.size, 2);
     unlinkSync(file);
   });
 
-  it('skips non-user type lines', () => {
+  it('skips non-user type lines', async () => {
     const file = path.join(tmpDir, 'non-user.jsonl');
     writeFileSync(file, JSON.stringify({
       type: 'assistant',
       message: { role: 'assistant', content: '<teammate-message teammate_id="x" summary="t">{"type":"teammate_terminated","from":"x"}</teammate-message>' },
       timestamp: '2026-03-05T10:00:00Z'
     }) + '\n');
-    const result = findTerminatedTeammates(file);
+    const result = await findTerminatedTeammates(file);
     assert.equal(result.size, 0);
     unlinkSync(file);
   });
 
-  it('reads from existing session fixture', () => {
-    const result = findTerminatedTeammates(path.join(FIXTURES_DIR, 'session.jsonl'));
+  it('reads from existing session fixture', async () => {
+    const result = await findTerminatedTeammates(path.join(FIXTURES_DIR, 'session.jsonl'));
     assert.ok(result.has('worker-1'));
     assert.ok(result.has('worker-2'));
     assert.equal(result.size, 2);
@@ -538,26 +538,26 @@ describe('Parser: findTerminatedTeammates', () => {
 describe('Parser: buildAgentProgressMap', () => {
   const jsonlPath = path.join(FIXTURES_DIR, 'session.jsonl');
 
-  it('maps parentToolUseID to agentId and prompt', () => {
-    const map = buildAgentProgressMap(jsonlPath);
+  it('maps parentToolUseID to agentId and prompt', async () => {
+    const map = await buildAgentProgressMap(jsonlPath);
     assert.equal(map['tu_agent_01'].agentId, 'agent-abc-123');
     assert.equal(map['tu_agent_01'].prompt, 'Find all auth middleware files');
   });
 
-  it('maps background agent tool_result to agentId', () => {
-    const map = buildAgentProgressMap(jsonlPath);
+  it('maps background agent tool_result to agentId', async () => {
+    const map = await buildAgentProgressMap(jsonlPath);
     assert.equal(map['tu_bg_agent_01'].agentId, 'agent-bg-456');
     assert.equal(map['tu_bg_agent_01'].prompt, null);
   });
 
-  it('maps teammate_spawned tool_result to agentId', () => {
-    const map = buildAgentProgressMap(jsonlPath);
+  it('maps teammate_spawned tool_result to agentId', async () => {
+    const map = await buildAgentProgressMap(jsonlPath);
     assert.equal(map['tu_team_agent_01'].agentId, 'reviewer@my-team');
     assert.equal(map['tu_team_agent_01'].prompt, null);
   });
 
-  it('returns empty map for non-existent file', () => {
-    const map = buildAgentProgressMap('/nonexistent/path.jsonl');
+  it('returns empty map for non-existent file', async () => {
+    const map = await buildAgentProgressMap('/nonexistent/path.jsonl');
     assert.deepEqual(map, {});
   });
 });
@@ -975,58 +975,58 @@ describe('Parser: readScratchpadCreations', () => {
       message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: text }] }
     });
 
-  const run = (lines) => {
+  const run = async (lines) => {
     const { file, tmpDir } = write(lines);
     try {
-      return readScratchpadCreations(file);
+      return await readScratchpadCreations(file);
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }
   };
 
-  it('takes the printed manifest path as the answer', () => {
+  it('takes the printed manifest path as the answer', async () => {
     const out = 'pad dir   : C:\\p\\notes\\demo\n  manifest  : C:\\p\\notes\\demo\\scratchpad.json';
-    const rows = run([call('scratch new "demo" --dir notes'), result(out)]);
+    const rows = await run([call('scratch new "demo" --dir notes'), result(out)]);
     assert.equal(rows.length, 1);
     assert.equal(rows[0].path, 'C:\\p\\notes\\demo\\scratchpad.json');
   });
 
-  it('reads the pad name out of the command when the output was piped away', () => {
-    const rows = run([call('scratch new "in-app-feedback" --dir _plans 2>&1 | tail -3'), result('not ignored')]);
+  it('reads the pad name out of the command when the output was piped away', async () => {
+    const rows = await run([call('scratch new "in-app-feedback" --dir _plans 2>&1 | tail -3'), result('not ignored')]);
     assert.equal(rows.length, 1);
     assert.equal(rows[0].path, null);
     assert.equal(rows[0].name, 'in-app-feedback');
     assert.equal(rows[0].ts, Date.parse('2026-03-05T10:00:00.344Z'));
   });
 
-  it('reads single-quoted and bare names, and survives a leading cd', () => {
-    assert.equal(run([call("cd '/repo'; scratch new 'vid promo' --dir x")])[0].name, 'vid promo');
-    assert.equal(run([call('scratch new notes')])[0].name, 'notes');
+  it('reads single-quoted and bare names, and survives a leading cd', async () => {
+    assert.equal((await run([call("cd '/repo'; scratch new 'vid promo' --dir x")]))[0].name, 'vid promo');
+    assert.equal((await run([call('scratch new notes')]))[0].name, 'notes');
   });
 
-  it('does not mistake a flag for the name', () => {
-    assert.equal(run([call('scratch new --dir _plans')])[0].name, null);
+  it('does not mistake a flag for the name', async () => {
+    assert.equal((await run([call('scratch new --dir _plans')]))[0].name, null);
   });
 
-  it('ignores a transcript with no scratch new call', () => {
-    assert.deepEqual(run([call('ls -la')]), []);
+  it('ignores a transcript with no scratch new call', async () => {
+    assert.deepEqual(await run([call('ls -la')]), []);
   });
 });
 
 describe('Parser: readCompactSummaries', () => {
-  it('returns empty array when subagents dir does not exist', () => {
+  it('returns empty array when subagents dir does not exist', async () => {
     const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'parser-test-'));
     const file = path.join(tmpDir, 'no-subagents.jsonl');
     writeFileSync(file, '');
     try {
-      const result = readCompactSummaries(file);
+      const result = await readCompactSummaries(file);
       assert.deepEqual(result, []);
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }
   });
 
-  it('returns summaries from compact subagent JSONL files', () => {
+  it('returns summaries from compact subagent JSONL files', async () => {
     const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'parser-test-'));
     const sessionName = 'compact-test-session';
     const sessionFile = path.join(tmpDir, `${sessionName}.jsonl`);
@@ -1041,7 +1041,7 @@ describe('Parser: readCompactSummaries', () => {
     writeFileSync(sessionFile, '');
 
     try {
-      const result = readCompactSummaries(sessionFile);
+      const result = await readCompactSummaries(sessionFile);
       assert.ok(Array.isArray(result));
       assert.equal(result.length, 1);
       assert.equal(result[0].summary, 'Session compacted successfully');
@@ -1051,7 +1051,7 @@ describe('Parser: readCompactSummaries', () => {
     }
   });
 
-  it('skips compact files without a summary tag', () => {
+  it('skips compact files without a summary tag', async () => {
     const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'parser-test-'));
     const sessionName = 'compact-no-summary';
     const sessionFile = path.join(tmpDir, `${sessionName}.jsonl`);
@@ -1065,7 +1065,7 @@ describe('Parser: readCompactSummaries', () => {
     writeFileSync(sessionFile, '');
 
     try {
-      const result = readCompactSummaries(sessionFile);
+      const result = await readCompactSummaries(sessionFile);
       assert.deepEqual(result, []);
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
@@ -1331,7 +1331,7 @@ describe('readRecentMessages: agent-message rendering', () => {
 // buildAgentProgressMap must capture those as a formatted usageText chip — the same
 // " · Nk tok · N tools · Ns" string a background agent gets — keyed by tool_use_id.
 describe('buildAgentProgressMap: foreground agent usage chip', () => {
-  it('captures totalTokens/toolUses/duration as a usageText chip', () => {
+  it('captures totalTokens/toolUses/duration as a usageText chip', async () => {
     const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'parser-test-'));
     const file = path.join(tmpDir, 'fg-agent.jsonl');
     const dummy = JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'x' }] }, timestamp: '2026-06-10T10:00:00Z' });
@@ -1351,7 +1351,7 @@ describe('buildAgentProgressMap: foreground agent usage chip', () => {
     });
     writeFileSync(file, [dummy, completion].join('\n') + '\n');
     try {
-      const map = buildAgentProgressMap(file);
+      const map = await buildAgentProgressMap(file);
       const entry = map['toolu_fg1'];
       assert.ok(entry, 'progressMap entry for the agent tool_use_id');
       assert.equal(entry.agentId, 'fgagent123');
@@ -1361,7 +1361,7 @@ describe('buildAgentProgressMap: foreground agent usage chip', () => {
     }
   });
 
-  it('omits usageText when the toolUseResult carries no cost numbers', () => {
+  it('omits usageText when the toolUseResult carries no cost numbers', async () => {
     const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'parser-test-'));
     const file = path.join(tmpDir, 'fg-agent-nousage.jsonl');
     const dummy = JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'x' }] }, timestamp: '2026-06-10T10:00:00Z' });
@@ -1373,7 +1373,7 @@ describe('buildAgentProgressMap: foreground agent usage chip', () => {
     });
     writeFileSync(file, [dummy, completion].join('\n') + '\n');
     try {
-      const entry = buildAgentProgressMap(file)['toolu_fg2'];
+      const entry = (await buildAgentProgressMap(file))['toolu_fg2'];
       assert.ok(entry);
       assert.equal(entry.usageText, null);
     } finally {

@@ -35,7 +35,8 @@ const {
   readToolResultImage,
   readCachedImage,
   updateLoopInfo,
-  buildLoopInfoFromState
+  buildLoopInfoFromState,
+  readLines
 } = require('./lib/parsers');
 const { inlineHtmlAssets, MIME_BY_EXT } = require('./lib/inline-assets');
 const { buildDecision, decisionFileName, isDecisionFile, approvalsFrom, boardRefusal } = require('./lib/approvals');
@@ -764,20 +765,34 @@ function taskDirBeats(candMtime, candCount, curMtime, curCount) {
   return candMtime > curMtime || (candMtime === curMtime && candCount > curCount);
 }
 
+// A promise from loadFn is cached as is, so concurrent callers share one read, and a newer
+// mtime starts no second read while it is pending: full-transcript scans stream for seconds.
 function cachedByMtime(cache, cacheKey, filePath, loadFn, fallback) {
   try {
     const cached = cache.get(cacheKey);
-    if (cached && Date.now() - cached.ts < MESSAGE_CACHE_TTL) return cached.data;
+    if (cached && (cached.pending || Date.now() - cached.ts < MESSAGE_CACHE_TTL)) return cached.data;
     const st = statSync(filePath);
     if (cached && cached.mtime === st.mtimeMs) {
       cached.ts = Date.now();
       return cached.data;
     }
-    const data = loadFn();
-    cache.set(cacheKey, { data, mtime: st.mtimeMs, ts: Date.now() });
+    const entry = { data: loadFn(), mtime: st.mtimeMs, ts: Date.now() };
+    if (typeof entry.data?.then === 'function') {
+      entry.pending = true;
+      entry.data = entry.data.catch(() => fallback).finally(() => {
+        entry.pending = false;
+        entry.ts = Date.now();
+      });
+    }
+    cache.set(cacheKey, entry);
     evictStaleCache(cache);
-    return data;
+    return entry.data;
   } catch (_) { return fallback; }
+}
+
+// Express 4 does not pass a rejected handler promise to next(), and Node 24 exits on it.
+function asyncRoute(fn) {
+  return (req, res, next) => fn(req, res, next).catch(next);
 }
 
 const sessionDigestCache = new Map();
@@ -785,12 +800,8 @@ function getSessionDigest(jsonlPath) {
   return cachedByMtime(sessionDigestCache, jsonlPath, jsonlPath, () => buildSessionDigest(jsonlPath), { progressMap: {}, terminated: new Map() });
 }
 
-function getProgressMap(jsonlPath) {
-  return getSessionDigest(jsonlPath).progressMap;
-}
-
-function getTerminatedTeammates(jsonlPath) {
-  return getSessionDigest(jsonlPath).terminated;
+async function getProgressMap(jsonlPath) {
+  return (await getSessionDigest(jsonlPath)).progressMap;
 }
 
 function readRecentMessages(jsonlPath, limit = 10) {
@@ -1765,15 +1776,20 @@ app.get('/api/sessions/:sessionId/loop', (req, res) => {
 
 // Memo for a cold read keyed on the file's identity, so a repeat ask costs the one stat
 // it already pays to notice the file grew. `load` may return a promise: the promise is
-// what gets cached, so concurrent callers share a single read. Null when the file is gone.
+// what gets cached, so concurrent callers share a single read, and a file that grows while
+// it is pending starts no second one. Null when the file is gone.
 function cachedByFileStat(cache, filePath, load) {
   let stat;
   try { stat = statSync(filePath); } catch (_) { return null; }
   const hit = cache.get(filePath);
-  if (hit && hit.mtimeMs === stat.mtimeMs && hit.size === stat.size) return hit.value;
-  const value = load();
-  cache.set(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, value });
-  return value;
+  if (hit && (hit.pending || (hit.mtimeMs === stat.mtimeMs && hit.size === stat.size))) return hit.value;
+  const entry = { mtimeMs: stat.mtimeMs, size: stat.size, value: load() };
+  if (typeof entry.value?.then === 'function') {
+    entry.pending = true;
+    entry.value.finally(() => { entry.pending = false; }).catch(() => {});
+  }
+  cache.set(filePath, entry);
+  return entry.value;
 }
 
 // Cold path — a full transcript scan, so the result is held until the file grows.
@@ -1784,12 +1800,12 @@ function getArtifactLinks(jsonlPath) {
   return cachedByFileStat(artifactsByPath, jsonlPath, () => readArtifactLinks(jsonlPath)) || [];
 }
 
-app.get('/api/sessions/:sessionId/artifacts', (req, res) => {
+app.get('/api/sessions/:sessionId/artifacts', async (req, res) => {
   try {
     const metadata = loadSessionMetadata();
     const meta = metadata[req.params.sessionId] || metadata[resolveSessionId(req.params.sessionId)];
     if (!meta?.jsonlPath) return res.json({ artifacts: [] });
-    res.json({ artifacts: getArtifactLinks(meta.jsonlPath) });
+    res.json({ artifacts: await getArtifactLinks(meta.jsonlPath) });
   } catch (error) {
     console.error('Error reading artifacts:', error);
     res.status(500).json({ error: 'Failed to read artifacts' });
@@ -1834,7 +1850,7 @@ async function findPads(root, depth = 0) {
 // stored, so re-reading a transcript cannot drift; the client links each pad once
 // and records that it did, which is what stops a re-read undoing an unlink.
 async function readCreatedPads(meta) {
-  const creations = readScratchpadCreations(meta.jsonlPath);
+  const creations = await readScratchpadCreations(meta.jsonlPath);
   // No `scratch new` in the transcript means no disk work at all, so sessions that
   // never touch the CLI pay a substring pass over the transcript and nothing more.
   if (!creations.length) return [];
@@ -2112,7 +2128,7 @@ app.get('/api/sessions/:sessionId/workflows/:wfId/run', async (req, res) => {
       try { files = readdirSync(runDir).filter((f) => /^agent-.+\.jsonl$/.test(f)); } catch (_) {}
       for (const f of files) {
         const agentId = f.slice('agent-'.length, -'.jsonl'.length);
-        const stats = extractTranscriptStats(path.join(runDir, f)) || {};
+        const stats = (await extractTranscriptStats(path.join(runDir, f))) || {};
         let type = null;
         try {
           type = JSON.parse(readFileSync(path.join(runDir, `agent-${agentId}.meta.json`), 'utf8')).agentType || null;
@@ -2349,7 +2365,7 @@ app.get('/api/teams/:name', (req, res) => {
 // extractAgentResultFromTranscript finds more, so agents latched earlier rescan once.
 const RESULT_SCAN = 2;
 
-app.get('/api/sessions/:sessionId/agents', (req, res) => {
+app.get('/api/sessions/:sessionId/agents', async (req, res) => {
   const sessionId = resolveSessionId(req.params.sessionId);
   const agentDir = path.join(AGENT_ACTIVITY_DIR, sessionId);
   if (!existsSync(agentDir)) return res.json({ agents: [], waitingForUser: null });
@@ -2393,10 +2409,11 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
         agents.push(agent);
       } catch { /* skip invalid */ }
     }
+    const digest = meta.jsonlPath ? await getSessionDigest(meta.jsonlPath) : null;
     const liveAgents = agents.filter(isAgentLive);
     if (liveAgents.length && meta.jsonlPath) {
       try {
-        const terminated = getTerminatedTeammates(meta.jsonlPath);
+        const { terminated } = digest;
         if (terminated.size) {
           for (const agent of liveAgents) {
             const agentName = agentDisplayName(agent);
@@ -2413,10 +2430,9 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
       // Mark agents whose spawning Agent tool_use was rejected by the user as stopped:
       // the parent will never read their output, so they're orphans. Match by agentId
       // when the digest already correlated tool_use→agent, else fall back to prompt text
-      // (the agent-spy hook doesn't record the spawning tool_use_id).
+      // (the plugin's mod doesn't record the spawning tool_use_id).
       try {
-        const { rejectedAgentIds = new Set(), rejectedPrompts = new Set(), killedAgentIds = new Set() } =
-          getSessionDigest(meta.jsonlPath);
+        const { rejectedAgentIds = new Set(), rejectedPrompts = new Set(), killedAgentIds = new Set() } = digest;
         if (rejectedAgentIds.size || rejectedPrompts.size || killedAgentIds.size) {
           for (const agent of liveAgents) {
             if (!isAgentLive(agent)) continue;
@@ -2447,8 +2463,7 @@ app.get('/api/sessions/:sessionId/agents', (req, res) => {
     const byAgentId = {};
     if (meta.jsonlPath) {
       try {
-        const progressMap = getProgressMap(meta.jsonlPath);
-        for (const entry of Object.values(progressMap)) {
+        for (const entry of Object.values(digest.progressMap)) {
           byAgentId[entry.agentId] ||= {};
           const e = byAgentId[entry.agentId];
           for (const f of ['prompt', 'name', 'description', 'usage']) {
@@ -2925,7 +2940,7 @@ app.get('/api/sessions/:sessionId/agents/:agentId/messages/stream', (req, res) =
   res.on('error', cleanup);
 });
 
-app.get('/api/sessions/:sessionId/messages', (req, res) => {
+async function sendSessionMessages(req, res) {
   const limit = Math.min(parseInt(req.query.limit, 10) || 10, 50);
   const before = req.query.before || null;
   const metadata = loadSessionMetadata();
@@ -2942,9 +2957,10 @@ app.get('/api/sessions/:sessionId/messages', (req, res) => {
     hasMore = messages.length > limit;
     if (hasMore) messages = messages.slice(-limit);
   }
+  const compactPromise = cachedByMtime(compactSummaryCache, jsonlPath, jsonlPath, () => readCompactSummaries(jsonlPath), []);
   const agentMessages = messages.filter(m => m.tool === 'Agent' && m.toolUseId);
   if (agentMessages.length) {
-    const progressMap = getProgressMap(jsonlPath);
+    const progressMap = await getProgressMap(jsonlPath);
     const resolvedSid = resolveSessionId(req.params.sessionId);
     const agentDir = path.join(AGENT_ACTIVITY_DIR, resolvedSid);
     for (const msg of agentMessages) {
@@ -2995,15 +3011,7 @@ app.get('/api/sessions/:sessionId/messages', (req, res) => {
       }
     }
   }
-  const cachedCompact = compactSummaryCache.get(jsonlPath);
-  let compactSummaries;
-  if (cachedCompact && Date.now() - cachedCompact.ts < MESSAGE_CACHE_TTL) {
-    compactSummaries = cachedCompact.data;
-  } else {
-    compactSummaries = readCompactSummaries(jsonlPath);
-    compactSummaryCache.set(jsonlPath, { data: compactSummaries, ts: Date.now() });
-    evictStaleCache(compactSummaryCache);
-  }
+  const compactSummaries = await compactPromise;
   // Match compaction messages to summaries by chronological order
   const compactedMsgs = messages
     .filter(m => m.systemLabel === 'Compacted')
@@ -3021,29 +3029,30 @@ app.get('/api/sessions/:sessionId/messages', (req, res) => {
     delete msg.promptId;
   }
   res.json({ messages, hasMore, sessionId: req.params.sessionId });
-});
+}
 
-app.get('/api/sessions/:sessionId/tool-result/:toolUseId', (req, res) => {
+app.get('/api/sessions/:sessionId/messages', asyncRoute(sendSessionMessages));
+
+app.get('/api/sessions/:sessionId/tool-result/:toolUseId', asyncRoute(async (req, res) => {
   const metadata = loadSessionMetadata();
   const meta = metadata[req.params.sessionId] || metadata[resolveSessionId(req.params.sessionId)];
   const jsonlPath = meta?.jsonlPath;
   if (!jsonlPath) return res.status(404).json({ error: 'session not found' });
-  const content = readFullToolResult(jsonlPath, req.params.toolUseId);
+  const content = await readFullToolResult(jsonlPath, req.params.toolUseId);
   if (content == null) return res.status(404).json({ error: 'tool result not found' });
   res.json({ toolUseId: req.params.toolUseId, content });
-});
+}));
 
 const toolStatsCache = new Map();
 
-function buildToolStats(jsonlPath) {
+async function buildToolStats(jsonlPath) {
   const toolUseById = {};     // tool_use_id -> { displayName, isSkill }
   const seenResults = new Set();
   const toolMap = {};         // displayName -> { count, success, failed, outputBytes }
   const skillPromptIds = {};  // promptId -> [skillDisplayName, ...]
   const promptOutputBytes = {}; // promptId -> total outputBytes in that turn
 
-  const content = readFileSync(jsonlPath, 'utf8');
-  for (const line of content.split('\n')) {
+  for await (const line of readLines(jsonlPath)) {
     if (!line) continue;
     let obj;
     try { obj = JSON.parse(line); } catch (_) { continue; }
@@ -3130,13 +3139,13 @@ function buildToolStats(jsonlPath) {
   return { totalCalls, uniqueTools, totalFailed, totalRejected, tools };
 }
 
-app.get('/api/sessions/:sessionId/tool-stats', (req, res) => {
+app.get('/api/sessions/:sessionId/tool-stats', async (req, res) => {
   const metadata = loadSessionMetadata();
   const meta = metadata[req.params.sessionId] || metadata[resolveSessionId(req.params.sessionId)];
   const jsonlPath = meta?.jsonlPath;
   if (!jsonlPath) return res.status(404).json({ error: 'session not found' });
   try {
-    const data = cachedByMtime(toolStatsCache, jsonlPath, jsonlPath, () => buildToolStats(jsonlPath), null);
+    const data = await cachedByMtime(toolStatsCache, jsonlPath, jsonlPath, () => buildToolStats(jsonlPath), null);
     if (!data) return res.status(404).json({ error: 'could not parse session' });
     res.json({ sessionId: req.params.sessionId, ...data });
   } catch (e) {
@@ -3144,31 +3153,24 @@ app.get('/api/sessions/:sessionId/tool-stats', (req, res) => {
   }
 });
 
-app.get('/api/sessions/:sessionId/user-image/:msgUuid/:blockIndex', (req, res) => {
+async function sendTranscriptImage(req, res, read) {
   const metadata = loadSessionMetadata();
   const meta = metadata[req.params.sessionId] || metadata[resolveSessionId(req.params.sessionId)];
   const jsonlPath = meta?.jsonlPath;
   if (!jsonlPath) return res.status(404).end();
-  const img = readUserImage(jsonlPath, req.params.msgUuid, req.params.blockIndex);
+  const img = await read(jsonlPath);
   if (!img) return res.status(404).end();
   const buf = Buffer.from(img.data, 'base64');
   res.setHeader('Content-Type', img.mediaType);
   res.setHeader('Cache-Control', 'no-store');
   res.end(buf);
-});
+}
 
-app.get('/api/sessions/:sessionId/tool-result-image/:toolUseId/:n', (req, res) => {
-  const metadata = loadSessionMetadata();
-  const meta = metadata[req.params.sessionId] || metadata[resolveSessionId(req.params.sessionId)];
-  const jsonlPath = meta?.jsonlPath;
-  if (!jsonlPath) return res.status(404).end();
-  const img = readToolResultImage(jsonlPath, req.params.toolUseId, req.params.n);
-  if (!img) return res.status(404).end();
-  const buf = Buffer.from(img.data, 'base64');
-  res.setHeader('Content-Type', img.mediaType);
-  res.setHeader('Cache-Control', 'no-store');
-  res.end(buf);
-});
+app.get('/api/sessions/:sessionId/user-image/:msgUuid/:blockIndex', asyncRoute((req, res) =>
+  sendTranscriptImage(req, res, (p) => readUserImage(p, req.params.msgUuid, req.params.blockIndex))));
+
+app.get('/api/sessions/:sessionId/tool-result-image/:toolUseId/:n', asyncRoute((req, res) =>
+  sendTranscriptImage(req, res, (p) => readToolResultImage(p, req.params.toolUseId, req.params.n))));
 
 app.get('/api/sessions/:sessionId/cached-image/:n', (req, res) => {
   const img = readCachedImage(req.params.sessionId, req.params.n, CLAUDE_DIR);
