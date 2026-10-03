@@ -7673,6 +7673,27 @@ pre.mermaid svg {
   background: var(--accent-dim);
 }
 
+/* Centered in the 6px gap between cards (.session-item margin-bottom). */
+.session-item.sg-insert-before::after,
+.session-item.sg-insert-after::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+  pointer-events: none;
+}
+
+.session-item.sg-insert-before::after {
+  top: -5px;
+}
+
+.session-item.sg-insert-after::after {
+  bottom: -5px;
+}
+
 /* An empty section shows only while a drag needs its ungroup drop zone. */
 .sessions-list:not(.sg-dragging-active) .sg-section-empty {
   display: none;

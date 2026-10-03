@@ -52,7 +52,12 @@ const collapsedProjectGroups = new Set();
 const SECTION_GROUPS = '__section_groups__';
 const SECTION_PROJECTS = '__section_projects__';
 const SECTION_SESSIONS = '__section_sessions__';
-let stableGroupOrder = []; // cached project path order to prevent jumping
+// Project paths and session ids in Active-view sidebar order, kept across reloads so live
+// activity does not reshuffle the list. Each holds only what the loaded list still has.
+const PROJECT_ORDER_KEY = 'project-order';
+const SESSION_ORDER_KEY = 'session-order';
+let stableGroupOrder = readStoredList(PROJECT_ORDER_KEY);
+let sessionOrder = readStoredList(SESSION_ORDER_KEY);
 let sessionGroups = []; // user-named groups: [{id, name, color, members:[{type,ref}]}]
 // Sessions the user pulled out of their dispatch placement; the server's group map is not theirs to edit.
 let sgReleased = new Set();
@@ -3462,6 +3467,39 @@ function getFilteredSessions() {
   return filteredSessions;
 }
 
+function saveOrder(key, prev, next) {
+  if (next.length === prev.length && next.every((id, i) => id === prev[i])) return prev;
+  try {
+    store.setItem(key, JSON.stringify(next));
+  } catch (_) {}
+  return next;
+}
+
+// An entry keeps its slot while `loaded` has it; one not seen before enters at the top.
+function mergeOrder(key, prev, loaded, incoming) {
+  const kept = prev.filter((id) => loaded.has(id));
+  const known = new Set(kept);
+  return saveOrder(key, prev, [...incoming.filter((id) => !known.has(id)), ...kept]);
+}
+
+// Only the Active view groups into blocks; the other views stay in recency order.
+function applyStableSessionOrder(list) {
+  if (sessionFilter !== 'active' || sessions.length === 0) return list;
+  const loaded = new Set(sessions.map((s) => s.id));
+  const ids = list.map((s) => s.id);
+  sessionOrder = mergeOrder(SESSION_ORDER_KEY, sessionOrder, loaded, ids);
+  const rank = new Map(sessionOrder.map((id, i) => [id, i]));
+  return [...list].sort((a, b) => rank.get(a.id) - rank.get(b.id));
+}
+
+function insertNear(arr, isRef, item, after) {
+  const at = arr.findIndex(isRef);
+  if (at < 0) return null;
+  const out = [...arr];
+  out.splice(at + (after ? 1 : 0), 0, item);
+  return out;
+}
+
 // A live refresh would replace the zen panel's link-a-file input mid-type, the same way it
 // would swallow a half-typed group name. Off zen there is no panel, so skip the DOM probe.
 function zenPanelIsEditing() {
@@ -3478,7 +3516,7 @@ function renderSessions() {
   // Zen narrows the rendered list only — the session picker keeps calling getFilteredSessions()
   // and still offers everything, or there would be no way to switch sessions without leaving zen.
   const zenSession = zenMode && currentSessionId ? sessions.find((s) => s.id === currentSessionId) : null;
-  const filteredSessions = zenMode ? (zenSession ? [zenSession] : []) : getFilteredSessions();
+  const filteredSessions = zenMode ? (zenSession ? [zenSession] : []) : applyStableSessionOrder(getFilteredSessions());
 
   if (filteredSessions.length === 0) {
     let emptyMsg = 'No sessions found';
@@ -3787,7 +3825,7 @@ function renderSessions() {
       ungrouped.sort(pinSort);
     }
 
-    // Stable group order: preserve existing order, append new groups sorted by recency.
+    // Stable group order: preserve existing order, put new groups first, sorted by recency.
     // Grouped projects stay in the array (they are just not rendered here), so dragging one
     // back out restores its old slot instead of jumping to the top.
     const latestByPath = new Map();
@@ -3796,11 +3834,9 @@ function renderSessions() {
       const t = new Date(s.modifiedAt).getTime();
       latestByPath.set(s.project, Math.max(latestByPath.get(s.project) ?? -Infinity, t));
     }
-    const knownPaths = new Set(stableGroupOrder);
-    const keptOrder = stableGroupOrder.filter((p) => latestByPath.has(p));
-    const newPaths = [...latestByPath.keys()].filter((p) => !knownPaths.has(p));
-    if (newPaths.length > 1) newPaths.sort((a, b) => latestByPath.get(b) - latestByPath.get(a));
-    stableGroupOrder = [...keptOrder, ...newPaths];
+    const byRecency = [...latestByPath.keys()].sort((a, b) => latestByPath.get(b) - latestByPath.get(a));
+    const loadedPaths = new Set(sessions.map((s) => s.project));
+    stableGroupOrder = mergeOrder(PROJECT_ORDER_KEY, stableGroupOrder, loadedPaths, byRecency);
     const sortedGroups = stableGroupOrder.filter((p) => groups.has(p)).map((p) => [p, groups.get(p)]);
 
     // The section header is rendered even when nothing is left under it: it is the drop target
@@ -4545,17 +4581,68 @@ function sgCommitRename(input, save) {
 //#region SESSION_GROUPS_DND
 // At most one zone is lit, so the reference is enough - dragover fires many times a second.
 let sgLitZone = null;
+let sgDragEl = null;
+const SG_LIT_CLASSES = ['sg-drop-over', 'sg-insert-before', 'sg-insert-after'];
+const SG_LIT_SELECTOR = SG_LIT_CLASSES.map((c) => `.${c}`).join(', ');
 
 function sgClearDropTargets() {
-  sgLitZone?.classList.remove('sg-drop-over');
+  sgLitZone?.classList.remove(...SG_LIT_CLASSES);
   sgLitZone = null;
 }
 
-function sgLightDropTarget(zone) {
-  if (sgLitZone === zone) return;
+function sgLightDropTarget(zone, cls = 'sg-drop-over') {
+  if (sgLitZone === zone && zone.classList.contains(cls)) return;
   sgClearDropTargets();
-  zone.classList.add('sg-drop-over');
+  zone.classList.add(cls);
   sgLitZone = zone;
+}
+
+// A session dropped on the edge of a card in its own list moves next to it. `share` is the part
+// of the card's height on each edge that means insert; the middle keeps its group gesture.
+function sgInsertHit(card, e, share) {
+  const rect = card.getBoundingClientRect();
+  const y = e.clientY - rect.top;
+  const after = y > rect.height * (1 - share);
+  if (!after && y >= rect.height * share) return null;
+  return { zone: card, cls: after ? 'sg-insert-after' : 'sg-insert-before', insert: { card, after } };
+}
+
+function sgSiblingCard(target) {
+  if (sgDrag?.kind !== 'session' || sessionFilter !== 'active' || !sgDragEl) return null;
+  const card = target.closest('.session-item');
+  return card && card !== sgDragEl && card.parentElement === sgDragEl.parentElement ? card : null;
+}
+
+function sgDropZone(target, e) {
+  const sibling = sgSiblingCard(target);
+  const hit = sgGroupDropZone(target);
+  // Where the middle of a card does nothing, the whole card is an insert target.
+  return (sibling && sgInsertHit(sibling, e, hit ? 0.25 : 0.5)) || hit;
+}
+
+function sgInsertSession(dragId, { card, after }) {
+  const ref = card.dataset.sessionId;
+  const group = card.closest('.project-group-sessions') ? null : sgGroupOf('session', ref);
+  if (group && sgGroupOf('session', dragId)?.id === group.id) {
+    // Loose sessions in a named group follow the group's member order, not the sidebar order.
+    const members = insertNear(
+      group.members.filter((m) => !(m.type === 'session' && m.ref === dragId)),
+      (m) => m.type === 'session' && m.ref === ref,
+      { type: 'session', ref: dragId },
+      after,
+    );
+    if (!members) return;
+    group.members = members;
+    persistSessionGroups();
+    return;
+  }
+  const order = insertNear(
+    sessionOrder.filter((id) => id !== dragId),
+    (id) => id === ref,
+    dragId,
+    after,
+  );
+  if (order) sessionOrder = saveOrder(SESSION_ORDER_KEY, sessionOrder, order);
 }
 
 function sgDragPayload(el) {
@@ -4571,7 +4658,7 @@ function sgDragPayload(el) {
 // Resolve the element under the pointer to a legal drop zone for the in-flight drag.
 // Returns {zone} to ungroup, {zone, groupId} to assign, or {zone, pairWith}/{zone, pairSession}
 // to stack two ungrouped items into a brand-new group.
-function sgDropZone(target) {
+function sgGroupDropZone(target) {
   if (!sgDrag) return null;
   const base =
     '.sg-ungroup-zone, .session-group-header, .session-group-sessions, .project-group-header, .project-group-sessions';
@@ -4655,6 +4742,7 @@ function sgOnDragStart(e) {
     return;
   }
   sgDrag = payload;
+  sgDragEl = el;
   el.classList.add('sg-dragging');
   sessionsList.classList.add('sg-dragging-active');
   e.dataTransfer.effectAllowed = 'move';
@@ -4664,7 +4752,7 @@ function sgOnDragStart(e) {
 }
 
 function sgOnDragOver(e) {
-  const hit = sgDropZone(e.target);
+  const hit = sgDropZone(e.target, e);
   // Moving onto a spot that refuses the drop has to put the previous highlight out, or two zones
   // stay lit and the one under the pointer is not the one that would receive the drop.
   if (!hit) {
@@ -4673,15 +4761,20 @@ function sgOnDragOver(e) {
   }
   e.preventDefault();
   e.dataTransfer.dropEffect = 'move';
-  sgLightDropTarget(hit.zone);
+  sgLightDropTarget(hit.zone, hit.cls);
 }
 
 function sgOnDrop(e) {
-  const hit = sgDropZone(e.target);
+  const hit = sgDropZone(e.target, e);
   if (!hit) return;
   e.preventDefault();
   e.stopPropagation();
   const drag = sgDrag;
+  if (hit.insert) {
+    sgInsertSession(drag.ref, hit.insert);
+    sgFinishDrag();
+    return;
+  }
   if (hit.pairWith || hit.pairSession) {
     // Stacked onto an ungrouped item: seed a group, then let the user name it in place.
     const target = hit.pairWith
@@ -4712,6 +4805,7 @@ function sgOnDrop(e) {
 
 function sgFinishDrag() {
   sgDrag = null;
+  sgDragEl = null;
   sgClearDropTargets();
   sessionsList.classList.remove('sg-dragging-active');
   // biome-ignore lint/suspicious/useIterableCallbackReturn: forEach side-effect
@@ -4732,7 +4826,7 @@ function initSessionGroupsDnd() {
   sessionsList.addEventListener('dragstart', sgOnDragStart);
   sessionsList.addEventListener('dragover', sgOnDragOver);
   sessionsList.addEventListener('dragleave', (e) => {
-    const zone = e.target.closest?.('.sg-drop-over');
+    const zone = e.target.closest?.(SG_LIT_SELECTOR);
     if (zone && !zone.contains(e.relatedTarget)) sgClearDropTargets();
   });
   sessionsList.addEventListener('drop', sgOnDrop);
