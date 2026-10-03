@@ -26,8 +26,8 @@ const SERVER_INFO = path.join(CLAUDE_DIR, '.cck', 'server.json');
 // because an enqueue wakes the poll immediately.
 const WAIT_SEC = 120;
 const RETRY_MS = 15000;
-// Windows sometimes fails a loopback connect with ETIMEDOUT while the board is up, so that
-// error gets a few short waits before the normal one.
+// Windows sometimes fails a loopback connect with ETIMEDOUT, or resets it once open, while the
+// board is up, so those errors get a few short waits before the normal one.
 const CONNECT_RETRY_MS = [250, 500, 1000, 2000];
 // `--topic dispatch` is the dispatch inbox: reports from sessions this one started.
 const TOPIC = process.argv.includes('--topic') ? process.argv[process.argv.indexOf('--topic') + 1] : null;
@@ -75,8 +75,8 @@ async function poll(base) {
     } catch (e) {
       // No board yet, or it went away. It may come back later in the session, so keep
       // waiting quietly -- a missing server is the normal case, not an error.
-      const timedOut = e.cause?.code === 'ETIMEDOUT' && e.cause?.syscall === 'connect';
-      if (timedOut && connectRetries < CONNECT_RETRY_MS.length) {
+      const blip = (e.cause?.code === 'ETIMEDOUT' && e.cause?.syscall === 'connect') || e.cause?.code === 'ECONNRESET';
+      if (blip && connectRetries < CONNECT_RETRY_MS.length) {
         await sleep(CONNECT_RETRY_MS[connectRetries++]);
       } else {
         connectRetries = 0;

@@ -431,6 +431,8 @@ class CliUnreachable extends Error { constructor() { super(unreachable()); this.
 // connects run at once. Nothing reached the server, so even a POST is safe to send again.
 const CONNECT_RETRY_MS = [250, 500, 1000, 2000];
 const isConnectTimeout = (e) => e.cause?.code === 'ETIMEDOUT' && e.cause?.syscall === 'connect';
+// A loopback connection can also be reset after it opens. A GET is safe to send again; a write may have landed.
+const isRetryable = (e, init) => isConnectTimeout(e) || (!init?.method && e.cause?.code === 'ECONNRESET');
 
 async function cliFetch(urlPath, init) {
   const base = cliBaseUrl();
@@ -439,7 +441,7 @@ async function cliFetch(urlPath, init) {
     try {
       return await fetch(`${base}${urlPath}`, init);
     } catch (e) {
-      if (isConnectTimeout(e) && i < CONNECT_RETRY_MS.length) {
+      if (isRetryable(e, init) && i < CONNECT_RETRY_MS.length) {
         await new Promise((r) => setTimeout(r, CONNECT_RETRY_MS[i]));
         continue;
       }
