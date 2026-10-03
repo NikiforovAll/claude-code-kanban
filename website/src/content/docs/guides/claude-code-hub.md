@@ -65,7 +65,7 @@ Theme and project scope are the same in all hub apps:
 
 ## Framing
 
-Standalone, Claude Code Kanban sends `X-Frame-Options: DENY` and `Content-Security-Policy: frame-ancestors 'none'`, so no other page can put it in a frame. When `HUB_URL` is set, it allows frames from itself, `http://localhost:*` and `http://127.0.0.1:*`. If the hub uses a different address, that origin is allowed too.
+Standalone, Claude Code Kanban sends `X-Frame-Options: DENY` and `Content-Security-Policy: frame-ancestors 'none'`, so no other page can put it in a frame. The terminal page, `/terminal.html`, is the exception: the board frames it from its other loopback name, so the board's pages on `localhost` and `127.0.0.1` on the same port can frame it. When `HUB_URL` is set, it allows frames from itself, `http://localhost:*` and `http://127.0.0.1:*`. If the hub uses a different address, that origin is allowed too.
 
 ## Help modal
 

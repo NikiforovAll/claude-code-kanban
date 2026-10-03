@@ -11375,31 +11375,44 @@ const TERMINAL_MODES_KEY = 'terminal-sessions';
 const TERMINAL_FONT_KEY = 'terminal-font-size';
 const TERMINAL_FONT_MIN = 8;
 const TERMINAL_FONT_MAX = 32;
-const ACK_BATCH_BYTES = 32 * 1024;
+const TERMINAL_FRAME_ISOLATED_MS = 5000;
+const TERMINAL_FRAME_LOAD_MS = 10000;
+const TERMINAL_FRAME_ALIVE_MS = 5000;
+const TERMINAL_MSG = 'cck-term:';
 const TERMINAL_RETRY_MS = [500, 1000, 2000, 4000, 8000];
 const TERMINAL_STABLE_MS = 5000;
 const STALE_TOKEN_MSG = 'The terminal token is out of date. Reload the hub window.';
 // Read at load, before the first updateUrl() rewrites the URL without the fragment.
 let terminalToken = readTerminalToken();
 const termState = {
-  loaded: null,
-  term: null,
-  fit: null,
-  webgl: null,
-  ws: null,
+  socket: null,
   sessionId: null,
+  fontSize: null,
   syncedView: null,
   panelHidden: false,
   shown: false,
   attached: false,
   closeGuard: false,
-  leaving: false,
   focusNext: false,
   openedByUser: null,
-  ackPending: 0,
-  ackTimer: null,
   retryTimer: null,
 };
+const termFrame = {
+  el: null,
+  origin: null,
+  ready: null,
+  resolve: null,
+  inited: false,
+  reload: false,
+  claims: '',
+  theme: '',
+  sameOrigin: false,
+};
+
+function resetTerminalFrame(patch) {
+  Object.assign(termFrame, { inited: false, reload: false, claims: '', theme: '', ...patch });
+}
+let terminalSocketSeq = 0;
 
 // The hub passes the token in the fragment, which is never sent to a server or logged.
 function readTerminalToken() {
@@ -11480,12 +11493,13 @@ function inPageField(e) {
   return !!field && !document.getElementById('terminal-pane').contains(field);
 }
 
-function terminalShortcut(e) {
+// `probe` asks which keys the terminal frame hands back, and the frame sees keys only while it has focus.
+function terminalShortcut(e, probe = false) {
   const ctrlAlt = e.ctrlKey && e.altKey && !e.shiftKey && !e.metaKey;
   const ctrlShift = e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey;
   // Ctrl+_ is Claude Code's undo, so the zoom keys leave it to the terminal.
   const zoom = e.key === '_' ? undefined : zoomDelta(e);
-  if (zoom !== undefined && termState.term && terminalPaneFocused()) {
+  if (zoom !== undefined && termFrame.inited && (probe || terminalPaneFocused())) {
     return () => adjustTerminalFontSize(Math.sign(zoom));
   }
   if (ctrlAlt && e.code === 'KeyS') return swapToPreviousSession;
@@ -11564,7 +11578,13 @@ function syncTerminal() {
     btn.classList.toggle('active', on);
   }
   sessionView.classList.toggle('terminal-mode', on);
+  pushTerminalClaims();
   if (!on) {
+    // A hidden xterm textarea drops focus, but a display:none iframe keeps it and would take keys unseen.
+    if (termState.shown && terminalPaneFocused()) {
+      terminalHadFocus = false;
+      document.activeElement.blur();
+    }
     termState.shown = false;
     termState.focusNext = false;
     termState.openedByUser = null;
@@ -11609,8 +11629,7 @@ function promptAwaitsUser(sessionId) {
 
 function onTerminalShown(focus = true) {
   requestAnimationFrame(() => {
-    fitTerminal();
-    repaintTerminal();
+    terminalFrameSend('refresh');
     if (focus) focusTerminalPane();
   });
 }
@@ -11618,37 +11637,210 @@ function onTerminalShown(focus = true) {
 function focusTerminalPane() {
   const prompt = document.getElementById('terminal-prompt');
   if (prompt.classList.contains('visible')) prompt.querySelector('button')?.focus();
-  else termState.term?.focus();
+  else if (termFrame.inited) {
+    termFrame.el.focus();
+    terminalFrameSend('focus');
+  }
 }
 
 function leaveTerminalPane() {
-  termState.leaving = true;
+  terminalHadFocus = false;
   document.activeElement.blur();
-  termState.leaving = false;
   setFocusZone('sidebar');
 }
 
-function loadXterm() {
-  if (termState.loaded) return termState.loaded;
-  const css = document.createElement('link');
-  css.rel = 'stylesheet';
-  css.href = '/vendor/xterm/xterm.css';
-  document.head.appendChild(css);
-  const script = (src) =>
-    new Promise((resolve, reject) => {
-      const s = document.createElement('script');
-      s.src = src;
-      s.onload = resolve;
-      s.onerror = () => reject(new Error(`failed to load ${src}`));
-      document.head.appendChild(s);
-    });
-  termState.loaded = script('/vendor/xterm/xterm.js').then(() =>
-    Promise.all(['addon-fit', 'addon-webgl', 'addon-unicode11'].map((n) => script(`/vendor/xterm/${n}.js`))),
-  );
-  termState.loaded.catch(() => {
-    termState.loaded = null;
+// Chrome puts frames in one process per site, and a site ignores the port. Served from another
+// loopback name, the terminal runs in its own renderer, so board work never delays a key or a frame.
+// localhost maps to [::1], not 127.0.0.1: Chrome reaches localhost over IPv6, and some Windows
+// machines drop fresh IPv4 loopback connects in bursts, which stalls a socket for seconds.
+// A board on [::1] keeps the terminal in its process, because frame-ancestors cannot name an IPv6
+// literal; so does any other host, which has no second name.
+function terminalFrameOrigin(loc = location) {
+  const other = { localhost: '[::1]', '127.0.0.1': 'localhost' }[loc.hostname];
+  return other ? `${loc.protocol}//${other}${loc.port ? `:${loc.port}` : ''}` : loc.origin;
+}
+
+function ensureTerminalFrame() {
+  if (termFrame.ready) return termFrame.ready;
+  const isolated = termFrame.sameOrigin ? location.origin : terminalFrameOrigin();
+  // A host that does not answer on the other name (IPv6 turned off) still gets a terminal, in this
+  // process, and later loads skip the wait.
+  const ready = loadTerminalFrame(isolated, TERMINAL_FRAME_ISOLATED_MS).catch(async (err) => {
+    if (isolated === location.origin) throw err;
+    await loadTerminalFrame(location.origin, TERMINAL_FRAME_LOAD_MS);
+    termFrame.sameOrigin = true;
   });
-  return termState.loaded;
+  termFrame.ready = ready;
+  ready.catch(() => {
+    if (termFrame.ready === ready) termFrame.ready = null;
+  });
+  return ready;
+}
+
+function loadTerminalFrame(origin, timeoutMs) {
+  termFrame.el?.remove();
+  const el = document.createElement('iframe');
+  el.className = 'terminal-frame';
+  el.title = 'Terminal';
+  el.allow = 'clipboard-read; clipboard-write';
+  el.src = `${origin}/terminal.html#p=${encodeURIComponent(location.origin)}`;
+  resetTerminalFrame({ el, origin });
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      if (termFrame.el !== el || termFrame.inited) return;
+      el.remove();
+      termFrame.el = null;
+      reject(new Error('The terminal did not load.'));
+    }, timeoutMs);
+    termFrame.resolve = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    document.getElementById('terminal-host').appendChild(el);
+  });
+}
+
+function sendTerminalTheme() {
+  if (!termFrame.inited) return;
+  const options = terminalThemeOptions();
+  const key = JSON.stringify(options);
+  if (key === termFrame.theme) return;
+  termFrame.theme = key;
+  postToTerminalFrame('theme', { options });
+}
+
+// Keyed on the colors, and style is watched, because under the hub a theme change lands in two
+// steps: the class flips while the old pick's inline vars are still on body, then the SDK swaps them.
+new MutationObserver(sendTerminalTheme).observe(document.body, {
+  attributes: true,
+  attributeFilter: ['class', 'data-color-theme', 'style'],
+});
+
+function postToTerminalFrame(t, data) {
+  termFrame.el.contentWindow?.postMessage({ ...data, type: TERMINAL_MSG + t }, termFrame.origin);
+}
+
+function terminalFrameSend(t, data) {
+  if (termFrame.inited) postToTerminalFrame(t, data);
+}
+
+window.addEventListener('message', (e) => {
+  if (!termFrame.el || e.source !== termFrame.el.contentWindow || e.origin !== termFrame.origin) return;
+  const m = e.data;
+  if (typeof m?.type === 'string' && m.type.startsWith(TERMINAL_MSG))
+    onTerminalFrameMessage(m.type.slice(TERMINAL_MSG.length), m);
+});
+
+function onTerminalFrameMessage(t, m) {
+  const socket = termState.socket;
+  const current = socket && m.socketId === socket.id;
+  if (t === 'loaded') {
+    // A second load is the frame reloaded (its context menu), with no terminal and no socket.
+    const themeOptions = terminalThemeOptions();
+    resetTerminalFrame({ reload: termFrame.reload || termFrame.inited, theme: JSON.stringify(themeOptions) });
+    postToTerminalFrame('init', {
+      fontFamily:
+        appConfig.terminal.fontFamily ||
+        getComputedStyle(document.body).getPropertyValue('--font-mono').trim() ||
+        'monospace',
+      fontSize: currentTerminalFontSize(),
+      scrollback: appConfig.terminal.scrollback,
+      themeOptions,
+    });
+  } else if (t === 'term') {
+    termFrame.inited = true;
+    pushTerminalClaims();
+    // A theme change between init and now was dropped.
+    sendTerminalTheme();
+    termFrame.resolve?.();
+    if (termFrame.reload) {
+      termFrame.reload = false;
+      reconnectTerminal();
+    }
+  } else if (t === 'key') replayTerminalKey(m);
+  // Chrome does not always fire focusin on the iframe element when its content takes focus.
+  else if (t === 'focused') terminalHadFocus = terminalPaneFocused();
+  else if (t === 'opening') {
+    if (current) clearTimeout(socket.aliveTimer);
+  } else if (t === 'output') {
+    if (current && terminalBootTimer) hideTerminalBoot();
+  } else if (t === 'ws') {
+    if (!current) return;
+    if (m.msg?.t === 'ready') socket.readyAt = Date.now();
+    else if (m.msg?.t === 'error') socket.refused = true;
+    onTerminalMessage(socket.sessionId, m.msg, m.tail);
+  } else if (t === 'close') {
+    if (current) onTerminalSocketClose(socket, m.code);
+  }
+}
+
+// The frame hands back the keys the board acts on. Replaying them on a textarea inside the pane gives
+// the document listeners the target they saw when xterm lived here: the shortcut runs, the SDK
+// forwards a hub key, and the text-field guard keeps the board's own keys out.
+function replayTerminalKey(m) {
+  const target = document.getElementById('terminal-key-proxy');
+  target.dispatchEvent(
+    new KeyboardEvent('keydown', {
+      key: m.key,
+      code: m.code,
+      ctrlKey: !!m.ctrl,
+      altKey: !!m.alt,
+      shiftKey: !!m.shift,
+      metaKey: !!m.meta,
+      bubbles: true,
+      cancelable: true,
+    }),
+  );
+}
+
+// [code, key, key with Shift] on a US layout. Each is probed by code alone and by key alone, so a claim
+// holds on any layout exactly when the shortcut would. Hub keys are not probed: the frame gets the
+// hub's combos and matches them with the SDK's comboOf.
+const TERMINAL_PROBE_KEYS = [
+  ...[...'abcdefghijklmnopqrstuvwxyz'].map((k) => [`Key${k.toUpperCase()}`, k, k.toUpperCase()]),
+  ...[...')!@#$%^&*('].map((s, n) => [`Digit${n}`, String(n), s]),
+  ['Backquote', '`', '~'],
+  ['Equal', '=', '+'],
+  ['Minus', '-', '_'],
+  ['NumpadAdd', '+', '+'],
+  ['NumpadSubtract', '-', '-'],
+  ['Numpad0', '0', '0'],
+  ...['Left', 'Right', 'Up', 'Down'].map((d) => [`Arrow${d}`, `Arrow${d}`, `Arrow${d}`]),
+];
+
+function terminalClaims() {
+  const keys = [];
+  for (let bits = 0; bits < 16; bits++) {
+    const mods = { ctrlKey: !!(bits & 1), altKey: !!(bits & 2), shiftKey: !!(bits & 4), metaKey: !!(bits & 8) };
+    for (const [code, base, shifted] of TERMINAL_PROBE_KEYS) {
+      const key = mods.shiftKey ? shifted : base;
+      for (const probe of [
+        { ...mods, key: 'Unidentified', code },
+        { ...mods, key, code: '' },
+      ]) {
+        if (terminalShortcut(probe, true)) keys.push(probe);
+      }
+    }
+  }
+  return keys;
+}
+
+let terminalClaimsQueued = false;
+
+// The claims depend on state (the hub's welcome, a slow connect, the session), so every change re-sends
+// them. One state change calls this several times, and the probe is about 1,500 shortcut checks.
+function pushTerminalClaims() {
+  if (!termFrame.inited || terminalClaimsQueued) return;
+  terminalClaimsQueued = true;
+  queueMicrotask(() => {
+    terminalClaimsQueued = false;
+    if (!termFrame.inited) return;
+    const claims = { keys: terminalClaims(), forward: hub.forwardCombos() };
+    const sig = JSON.stringify(claims);
+    if (sig === termFrame.claims) return;
+    termFrame.claims = sig;
+    terminalFrameSend('claims', claims);
+  });
 }
 
 function terminalTheme() {
@@ -11677,141 +11869,6 @@ function terminalThemeOptions() {
   };
 }
 
-// Returning false hands the key back to the page: xterm skips it and the document
-// listeners (the toggle, hub forwarding, native paste) see it instead.
-function terminalKeyFilter(e) {
-  if (e.type !== 'keydown') return true;
-  const ctrlOnly = e.ctrlKey && !e.altKey && !e.metaKey;
-  if (terminalShortcut(e)) return false;
-  if (ctrlOnly && e.code === 'KeyC' && (e.shiftKey || termState.term.hasSelection())) {
-    e.preventDefault();
-    navigator.clipboard?.writeText(termState.term.getSelection()).catch(() => {});
-    termState.term.clearSelection();
-    return false;
-  }
-  if (ctrlOnly && e.code === 'KeyV') return false;
-  return !hub.forwards(e);
-}
-
-function oscColor(hex) {
-  const m = /^#([0-9a-f]{6})$/i.exec(hex || '');
-  if (!m) return null;
-  return `rgb:${[0, 2, 4].map((i) => m[1].slice(i, i + 2).repeat(2)).join('/')}`;
-}
-
-function ensureTerm() {
-  if (termState.term) return termState.term;
-  const cfg = appConfig.terminal;
-  const host = document.getElementById('terminal-host');
-  const fontFamily =
-    cfg.fontFamily || getComputedStyle(document.body).getPropertyValue('--font-mono').trim() || 'monospace';
-  const fontSize = terminalFontSize();
-  const term = new window.Terminal({
-    fontFamily,
-    fontSize,
-    scrollback: cfg.scrollback,
-    cursorBlink: true,
-    allowProposedApi: true,
-    ...terminalThemeOptions(),
-  });
-  termState.fit = new window.FitAddon.FitAddon();
-  term.loadAddon(termState.fit);
-  term.loadAddon(new window.Unicode11Addon.Unicode11Addon());
-  term.unicode.activeVersion = '11';
-  term.open(host);
-  try {
-    const gl = new window.WebglAddon.WebglAddon();
-    gl.onContextLoss(() => {
-      gl.dispose();
-      termState.webgl = null;
-      repaintTerminal();
-    });
-    term.loadAddon(gl);
-    termState.webgl = gl;
-  } catch (_) {
-    // No WebGL: xterm falls back to its DOM renderer.
-  }
-  document.fonts
-    ?.load(`${fontSize}px ${fontFamily}`)
-    .then(repaintTerminal)
-    .catch(() => {});
-  term.attachCustomKeyEventHandler(terminalKeyFilter);
-  // xterm leaves OSC 10/11 color queries unanswered, so apps that pick a palette from the
-  // background (Claude Code's Auto theme) assume dark even on a light theme.
-  for (const [code, key] of [
-    [10, 'foreground'],
-    [11, 'background'],
-  ]) {
-    term.parser.registerOscHandler(code, (data) => {
-      if (data !== '?') return false;
-      const rgb = oscColor(term.options.theme[key]);
-      if (rgb) terminalSend({ t: 'in', d: `\x1b]${code};${rgb}\x1b\\` });
-      return true;
-    });
-  }
-  term.onData((d) => terminalSend({ t: 'in', d }));
-  term.onResize(({ cols, rows }) => terminalSend({ t: 'resize', cols, rows }));
-  // One fit per frame while a drag resizes the host. The atlas is rebuilt only when the host comes
-  // back from 0×0, which is also how a hidden hub iframe or pane shows again.
-  let frame = 0;
-  let visible = false;
-  new ResizeObserver(() => {
-    if (frame) return;
-    frame = requestAnimationFrame(() => {
-      frame = 0;
-      const nowVisible = host.offsetWidth > 0;
-      fitTerminal();
-      if (nowVisible && !visible) repaintTerminal();
-      visible = nowVisible;
-    });
-  }).observe(host);
-  const themeKey = () => `${isLightTheme()}|${document.body.dataset.colorTheme || ''}`;
-  let appliedTheme = themeKey();
-  new MutationObserver(() => {
-    if (themeKey() === appliedTheme) return;
-    appliedTheme = themeKey();
-    Object.assign(term.options, terminalThemeOptions());
-    repaintTerminal();
-  }).observe(document.body, { attributes: true, attributeFilter: ['class', 'data-color-theme'] });
-  // Vimium eats Escape inside a text field and only blurs it, so the key never reaches Claude.
-  // A blur no click caused, while the pane stays shown and the window keeps focus, is that Escape.
-  let pointerDown = false;
-  document.addEventListener('mousedown', () => (pointerDown = true), true);
-  document.addEventListener('mouseup', () => (pointerDown = false), true);
-  term.textarea.addEventListener('blur', () => {
-    if (pointerDown || termState.leaving) return;
-    requestAnimationFrame(() => {
-      if (!termState.attached || !host.offsetWidth) return;
-      if (!document.hasFocus() || document.activeElement !== document.body) return;
-      terminalSend({ t: 'in', d: '\x1b' });
-      term.focus();
-    });
-  });
-  termState.term = term;
-  return term;
-}
-
-// The WebGL renderer keeps its last frame and glyph atlas while the pane (or the hub's iframe) is
-// display:none, and comes back showing stale cells or backgrounds with no text. xterm does not
-// repaint on its own when the canvas is shown again.
-function repaintTerminal() {
-  const term = termState.term;
-  if (!term) return;
-  try {
-    termState.webgl?.clearTextureAtlas();
-  } catch (_) {}
-  term.refresh(0, term.rows - 1);
-}
-
-// The fit addon measures 0×0 while the pane (or the hub's iframe) is display:none.
-function fitTerminal() {
-  const host = document.getElementById('terminal-host');
-  if (!termState.fit || !host.offsetWidth || !host.offsetHeight) return;
-  try {
-    termState.fit.fit();
-  } catch (_) {}
-}
-
 function clampTerminalFont(v) {
   return Math.min(TERMINAL_FONT_MAX, Math.max(TERMINAL_FONT_MIN, v));
 }
@@ -11821,33 +11878,25 @@ function terminalFontSize() {
   return saved ? clampTerminalFont(saved) : appConfig.terminal.fontSize;
 }
 
+function currentTerminalFontSize() {
+  termState.fontSize ??= terminalFontSize();
+  return termState.fontSize;
+}
+
 function adjustTerminalFontSize(step) {
-  const term = termState.term;
-  const size = step === 0 ? appConfig.terminal.fontSize : clampTerminalFont(term.options.fontSize + step);
-  if (size !== term.options.fontSize) {
+  const current = currentTerminalFontSize();
+  const size = step === 0 ? appConfig.terminal.fontSize : clampTerminalFont(current + step);
+  if (size !== current) {
     if (step === 0) store.removeItem(TERMINAL_FONT_KEY);
     else store.setItem(TERMINAL_FONT_KEY, String(size));
-    term.options.fontSize = size;
-    fitTerminal();
+    termState.fontSize = size;
+    terminalFrameSend('font', { size });
   }
   showToast(`Terminal ${size}px`);
 }
 
 function terminalSend(msg) {
-  if (termState.ws?.readyState === WebSocket.OPEN) termState.ws.send(JSON.stringify(msg));
-}
-
-function ackTerminal(ws, n) {
-  if (termState.ws !== ws) return;
-  termState.ackPending += n;
-  const flush = () => {
-    clearTimeout(termState.ackTimer);
-    termState.ackTimer = null;
-    if (termState.ws === ws && termState.ackPending) terminalSend({ t: 'ack', n: termState.ackPending });
-    termState.ackPending = 0;
-  };
-  if (termState.ackPending >= ACK_BATCH_BYTES) flush();
-  else if (!termState.ackTimer) termState.ackTimer = setTimeout(flush, 50);
+  if (termState.socket) terminalFrameSend('send', { msg });
 }
 
 function setTerminalStatus(text) {
@@ -11887,6 +11936,7 @@ function clearTerminalSlow() {
   clearTimeout(terminalSlowTimer);
   terminalSlowTimer = null;
   document.getElementById('terminal-boot').classList.remove('slow');
+  pushTerminalClaims();
 }
 
 function terminalConnectSlow() {
@@ -11915,22 +11965,12 @@ function showTerminalPrompt(sessionId, title, detail, choices, output = '') {
   el.querySelector('button')?.focus();
 }
 
-function terminalTail(count) {
-  const buf = termState.term?.buffer.active;
-  if (!buf) return '';
-  const lines = [];
-  for (let i = buf.length - 1; i >= 0 && lines.length < count; i--) {
-    const text = buf.getLine(i)?.translateToString(true) ?? '';
-    if (text.trim() || lines.length) lines.unshift(text);
-  }
-  return lines.join('\n');
-}
-
 // Closing the page leaves the PTY running, but Ctrl+W meant for the prompt closes the tab, so ask first.
 // Under the hub the top frame asks: browsers do not reliably show the dialog for a frame.
 function setTerminalAttached(on) {
   termState.attached = on;
   syncCloseGuard();
+  pushTerminalClaims();
 }
 
 // A hidden pane stays attached, but Ctrl+W can only be meant for a terminal on screen.
@@ -11958,6 +11998,26 @@ document.addEventListener('focusout', (e) => {
     if (document.hasFocus()) terminalHadFocus = terminalPaneFocused();
   });
 });
+// The hub hands focus back by focusing this frame after a palette closes, and focus does not
+// pass on into the nested terminal frame by itself. The hub makes this frame inert while the
+// palette is open, which can blur the terminal frame, so activeElement no longer says it had focus.
+// Without inert (the app launcher), activeElement stays the frame element while the frame has no focus.
+// Chrome fires this before focusin when a click or a focus() call in this page takes focus from the
+// frame, so it waits a task and gives way to whatever took focus.
+let boardPointerDown = false;
+document.addEventListener('pointerdown', () => (boardPointerDown = true), true);
+for (const type of ['pointerup', 'pointercancel']) {
+  document.addEventListener(type, () => (boardPointerDown = false), true);
+}
+window.addEventListener('focus', () => {
+  if (!terminalHadFocus || boardPointerDown) return;
+  setTimeout(() => {
+    const active = document.activeElement;
+    if (terminalHadFocus && termState.shown && (active === document.body || active === termFrame.el)) {
+      focusTerminalPane();
+    }
+  });
+});
 window.addEventListener('pagehide', () => {
   try {
     if (termState.attached && termState.shown && terminalHadFocus) {
@@ -11982,109 +12042,84 @@ document.getElementById('terminal-pane').addEventListener('focusin', () => {
 });
 
 function detachTerminal() {
-  const ws = termState.ws;
-  termState.ws = null;
+  const had = termState.socket;
+  termState.socket = null;
   termState.sessionId = null;
-  clearTimeout(termState.ackTimer);
-  termState.ackTimer = null;
-  termState.ackPending = 0;
   clearTimeout(termState.retryTimer);
   termState.retryTimer = null;
   setTerminalAttached(false);
-  if (ws) {
-    ws.onclose = null;
-    ws.close();
-  }
+  if (had) terminalFrameSend('detach');
   hideTerminalPrompt();
   hideTerminalBoot();
 }
 
+// The frame owns the socket and xterm; the board picks the session, the mode and when to retry.
 async function openTerminal(sessionId, mode, attempt = 0) {
   detachTerminal();
   termState.sessionId = sessionId;
+  const socket = { id: ++terminalSocketSeq, sessionId, mode, attempt, readyAt: 0, refused: false };
+  termState.socket = socket;
   if (!attempt) setTerminalStatus('');
   try {
-    await loadXterm();
+    await ensureTerminalFrame();
   } catch (e) {
-    setTerminalStatus(e.message);
+    if (termState.socket === socket) setTerminalStatus(e.message);
     return;
   }
-  if (termState.sessionId !== sessionId) return;
-  const term = ensureTerm();
-  if (!attempt) showTerminalBoot();
-  // RIS through the write queue, not term.reset(): reset() runs at once, and output the previous
-  // session had already queued would still be drawn after it. A retry keeps the last screen
-  // until the replay arrives.
-  const reset = () => term.write('\x1bc', repaintTerminal);
-  if (!attempt) reset();
-  fitTerminal();
-  const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/api/terminal/ws`);
-  ws.binaryType = 'arraybuffer';
-  termState.ws = ws;
+  if (termState.socket !== socket) return;
   if (!attempt) {
+    showTerminalBoot();
     terminalSlowTimer = setTimeout(() => {
-      if (termState.ws === ws) document.getElementById('terminal-boot').classList.add('slow');
+      if (termState.socket !== socket) return;
+      document.getElementById('terminal-boot').classList.add('slow');
+      pushTerminalClaims();
     }, TERMINAL_SLOW_CONNECT_MS);
   }
   const spec = newSpecs.get(sessionId);
-  let readyAt = 0;
-  let refused = false;
-  ws.onopen = () =>
-    ws.send(
-      JSON.stringify({
-        t: 'hello',
-        token: terminalToken,
-        id: sessionId,
-        mode,
-        cols: term.cols,
-        rows: term.rows,
-        ...(spec?.mode === mode && {
-          cwd: spec.cwd,
-          name: spec.name,
-          worktree: spec.worktree,
-          model: spec.model,
-          prompt: spec.prompt,
-        }),
+  terminalFrameSend('open', {
+    socketId: socket.id,
+    reset: !attempt,
+    hello: {
+      token: terminalToken,
+      id: sessionId,
+      mode,
+      ...(spec?.mode === mode && {
+        cwd: spec.cwd,
+        name: spec.name,
+        worktree: spec.worktree,
+        model: spec.model,
+        prompt: spec.prompt,
       }),
-    );
-  ws.onmessage = (ev) => {
-    if (termState.ws !== ws) return;
-    if (typeof ev.data !== 'string') {
-      const bytes = new Uint8Array(ev.data);
-      term.write(bytes, () => {
-        ackTerminal(ws, bytes.length);
-        if (terminalBootTimer && termState.ws === ws && terminalTail(1)) hideTerminalBoot();
-      });
-      return;
-    }
-    let msg;
-    try {
-      msg = JSON.parse(ev.data);
-    } catch (_) {
-      return;
-    }
-    if (msg.t === 'ready') {
-      readyAt = Date.now();
-      if (attempt) reset();
-    } else if (msg.t === 'error') refused = true;
-    onTerminalMessage(sessionId, msg);
-  };
-  ws.onclose = (ev) => {
-    if (termState.ws !== ws) return;
-    termState.ws = null;
-    setTerminalAttached(false);
-    // A refusal already shows the server's reason, and retrying would only repeat it, unless the
-    // reason was a token that the hub has since replaced (4001).
-    if (refused && ev.code === 4001) {
-      refreshTerminalToken().then((ok) => {
-        if (ok && termState.sessionId === sessionId) openTerminal(sessionId, mode, attempt + 1);
-      });
-      return;
-    }
-    if (refused || document.getElementById('terminal-prompt').classList.contains('visible')) return;
-    const stable = readyAt && Date.now() - readyAt > TERMINAL_STABLE_MS;
-    retryTerminal(sessionId, stable ? 0 : attempt);
-  };
+    },
+  });
+  // Chrome shows a crashed frame as a sad face and does not reload it, so a dead frame only shows as silence.
+  socket.aliveTimer = setTimeout(() => {
+    if (termState.socket !== socket) return;
+    dropTerminalFrame();
+    openTerminal(sessionId, mode, attempt);
+  }, TERMINAL_FRAME_ALIVE_MS);
+}
+
+function dropTerminalFrame() {
+  termFrame.el?.remove();
+  resetTerminalFrame({ el: null, ready: null });
+}
+
+function onTerminalSocketClose(socket, code) {
+  termState.socket = null;
+  setTerminalAttached(false);
+  const { sessionId, mode, attempt } = socket;
+  // A refusal already shows the server's reason, and retrying would only repeat it, unless the
+  // reason was a token that the hub has since replaced (4001).
+  if (socket.refused && code === 4001) {
+    refreshTerminalToken().then((ok) => {
+      if (ok && termState.sessionId === sessionId) openTerminal(sessionId, mode, attempt + 1);
+    });
+    return;
+  }
+  if (socket.refused || document.getElementById('terminal-prompt').classList.contains('visible')) return;
+  const stable = socket.readyAt && Date.now() - socket.readyAt > TERMINAL_STABLE_MS;
+  retryTerminal(sessionId, stable ? 0 : attempt);
 }
 
 function terminalOpenMode(sessionId) {
@@ -12123,7 +12158,7 @@ function retryTerminal(sessionId, attempt) {
   }, delay);
 }
 
-function onTerminalMessage(sessionId, msg) {
+function onTerminalMessage(sessionId, msg, tail = '') {
   if (msg.t === 'ready') {
     // The server has the prompt now; a later start of the same placeholder must not send it again.
     const spec = newSpecs.get(sessionId);
@@ -12132,8 +12167,7 @@ function onTerminalMessage(sessionId, msg) {
     hideTerminalPrompt();
     setTerminalStatus('');
     setTerminalAttached(true);
-    terminalSend({ t: 'resize', cols: termState.term.cols, rows: termState.term.rows });
-    if (takeTerminalFocus(sessionId)) termState.term.focus();
+    if (takeTerminalFocus(sessionId)) focusTerminalPane();
   } else if (msg.t === 'rekey' && typeof msg.id === 'string') {
     adoptPickedSession(sessionId, msg.id);
     if (msg.duplicate) showToast('That session is already open here, so this terminal switched to it', 'info');
@@ -12174,7 +12208,7 @@ function onTerminalMessage(sessionId, msg) {
             ['fork', 'Fork'],
             ['shell', 'Shell'],
           ],
-      clean ? '' : terminalTail(6),
+      clean ? '' : tail,
     );
   } else if (msg.t === 'error') {
     hideTerminalBoot();
@@ -12453,12 +12487,14 @@ async function loadTerminals() {
   const res = await fetch('/api/terminals', { cache: 'no-store' });
   const list = (await res.json()).sessions || [];
   runningTerminals = new Set(list.map((t) => t.id));
+  pushTerminalClaims();
   renderActivityChip();
   return list;
 }
 
 function setRunningTerminals(ids) {
   runningTerminals = new Set(ids);
+  pushTerminalClaims();
   if (ids.some((id) => !sessions.some((s) => s.id === id))) fetchSessions(false).catch(() => {});
   else renderSessionViews();
   renderActivityChip();
@@ -13107,7 +13143,11 @@ const hub = ClaudeHub.connect({
   }),
 });
 
-hub.onActive((active) => onHubActive(active));
+hub.onActive((active) => {
+  onHubActive(active);
+  pushTerminalClaims();
+});
+hub.onStatus(pushTerminalClaims);
 
 // session.changed goes out once the switch settles, so arrowing through the list sends one event.
 let publishTimer = 0;

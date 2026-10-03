@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const { readFileSync } = require('fs');
 const path = require('path');
 const vm = require('vm');
+const { claimSig, handsBack } = require('../public/terminal-frame.js');
 
 const HUB = 'http://localhost:3540';
 const read = (file) => readFileSync(path.join(__dirname, '..', file), 'utf8');
@@ -34,6 +35,7 @@ async function loadShim({ enabled = true, costUrl = null, marketplaceUrl = null,
     open: (...args) => opened.push(args),
     appConfig: { costUrl, marketplaceUrl, memoryUrl },
     onHubActive: (active) => calls.push(['active', active]),
+    pushTerminalClaims() {},
     sessions: [],
     currentSessionId: null,
     isSessionActive: (s) => !!s.live,
@@ -54,16 +56,22 @@ async function loadShim({ enabled = true, costUrl = null, marketplaceUrl = null,
   context.window = context;
   vm.runInContext(read('test/vendor/claude-hub-sdk.js'), context);
   vm.runInContext(region, context);
-  const filter = /^function terminalKeyFilter\(e\) \{[\s\S]*?^\}/m.exec(read('public/app.js'))[0];
-  vm.runInContext(`const terminalShortcut = () => false;\n${filter}`, context);
+  const app = read('public/app.js');
+  const probeKeys = /^const TERMINAL_PROBE_KEYS = [\s\S]*?^\];/m.exec(app)[0];
+  const claims = /^function terminalClaims\(\) \{[\s\S]*?^\}/m.exec(app)[0];
+  vm.runInContext(`const terminalShortcut = () => false;\n${probeKeys}\n${claims}`, context);
   await new Promise((r) => setImmediate(r));
 
   return {
     calls,
     context,
     hub: vm.runInContext('hub', context),
-    terminalKeeps: (init) =>
-      context.terminalKeyFilter({ type: 'keydown', ctrlKey: false, altKey: false, shiftKey: false, metaKey: false, ...init }),
+    terminalKeeps: (init) => {
+      const claimed = new Set(context.terminalClaims().map(claimSig));
+      const forward = new Set(vm.runInContext('hub.forwardCombos()', context));
+      const e = { ctrlKey: false, altKey: false, shiftKey: false, metaKey: false, ...init };
+      return !handsBack(claimed, forward, context.ClaudeHub.comboOf, e);
+    },
     opened,
     endWait: () => {
       for (const fn of timers.splice(0)) fn();
@@ -128,6 +136,9 @@ describe('hub key forwarding', () => {
     assert.equal(shim.terminalKeeps({ ctrlKey: true, altKey: true, key: 'p', code: 'KeyP' }), false);
     assert.equal(shim.terminalKeeps({ ctrlKey: true, altKey: true, key: 'n', code: 'KeyN' }), true);
     assert.equal(shim.terminalKeeps({ ctrlKey: true, key: 'l', code: 'KeyL' }), true);
+    // AZERTY: Ctrl+Alt+Q sits where a US keyboard has A.
+    assert.equal(shim.terminalKeeps({ ctrlKey: true, altKey: true, key: 'q', code: 'KeyA' }), true);
+    assert.equal(shim.terminalKeeps({ ctrlKey: true, altKey: true, key: 'w', code: 'KeyZ' }), false);
     const alone = await loadShim({ enabled: false });
     assert.equal(alone.terminalKeeps({ ctrlKey: true, altKey: true, key: 'p', code: 'KeyP' }), true);
   });

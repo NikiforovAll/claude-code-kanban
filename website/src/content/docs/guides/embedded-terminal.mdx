@@ -143,6 +143,20 @@ The terminal starts a shell and runs Claude Code in it. To pick the shell, use `
 
 With no value, Claude Code Kanban uses `pwsh`, then `powershell` on Windows. On other systems it uses `$SHELL`, or `/bin/sh`. If the named shell is not found, the terminal does not start.
 
+## Typing while the board is busy
+
+The terminal runs in its own browser process. Typing and output do not wait for work on the board, such as a large session list or a long Session Log.
+
+To get its own process, the terminal loads from the other loopback name of the same server:
+
+| You open the board on | The terminal loads from |
+| --- | --- |
+| `localhost` | `[::1]` |
+| `127.0.0.1` | `localhost` |
+| any other host name | the same host, in the board's process |
+
+If the terminal does not load from the other name in 5 seconds, for example because IPv6 is off, the board loads it from its own host. The terminal then works as before, but it shares the board's process, and the first terminal you open on the page takes 5 seconds longer to show.
+
 For other terminal settings, such as font size and scrollback, see [Configuration](/claude-code-kanban/reference/configuration/). For all keys, see [Keyboard shortcuts](/claude-code-kanban/reference/keyboard-shortcuts/).
 
 <Lightbox />

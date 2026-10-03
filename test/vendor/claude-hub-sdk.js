@@ -1,4 +1,4 @@
-// claude-hub-sdk 1.2.0 (sha256 0b8540e7ea36). Copied by npm run sdk:sync in claude-code-hub. Do not edit.
+// claude-hub-sdk 1.2.0 (sha256 62c7d9f477b2). Copied by npm run sdk:sync in claude-code-hub. Do not edit.
 // Claude Code Hub SDK: the app side of the hub protocol v1.
 // A classic script. Load it as the first element in <body>, with no defer or async,
 // so the cached theme is on the page before the first paint (protocol section 6, rule 3).
@@ -335,6 +335,8 @@
         },
         // For an element that eats keys before the document sees them, like a terminal.
         forwards,
+        // The combos forwards() matches, for a frame that tests keys with ClaudeHub.comboOf on its own.
+        forwardCombos: () => (forward ? [...forward] : []),
         closeGuard(on) {
           post({ type: 'hub:closeGuard', on: !!on });
         },
@@ -364,7 +366,7 @@
       return hub;
     }
 
-    return { connect };
+    return { connect, comboOf };
   }
 
   if (typeof module === 'object' && module.exports) module.exports = { createClaudeHub, comboOf };

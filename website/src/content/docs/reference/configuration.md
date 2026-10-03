@@ -102,7 +102,7 @@ The server also applies these guards:
 
 - **Host allowlist.** A request with a `Host` header that is not loopback, not in `--allowed-hosts` and not the bound address gets `403`. This blocks DNS rebinding.
 - **Cross-origin writes.** The server refuses a request other than `GET`, `HEAD` or `OPTIONS` from another origin, or one that the browser marks as cross-site.
-- **Framing.** When it runs alone, no other page can put the app in a frame. Under Claude Code Hub, pages on `localhost` or `127.0.0.1` (any port) and pages on the hub's own origin can.
+- **Framing.** When it runs alone, no other page can put the app in a frame. The one exception is the terminal page, `/terminal.html`: the board's own pages on `localhost` and `127.0.0.1`, on the same port, can frame it. See [Typing while the board is busy](/claude-code-kanban/guides/embedded-terminal/#typing-while-the-board-is-busy). Under Claude Code Hub, pages on `localhost` or `127.0.0.1` (any port) and pages on the hub's own origin can.
 - **Terminal off loopback.** The server refuses the embedded terminal when it listens on an address other than loopback.
 - **Terminal token.** The terminal WebSocket checks the `Host` and `Origin` headers. The client must then send the token in its first message within 5 seconds.
 

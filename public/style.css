@@ -3159,17 +3159,23 @@ body.booting .boot-splash {
   background: var(--bg-deep);
 }
 
-.terminal-pane:has(.terminal-prompt.visible) .xterm {
+.terminal-pane:has(.terminal-prompt.visible) .terminal-frame {
   visibility: hidden;
 }
 
-.terminal-host .xterm {
+.terminal-frame {
+  display: block;
+  width: 100%;
   height: 100%;
+  border: 0;
 }
 
-/* xterm.css paints the viewport #000; it shows below the last row when the height is not a whole number of rows. */
-.terminal-host .xterm .xterm-viewport {
-  background-color: var(--bg-deep);
+.terminal-key-proxy {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .terminal-manager-modal {
@@ -3330,7 +3336,7 @@ body.booting .boot-splash {
 }
 
 /* Opacity, not visibility: a hidden textarea drops focus, and the terminal must keep it. */
-.terminal-pane:has(.terminal-boot.visible) .xterm {
+.terminal-pane:has(.terminal-boot.visible) .terminal-frame {
   opacity: 0;
 }
 

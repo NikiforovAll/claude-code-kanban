@@ -233,10 +233,10 @@ describe('parseHostHeader', { skip: !parseHostHeader }, () => {
 });
 
 describe('isLoopbackAddress', { skip: !isLoopbackAddress }, () => {
-  for (const host of ['localhost', '127.0.0.1', '127.1.2.3', '::1', '0:0:0:0:0:0:0:1', '::ffff:127.0.0.1']) {
+  for (const host of ['localhost', '127.0.0.1', '127.1.2.3', '::1', '[::1]', '0:0:0:0:0:0:0:1', '::ffff:127.0.0.1']) {
     it(`accepts ${host}`, () => assert.equal(isLoopbackAddress(host), true));
   }
-  for (const host of ['0.0.0.0', '192.168.1.42', 'evil.com', '::', '', null]) {
+  for (const host of ['0.0.0.0', '192.168.1.42', 'evil.com', '::', '', null, '127.evil.com', '127.0.0.1.evil.com', '127.0.0.256', '[evil.com]']) {
     it(`rejects ${JSON.stringify(host)}`, () => assert.equal(isLoopbackAddress(host), false));
   }
 });
@@ -248,10 +248,12 @@ describe('upgradeVerdict', { skip: !netGuard?.createNetGuard }, () => {
   it('accepts a loopback Host with a loopback Origin', () => {
     assert.equal(guard.upgradeVerdict(req('localhost:3541', 'http://localhost:3541')), null);
     assert.equal(guard.upgradeVerdict(req('127.0.0.1:3541', 'http://127.0.0.1:3541')), null);
+    assert.equal(guard.upgradeVerdict(req('[::1]:3541', 'http://[::1]:3541')), null);
   });
 
   it('rejects a rebinding Host', () => {
     assert.match(guard.upgradeVerdict(req('evil.com:3541', 'http://evil.com:3541')), /Host/);
+    assert.match(guard.upgradeVerdict(req('127.evil.com:3541', 'http://127.evil.com:3541')), /Host/);
   });
 
   for (const origin of [undefined, 'null', '', 'http://evil.com', 'not a url']) {
@@ -259,6 +261,100 @@ describe('upgradeVerdict', { skip: !netGuard?.createNetGuard }, () => {
       assert.match(guard.upgradeVerdict(req('localhost:3541', origin)), /Origin/);
     });
   }
+});
+
+describe('frameGuard', { skip: !netGuard?.createNetGuard }, () => {
+  function headersFor(reqPath, hubUrl) {
+    const saved = process.env.HUB_URL;
+    if (hubUrl) process.env.HUB_URL = hubUrl;
+    else delete process.env.HUB_URL;
+    try {
+      const guard = netGuard.createNetGuard({ selfFramedPaths: ['/framed.html'] });
+      const headers = {};
+      const res = { setHeader: (k, v) => (headers[k.toLowerCase()] = v) };
+      let nexted = false;
+      guard.frameGuard({ path: reqPath, socket: { localPort: 3541 } }, res, () => (nexted = true));
+      assert.ok(nexted);
+      return headers;
+    } finally {
+      if (saved === undefined) delete process.env.HUB_URL;
+      else process.env.HUB_URL = saved;
+    }
+  }
+
+  it('lets only its own port frame a self-framed page when alone', () => {
+    const h = headersFor('/framed.html');
+    assert.equal(h['content-security-policy'], "frame-ancestors 'self' http://localhost:3541 http://127.0.0.1:3541");
+    assert.equal(h['x-frame-options'], undefined);
+  });
+
+  it('denies framing of every other page when alone', () => {
+    const h = headersFor('/index.html');
+    assert.equal(h['content-security-policy'], "frame-ancestors 'none'");
+    assert.equal(h['x-frame-options'], 'DENY');
+  });
+
+  it('keeps the hub policy for a self-framed page', () => {
+    const h = headersFor('/framed.html', 'http://localhost:3540');
+    assert.match(h['content-security-policy'], /http:\/\/localhost:\*/);
+  });
+});
+
+describe('listenLoopback', { skip: !netGuard?.createNetGuard }, () => {
+  const net = require('node:net');
+  const guard = netGuard?.createNetGuard();
+  const squat = () =>
+    new Promise((resolve) => {
+      const s = net.createServer();
+      s.once('error', () => resolve(null));
+      s.listen({ host: '::1', port: 0, ipv6Only: true }, () => resolve(s));
+    });
+
+  it('treats a port held on the other family as busy', async (t) => {
+    const squatter = await squat();
+    if (!squatter) return t.skip('no IPv6 loopback');
+    try {
+      const server = guard.listenLoopback(() => {}, squatter.address().port, () => assert.fail('ready'));
+      const err = await new Promise((resolve) => server.once('error', resolve));
+      assert.equal(err.code, 'EADDRINUSE');
+      assert.equal(server.listening, false);
+    } finally {
+      squatter.close();
+    }
+  });
+
+  it('gives each server its own port when one guard listens several', async () => {
+    const servers = [];
+    const ports = await Promise.all(
+      [0, 1].map(() => new Promise((resolve) => servers.push(guard.listenLoopback(() => {}, 0, resolve)))),
+    );
+    try {
+      assert.deepEqual(ports, servers.map((s) => s.address().port));
+    } finally {
+      for (const s of servers) s.close();
+    }
+  });
+
+  // A bind, not a connect: fresh loopback connects fail in bursts on some Windows machines.
+  it('is ready once both families listen', async (t) => {
+    const probe = await squat();
+    if (!probe) return t.skip('no IPv6 loopback');
+    probe.close();
+    let server;
+    const port = await new Promise((resolve) => {
+      server = guard.listenLoopback(() => {}, 0, resolve);
+    });
+    try {
+      const code = await new Promise((resolve) => {
+        const s = net.createServer();
+        s.once('error', (e) => resolve(e.code));
+        s.listen({ host: '::1', port, ipv6Only: true }, () => s.close(() => resolve('free')));
+      });
+      assert.equal(code, 'EADDRINUSE');
+    } finally {
+      server.close();
+    }
+  });
 });
 
 describe('argv validators', { skip: !validate }, () => {

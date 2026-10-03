@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Terminal</title>
+  <link rel="stylesheet" href="/fonts/fonts.css">
+  <link rel="stylesheet" href="/vendor/xterm/xterm.css">
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg, transparent); }
+    #host { height: 100%; }
+    #host .xterm { height: 100%; }
+    /* xterm.css paints the viewport #000; it shows below the last row when the height is not a whole number of rows. */
+    #host .xterm .xterm-viewport { background-color: var(--bg, transparent); }
+  </style>
+  <!-- For ClaudeHub.comboOf only. In <head>, where there is no body yet for the SDK to paint theme vars on. -->
+  <script src="/vendor/claude-hub-sdk.js"></script>
+</head>
+<body>
+  <div id="host"></div>
+  <script src="/vendor/xterm/xterm.js"></script>
+  <script src="/vendor/xterm/addon-fit.js"></script>
+  <script src="/vendor/xterm/addon-webgl.js"></script>
+  <script src="/vendor/xterm/addon-unicode11.js"></script>
+  <script src="/terminal-frame.js"></script>
+</body>
+</html>

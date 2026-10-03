@@ -71,7 +71,8 @@ const PORT = parseInt(getArgValue('port') || process.env.PORT || '3541', 10);
 
 // Mounted before express.json() so a rejected request never buffers a body, and
 // before the /api catch-all so no route escapes the check.
-const net = createNetGuard({ appName: 'Claude Task Kanban' });
+// The board frames the terminal from its other loopback name, so Chrome runs it in its own process.
+const net = createNetGuard({ appName: 'Claude Task Kanban', selfFramedPaths: ['/terminal.html'] });
 app.use(net.hostGuard);
 app.use(net.frameGuard);
 app.use(net.originGuard);
