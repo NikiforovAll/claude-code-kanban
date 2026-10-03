@@ -17,6 +17,14 @@ describe('projectMatcher', () => {
     assert.equal(m('/home/me/app-2'), false);
   });
 
+  it('selects the linked worktrees of a repo path', () => {
+    const m = projectMatcher('C:\\dev\\app');
+    assert.equal(m('C:\\dev\\app\\.claude\\worktrees\\squid', 'C:\\dev\\app'), true);
+    assert.equal(m('C:\\dev\\app-feature', 'c:/dev/app'), true);
+    assert.equal(m('C:\\dev\\other-feature', 'C:\\dev\\other'), false);
+    assert.equal(projectMatcher('C:\\dev\\app-feature')('C:\\dev\\app', undefined), false);
+  });
+
   it('matches a part of the path for other text', () => {
     const m = projectMatcher(' dev\\ap ');
     assert.equal(m('C:/dev/app'), true);

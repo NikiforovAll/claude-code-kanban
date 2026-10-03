@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { createDispatchedStore, listTranscriptIds, pruneSessionDirs, retentionMs, GRACE_MS, MAX_DISPATCHED, DAY_MS } = require('../lib/retention');
+const { createDispatchedStore, scanTranscripts, pruneSessionDirs, retentionMs, GRACE_MS, MAX_DISPATCHED, DAY_MS } = require('../lib/retention');
 
 const roots = [];
 after(() => {
@@ -135,21 +135,24 @@ describe('pruneSessionDirs', () => {
   });
 });
 
-describe('listTranscriptIds', () => {
-  it('lists session ids from the .jsonl names in each project dir', async () => {
+describe('scanTranscripts', () => {
+  it('lists session ids and the project dirs that hold them', async () => {
     const dir = tempDir();
     fs.mkdirSync(path.join(dir, 'proj-a'));
     fs.mkdirSync(path.join(dir, 'proj-b'));
+    fs.mkdirSync(path.join(dir, 'proj-empty'));
     fs.writeFileSync(path.join(dir, 'proj-a', 'one.jsonl'), '');
     fs.writeFileSync(path.join(dir, 'proj-a', 'sessions-index.json'), '{}');
     fs.writeFileSync(path.join(dir, 'proj-b', 'two.jsonl'), '');
-    assert.deepEqual([...(await listTranscriptIds(dir))].sort(), ['one', 'two']);
+    const { ids, dirs } = await scanTranscripts(dir);
+    assert.deepEqual([...ids].sort(), ['one', 'two']);
+    assert.deepEqual([...dirs].sort(), ['proj-a', 'proj-b']);
   });
 
   it('returns null for a missing or empty projects dir', async () => {
     const dir = tempDir();
-    assert.equal(await listTranscriptIds(path.join(dir, 'missing')), null);
-    assert.equal(await listTranscriptIds(dir), null);
+    assert.equal(await scanTranscripts(path.join(dir, 'missing')), null);
+    assert.equal(await scanTranscripts(dir), null);
   });
 });
 

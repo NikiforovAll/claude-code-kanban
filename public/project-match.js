@@ -10,15 +10,17 @@ const projectMatch = (() => {
   function isExactProjectFilter(query) {
     return isExactProjectPath(normalizeProjectPath(query.trim()));
   }
-  // An absolute path selects that one project, so the hub's scope does not also pull in
-  // `app-2` next to `app`; any other text matches a part of the path.
+  // An absolute path selects that one project and its linked worktrees (`repo` is the main
+  // checkout of a worktree project), so the hub's scope does not also pull in `app-2` next to
+  // `app`; any other text matches a part of the path.
   function projectMatcher(query) {
     const q = normalizeProjectPath(query.trim());
     const exact = isExactProjectPath(q);
-    return (project) => {
+    return (project, repo) => {
       if (!project) return false;
       const p = normalizeProjectPath(project);
-      return exact ? p === q : p.includes(q);
+      if (!exact) return p.includes(q);
+      return p === q || (!!repo && normalizeProjectPath(repo) === q);
     };
   }
   return { normalizeProjectPath, isExactProjectPath, isExactProjectFilter, projectMatcher };

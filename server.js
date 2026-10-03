@@ -39,16 +39,17 @@ const {
 } = require('./lib/parsers');
 const { inlineHtmlAssets, MIME_BY_EXT } = require('./lib/inline-assets');
 const { buildDecision, decisionFileName, isDecisionFile, approvalsFrom, boardRefusal } = require('./lib/approvals');
-const { getClaudeDir, getArgValue, storageNamespace, isDefaultClaudeDir } = require('./lib/claude-dir');
+const { getClaudeDir, getArgValue, storageNamespace, isDefaultClaudeDir, encodeProjectDirName } = require('./lib/claude-dir');
 const { createTerminalService, readTerminalConfig } = require('./lib/terminal');
 const { createDispatchRegistry, formatPreamble, formatDispatchLine, isPeerName, DISPATCH_OUTCOME } = require('./lib/dispatch');
 const { createGroupStore, isGroupName, suggestGroupName } = require('./lib/dispatch-groups');
-const { createDispatchedStore, listTranscriptIds, pruneSessionDirs, retentionMs } = require('./lib/retention');
+const { createDispatchedStore, scanTranscripts, pruneSessionDirs, retentionMs } = require('./lib/retention');
+const { createWorktreeStore } = require('./lib/worktrees');
 const { createLinkedDocStore, linkUrl } = require('./lib/linked-docs');
 const { pickFolder } = require('./lib/folder-dialog');
 const { loadSessionCache, saveSessionCache } = require('./lib/session-cache');
 const { countTaskDir } = require('./lib/task-counts');
-const { projectMatcher } = require('./public/project-match');
+const { projectMatcher, normalizeProjectPath } = require('./public/project-match');
 const { getParentVerdict, setParentVerdict } = require('./lib/parent-cache');
 
 if (process.argv.includes("--install") || process.argv.includes("--uninstall")) {
@@ -93,6 +94,7 @@ const CONTEXT_STATUS_DIR = path.join(CCK_DIR, 'context-status');
 const PINS_FILE = path.join(CCK_DIR, 'pins.json');
 const DISPATCH_GROUPS_FILE = path.join(CCK_DIR, 'dispatch-groups.json');
 const DISPATCHED_FILE = path.join(CCK_DIR, 'dispatched.json');
+const WORKTREES_FILE = path.join(CCK_DIR, 'worktrees.json');
 const LINKED_DOCS_FILE = path.join(CCK_DIR, 'linked-docs.json');
 const SERVER_INFO_FILE = path.join(CCK_DIR, 'server.json');
 const TERMINAL_TOKENS_DIR = path.join(CCK_DIR, 'terminal-tokens');
@@ -338,33 +340,12 @@ function getGitBranch(cwd) {
   return branch;
 }
 
-// A linked worktree's `.git` is a file holding `gitdir: <main>/.git/worktrees/<name>`, so the
-// main checkout is readable without spawning git. Path shape alone would not do: only some
-// worktrees live under `<repo>/.claude/worktrees/`, the rest sit beside the repo.
-// Cached without a TTL, misses included: a directory cannot turn from an ordinary checkout into
-// a linked worktree without being recreated, and a recreated path is a new cache key.
-const worktreeCache = new Map();
-const WORKTREE_CACHE_MAX = 500;
-const GITDIR_WORKTREE_RE = /^gitdir:\s*(.*)[/\\]\.git[/\\]worktrees[/\\]([^/\\]+)[/\\]?$/;
-
-function resolveWorktree(dir) {
-  if (!dir) return null;
-  if (worktreeCache.has(dir)) return worktreeCache.get(dir);
-
-  let worktree = null;
-  try {
-    // An ordinary checkout's `.git` is a directory, so the read throws EISDIR — that is the
-    // answer, and it costs one syscall instead of a stat followed by a read.
-    const m = GITDIR_WORKTREE_RE.exec(readFileSync(path.join(dir, '.git'), 'utf8').trim());
-    if (m) worktree = { repo: m[1], name: m[2] };
-  } catch (_) {}
-
-  worktreeCache.set(dir, worktree);
-  if (worktreeCache.size > WORKTREE_CACHE_MAX) {
-    worktreeCache.delete(worktreeCache.keys().next().value);
-  }
-  return worktree;
-}
+const worktrees = createWorktreeStore({
+  load: () => {
+    try { return JSON.parse(readFileSync(WORKTREES_FILE, 'utf8')); } catch { return null; }
+  },
+  save: (data) => writeJsonAtomic(WORKTREES_FILE, data),
+});
 
 // Only spawn git when cwd has diverged from the launch project — that's the
 // only case the JSONL value is wrong. Saves N spawns on a typical list build.
@@ -1140,12 +1121,6 @@ function getSessionDisplayName(_sessionId, meta) {
   return null;
 }
 
-// The harness spells a project path into a temp/log dir name by replacing every
-// non-alphanumeric character with a dash, drive colon and separators included.
-function encodeProjectDirName(p) {
-  return p.replace(/[^a-zA-Z0-9]/g, '-');
-}
-
 // Derived by convention, not looked up: the harness creates the dir lazily, so a
 // stat here would report "missing" for every session that has not written a temp
 // file yet — and it would put IO on the session-list hot path. Pure string join.
@@ -1160,7 +1135,7 @@ function getScratchpadDir(id, meta) {
   // harness actually created. Probed only for worktree sessions, and only until one
   // of them exists — before that there is nothing to disambiguate and `byProject`,
   // right for a session started inside the worktree, stands.
-  const wt = resolveWorktree(meta.project);
+  const wt = worktrees.resolve(meta.project);
   if (!wt || existsSync(byProject)) return byProject;
   const byRepo = path.join(SCRATCHPAD_ROOT, encodeProjectDirName(wt.repo), id, 'scratchpad');
   return existsSync(byRepo) ? byRepo : byProject;
@@ -1179,7 +1154,7 @@ function buildSessionObject(id, meta, overrides = {}) {
     cwd: meta.cwd || null,
     description: meta.description || null,
     gitBranch: resolveSessionGitBranch(meta),
-    worktree: resolveWorktree(meta.project),
+    worktree: worktrees.resolve(meta.project),
     customTitle: meta.customTitle || null,
     taskCount: 0,
     completed: 0,
@@ -1578,7 +1553,7 @@ app.get('/api/sessions', async (req, res) => {
     // if the row is missing — that one is not a preference.
     if (projectFilter) {
       const matches = projectMatcher(String(projectFilter));
-      sessions = sessions.filter(s => matches(s.project) || includeIds.has(s.id));
+      sessions = sessions.filter(s => matches(s.project, s.worktree?.repo) || includeIds.has(s.id));
     }
     // The sidebar's 24h filter: projects with any transcript written in the window, so an older
     // session of such a project stays in.
@@ -1650,14 +1625,30 @@ function projectActivity() {
   return activity;
 }
 
-// API: Get distinct project paths with last-modified timestamps
+// API: Get distinct project paths with last-modified timestamps. A linked worktree is folded
+// into its repo, which lists it under `worktrees`; the repo row exists even when only its
+// worktrees have transcripts.
 app.get('/api/projects', (_req, res) => {
   res.setHeader('Cache-Control', 'no-store');
-  const projects = [...projectActivity()]
-    .map(([path, mtime]) => ({
-      path,
-      modifiedAt: mtime ? new Date(mtime).toISOString() : null,
-      ...(isTempPath(path) && { temp: true }),
+  const byRepo = new Map();
+  for (const [project, mtime] of projectActivity()) {
+    const repo = worktrees.resolve(project)?.repo || project;
+    const key = normalizeProjectPath(repo);
+    let row = byRepo.get(key);
+    if (!row) {
+      row = { path: repo, mtime: 0, worktrees: [] };
+      byRepo.set(key, row);
+    }
+    if (repo === project) row.path = project;
+    else row.worktrees.push(project);
+    row.mtime = Math.max(row.mtime, mtime || 0);
+  }
+  const projects = [...byRepo.values()]
+    .map((r) => ({
+      path: r.path,
+      modifiedAt: r.mtime ? new Date(r.mtime).toISOString() : null,
+      ...(isTempPath(r.path) && { temp: true }),
+      ...(r.worktrees.length && { worktrees: r.worktrees.sort() }),
     }))
     .sort((a, b) => a.path.localeCompare(b.path));
   res.json(projects);
@@ -4321,13 +4312,17 @@ async function cleanupAgentActivity() {
   } catch { /* agent-activity dir may not exist */ }
 }
 
-// Dispatch markers and reviews: see docs/retention.md.
+// Dispatch markers, reviews and worktrees: see docs/retention.md.
 async function runRetention() {
   try {
-    const opts = { known: await listTranscriptIds(PROJECTS_DIR), maxAgeMs: retentionMs(CLAUDE_DIR) };
+    const scan = await scanTranscripts(PROJECTS_DIR);
+    const opts = { known: scan?.ids, maxAgeMs: retentionMs(CLAUDE_DIR) };
     const markers = dispatched.prune(opts);
     const reviews = await pruneSessionDirs(REVIEW_DIR, opts);
-    if (markers || reviews) console.log(`[retention] removed ${markers} dispatch markers, ${reviews} reviews`);
+    const wts = worktrees.prune(scan?.dirs);
+    if (markers || reviews || wts) {
+      console.log(`[retention] removed ${markers} dispatch markers, ${reviews} reviews, ${wts} worktrees`);
+    }
   } catch (e) {
     console.warn('[retention] failed:', e.message);
   }

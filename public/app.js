@@ -3400,7 +3400,7 @@ function getFilteredSessions() {
     // above already makes, for the same reason.
     filteredSessions = filteredSessions.filter(
       (s) =>
-        matchesProjectFilter(s.project) ||
+        matchesProjectFilter(s.project, s.worktree?.repo) ||
         s.id === currentSessionId ||
         (filterProject === '__recent__' && isAnyPinned(s.id)),
     );
@@ -9461,13 +9461,13 @@ function projectFilterText() {
 }
 
 let filterMatcher = { query: null, match: null };
-function matchesProjectFilter(project) {
+function matchesProjectFilter(project, repo) {
   if (!filterProject) return true;
   if (filterProject === '__recent__') return recentProjects.has(project);
   if (filterMatcher.query !== filterProject) {
     filterMatcher = { query: filterProject, match: projectMatcher(filterProject) };
   }
-  return filterMatcher.match(project);
+  return filterMatcher.match(project, repo);
 }
 
 //#endregion
@@ -9642,7 +9642,9 @@ async function refreshProjectList() {
   const cutoff = Date.now() - RECENT_PROJECT_HOURS * 60 * 60 * 1000;
   const prevRecent = recentProjects;
   recentProjects = new Set(
-    projects.filter((p) => p.modifiedAt && new Date(p.modifiedAt).getTime() > cutoff).map((p) => p.path),
+    projects
+      .filter((p) => p.modifiedAt && new Date(p.modifiedAt).getTime() > cutoff)
+      .flatMap((p) => [p.path, ...(p.worktrees || [])]),
   );
 
   renderFilterState();
