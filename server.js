@@ -41,6 +41,7 @@ const { inlineHtmlAssets, MIME_BY_EXT } = require('./lib/inline-assets');
 const { buildDecision, decisionFileName, isDecisionFile, approvalsFrom, boardRefusal } = require('./lib/approvals');
 const { getClaudeDir, getArgValue, storageNamespace, isDefaultClaudeDir, encodeProjectDirName } = require('./lib/claude-dir');
 const { createTerminalService, readTerminalConfig } = require('./lib/terminal');
+const { createProcStats } = require('./lib/proc-stats');
 const { createDispatchRegistry, formatPreamble, formatDispatchLine, isPeerName, DISPATCH_OUTCOME } = require('./lib/dispatch');
 const { createGroupStore, isGroupName, suggestGroupName } = require('./lib/dispatch-groups');
 const { createDispatchedStore, scanTranscripts, pruneSessionDirs, retentionMs } = require('./lib/retention');
@@ -3287,6 +3288,16 @@ app.post('/api/terminal/pick-folder', async (req, res) => {
 app.get('/api/terminals', (_req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   res.json({ sessions: terminal.list() });
+});
+
+const terminalProcStats = createProcStats();
+app.get('/api/terminals/stats', async (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const pids = terminal.claudePids();
+  const byPid = await terminalProcStats([process.pid, ...Object.values(pids)]);
+  const terminals = {};
+  for (const [id, pid] of Object.entries(pids)) if (byPid[pid]) terminals[id] = byPid[pid];
+  res.json({ cck: byPid[process.pid] || null, terminals });
 });
 
 app.delete('/api/terminals/:id', (req, res) => {

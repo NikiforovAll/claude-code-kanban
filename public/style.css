@@ -3255,6 +3255,15 @@ body.booting .boot-splash {
   text-overflow: ellipsis;
 }
 
+.terminal-manager-proc {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.terminal-manager-proc:empty {
+  display: none;
+}
+
 .terminal-manager-actions {
   display: flex;
   gap: 8px;
@@ -3282,6 +3291,15 @@ body.booting .boot-splash {
 .terminal-manager-count {
   font-size: 12px;
   color: var(--text-muted);
+}
+
+.terminal-manager-stats:empty {
+  display: none;
+}
+
+.terminal-manager-stats::before {
+  content: '·';
+  margin: 0 6px;
 }
 
 .terminal-manager-empty {

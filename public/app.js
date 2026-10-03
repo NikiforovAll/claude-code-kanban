@@ -12193,10 +12193,40 @@ function openTerminalManager() {
   if (terminalPaneFocused()) leaveTerminalPane();
   document.getElementById('terminal-manager-modal').classList.add('visible');
   renderTerminalManager();
+  clearInterval(terminalProcTimer);
+  pollTerminalProcStats();
+  terminalProcTimer = setInterval(pollTerminalProcStats, TERMINAL_PROC_POLL_MS);
 }
 
 function closeTerminalManager() {
+  clearInterval(terminalProcTimer);
   hideModalOverlay('terminal-manager-modal');
+}
+
+// Each poll costs one OS process query on the server, so it runs only while the modal is on screen.
+const TERMINAL_PROC_POLL_MS = 5000;
+let terminalProcTimer = 0;
+let terminalProcStats = {};
+
+function formatTerminalProc(s) {
+  if (!s) return '';
+  return `${Math.round(s.rss / 1048576)} MB${s.cpu === null ? '' : ` · ${s.cpu}% CPU`}`;
+}
+
+async function pollTerminalProcStats() {
+  if (!isOnScreen()) return;
+  let cck;
+  try {
+    const res = await fetch('/api/terminals/stats', { cache: 'no-store' });
+    if (!res.ok) return;
+    ({ cck, terminals: terminalProcStats } = await res.json());
+  } catch (_) {
+    return;
+  }
+  document.getElementById('terminal-manager-stats').textContent = cck ? `cck ${formatTerminalProc(cck)}` : '';
+  for (const el of document.querySelectorAll('#terminal-manager-body [data-proc]')) {
+    el.textContent = formatTerminalProc(terminalProcStats[el.dataset.proc]);
+  }
 }
 
 async function renderTerminalManager() {
@@ -12232,6 +12262,7 @@ async function renderTerminalManager() {
             <span class="terminal-manager-mode">${escapeHtml(t.mode)}</span>
             <span title="${escapeHtml(`pid ${t.pid}`)}">up ${formatDuration(Date.now() - t.startedAt)}</span>
             <span>${attached}</span>
+            <span class="terminal-manager-proc" data-proc="${escapeHtml(t.id)}" title="Memory and CPU of the claude process. Tools it runs are not counted. 100% CPU is one core.">${escapeHtml(formatTerminalProc(terminalProcStats[t.id]))}</span>
             <span class="terminal-manager-cwd" title="${escapeHtml(t.cwd)}">${escapeHtml(pathBasename(t.cwd))}</span>
           </div>
         </div>
