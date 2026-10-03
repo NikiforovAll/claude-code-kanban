@@ -1,4 +1,4 @@
-// claude-hub-sdk 1.1.0 (sha256 0fed14faa670). Copied by npm run sdk:sync in claude-code-hub. Do not edit.
+// claude-hub-sdk 1.2.0 (sha256 0b8540e7ea36). Copied by npm run sdk:sync in claude-code-hub. Do not edit.
 // Claude Code Hub SDK stub: what an app serves when no hub runs it. Under a hub, the hub hands the
 // app its real SDK (client.js) in place of this file. The API must match client.js; a test checks it.
 ((root) => {

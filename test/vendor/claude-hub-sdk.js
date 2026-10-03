@@ -1,4 +1,4 @@
-// claude-hub-sdk 1.1.0 (sha256 0fed14faa670). Copied by npm run sdk:sync in claude-code-hub. Do not edit.
+// claude-hub-sdk 1.2.0 (sha256 0b8540e7ea36). Copied by npm run sdk:sync in claude-code-hub. Do not edit.
 // Claude Code Hub SDK: the app side of the hub protocol v1.
 // A classic script. Load it as the first element in <body>, with no defer or async,
 // so the cached theme is on the page before the first paint (protocol section 6, rule 3).
