@@ -16,7 +16,7 @@ Claude Code Kanban works on one Claude Code config dir at a time. It picks the f
 
 A leading `~` expands to your home directory.
 
-The plugin, the hooks and the statusLine go into the config dir that `--install` targets. Pass the same `--dir` to `--install`, `--uninstall` and the server:
+The plugin goes into the config dir that `--install` targets. Pass the same `--dir` to `--install`, `--uninstall` and the server:
 
 ```sh
 npx claude-code-kanban --install --dir=~/.claude-work
@@ -127,7 +127,7 @@ The server, the hooks and the installer keep their state in `<config-dir>/.cck/`
 | Path | Written by | Contents |
 |---|---|---|
 | `agent-activity/<sessionId>/<agentId>.jsonl` | `agent-spy.sh` hook | Subagent start, idle and stop events |
-| `context-status/<sessionId>.json` | `context-status.sh` statusLine | Context use, cost and model for each session |
+| `context-status/<sessionId>.json` | Plugin mod (`context.ts`) | Context use, cost and model for each session |
 | `pins.json` | Server | Copy of the browser's session pins, so the CLI can read them |
 | `dispatch-groups.json` | Server | Groups made with `dispatch start --group` |
 | `server.json` | Server | `{port, pid}` of the running server. The CLI and hooks use it to find the port. |
@@ -136,8 +136,6 @@ The server, the hooks and the installer keep their state in `<config-dir>/.cck/`
 | `plugin/` | Installer | Copy of the Claude Code plugin |
 
 The server removes `server.json` and its `terminal-tokens/<port>.json` when it exits, if they still belong to it. At start it also removes token files left by servers that are no longer running.
-
-The installer also copies `context-status.sh` to `<config-dir>/hooks/context-status.sh` and can set `statusLine` in `<config-dir>/settings.json`.
 
 ## Browser-only data
 
@@ -151,19 +149,3 @@ Some data stays in the browser's `localStorage` and never reaches the server:
 Each config dir other than `~/.claude` gets its own key prefix, so two config dirs on the same port do not share this data. Another browser or profile does not see it.
 
 To remove data for sessions that no longer exist, open the Storage Manager with <kbd>Shift+S</kbd> and select **Clean Orphaned**.
-
-## Manual statusLine
-
-`--install` asks to set up the statusLine. If you skipped that prompt, add it by hand in `settings.json`. The script passes its input through, so you can pipe it into another statusline:
-
-```json
-{
-  "statusLine": {
-    "type": "command",
-    "command": "~/.claude/hooks/context-status.sh | npx -y ccstatusline@latest",
-    "padding": 0
-  }
-}
-```
-
-Without the statusLine, the board shows no context use, cost or rate limits.

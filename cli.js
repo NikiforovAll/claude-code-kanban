@@ -331,8 +331,8 @@ function printTopHelp() {
   console.log('  --port <n>            Port to listen on (default 3541)');
   console.log('  --dir <path>          Override Claude config dir (default ~/.claude); also targets --install/--uninstall');
   console.log('  --open                Open browser on start');
-  console.log('  --install, --uninstall    Install or remove the plugin, context spy, and statusline');
-  console.log('  --plugin-only         With --install: refresh only the plugin, skip context spy and statusline');
+  console.log('  --install, --uninstall    Install or remove the plugin');
+  console.log('  --plugin-only         With --install: install without a prompt');
   console.log('\nEnvironment:');
   console.log('  CCK_URL               Server base URL, e.g. http://127.0.0.1:4795 (wins over PORT)');
   console.log('  PORT                  Server port (default: the one this config dir\'s server reports, else 3541)');
@@ -810,9 +810,12 @@ async function runSessionViewCli(args) {
     ].filter(Boolean).join(' · ');
     lines.push(`  Model: ${modelName}${modelExtras ? ` (${modelExtras})` : ''}`);
     if (cw.used_percentage != null) {
-      lines.push(`  Context: ${cw.used_percentage}% used · ${fmtTok(cw.total_input_tokens)} in / ${fmtTok(cw.total_output_tokens)} out · cache ${fmtTok(cw.current_usage?.cache_read_input_tokens)} read`);
+      lines.push(`  Context: ${cw.used_percentage}% used · ${fmtTok(cw.total_input_tokens)} in${cw.total_output_tokens != null ? ` / ${fmtTok(cw.total_output_tokens)} out` : ''} · cache ${fmtTok(cw.current_usage?.cache_read_input_tokens)} read`);
     }
-    lines.push(`  Cost: ${fmtCost(cost.total_cost_usd)} · ${cost.total_api_duration_ms != null ? formatAge(cost.total_api_duration_ms) : '-'} api / ${cost.total_duration_ms != null ? formatAge(cost.total_duration_ms) : '-'} total · +${cost.total_lines_added || 0}/-${cost.total_lines_removed || 0}`);
+    const timing = cost.total_duration_ms != null
+      ? ` · ${cost.total_api_duration_ms != null ? formatAge(cost.total_api_duration_ms) : '-'} api / ${formatAge(cost.total_duration_ms)} total · +${cost.total_lines_added || 0}/-${cost.total_lines_removed || 0}`
+      : '';
+    lines.push(`  Cost: ${fmtCost(cost.total_cost_usd)}${timing}`);
     if (rl.five_hour || rl.seven_day) {
       lines.push(`  Limits: 5h ${rl.five_hour?.used_percentage ?? '-'}% · 7d ${rl.seven_day?.used_percentage ?? '-'}%`);
     }

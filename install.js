@@ -10,14 +10,13 @@ const { PLUGIN_ID } = require('./lib/plugin-status');
 const CLAUDE_DIR = getClaudeDir();
 const CLI_ENV = claudeCliEnv(CLAUDE_DIR);
 const CCK_DIR = path.join(CLAUDE_DIR, '.cck');
-const HOOKS_DIR = path.join(CLAUDE_DIR, 'hooks');
 const SETTINGS_PATH = path.join(CLAUDE_DIR, 'settings.json');
 const PLUGIN_SRC = path.join(__dirname, 'plugin');
 const PLUGIN_DEST = path.join(CCK_DIR, 'plugin');
+// Earlier versions piped the statusLine through this script to capture context use; the plugin's mod does it now.
 const CTX_SCRIPT_NAME = 'context-status.sh';
-const CTX_SCRIPT_SRC = path.join(PLUGIN_SRC, 'plugins', 'claude-code-kanban', 'scripts', CTX_SCRIPT_NAME);
-const CTX_SCRIPT_DEST = path.join(HOOKS_DIR, CTX_SCRIPT_NAME);
-const CTX_COMMAND = displayPath(CTX_SCRIPT_DEST);
+const CTX_SCRIPT_DEST = path.join(CLAUDE_DIR, 'hooks', CTX_SCRIPT_NAME);
+const MIN_CLAUDE_VERSION = [2, 1, 287];
 
 // ANSI helpers
 const green = s => `\x1b[32m${s}\x1b[0m`;
@@ -47,10 +46,37 @@ function runCLI(cmd, okPatterns = []) {
   }
 }
 
-function copyScript(src, dest) {
-  fs.mkdirSync(path.dirname(dest), { recursive: true });
-  fs.copyFileSync(src, dest);
-  try { fs.chmodSync(dest, 0o755); } catch {}
+function isBelowMinVersion(versionOutput) {
+  const parts = /(\d+)\.(\d+)\.(\d+)/.exec(versionOutput)?.slice(1).map(Number);
+  if (!parts) return false;
+  const i = parts.findIndex((n, k) => n !== MIN_CLAUDE_VERSION[k]);
+  return i !== -1 && parts[i] < MIN_CLAUDE_VERSION[i];
+}
+
+function removeContextSpy() {
+  if (fs.existsSync(CTX_SCRIPT_DEST)) {
+    fs.unlinkSync(CTX_SCRIPT_DEST);
+    console.log(`  Old context spy: ${green('✓')} Removed ${dim(displayPath(CTX_SCRIPT_DEST))}`);
+  }
+  if (!fs.existsSync(SETTINGS_PATH)) return;
+  let settings;
+  try {
+    settings = JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf8'));
+  } catch {
+    console.log(`  Settings: ${red('✗')} Could not parse settings.json`);
+    return;
+  }
+  const cmd = settings.statusLine?.command;
+  if (!cmd?.includes(CTX_SCRIPT_NAME)) return;
+  const stripped = cmd.replace(/\S*context-status\.sh\s*\|?\s*/, '').trim();
+  if (stripped) {
+    settings.statusLine.command = stripped;
+    console.log(`  StatusLine: ${green('✓')} Restored to "${stripped}"`);
+  } else {
+    delete settings.statusLine;
+    console.log(`  StatusLine: ${green('✓')} Removed`);
+  }
+  fs.writeFileSync(SETTINGS_PATH, `${JSON.stringify(settings, null, 2)}\n`);
 }
 
 // Deletes files but never directories: on Windows the running Claude Code process holds
@@ -81,7 +107,7 @@ function copyDirSync(src, dest) {
 }
 
 async function runInstall({ pluginOnly = false } = {}) {
-  console.log(`\n  ${bold('claude-code-kanban')} — ${pluginOnly ? 'Plugin installer' : 'Plugin & StatusLine installer'}\n`);
+  console.log(`\n  ${bold('claude-code-kanban')} — Plugin installer\n`);
   console.log(`  Claude config dir: ${dim(displayPath(CLAUDE_DIR))}\n`);
   let failed = false;
 
@@ -90,6 +116,9 @@ async function runInstall({ pluginOnly = false } = {}) {
   const claude = runCLI('claude --version');
   if (claude.ok) {
     console.log(green(`✓ found (${claude.output})`));
+    if (isBelowMinVersion(claude.output)) {
+      console.log(`    ${yellow(`⚠ context use and cost tracking needs Claude Code ${MIN_CLAUDE_VERSION.join('.')} or later — run \`claude update\``)}`);
+    }
   } else {
     console.log(red('✗ claude CLI not found'));
     console.log(`    ${dim('Install Claude Code CLI first: https://docs.anthropic.com/en/docs/claude-code')}`);
@@ -155,75 +184,8 @@ async function runInstall({ pluginOnly = false } = {}) {
     console.log(`    ${dim('Skipped')}`);
   }
 
-  if (pluginOnly) {
-    console.log(`\n  ${dim('Context spy and statusline skipped (--plugin-only).')}`);
-    printSummary(failed);
-    return;
-  }
-
-  // 3. StatusLine setup (context-status.sh must be copied globally since statusLine is not plugin-scoped)
-  console.log(`\n  Context spy: ${dim(CTX_SCRIPT_DEST)}`);
-  let ctxInstalled = false;
-  if (fs.existsSync(CTX_SCRIPT_DEST)) {
-    const existing = fs.readFileSync(CTX_SCRIPT_DEST, 'utf8');
-    const bundled = fs.readFileSync(CTX_SCRIPT_SRC, 'utf8');
-    if (existing === bundled) {
-      console.log(`    ${green('✓')} Up to date`);
-      ctxInstalled = true;
-    } else if (await prompt(`    Different version found. Update? [Y/n] `)) {
-      copyScript(CTX_SCRIPT_SRC, CTX_SCRIPT_DEST);
-      console.log(`    ${green('✓')} Updated`);
-      ctxInstalled = true;
-    } else {
-      console.log(`    ${dim('Skipped')}`);
-    }
-  } else if (await prompt(`    Not found. Install? [Y/n] `)) {
-    copyScript(CTX_SCRIPT_SRC, CTX_SCRIPT_DEST);
-    console.log(`    ${green('✓')} Installed`);
-    ctxInstalled = true;
-  } else {
-    console.log(`    ${dim('Skipped')}`);
-  }
-
-  // 4. StatusLine config in settings.json
-  if (ctxInstalled) {
-    let settings;
-    try {
-      settings = fs.existsSync(SETTINGS_PATH)
-        ? JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf8'))
-        : {};
-    } catch {
-      console.log(`    ${red('✗')} Malformed JSON in settings.json — skipping statusline config`);
-      printSummary(true);
-      return;
-    }
-
-    const hasCtx = settings.statusLine?.command?.includes(CTX_SCRIPT_NAME);
-    if (hasCtx) {
-      console.log(`\n  StatusLine: ${green('✓')} Already configured`);
-    } else if (!settings.statusLine) {
-      console.log(`\n  StatusLine: ${dim('not configured')}`);
-      if (await prompt(`    Set up context tracking statusline? [Y/n] `)) {
-        settings.statusLine = { type: 'command', command: CTX_COMMAND };
-        fs.writeFileSync(SETTINGS_PATH, `${JSON.stringify(settings, null, 2)}\n`);
-        console.log(`    ${green('✓')} StatusLine configured`);
-      } else {
-        console.log(`    ${dim('Skipped')}`);
-      }
-    } else {
-      const existing = settings.statusLine.command;
-      console.log(`\n  StatusLine: ${dim(`current: ${existing}`)}`);
-      if (await prompt(`    Prepend context spy to existing statusline? [Y/n] `)) {
-        settings.statusLine.type = 'command';
-        settings.statusLine.command = `${CTX_COMMAND} | ${existing}`;
-        fs.writeFileSync(SETTINGS_PATH, `${JSON.stringify(settings, null, 2)}\n`);
-        console.log(`    ${green('✓')} StatusLine updated`);
-      } else {
-        console.log(`    ${dim('Skipped')}`);
-      }
-    }
-  }
-
+  console.log('');
+  removeContextSpy();
   printSummary(failed);
 }
 
@@ -265,41 +227,7 @@ async function runUninstall() {
     console.log(`  Plugin copy: ${dim('Not found')}`);
   }
 
-  // 4. Remove context-status.sh copy
-  if (fs.existsSync(CTX_SCRIPT_DEST)) {
-    fs.unlinkSync(CTX_SCRIPT_DEST);
-    console.log(`  Context spy: ${green('✓')} Removed`);
-  } else {
-    console.log(`  Context spy: ${dim('Not found')}`);
-  }
-
-  // 5. Clean up settings.json (statusLine)
-  if (fs.existsSync(SETTINGS_PATH)) {
-    try {
-      const settings = JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf8'));
-      let changed = false;
-
-      // Strip context-status.sh from statusLine
-      if (settings.statusLine?.command?.includes(CTX_SCRIPT_NAME)) {
-        const cmd = settings.statusLine.command;
-        const stripped = cmd.replace(new RegExp(`\\S*${CTX_SCRIPT_NAME.replace('.', '\\.')}\\s*\\|\\s*`), '').trim();
-        if (stripped && stripped !== cmd) {
-          settings.statusLine.command = stripped;
-          console.log(`  StatusLine: ${green('✓')} Restored to "${stripped}"`);
-        } else {
-          delete settings.statusLine;
-          console.log(`  StatusLine: ${green('✓')} Removed`);
-        }
-        changed = true;
-      }
-
-      if (changed) {
-        fs.writeFileSync(SETTINGS_PATH, `${JSON.stringify(settings, null, 2)}\n`);
-      }
-    } catch {
-      console.log(`  Settings: ${red('✗')} Could not parse settings.json`);
-    }
-  }
+  removeContextSpy();
 
   console.log(`\n  ${green('Uninstall complete.')}\n`);
 }

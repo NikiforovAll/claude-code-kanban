@@ -47,9 +47,9 @@ See [Getting started](/claude-code-kanban/getting-started/) and [Configuration](
 
 **Symptom.** Session cards and session info show no context use, tokens or cost.
 
-**Cause.** The `statusLine` in `settings.json` does not run `context-status.sh`. The installer asks before it changes `statusLine`. If you answered `n`, or `settings.json` was malformed, it skipped this step. `--plugin-only` also skips it. Or `jq` is missing. The script uses `jq` to read the session id. See step 1 in the section above.
+**Cause.** The plugin's mod writes these numbers. Claude Code older than 2.1.287 does not load mods. Mods also do not run when `disableAllHooks` is set, in `--safe-mode`, or when your organization allows only managed mods. If the plugin is missing, see the section above.
 
-**Fix.** Run `npx claude-code-kanban --install` again and answer yes to the statusLine step. Or add it by hand, as [Manual statusLine](/claude-code-kanban/reference/configuration/#manual-statusline) shows. For a config dir other than `~/.claude`, use the `hooks/context-status.sh` path in that dir.
+**Fix.** Run `claude update`, then start a new session or run `/reload-plugins`.
 
 ## "Server Not Running" overlay
 

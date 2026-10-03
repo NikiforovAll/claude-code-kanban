@@ -77,9 +77,9 @@ Open that link to use the terminal. The token changes on each start unless you s
 
 | Flag | What it does |
 | --- | --- |
-| `--install` | Installs the Claude Code plugin (hooks and skills), the context spy script and the statusLine. |
+| `--install` | Installs the Claude Code plugin: hooks, skills and the mod that records context use and cost. |
 | `--uninstall` | Removes what `--install` added. |
-| `--plugin-only` | With `--install`: refreshes only the plugin, with no prompt. Skips the context spy and the statusLine. |
+| `--plugin-only` | With `--install`: installs the plugin with no prompt. |
 | `--dir <path>` | Installs into or removes from another Claude config dir. `CLAUDE_CONFIG_DIR` works too. |
 
 ```bash
@@ -186,7 +186,7 @@ Focuses the session in connected board tabs.
 claude-code-kanban session view <id> [--json]
 ```
 
-Prints the session's title, status, project, branch and task counts. With the context spy installed, it also prints the model, context window use, cost and rate limits. `--json` prints the full session object.
+Prints the session's title, status, project, branch and task counts. When the plugin's mod has recorded the session, it also prints the model, context window use, cost and rate limits. `--json` prints the full session object.
 
 ### session pin
 

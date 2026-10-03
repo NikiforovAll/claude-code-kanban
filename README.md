@@ -27,7 +27,7 @@ You need Node.js 20 or later, the `claude` CLI, and `jq` for the hook scripts.
 npx claude-code-kanban --install
 ```
 
-The installer adds a Claude Code plugin with hooks and skills, and a statusLine script for context use and cost. It asks before each change and keeps your other settings. Without the hooks, the board shows tasks only: no agent log, no live activity, no waiting prompts.
+The installer adds a Claude Code plugin with hooks, skills and a mod for context use and cost (Claude Code 2.1.287 or later). It asks before it installs and keeps your other settings. Without the hooks, the board shows tasks only: no agent log, no live activity, no waiting prompts.
 
 To remove it, run `npx claude-code-kanban --uninstall`. For another Claude config dir, pass the same `--dir=<path>` (or set `CLAUDE_CONFIG_DIR`) to `--install`, `--uninstall` and the server. See [Getting started](https://nikiforovall.blog/claude-code-kanban/getting-started/) for each install step.
 

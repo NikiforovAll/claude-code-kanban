@@ -4248,7 +4248,7 @@ agentActivityWatcher.on('all', (event, filePath) => {
   }
 });
 
-// Watch context-status directory for statusline updates
+// Watch context-status directory for the plugin's context and cost updates
 const contextStatusWatcher = chokidar.watch(CONTEXT_STATUS_DIR, {
   persistent: true,
   ignoreInitial: false,
