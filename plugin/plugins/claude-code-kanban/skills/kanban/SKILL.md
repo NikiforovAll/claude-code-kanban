@@ -2,7 +2,6 @@
 name: kanban
 description: Drive the kanban board — open, pin, preview, link, inspect.
 argument-hint: '[open|pin|unpin|preview|link] [target]'
-disable-model-invocation: true
 ---
 
 # Kanban Skill
