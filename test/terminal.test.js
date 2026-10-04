@@ -352,7 +352,7 @@ describe('terminal endpoint', { skip: !ptyAvailable }, () => {
     assert.equal((await exited).ended, true);
   });
 
-  it('raises the server, its console host and an attached shell, and restores the shell on detach', { skip: process.platform !== 'win32' }, async () => {
+  it('raises the terminal host, its console host and an attached shell, and restores the shell on detach', { skip: process.platform !== 'win32' }, async () => {
     const { PRIORITY_NORMAL, PRIORITY_ABOVE_NORMAL } = os.constants.priority;
     const until = async (test, what) => {
       for (let i = 0; i < 100; i++) {
@@ -361,11 +361,15 @@ describe('terminal endpoint', { skip: !ptyAvailable }, () => {
       }
       assert.fail(`timeout: ${what}`);
     };
-    const hosts = () => {
-      const q = `(Get-CimInstance Win32_Process -Filter "ParentProcessId=${srv.child.pid} AND Name='conhost.exe'").ProcessId`;
+    const children = (parent, name) => {
+      const q = `(Get-CimInstance Win32_Process -Filter "ParentProcessId=${parent} AND Name='${name}'").ProcessId`;
       return require('node:child_process').execFileSync('powershell.exe', ['-NoProfile', '-Command', q]).toString().split(/\s+/).filter(Boolean).map(Number);
     };
-    assert.equal(os.getPriority(srv.child.pid), PRIORITY_ABOVE_NORMAL);
+    const [host] = children(srv.child.pid, 'node.exe');
+    assert.ok(host, 'terminal host');
+    const hosts = () => children(host, 'conhost.exe');
+    assert.equal(os.getPriority(host), PRIORITY_ABOVE_NORMAL);
+    assert.equal(os.getPriority(srv.child.pid), PRIORITY_NORMAL);
 
     const got = await session(port, { id: SESSION, mode: 'shell' }, (g) => g.control.some((m) => m.t === 'ready'));
     let pid = 0;
@@ -442,6 +446,7 @@ describe('terminal restore', () => {
   it('resumes the saved terminals one at a time and keeps the list in step', async () => {
     const { t, pty, store } = service(true, { sessions: [A, ELSEWHERE, UNKNOWN, 'not-a-uuid', B] });
     t.restore();
+    await until(() => t.list().length === 1);
     assert.deepEqual(t.list().map((s) => s.id), [A]);
     await until(() => t.list().length === 2 && store.data.sessions.length === 2);
     assert.deepEqual(t.list().map((s) => s.id).sort(), [A, B]);

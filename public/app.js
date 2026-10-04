@@ -12455,14 +12455,16 @@ function formatTerminalProc(s) {
 async function pollTerminalProcStats() {
   if (!isOnScreen()) return;
   let cck;
+  let host;
   try {
     const res = await fetch('/api/terminals/stats', { cache: 'no-store' });
     if (!res.ok) return;
-    ({ cck, terminals: terminalProcStats } = await res.json());
+    ({ cck, host, terminals: terminalProcStats } = await res.json());
   } catch (_) {
     return;
   }
-  document.getElementById('terminal-manager-stats').textContent = cck ? `cck ${formatTerminalProc(cck)}` : '';
+  const parts = [cck && `cck ${formatTerminalProc(cck)}`, host && `terminal host ${formatTerminalProc(host)}`];
+  document.getElementById('terminal-manager-stats').textContent = parts.filter(Boolean).join(' · ');
   for (const el of document.querySelectorAll('#terminal-manager-body [data-proc]')) {
     el.textContent = formatTerminalProc(terminalProcStats[el.dataset.proc]);
   }
