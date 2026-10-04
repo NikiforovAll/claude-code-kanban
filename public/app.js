@@ -8995,7 +8995,7 @@ function renderCacheTimer(lastRequestAt, ttl, usage, modelId) {
     ? ` It writes ${formatTokens(rewrite.tokens / 1000)} tokens again, about ${formatCost(rewrite.usd)} at list price.`
     : '';
   const title = `Prompt cache, ${ttl} TTL. Expires at ${at}; the next request after that writes it again.${cost}`;
-  return `<div class="stat-item" title="${escapeHtml(title)}"><span class="stat-label">Cache</span><span class="stat-value cache-timer" data-expires="${expiresAt}" data-expired-text="${escapeHtml(expiredText)}" style="color:${color}">${text}</span></div>`;
+  return `<div class="stat-item" title="${escapeHtml(title)}"><span class="stat-label">Cache</span><span class="stat-value cache-timer" data-expires="${escapeHtml(expiresAt)}" data-expired-text="${escapeHtml(expiredText)}" style="color:${color}">${text}</span></div>`;
 }
 
 function renderContextDetail(session, { tokens = true } = {}) {
