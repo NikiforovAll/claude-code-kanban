@@ -28,6 +28,7 @@ const {
   readScratchpadCreations,
   extractPromptFromTranscript,
   extractModelFromTranscript,
+  readSubagentMeta,
   extractAgentResultFromTranscript,
   extractTranscriptStats,
   readFullToolResult,
@@ -2147,10 +2148,7 @@ app.get('/api/sessions/:sessionId/workflows/:wfId/run', async (req, res) => {
       for (const f of files) {
         const agentId = f.slice('agent-'.length, -'.jsonl'.length);
         const stats = (await extractTranscriptStats(path.join(runDir, f))) || {};
-        let type = null;
-        try {
-          type = JSON.parse(readFileSync(path.join(runDir, `agent-${agentId}.meta.json`), 'utf8')).agentType || null;
-        } catch (_) {}
+        const type = readSubagentMeta(path.join(runDir, f))?.agentType || null;
         const entry = journal.get(agentId);
         const durationMs = stats.firstTs && stats.lastTs ? new Date(stats.lastTs) - new Date(stats.firstTs) : null;
         if (stats.lastTs && (!stoppedAt || stats.lastTs > stoppedAt)) stoppedAt = stats.lastTs;
@@ -2387,6 +2385,8 @@ app.get('/api/sessions/:sessionId/agents', async (req, res) => {
   const sessionId = resolveSessionId(req.params.sessionId);
   const agentDir = path.join(AGENT_ACTIVITY_DIR, sessionId);
   if (!existsSync(agentDir)) return res.json({ agents: [], waitingForUser: null });
+// Same for the modelUnavailable latch and extractModelFromTranscript.
+const MODEL_SCAN = 2;
   try {
     const metadata = loadSessionMetadata();
     const meta = metadata[sessionId] || {};
@@ -2523,21 +2523,36 @@ app.get('/api/sessions/:sessionId/agents', async (req, res) => {
       }
     }
 
-    // Retry stopped agents even if modelUnavailable was set — it may have been marked
-    // unavailable while the agent was still active and its JSONL wasn't ready yet.
-    const agentsNeedingModel = agents.filter(a => !a.model && (!a.modelUnavailable || a.status === 'stopped'));
+    // The plugin's start record carries the model; this covers sessions without it.
+    const agentsNeedingModel = agents.filter(a => !a.model && a.modelUnavailable !== MODEL_SCAN);
     if (agentsNeedingModel.length && meta.jsonlPath) {
       for (const agent of agentsNeedingModel) {
         let model = null;
-        try { model = extractModelFromTranscript(subagentJsonlForExtraction(meta, agent.agentId)); } catch (_) {}
+        try { model = extractModelFromTranscript(jsonl); } catch (_) {}
         if (model) {
           agent.model = model;
           delete agent.modelUnavailable;
+        const jsonl = subagentJsonlForExtraction(meta, agent.agentId);
           dirty.add(agent);
-        } else if (agent.status === 'stopped' && !agent.modelUnavailable) {
-          agent.modelUnavailable = true;
+          continue;
+        }
+        // Until the transcript has an assistant line, show the requested alias.
+        // agent.model stays empty so the exact id is still looked up.
+        if (!agent.modelAlias) {
+          let alias = readSubagentMeta(jsonl)?.model || null;
+          if (alias === 'inherit') {
+            try { alias = extractModelFromTranscript(meta.jsonlPath); } catch (_) { alias = null; }
+          }
+          if (alias) {
+            agent.modelAlias = alias;
+            dirty.add(agent);
+          }
+        }
+        if (agent.status === 'stopped') {
+          agent.modelUnavailable = MODEL_SCAN;
           dirty.add(agent);
         }
+          delete agent.modelAlias;
       }
     }
 

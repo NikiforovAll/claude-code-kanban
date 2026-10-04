@@ -4407,12 +4407,18 @@ body.booting .boot-splash {
 }
 .agent-log-title {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 6px;
 }
 .agent-log-id {
   font-size: 11px;
   color: var(--text-tertiary);
+}
+.agent-log-model {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
 }
 .msg-agent-log-btn {
   flex-shrink: 0;
@@ -4636,7 +4642,8 @@ body.booting .boot-splash {
   border: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
   border-radius: 8px;
   white-space: nowrap;
-  min-width: 0;
+  flex-shrink: 0;
+  min-width: 180px;
   overflow: hidden;
   transition:
     opacity 0.3s,
@@ -4675,21 +4682,33 @@ body.booting .boot-splash {
 .agent-card.fading {
   opacity: 0.4;
 }
-.agent-type-row {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
-}
-.agent-type-ns {
-  font-size: 11px;
-  color: var(--text-muted);
-  font-weight: 400;
-}
-.agent-type-name {
-  font-size: 13px;
+.agent-task {
+  max-width: 240px;
+  padding-right: 14px;
+  font-size: 12.5px;
   font-weight: 600;
   color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.agent-ident-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  max-width: 240px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.agent-ident-sep {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.agent-type-ns {
+  color: var(--text-muted);
+}
+.agent-type-name {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -4697,8 +4716,8 @@ body.booting .boot-splash {
   font-size: 9px;
   padding: 2px 6px;
   border-radius: 3px;
-  margin-left: 6px;
-  vertical-align: middle;
+  margin-left: 2px;
+  flex-shrink: 0;
 }
 .agent-status-row {
   display: flex;
@@ -4728,30 +4747,13 @@ body.booting .boot-splash {
   color: var(--text-primary);
 }
 .agent-status {
-  font-size: 11px;
-  color: var(--text-tertiary);
+  font-size: 10px;
+  color: var(--text-muted);
 }
 .agent-card-model {
-  margin-left: auto;
-  padding: 1px 6px;
-  font-family: var(--font-mono, monospace);
-  font-size: 9.5px;
-  line-height: 1.4;
-  color: var(--text-tertiary);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 45%;
-}
-.agent-message {
-  font-size: 11px;
-  color: var(--text-muted);
-  max-width: 220px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  flex-shrink: 0;
+  font-weight: 600;
+  color: var(--text-primary);
 }
 
 .agent-dismiss-btn {

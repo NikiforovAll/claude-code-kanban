@@ -23,6 +23,8 @@ const {
   readCompactSummaries,
   findTerminatedTeammates,
   extractPromptFromTranscript,
+  extractModelFromTranscript,
+  readSubagentMeta,
   extractAgentResultFromTranscript,
   readScratchpadCreations,
   updateLoopInfo,
@@ -996,6 +998,48 @@ describe('Parser: extractPromptFromTranscript', () => {
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('Parser: extractModelFromTranscript', () => {
+  let tmpDir;
+  before(() => { tmpDir = mkdtempSync(path.join(os.tmpdir(), 'parser-test-')); });
+  after(() => rmSync(tmpDir, { recursive: true, force: true }));
+
+  const assistant = (model) => JSON.stringify({ type: 'assistant', message: { role: 'assistant', model, content: [] } });
+
+  it('finds the model in the head', () => {
+    const file = path.join(tmpDir, 'head.jsonl');
+    writeFileSync(file, `${JSON.stringify({ type: 'user', message: { content: 'hi' } })}\n${assistant('claude-opus-5-5')}\n`);
+    assert.equal(extractModelFromTranscript(file), 'claude-opus-5-5');
+  });
+
+  it('finds the model in the tail when a long first line ends the head scan', () => {
+    const file = path.join(tmpDir, 'tail.jsonl');
+    const prompt = JSON.stringify({ type: 'user', message: { content: 'x'.repeat(150000) } });
+    writeFileSync(file, `${prompt}\n${assistant('claude-opus-5-5')}\n`);
+    assert.equal(extractModelFromTranscript(file), 'claude-opus-5-5');
+  });
+
+  it('returns null when no line has a model', () => {
+    const file = path.join(tmpDir, 'none.jsonl');
+    writeFileSync(file, `${JSON.stringify({ type: 'user', message: { content: 'x'.repeat(150000) } })}\n`);
+    assert.equal(extractModelFromTranscript(file), null);
+  });
+});
+
+describe('Parser: readSubagentMeta', () => {
+  let tmpDir;
+  before(() => { tmpDir = mkdtempSync(path.join(os.tmpdir(), 'parser-test-')); });
+  after(() => rmSync(tmpDir, { recursive: true, force: true }));
+
+  it('reads the meta file next to the transcript', () => {
+    writeFileSync(path.join(tmpDir, 'agent-a1.meta.json'), JSON.stringify({ agentType: 'general-purpose', model: 'opus' }));
+    assert.deepEqual(readSubagentMeta(path.join(tmpDir, 'agent-a1.jsonl')), { agentType: 'general-purpose', model: 'opus' });
+  });
+
+  it('returns null without a meta file', () => {
+    assert.equal(readSubagentMeta(path.join(tmpDir, 'agent-missing.jsonl')), null);
   });
 });
 

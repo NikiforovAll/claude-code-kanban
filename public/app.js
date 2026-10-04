@@ -889,7 +889,12 @@ async function viewAgentLog(agentId) {
   if (!messagePanelOpen) toggleMessagePanel();
   const header = document.querySelector('.message-panel-header h3');
   if (header) {
-    header.innerHTML = `<span class="agent-log-title"><button class="agent-log-back" onclick="exitAgentLogMode()" title="Back to session log">&larr;</button> ${escapeHtml(agent.type || 'unknown')} <code class="agent-log-id">(${escapeHtml(shortId)})</code></span>`;
+    const fullModel = agentModel(agent);
+    const model = shortModelName(fullModel);
+    const modelHtml = model
+      ? `<span class="agent-log-model" title="${escapeHtml(fullModel)}">${escapeHtml(model)}</span> <span class="agent-ident-sep">·</span> `
+      : '';
+    header.innerHTML = `<span class="agent-log-title"><button class="agent-log-back" onclick="exitAgentLogMode()" title="Back to session log">&larr;</button> ${modelHtml}${escapeHtml(agent.type || 'unknown')} <code class="agent-log-id">(${escapeHtml(shortId)})</code></span>`;
   }
   fetchAgentMessages();
   if (agentLogSSE) {
@@ -3138,15 +3143,12 @@ function renderAgentFooter() {
               : `active · ${formatDuration(elapsed)}`;
         const descText = a.description || '';
         const promptTrimmed = stripAnsi(stripTeammateWrapper((a.prompt || '').trim())).replace(/[\r\n]+/g, ' ');
-        const displayText = descText || promptTrimmed;
-        const displayTrunc = displayText.length > 60 ? `${displayText.substring(0, 60)}…` : displayText;
-        const msgHtml = displayTrunc
-          ? `<div class="agent-message" title="${escapeHtml(displayText)}">${escapeHtml(displayTrunc)}</div>`
-          : '';
         const rawType = a.type || 'unknown';
         const colonIdx = rawType.indexOf(':');
         const typeNs = colonIdx > 0 ? rawType.substring(0, colonIdx + 1) : '';
         const typeName = colonIdx > 0 ? rawType.substring(colonIdx + 1) : rawType;
+        const displayText = descText || promptTrimmed || typeName;
+        const taskHtml = `<div class="agent-task" title="${escapeHtml(displayText)}">${escapeHtml(displayText)}</div>`;
         const agentNameVal = a.agentName || null;
         const nameColor = agentNameVal ? getOwnerColor(agentNameVal) : null;
         const nameBadgeHtml = nameColor
@@ -3155,15 +3157,16 @@ function renderAgentFooter() {
         const agentColor = resolveNamedColor(a.color);
         const colorStyle = agentColor ? ` style="border-left:3px solid ${agentColor.color}"` : '';
         const selectedClass = a.agentId === currentAgentModalId ? ' selected' : '';
-        const cardModel = shortModelName(a.model);
-        const modelChipHtml = cardModel
-          ? `<span class="agent-card-model" title="${escapeHtml(a.model)}">${escapeHtml(cardModel)}</span>`
+        const fullModel = agentModel(a);
+        const cardModel = shortModelName(fullModel);
+        const modelHtml = cardModel
+          ? `<span class="agent-card-model" title="${escapeHtml(fullModel)}">${escapeHtml(cardModel)}</span><span class="agent-ident-sep">·</span>`
           : '';
         return `<div class="agent-card${selectedClass}" data-agent-id="${escapeHtml(a.agentId)}"${colorStyle} onclick="showAgentModal('${escAttrJs(a.agentId)}')">
           ${agentLogButton(a.agentId, 'agent-card-log-btn')}
-          <div class="agent-type-row">${typeNs ? `<span class="agent-type-ns">${escapeHtml(typeNs)}</span>` : ''}<span class="agent-type-name">${escapeHtml(typeName)}</span>${nameBadgeHtml}</div>
-          <div class="agent-status-row"><span class="agent-dot ${a.status}"></span><span class="agent-status">${statusText}</span>${modelChipHtml}</div>
-          ${msgHtml}
+          ${taskHtml}
+          <div class="agent-ident-row">${modelHtml}<span class="agent-type-name" title="${escapeHtml(rawType)}">${typeNs ? `<span class="agent-type-ns">${escapeHtml(typeNs)}</span>` : ''}${escapeHtml(typeName)}</span>${nameBadgeHtml}</div>
+          <div class="agent-status-row"><span class="agent-dot ${a.status}"></span><span class="agent-status">${statusText}</span></div>
         </div>`;
       })
       .join('');
@@ -3266,7 +3269,7 @@ function showAgentModal(agentId) {
   const modalNameLabel = agent.agentName ? ` · ${escapeHtml(agent.agentName)}` : '';
   title.innerHTML = `${statusDot} ${escapeHtml(agent.type || 'unknown')}${modalNameLabel}`;
 
-  const shortModel = shortModelName(agent.model);
+  const shortModel = shortModelName(agentModel(agent));
   const shortId = agent.agentId ? agent.agentId.slice(0, 8) : '';
   const chip = (label, value, opts = {}) => {
     const cls = opts.cls ? ` ${opts.cls}` : '';
@@ -11264,6 +11267,10 @@ function fmtTokens(t) {
 
 function shortModelName(model) {
   return model ? model.replace(/^claude-/, '').replace(/-\d{8}$/, '') : '';
+}
+
+function agentModel(agent) {
+  return agent.model || agent.modelAlias || '';
 }
 
 function renderWorkflowRun(run) {

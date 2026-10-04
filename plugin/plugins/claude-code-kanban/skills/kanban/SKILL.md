@@ -28,6 +28,8 @@ claude-code-kanban help <command> <subcommand> # flags and examples
 | `view` / `peek` | `session view <id>`, `session peek <id>` |
 | tasks, projects | `task list`, `project list` |
 
+`preview` and `link` take markdown (`.md`) and HTML (`.html`). HTML renders as authored in a sandboxed iframe, and cck inlines its local stylesheets, scripts and images, `url()` refs in `<style>` blocks included. To show the user a page, a prototype or a collage of screenshots, write the HTML and preview that file: do not render it to an image first or serve it over HTTP.
+
 To be driven *by* the board instead — card moves arriving as instructions — the user types `/claude-code-kanban:follow`.
 
 ## Troubleshooting

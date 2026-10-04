@@ -149,13 +149,14 @@ async function markStopped($: EngineInterface) {
 }
 
 // The name map lets TeammateIdle, which names the teammate, find its agent id.
-async function agentStarted($: EngineInterface, agentId: string, type: string, name?: string) {
+async function agentStarted($: EngineInterface, agentId: string, type: string, model: string, name?: string) {
   const dir = await sessionDir($)
   const ts = new Date().toISOString()
   await Promise.all([
     appendLine($, `${dir}/${agentId}.jsonl`, {
       agentId,
       type,
+      model,
       event: 'start',
       status: 'active',
       startedAt: ts,
@@ -248,7 +249,7 @@ export const register: Register = on => {
   })
   on('agent.spawn', async ($, e, next) => {
     const result = await next(e)
-    if (result.agentId) await agentStarted($, result.agentId, e.subagentType, e.name)
+    if (result.agentId) await agentStarted($, result.agentId, e.subagentType, result.model, e.name)
     return result
   })
   // An interrupted turn fires no Stop hook, so it does not mark the session unread either.

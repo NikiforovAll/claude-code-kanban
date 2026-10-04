@@ -253,7 +253,7 @@ test('a subagent spawn then finish records start and stop', async ($, on) => {
   await $.turn.complete(turn({ agentId: 'a1', answer: 'Task done with "quotes"' }))
 
   const [start, stop] = lines(files[`${SESSION}/a1.jsonl`])
-  expect(start).toMatchObject({ agentId: 'a1', type: 'general-purpose', event: 'start', status: 'active' })
+  expect(start).toMatchObject({ agentId: 'a1', type: 'general-purpose', model: 'haiku', event: 'start', status: 'active' })
   expect(stop).toMatchObject({ agentId: 'a1', event: 'stop', status: 'stopped', lastMessage: 'Task done with "quotes"' })
   expect('type' in stop).toBe(false)
   expect(files[`${SESSION}/_name-general-purpose.id`]).toBe('a1')
