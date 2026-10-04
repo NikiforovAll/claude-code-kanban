@@ -8815,8 +8815,9 @@ function setupEventSource() {
 const CONTEXT_COLORS = { green: '#5b9a6b', yellow: '#b8a63e', orange: '#c07840', red: '#b85555' };
 const COST_THRESHOLDS = { green: 0.5, yellow: 2, orange: 5 };
 const MODEL_THRESHOLDS = [
-  { match: /sonnet|haiku/i, yellow: 100000, orange: 130000, red: 150000 },
-  { match: /opus/i, yellow: 100000, orange: 200000, red: 700000 },
+  { match: /sonnet/i, yellow: 120000, orange: 200000, red: 300000 },
+  { match: /haiku/i, yellow: 100000, orange: 130000, red: 150000 },
+  { match: /opus/i, yellow: 150000, orange: 250000, red: 400000 },
 ];
 const DEFAULT_THRESHOLDS = { yellow: 100000, orange: 130000, red: 150000 };
 
