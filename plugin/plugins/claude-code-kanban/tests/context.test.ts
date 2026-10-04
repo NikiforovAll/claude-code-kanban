@@ -1,6 +1,6 @@
 import type { On, SessionMeasureInput } from 'claude-code'
 import { expect, test } from 'claude-code/testing'
-import { displayName } from '../hooks/context'
+import { displayName, toStatus } from '../hooks/context'
 
 const MEASURE: SessionMeasureInput = {
   context: { tokens: 129_174, window: 1_000_000, percent: 13 },
@@ -43,6 +43,19 @@ test('session.measure writes the statusLine shape the board reads', async ($, on
   })
   expect(status.rate_limits.five_hour).toEqual({ used_percentage: 1, resets_at: 1790946600 })
   expect(status.rate_limits.seven_day.used_percentage).toBe(7.5)
+})
+
+test('session.measure writes no cache entry before the first request', async ($, on) => {
+  const writes = engine(on, { CLAUDE_CONFIG_DIR: 'C:/cfg' }, 'sid-4')
+
+  await $.session.measure(MEASURE)
+
+  expect(JSON.parse(writes[0]?.text ?? '{}').cache).toBeUndefined()
+})
+
+test('toStatus adds the last request time', async () => {
+  const status = toStatus('claude-opus-5-5', MEASURE, undefined, 1_790_000_000_000)
+  expect(status.cache).toEqual({ last_request_at: 1_790_000_000_000 })
 })
 
 test('skips a write when the status has not changed', async ($, on) => {

@@ -69,6 +69,8 @@ The header has a Sticky button. Inside [Claude Code Hub](/claude-code-kanban/gui
 
 Context bars, token counts, cost and the model come from a mod in the plugin. It needs Claude Code 2.1.287 or later. Without it, the board has no context data to show. See [Getting started](/claude-code-kanban/getting-started/).
 
+The **Cache** row counts down until the prompt cache expires. The time starts at the last request of the main session. The TTL (5 minutes or 1 hour) comes from the transcript. After the time runs out, the next request writes the whole context to the cache again, and that costs more than a cache read. The row is green above 5 minutes, orange from 2 to 5 minutes and red under 2 minutes. Hover over it to see the clock time it expires and the estimated cost of that write. When the cache has expired, the row shows that cost, for example `expired · ~$1.08`. The estimate uses the list input price of the model and the cache-write rate of the TTL (1.25× for 5 minutes, 2× for 1 hour). It does not show for a model that cck has no price for. On a subscription plan the write costs usage limit, not money, but the estimate still shows how large it is.
+
 ## Tool stats
 
 Click **Tool Stats** in the session info dialog. The Tool Statistics dialog shows totals for calls, unique tools, failed calls and rejected calls. A table lists each tool with its calls, successes, failures, rejections and impact. Impact is the share of all tool output, by character count. Click a column header to sort by it.

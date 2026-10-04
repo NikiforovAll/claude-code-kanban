@@ -8931,6 +8931,73 @@ function formatCost(usd) {
   return `$${usd.toFixed(2)}`;
 }
 
+const CACHE_TTL = { '5m': { ms: 5 * 60000, write: 1.25 }, '1h': { ms: 60 * 60000, write: 2 } };
+// List input price, $ per million tokens. Most specific prefix first.
+const INPUT_PRICE_PER_MTOK = [
+  ['claude-fable-5', 10],
+  ['claude-mythos-5', 10],
+  ['claude-opus-5-5', 4],
+  ['claude-opus-5', 5],
+  ['claude-opus-4', 5],
+  ['claude-sonnet-5', 2],
+  ['claude-sonnet-4', 3],
+  ['claude-haiku-4', 1],
+];
+
+// Same token count Claude Code prices in its own estimated_cache_write_usd.
+function cacheRewrite(usage, modelId, writeRate) {
+  const price = INPUT_PRICE_PER_MTOK.find(([prefix]) => modelId?.startsWith(prefix))?.[1];
+  const tokens =
+    (usage.input_tokens || 0) +
+    (usage.cache_read_input_tokens || 0) +
+    (usage.cache_creation_input_tokens || 0) +
+    (usage.output_tokens || 0);
+  if (!price || !tokens) return null;
+  return { tokens, usd: (tokens / 1e6) * price * writeRate };
+}
+
+function formatCacheLeft(expiresAt, expiredText) {
+  const left = Math.max(0, Math.floor((expiresAt - Date.now()) / 1000));
+  if (left === 0) return { text: expiredText, color: 'var(--text-muted)' };
+  const text = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+  const color = left < 120 ? CONTEXT_COLORS.red : left < 300 ? CONTEXT_COLORS.orange : CONTEXT_COLORS.green;
+  return { text, color };
+}
+
+let cacheTimerInterval = null;
+
+function tickCacheTimers() {
+  const els = document.querySelectorAll('.cache-timer');
+  if (!els.length) {
+    clearInterval(cacheTimerInterval);
+    cacheTimerInterval = null;
+    return;
+  }
+  if (!isOnScreen()) return;
+  for (const el of els) {
+    const { text, color } = formatCacheLeft(Number(el.dataset.expires), el.dataset.expiredText);
+    if (el.textContent === text) continue;
+    el.textContent = text;
+    el.style.color = color;
+  }
+}
+
+function renderCacheTimer(lastRequestAt, ttl, usage, modelId) {
+  const cache = CACHE_TTL[ttl];
+  if (!lastRequestAt || !cache) return '';
+  const expiresAt = lastRequestAt + cache.ms;
+  const rewrite = cacheRewrite(usage, modelId, cache.write);
+  const expiredText = rewrite ? `expired · ~${formatCost(rewrite.usd)}` : 'expired';
+  const { text, color } = formatCacheLeft(expiresAt, expiredText);
+  cacheTimerInterval ??= setInterval(tickCacheTimers, 1000);
+  const at = new Date(expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const cost = rewrite
+    ? ` It writes ${formatTokens(rewrite.tokens / 1000)} tokens again, about ${formatCost(rewrite.usd)} at list price.`
+    : '';
+  const title = `Prompt cache, ${ttl} TTL. Expires at ${at}; the next request after that writes it again.${cost}`;
+  return `<div class="stat-item" title="${escapeHtml(title)}"><span class="stat-label">Cache</span><span class="stat-value cache-timer" data-expires="${expiresAt}" data-expired-text="${escapeHtml(expiredText)}" style="color:${color}">${text}</span></div>`;
+}
+
 function renderContextDetail(session, { tokens = true } = {}) {
   const ctx = getCtx(session);
   if (!ctx) return '';
@@ -8968,6 +9035,7 @@ function renderContextDetail(session, { tokens = true } = {}) {
           <div class="detail-context-stats">
             ${tokenRows}
             <div class="stat-item"><span class="stat-label">Cost</span><span class="stat-value" style="color:${getCostColor(cost.total_cost_usd)}">${formatCost(cost.total_cost_usd)}</span></div>
+            ${renderCacheTimer(raw.cache?.last_request_at, session.cacheTtl, usage, raw.model?.id)}
             ${cost.total_duration_ms != null ? `<div class="stat-item"><span class="stat-label">Duration</span><span class="stat-value">${formatDuration(cost.total_duration_ms)}</span></div>` : ''}
             ${cost.total_api_duration_ms != null ? `<div class="stat-item"><span class="stat-label">API time</span><span class="stat-value">${formatDuration(cost.total_api_duration_ms)}</span></div>` : ''}
             ${cost.total_lines_added != null ? `<div class="stat-item"><span class="stat-label">Lines</span><span class="stat-value"><span style="color:${CONTEXT_COLORS.green}">+${(cost.total_lines_added || 0).toLocaleString()}</span> / <span style="color:${CONTEXT_COLORS.red}">-${(cost.total_lines_removed || 0).toLocaleString()}</span></span></div>` : ''}

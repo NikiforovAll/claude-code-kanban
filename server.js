@@ -303,7 +303,11 @@ function getContextStatus(sessionId, meta) {
 
 function getContextFields(sessionId, meta) {
   const contextStatus = getContextStatus(sessionId, meta);
-  return { contextStatus, autoCompact: contextStatus ? getAutoCompact(CLAUDE_DIR, meta?.project) : null };
+  return {
+    contextStatus,
+    autoCompact: contextStatus ? getAutoCompact(CLAUDE_DIR, meta?.project) : null,
+    cacheTtl: meta?.cacheTtl || null,
+  };
 }
 
 function isAgentFresh(agent) {
@@ -823,6 +827,7 @@ function refreshSessionMetadataPath(jsonlPath) {
   if (info.logicalParentUuid) existing.logicalParentUuid = info.logicalParentUuid;
   if (info.compactBoundaryUuid) existing.compactBoundaryUuid = info.compactBoundaryUuid;
   existing.permissionMode = info.permissionMode;
+  existing.cacheTtl = info.cacheTtl;
   return true;
 }
 
@@ -910,7 +915,8 @@ function loadSessionMetadata() {
           jsonlPath: jsonlPath,
           logicalParentUuid: sessionInfo.logicalParentUuid || null,
           compactBoundaryUuid: sessionInfo.compactBoundaryUuid || null,
-          permissionMode: sessionInfo.permissionMode
+          permissionMode: sessionInfo.permissionMode,
+          cacheTtl: sessionInfo.cacheTtl || null
         };
         sessionIds.push(sessionId);
       }

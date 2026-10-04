@@ -12,9 +12,10 @@ export function displayName(model: string) {
 const toEpochSeconds = (iso?: string) => (iso ? Math.floor(Date.parse(iso) / 1000) : undefined)
 
 // The board reads the statusLine's JSON shape, so the file keeps its field names.
-export function toStatus(model: string, m: Measure, usage: ModelUsage | undefined) {
+export function toStatus(model: string, m: Measure, usage: ModelUsage | undefined, requestAt?: number) {
   const { context } = m
   return {
+    ...(requestAt && { cache: { last_request_at: requestAt } }),
     model: { id: model, display_name: displayName(model) },
     cost: { total_cost_usd: m.cost?.usd ?? 0 },
     context_window: {
@@ -43,6 +44,7 @@ function cckDir($: EngineInterface) {
 
 let lastUsage: ModelUsage | undefined
 let lastModel: string | undefined
+let lastRequestAt: number | undefined
 const lastWritten = new Map<string, string>()
 
 async function write($: EngineInterface, m: Measure) {
@@ -51,7 +53,7 @@ async function write($: EngineInterface, m: Measure) {
     lastModel ?? $.session.model(),
     cckDir($),
   ])
-  const text = JSON.stringify(toStatus(model, m, lastUsage))
+  const text = JSON.stringify(toStatus(model, m, lastUsage, lastRequestAt))
   const file = `${dir}/context-status/${sessionId}.json`
   if (lastWritten.get(file) === text) return
   await $.fs.write(file, text)
@@ -65,6 +67,7 @@ export const register: Register = on => {
       const { model, ...usage } = result.usage
       lastUsage = usage
       lastModel = model
+      lastRequestAt = Date.now()
       await write($, await $.session.usage())
     }
     return result

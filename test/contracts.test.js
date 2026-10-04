@@ -1,6 +1,6 @@
 const { describe, it, before, after } = require('node:test');
 const assert = require('node:assert/strict');
-const { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync } = require('fs');
+const { readFileSync, writeFileSync, appendFileSync, mkdirSync, mkdtempSync, rmSync } = require('fs');
 const path = require('path');
 const os = require('os');
 const Ajv = require('ajv');
@@ -610,6 +610,25 @@ describe('Parser: readSessionInfoFromJsonl', () => {
       assert.equal(readSessionInfoFromJsonl(p).permissionMode, 'default');
       writeFileSync(p, prompt('auto') + toolResult + modeLine('default') + toolResult + prompt('auto'));
       assert.equal(readSessionInfoFromJsonl(p).permissionMode, 'auto');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('reads cacheTtl from the last main-thread cache write, as the file grows', () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'cck-ttl-'));
+    const p = path.join(dir, 's.jsonl');
+    const reply = (h1, m5, isSidechain = false) => `${JSON.stringify({
+      type: 'assistant', cwd: 'C:/proj', isSidechain,
+      message: { role: 'assistant', content: [], usage: { cache_creation: { ephemeral_1h_input_tokens: h1, ephemeral_5m_input_tokens: m5 } } },
+    })}\n`;
+    try {
+      writeFileSync(p, reply(0, 0));
+      assert.equal(readSessionInfoFromJsonl(p).cacheTtl, null);
+      for (const [line, ttl] of [[reply(500, 0), '1h'], [reply(0, 0), '1h'], [reply(0, 300, true), '1h'], [reply(0, 300), '5m']]) {
+        appendFileSync(p, line);
+        assert.equal(readSessionInfoFromJsonl(p).cacheTtl, ttl);
+      }
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
