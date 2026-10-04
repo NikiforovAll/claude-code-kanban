@@ -29,10 +29,6 @@ const RETRY_MS = 15000;
 // Windows sometimes fails a loopback connect with ETIMEDOUT, or resets it once open, while the
 // board is up, so those errors get a few short waits before the normal one.
 const CONNECT_RETRY_MS = [250, 500, 1000, 2000];
-// `--topic dispatch` is the dispatch inbox: reports from sessions this one started.
-const TOPIC = process.argv.includes('--topic') ? process.argv[process.argv.indexOf('--topic') + 1] : null;
-// A dispatch report is a result, not an instruction, so a late attach still wants it.
-const KEEP_BACKLOG = process.argv.includes('--keep-backlog');
 
 if (!SESSION_ID) process.exit(0);
 
@@ -53,12 +49,11 @@ function serverUrl() {
 // Once per process, not once per poll: the grant means "follow the board from here on", so
 // the first attach throws away whatever queued up before it. A later reconnect must not
 // discard again -- by then the queue holds events the user is owed.
-let firstAttach = !KEEP_BACKLOG;
+let firstAttach = true;
 
 async function poll(base) {
   const first = firstAttach ? '&first=1' : '';
-  const topic = TOPIC ? `&topic=${encodeURIComponent(TOPIC)}` : '';
-  const url = `${base}/api/sessions/${encodeURIComponent(SESSION_ID)}/events?wait=${WAIT_SEC}${first}${topic}`;
+  const url = `${base}/api/sessions/${encodeURIComponent(SESSION_ID)}/events?wait=${WAIT_SEC}${first}`;
   const res = await fetch(url, { signal: AbortSignal.timeout((WAIT_SEC + 15) * 1000) });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   firstAttach = false;

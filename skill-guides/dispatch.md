@@ -1,73 +1,35 @@
 # Dispatch guide
 
-A dispatch is one Claude Code session that cck starts for a task, in its embedded terminal. It is an ordinary session, not a child: it shows in the sidebar like any other, and the user can open its terminal at any time.
+A dispatch is a plain Claude Code session that cck starts in its embedded terminal, with your spec as the first message. It is an ordinary session: it shows in the sidebar, its card links back to you, and the user can open its terminal at any time. cck only starts it.
 
-A dispatch **reports back** by default: start it with `--report` and `--peer`, then collect and verify the outcome (With `--report`, below). When the user's request says `--no-report`, it is **fire-and-forget**: start it with neither flag (Fire-and-forget, below). `--no-report` lives only in the user's request; `dispatch start` has no such flag.
+## Spec
 
-## Write the spec
+The started session sees only the spec, not this conversation, so the spec carries everything it needs.
 
-The started session sees only the spec, not this conversation, so every spec is self-contained. Name:
-
-- **Target:** the files, component, or environment in scope.
-- **Change:** the concrete result to produce.
-- **Constraints:** invariants and do-not-touch boundaries.
-- **Ownership:** what it may edit. Two dispatches edit the same files only when each runs in its own `--worktree`.
-- **Acceptance:** the test, output, or evidence that proves it is done.
-
-Dispatch when the task can run on its own. Do the work yourself when it is small or needs context from this conversation that you cannot write down.
+cck sends nothing back. To hear from the session, the spec tells it to `SendMessage` you and names you. Your name is auto-assigned (e.g. `claude-code-hub-06`); `ListAgents` prints it as "This session is <name>".
 
 ## Start
 
 ```bash
-claude-code-kanban dispatch start --cwd <dir> --spec-file <spec.md> --name <name> --group <group> --peer <your-peer> --report --json
+claude-code-kanban dispatch start --cwd <dir> --spec-file <spec.md> --name <name> --group <group> --json -- <claude args>
 ```
 
-`claude-code-kanban help dispatch start` lists every flag (model, worktree, and the rest). `project list` shows the folders `--cwd` accepts. How to choose the values:
+- `--name` is the sidebar name and the session's peer name. Kebab-case and unique: `fix-login-redirect`.
+- `--group` names the effort in kebab-case (`auth-refactor`) and shows the session under that sidebar group. Pass it on every dispatch that belongs to the effort; a dispatch without it goes to its project.
+- `--spec-file` keeps a long spec out of shell quoting.
+- Everything after `--` goes to `claude` as it is: any flag in `claude --help`, e.g. `-- --permission-mode auto --add-dir ../shared`. Keep each value one shell word of plain characters (no quotes, `%` or control characters); long text belongs in the spec. cck owns the session id, name, model and worktree, so pass those with its own flags.
+- After a cck restart the terminal comes back with `claude --resume <id>` alone, so the args after `--` apply to the first run only.
+- The result holds the `session` id.
 
-- `--peer` is your own peer name: the first line of `ListAgents` ("This session is `<name>`"). Pass it when you have the `ListAgents` tool. cck then tells the started session to ask you with `SendMessage` instead of failing on a question. See [Peer](#peer).
-- `--spec-file` over `--spec` for anything longer than a line: no shell quoting.
-- `--name` is what the user sees in the sidebar. Kebab-case, saying what the session does: `fix-login-redirect`, not `task-1`.
-- `--group` names the effort, in kebab-case (`auth-refactor`), and shows the new session under that sidebar group. This session stays where it is. Pass it on your first dispatch; later dispatches join the same group without it. A group goes away when its sessions end, unless the user pins a member or keeps the group.
-- The result holds the `dispatch` id and the `session` id.
+`claude-code-kanban help dispatch start` lists cck's flags (`--model`, `--worktree` and more); `claude --help` lists the ones you can pass after `--`.
 
-## Fire-and-forget
+## Messages and status
 
-The started session gets the task alone and does not know your session exists. Tell the user the session name, its group, and the dispatch id. Your part ends with that message: the user follows the dispatch in the sidebar, and asks you when they want it checked.
+A message from the session arrives here as a new turn. Reply with `SendMessage` to its name.
 
-## With `--report`
-
-The started session settles with one report, `succeeded` or `failed`, or as `exited` when its terminal ends first. Start every independent dispatch first, then collect. Two channels, use either or both:
-
-- **Inbox:** this skill armed it. Lines `[kanban board] Dispatch <id> (session <uuid>) ...` arrive on their own while you keep working.
-- **Wait:** block until one settles.
+A crashed session sends nothing. To learn when one ends, `SendMessage` it with `notify_when_idle: true`, or look:
 
 ```bash
-claude-code-kanban dispatch wait [<id>...] --timeout 15m --json
-```
-
-Call it again with the ids still running (`help dispatch wait` has the output fields). A timeout is a checkpoint: the session may still be working. Look before you act:
-
-```bash
-claude-code-kanban dispatch list --json
+claude-code-kanban dispatch list --json            # still running in cck's terminal
 claude-code-kanban session peek <session-id> --limit 20
 ```
-
-A dispatch still `running` is still working; retry only after a `failed` report or an `exited` one.
-
-The summary is the started session's own claim. Verify it (run the tests, read the diff), then give the user each dispatch's outcome, the summary, and what you checked. Done when every `--report` dispatch has settled and each summary is verified.
-
-## Peer
-
-A dispatch is a Claude Code peer under its `--name`, so `SendMessage` reaches it and it reaches you. The peer channel carries the conversation. The report carries the record: only `dispatch done` settles a dispatch, ends `dispatch wait`, and shows in the sidebar.
-
-- **Answer questions.** A question or a finding from the dispatch arrives as a new turn. Answer it yourself, or ask the user when the decision is theirs, then send the answer back.
-- **Steer.** Send a short, self-contained message to the dispatch's name. It arrives between the receiver's steps, never inside a subagent or a running workflow.
-- **Limits.** A session in another permission mode can hold a message until its user approves it, so anything the result depends on goes in the report. A dispatch that restarts ends as `exited` and cannot report, so its result comes back as a message.
-
-## If you are the started session
-
-Your prompt begins with `[cck dispatch <id>]` and holds your instructions: the peer to ask, and with a report the exact `dispatch done` command. Follow them. Without that line, the prompt is the task alone.
-
-- Ask the peer with `SendMessage` when you need a decision or find something that changes the task, and keep working on what does not depend on the answer.
-- The summary is three sentences: what changed, what you found, what remains. Use `--summary-file` if it needs quotes.
-- After you report, a message from the peer is a new request: answer it.

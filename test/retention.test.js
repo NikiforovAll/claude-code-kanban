@@ -25,33 +25,21 @@ function store({ saved = null, clock = { t: 1_000_000_000 } } = {}) {
 const MONTH = 30 * DAY_MS;
 
 describe('createDispatchedStore', () => {
-  it('records a running marker with its starter and saves it', () => {
+  it('records a marker with its starter and saves it', () => {
     const { s, writes } = store();
     s.record('a', 'p');
-    assert.deepEqual(s.get('a'), { parent: 'p', status: 'running', at: 1_000_000_000 });
+    assert.deepEqual(s.get('a'), { parent: 'p', at: 1_000_000_000 });
     assert.equal(writes.length, 1);
   });
 
-  it('settles a marker once and ignores unknown statuses', () => {
-    const { s, writes } = store();
-    s.record('a');
-    s.settle('a', 'bogus');
-    s.settle('a', 'succeeded');
-    s.settle('a', 'failed');
-    s.settle('missing', 'failed');
-    assert.equal(s.get('a').status, 'succeeded');
-    assert.equal(writes.length, 2);
-  });
-
-  it('loads valid entries, drops malformed ones, and reads a saved running marker as exited', () => {
+  it('loads valid entries and drops malformed ones', () => {
     const { s } = store({
       saved: {
         version: 1,
-        sessions: { ok: { parent: null, status: 'failed', at: 5 }, stuck: { status: 'running', at: 5 }, bad: { status: 'x' }, worse: null },
+        sessions: { ok: { parent: 'p', status: 'failed', at: 5 }, bad: { status: 'x' }, worse: null },
       },
     });
-    assert.equal(s.get('ok').status, 'failed');
-    assert.equal(s.get('stuck').status, 'exited');
+    assert.deepEqual(s.get('ok'), { parent: 'p', at: 5 });
     assert.equal(s.get('bad'), null);
     assert.equal(s.get('worse'), null);
   });

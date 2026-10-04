@@ -43,7 +43,7 @@ const { buildDecision, decisionFileName, isDecisionFile, approvalsFrom, boardRef
 const { getClaudeDir, getArgValue, storageNamespace, isDefaultClaudeDir, encodeProjectDirName } = require('./lib/claude-dir');
 const { createTerminalService, readTerminalConfig } = require('./lib/terminal');
 const { createProcStats } = require('./lib/proc-stats');
-const { createDispatchRegistry, formatPreamble, formatDispatchLine, isPeerName, DISPATCH_OUTCOME } = require('./lib/dispatch');
+const { createDispatchRegistry } = require('./lib/dispatch');
 const { createGroupStore, isGroupName, suggestGroupName } = require('./lib/dispatch-groups');
 const { createDispatchedStore, scanTranscripts, pruneSessionDirs, retentionMs } = require('./lib/retention');
 const { createWorktreeStore } = require('./lib/worktrees');
@@ -3268,7 +3268,9 @@ const terminal = createTerminalService({
   isAllowedFolder,
   liveSessions: () => loadLiveSessions(true),
   onChange: () => broadcast({ type: 'terminals-update', ids: terminal.list().map((t) => t.id) }),
-  onExit: (id) => dispatches.sessionExited(id),
+  onExit: (id) => {
+    if (dispatches.remove(id)) broadcast({ type: 'dispatch-update' });
+  },
 });
 
 let folderDialogOpen = false;
@@ -3338,13 +3340,7 @@ const dispatched = createDispatchedStore({
   save: (data) => writeJsonAtomic(DISPATCHED_FILE, data),
 });
 
-const dispatches = createDispatchRegistry({
-  onSettle: (r) => {
-    if (r.parent && r.report) enqueueSessionEvent(topicKey('dispatch', r.parent), formatDispatchLine(r));
-    if (r.session) dispatched.settle(r.session, r.status);
-    broadcast({ type: 'dispatch-update' });
-  },
-});
+const dispatches = createDispatchRegistry();
 
 const dispatchGroups = createGroupStore({
   load: () => {
@@ -3363,8 +3359,6 @@ const linkedDocs = createLinkedDocStore({
 });
 
 // The board places a session from these alone, so it never has to move it later.
-// `startedBy` lets it follow a starter the user put in a named group, which only the
-// browser knows; it goes once the dispatch settles. `dispatched` stays for the card's marker.
 function withDispatchPlacement(sessions) {
   const groups = dispatchGroups.snapshot();
   return sessions.map((s) => {
@@ -3374,56 +3368,35 @@ function withDispatchPlacement(sessions) {
     return {
       ...s,
       dispatchGroup,
-      startedBy: marker?.status === 'running' ? marker.parent || undefined : undefined,
-      dispatched: marker ? { parent: marker.parent, outcome: DISPATCH_OUTCOME[marker.status] } : undefined,
+      dispatched: marker ? { parent: marker.parent } : undefined,
     };
   });
 }
 
 // Starting a session needs the terminal token, as the browser does; the CLI reads it from
-// TERMINAL_TOKEN_FILE. The child gets only its dispatch capability through the preamble.
+// TERMINAL_TOKEN_FILE. The started session never holds it.
 app.post('/api/dispatch', (req, res) => {
   if (!terminal.authorized(req.get('x-terminal-token'))) return res.status(401).json({ error: 'invalid terminal token' });
-  const { cwd, spec, name, model, worktree, parent, group, report, peer } = req.body || {};
+  const { cwd, spec, name, model, worktree, parent, group, claudeArgs } = req.body || {};
   if (typeof spec !== 'string' || !spec.trim()) return res.status(400).json({ error: 'spec is required' });
-  if (peer != null && !isPeerName(peer)) return res.status(400).json({ error: 'peer must be a peer name as ListAgents prints it' });
   if (parent != null && !(typeof parent === 'string' && isUUID(parent))) return res.status(400).json({ error: 'invalid parent' });
   if (group != null && !isGroupName(group)) {
     return res.status(400).json({ error: `group must be kebab-case, e.g. ${suggestGroupName(group) || 'my-group'}` });
   }
-  const target = group || (parent && dispatchGroups.groupOf(parent)) || null;
-  const r = dispatches.create({ parent, name, spec: spec.trim(), report: report === true, peer, group: target, worktree });
-  const env = { CCK_DISPATCH_ID: r.id, ...(parent && { PARENT_SESSION_ID: parent }) };
-  const started = terminal.startNew({ cwd, name, model, worktree, prompt: formatPreamble(r) }, env);
-  if (started.error) {
-    dispatches.discard(r.id);
-    return res.status(started.status).json({ error: started.error });
-  }
-  dispatches.attach(r.id, { session: started.id, cwd: started.cwd });
+  const started = terminal.startNew({ cwd, name, model, worktree, prompt: spec.trim(), extraArgs: claudeArgs });
+  if (started.error) return res.status(started.status).json({ error: started.error });
+  dispatches.add({ session: started.id, parent, cwd: started.cwd, name, group: group || null, worktree });
   dispatched.record(started.id, parent);
   // The starter stays where it is: moving it would jump it under the user.
-  if (target) dispatchGroups.join(target, [started.id], parent);
+  if (group) dispatchGroups.join(group, [started.id]);
   broadcast({ type: 'dispatch-update' });
-  res.status(201).json({ dispatch: r.id, session: started.id, cwd: started.cwd, group: target });
+  res.status(201).json({ session: started.id, cwd: started.cwd, group: group || null });
 });
 
-app.post('/api/dispatch/:id/done', (req, res) => {
-  const { cap, outcome, summary } = req.body || {};
-  const err = dispatches.settle(req.params.id, cap, outcome, summary);
-  if (err) return res.status(err.status).json({ error: err.error });
-  res.status(204).end();
-});
-
-app.get('/api/dispatch', async (req, res) => {
+app.get('/api/dispatch', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
-  const ids = typeof req.query.ids === 'string' && req.query.ids ? req.query.ids.split(',') : null;
   const parent = typeof req.query.parent === 'string' && req.query.parent ? req.query.parent : null;
-  // res, not req: a GET's request stream can close before the response is sent.
-  const out = await dispatches.wait({ ids, parent }, req.query.wait, (stop) => {
-    res.on('close', stop);
-    return () => res.off('close', stop);
-  });
-  if (!res.writableEnded) res.json(out);
+  res.json({ running: dispatches.list({ parent }) });
 });
 // #endregion
 
@@ -3488,7 +3461,6 @@ const {
   formatTaskMoved,
   handleSessionEvents,
   hasSessionListener,
-  topicKey,
 } = require('./lib/session-events');
 app.get('/api/sessions/:sessionId/events', handleSessionEvents);
 

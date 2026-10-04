@@ -20,7 +20,6 @@ State that cck writes under `<config dir>/.cck/` must not grow without a limit. 
 Claude Code deletes transcripts on the same schedule, so cck never keeps state for a session that no longer exists. The user sets one retention value, not two.
 
 - **Known transcripts** come from `scanTranscripts()`: the `.jsonl` names under `projects/*/`, read with async directory listings, with no stat and no parse. It does not use the session metadata cache, because that cache only updates when a board asks for sessions, so it can miss new transcripts while no board is open. When the list is empty (no `projects/` dir, or a failed read), the transcript check is skipped, so a bad read cannot delete everything; the age check still runs.
-- **Restart:** the dispatch registry is in memory, so a marker saved as `running` loads as `exited`: that dispatch can no longer settle.
 - **Grace period:** a started session writes its transcript a moment after cck records it, and a review folder exists a moment before its file. Entries younger than one hour are never dropped.
 - **Cap:** `dispatched.json` also keeps only the newest 500 entries, for users who keep transcripts forever.
 

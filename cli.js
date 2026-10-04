@@ -180,58 +180,30 @@ const COMMANDS = {
     },
   },
   dispatch: {
-    summary: 'Start a Claude Code session for a task in cck and collect its report',
+    summary: 'Start a Claude Code session for a task in cck\'s terminal',
     verbs: {
       start: {
-        summary: 'Start a session with a task; prints the dispatch id',
-        usage: 'claude-code-kanban dispatch start --cwd <dir> (--spec <text> | --spec-file <path>) [--name <n>] [--group <g>] [--report] [--peer <name>] [--model <m>] [--worktree [name]] [--json]',
+        summary: 'Start claude in cck\'s terminal with a task; prints the session id',
+        usage: 'claude-code-kanban dispatch start --cwd <dir> (--spec <text> | --spec-file <path>) [--name <n>] [--group <g>] [--model <m>] [--worktree [name]] [--json] [-- <claude args>...]',
         flags: {
           '--cwd <dir>': 'Folder to run in (a known project, default: current dir)',
-          '--spec <text>': 'The task, self-contained',
+          '--spec <text>': 'The task, self-contained; sent as the first message',
           '--spec-file <path>': 'Read the task from a file',
-          '--name <n>': 'Session name',
+          '--name <n>': 'Session name; also its peer name for SendMessage',
           '--group <g>': 'Show it with this session in a kebab-case group (default: this session\'s group)',
-          '--report': 'Ask it to report its outcome back to this session',
-          '--peer <name>': 'This session\'s peer name; it sends questions and findings there with SendMessage',
           '--model <m>': 'fable, opus, sonnet or haiku',
           '--worktree [name]': 'Run in a new git worktree',
           '--json': 'Output JSON',
+          '-- <claude args>': 'Passed to claude as they are, e.g. --permission-mode auto. No quotes, % or control characters; cck sets --session-id, --name, --model and --worktree',
         },
-        notes: 'Needs the terminal token, so it runs on the machine of the cck server. Run `claude-code-kanban skills get dispatch` for how to write the spec.',
+        notes: 'Needs the terminal token, so it runs on the machine of the cck server. cck sends no report: say in the spec how the session reports back. Run `claude-code-kanban skills get dispatch` for how to write the spec.',
         examples: [
-          'claude-code-kanban dispatch start --cwd . --spec-file spec.md --name fix-login-redirect --group auth-refactor --peer my-peer --report --json',
+          'claude-code-kanban dispatch start --cwd . --spec-file spec.md --name fix-login-redirect --group auth-refactor --model sonnet -- --permission-mode auto',
         ],
         run: runDispatchStartCli,
       },
-      done: {
-        summary: 'Report the outcome of a dispatch (run by the started session)',
-        usage: 'claude-code-kanban dispatch done <id> --cap <cap> --outcome succeeded|failed (--summary <text> | --summary-file <path>)',
-        flags: {
-          '<id>': 'Dispatch id from the preamble',
-          '--cap <cap>': 'Capability from the preamble',
-          '--outcome <o>': 'succeeded or failed',
-          '--summary <text>': 'What changed, what was found, what remains',
-          '--summary-file <path>': 'Read the summary from a file',
-        },
-        examples: [
-          'claude-code-kanban dispatch done d_1a2b3c --cap <cap> --outcome succeeded --summary-file summary.md',
-        ],
-        run: runDispatchDoneCli,
-      },
-      wait: {
-        summary: 'Wait until a dispatch settles; a timeout is a checkpoint, not a failure',
-        usage: 'claude-code-kanban dispatch wait [<id>...] [--timeout <dur>] [--json]',
-        flags: {
-          '<id>': 'Dispatches to wait on (default: all started by this session)',
-          '--timeout <dur>': 'How long to wait, e.g. 90s, 15m, 1h (default: 10m)',
-          '--json': 'Output JSON',
-        },
-        notes: 'Returns as soon as any watched dispatch settles, with settled, running and timeout.',
-        examples: ['claude-code-kanban dispatch wait --timeout 15m --json'],
-        run: runDispatchWaitCli,
-      },
       list: {
-        summary: 'List dispatches started by this session',
+        summary: 'List sessions this session started that still run in cck\'s terminal',
         usage: 'claude-code-kanban dispatch list [--all] [--json]',
         flags: {
           '--all': 'Every dispatch on this board',
@@ -1042,19 +1014,10 @@ function textArg(args, name) {
   return file ? fs.readFileSync(path.resolve(file), 'utf8') : getArgValue(args, name);
 }
 
-function parseDuration(raw, fallbackSec) {
-  if (!raw) return fallbackSec;
-  const m = /^(\d+(?:\.\d+)?)(s|m|h)?$/.exec(raw);
-  if (!m) return null;
-  return Number(m[1]) * ({ s: 1, m: 60, h: 3600 }[m[2] || 's']);
-}
-
-function printDispatch(r) {
-  const head = `${r.id}  ${r.status.padEnd(9)} session=${r.session}${r.name ? `  ${r.name}` : ''}`;
-  console.log(r.summary ? `${head}\n  ${r.summary}` : head);
-}
-
-async function runDispatchStartCli(args) {
+async function runDispatchStartCli(argv) {
+  const sep = argv.indexOf('--');
+  const args = sep === -1 ? argv : argv.slice(0, sep);
+  const claudeArgs = sep === -1 ? [] : argv.slice(sep + 1);
   const port = cliTargetPort();
   if (port === null) {
     console.error(unreachable());
@@ -1085,73 +1048,27 @@ async function runDispatchStartCli(args) {
     model: getArgValue(args, 'model'),
     worktree,
     group,
-    report: args.includes('--report'),
-    peer: getArgValue(args, 'peer') || null,
+    claudeArgs,
     parent: process.env.CLAUDE_CODE_SESSION_ID || null,
   };
   try {
     const out = await cliPostJson('/api/dispatch', body, 'Dispatch', { 'x-terminal-token': token });
     if (!out) return 1;
     if (args.includes('--json')) console.log(JSON.stringify(out, null, 2));
-    else console.log(`Started ${out.dispatch} (session ${out.session}) in ${out.cwd}${out.group ? ` [${out.group}]` : ''}`);
-    return 0;
-  } catch (e) { reportCliError(e); return 1; }
-}
-
-async function runDispatchDoneCli(args) {
-  const [id] = positionals(args, ['--cap', '--outcome', '--summary', '--summary-file']);
-  let summary;
-  try { summary = textArg(args, 'summary'); } catch (e) { console.error(e.message); return 1; }
-  const body = { cap: getArgValue(args, 'cap'), outcome: getArgValue(args, 'outcome'), summary };
-  if (!id || !body.cap || !body.outcome) {
-    printLeafHelp(COMMANDS.dispatch.verbs.done);
-    return 1;
-  }
-  try {
-    if (!await cliPostJson(`/api/dispatch/${encodeURIComponent(id)}/done`, body, 'Report')) return 1;
-    console.log(`Reported ${id}: ${body.outcome}`);
-    return 0;
-  } catch (e) { reportCliError(e); return 1; }
-}
-
-function dispatchQuery(ids, all = false) {
-  const q = new URLSearchParams();
-  if (ids.length) q.set('ids', ids.join(','));
-  else if (!all && process.env.CLAUDE_CODE_SESSION_ID) q.set('parent', process.env.CLAUDE_CODE_SESSION_ID);
-  return q;
-}
-
-async function runDispatchWaitCli(args) {
-  const timeoutRaw = getArgValue(args, 'timeout');
-  const timeoutSec = parseDuration(timeoutRaw, 600);
-  if (timeoutSec === null) return usageError(COMMANDS.dispatch.verbs.wait, `Invalid --timeout value: ${timeoutRaw}`);
-  const q = dispatchQuery(positionals(args, ['--timeout']));
-  const deadline = Date.now() + timeoutSec * 1000;
-  try {
-    let out;
-    do {
-      q.set('wait', String(Math.max(1, Math.min(120, Math.ceil((deadline - Date.now()) / 1000)))));
-      const res = await cliFetch(`/api/dispatch?${q}`);
-      out = await res.json();
-    } while (out.timeout && Date.now() < deadline);
-    if (args.includes('--json')) console.log(JSON.stringify(out, null, 2));
-    else {
-      for (const r of out.settled) printDispatch(r);
-      if (out.running.length) console.log(`${out.timeout ? 'Timed out; still running' : 'Still running'}: ${out.running.map(r => r.id).join(' ')}`);
-      if (!out.settled.length && !out.running.length) console.log('No dispatches to wait on.');
-    }
+    else console.log(`Started session ${out.session} in ${out.cwd}${out.group ? ` [${out.group}]` : ''}`);
     return 0;
   } catch (e) { reportCliError(e); return 1; }
 }
 
 async function runDispatchListCli(args) {
+  const q = new URLSearchParams();
+  if (!args.includes('--all') && process.env.CLAUDE_CODE_SESSION_ID) q.set('parent', process.env.CLAUDE_CODE_SESSION_ID);
   try {
-    const res = await cliFetch(`/api/dispatch?${dispatchQuery([], args.includes('--all'))}`);
-    const { settled, running } = await res.json();
-    const rows = [...running, ...settled].sort((a, b) => b.startedAt - a.startedAt);
+    const res = await cliFetch(`/api/dispatch?${q}`);
+    const rows = (await res.json()).running.sort((a, b) => b.startedAt - a.startedAt);
     if (args.includes('--json')) console.log(JSON.stringify(rows, null, 2));
     else if (!rows.length) console.log('No dispatches.');
-    else rows.forEach(printDispatch);
+    else for (const r of rows) console.log(`${r.session}${r.name ? `  ${r.name}` : ''}${r.group ? `  [${r.group}]` : ''}`);
     return 0;
   } catch (e) { reportCliError(e); return 1; }
 }

@@ -4428,20 +4428,18 @@ function sgTransientGroup(name) {
   return group;
 }
 
-function dispatchedTitle({ parent, outcome }) {
+function dispatchedTitle({ parent }) {
   const starter = parent && sessions.find((s) => s.id === parent);
   const by = starter ? sessionDisplayName(starter) : 'another session';
-  return `Started by ${by}${outcome ? ` · ${outcome}` : ''}${parent ? ' — click to reveal it' : ''}`;
+  return `Started by ${by}${parent ? ' — click to reveal it' : ''}`;
 }
 
 // A user group with the same name takes the session in, so Keep does not split a group in two.
-// With no group of its own, a started session follows its starter into the starter's named group.
 function sgDispatchGroupFor(session) {
   if (sgReleased.has(session.id)) return null;
   const name = session.dispatchGroup;
-  if (name) return sessionGroups.find((g) => g.name.toLowerCase() === name) || sgTransientGroup(name);
-  const starter = session.startedBy && sessions.find((s) => s.id === session.startedBy);
-  return starter ? sgUserGroupFor(starter) : null;
+  if (!name) return null;
+  return sessionGroups.find((g) => g.name.toLowerCase() === name) || sgTransientGroup(name);
 }
 
 function sgKeepTransient(name) {
@@ -12413,8 +12411,7 @@ function placeholderSession(id, spec) {
     mode: spec.mode,
     name: spec.name || PLACEHOLDER_NAMES[spec.mode] || PLACEHOLDER_NAMES.new,
     dispatchGroup: spec.group || undefined,
-    startedBy: spec.startedBy || undefined,
-    dispatched: spec.mode === 'dispatch' ? { parent: spec.startedBy || null } : undefined,
+    dispatched: spec.mode === 'dispatch' ? { parent: spec.parent || null } : undefined,
     project: spec.cwd,
     worktree: spec.worktree ? { repo: spec.cwd, name: spec.worktree === true ? 'new' : spec.worktree } : null,
     modifiedAt: new Date(spec.startedAt).toISOString(),
@@ -12448,7 +12445,7 @@ async function loadDispatches() {
         name: r.name,
         worktree: r.worktree,
         group: r.group,
-        startedBy: r.parent,
+        parent: r.parent,
         startedAt: r.startedAt,
       });
     }

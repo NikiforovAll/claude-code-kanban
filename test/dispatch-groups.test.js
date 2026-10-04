@@ -31,19 +31,21 @@ describe('group names', () => {
 });
 
 describe('transient groups', () => {
+  const groupOf = (groups, id) => groups.snapshot().get(id) ?? null;
+
   it('keeps members while one runs, then dissolves after the grace', () => {
     const { state, store } = harness();
     const groups = store();
-    groups.join('auth', ['starter', 'child']);
-    state.alive.add('child');
+    groups.join('auth', ['a', 'b']);
+    state.alive.add('b');
     state.t += GRACE_MS * 5;
-    assert.equal(groups.groupOf('starter'), 'auth');
+    assert.equal(groupOf(groups, 'a'), 'auth');
     state.alive.clear();
     state.t += GRACE_MS - 1;
-    assert.equal(groups.groupOf('child'), 'auth');
+    assert.equal(groupOf(groups, 'b'), 'auth');
     state.t += 2;
-    assert.equal(groups.groupOf('child'), null);
-    assert.equal(groups.groupOf('starter'), null);
+    assert.equal(groupOf(groups, 'a'), null);
+    assert.equal(groupOf(groups, 'b'), null);
     assert.deepEqual(state.disk.sessions, {});
   });
 
@@ -52,7 +54,7 @@ describe('transient groups', () => {
     const groups = store();
     groups.join('auth', ['child']);
     state.t += GRACE_MS / 2;
-    assert.equal(groups.groupOf('child'), 'auth');
+    assert.equal(groupOf(groups, 'child'), 'auth');
   });
 
   it('keeps only pinned members once none runs, and they survive a restart', () => {
@@ -66,41 +68,11 @@ describe('transient groups', () => {
     assert.deepEqual(state.disk.sessions, { starter: 'auth' });
   });
 
-  it('remembers the starter without placing it, and forgets it with the group', () => {
-    const { state, store } = harness();
+  it('ignores malformed entries and old starter links on disk', () => {
+    const { state, store } = harness({ sessions: { a: 'Bad Name', b: 'ok' }, starters: { b: 'starter' } });
     const groups = store();
-    groups.join('auth', ['child'], 'starter');
-    assert.deepEqual([...groups.snapshot()], [['child', 'auth']]);
-    assert.equal(groups.groupOf('starter'), 'auth');
-    assert.equal(store().groupOf('starter'), 'auth');
-    state.t += GRACE_MS + 1;
-    assert.equal(groups.groupOf('starter'), null);
-    assert.deepEqual(state.disk.starters, {});
-  });
-
-  it('defaults the starter to the group of its latest dispatch, and its own group wins', () => {
-    const { store } = harness();
-    const groups = store();
-    groups.join('auth', ['a'], 'starter');
-    groups.join('billing', ['b'], 'starter');
-    assert.equal(groups.groupOf('starter'), 'billing');
-    groups.join('ops', ['starter']);
-    assert.equal(groups.groupOf('starter'), 'ops');
-  });
-
-  it('forgets the starter once its sessions leave, even while the group lives', () => {
-    const { state, store } = harness();
-    const groups = store();
-    groups.join('auth', ['child'], 'starter');
-    groups.join('auth', ['other']);
-    state.pinned.add('other');
-    state.t += GRACE_MS + 1;
-    assert.equal(groups.groupOf('other'), 'auth');
-    assert.equal(groups.groupOf('starter'), null);
-  });
-
-  it('ignores malformed entries on disk', () => {
-    const { store } = harness({ sessions: { a: 'Bad Name', b: 'ok' } });
-    assert.deepEqual([...store().snapshot()], [['b', 'ok']]);
+    assert.deepEqual([...groups.snapshot()], [['b', 'ok']]);
+    groups.join('ok', ['c']);
+    assert.deepEqual(state.disk, { version: 1, sessions: { b: 'ok', c: 'ok' } });
   });
 });

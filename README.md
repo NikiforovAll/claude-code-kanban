@@ -71,7 +71,7 @@ Run `claude` in any project. You do not configure anything per project. Claude C
 - **Answer prompts from the board.** When Claude asks for permission, asks a question or waits for plan approval, the session gets an amber highlight and the ask shows with Allow and Deny buttons or an answer form. The terminal prompt stays open, and the first answer wins. [Answer prompts from the board](https://nikiforovall.blog/claude-code-kanban/guides/waiting-prompts/)
 - **Embedded terminal.** Run a real Claude Code process for any session next to its board (<kbd>Ctrl</kbd>+<kbd>&#96;</kbd>). <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>R</kbd> resumes a past session and <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>S</kbd> swaps to the previous one. The terminal is off by default when the board runs alone. Start it with `--enable-terminal` and open the `#t=<token>` link the server prints. [Embedded terminal](https://nikiforovall.blog/claude-code-kanban/guides/embedded-terminal/)
 - **New session.** <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>N</kbd> opens a dialog to pick a folder, a name, a model, an optional git worktree and a first prompt. Needs the terminal.
-- **Dispatch.** Hand a written task to a new session with `claude-code-kanban dispatch start`, or ask Claude to do it with the `dispatch` skill. Add `--report` to get the outcome back. Needs the terminal. [Dispatch tasks to other sessions](https://nikiforovall.blog/claude-code-kanban/guides/dispatch/)
+- **Dispatch.** Hand a written task to a new session with `claude-code-kanban dispatch start`, or ask Claude to do it with the `dispatch` skill. Args after `--` go to `claude` as they are, and the started session reports back with `SendMessage`. Needs the terminal. [Dispatch tasks to other sessions](https://nikiforovall.blog/claude-code-kanban/guides/dispatch/)
 - **Steer with card moves.** Run `/claude-code-kanban:follow` in a session, then drag its cards. Claude starts, parks or stops the task. [Claude Code plugin skills](https://nikiforovall.blog/claude-code-kanban/guides/plugin-skills/)
 - **Review comments.** Select text in a previewed file or the plan, add comments and send them to the session in one step. [Review comments](https://nikiforovall.blog/claude-code-kanban/guides/review-comments/)
 
@@ -100,7 +100,7 @@ With no subcommand, `claude-code-kanban` starts the server. Subcommands talk to 
 - `session list|search|open|view|plan|agents|pin|pins|peek` to read and focus sessions.
 - `task list` and `project list` to read tasks and projects.
 - `preview-doc` and `link-doc` to show or link a file on the board.
-- `dispatch start|done|wait|list` to start sessions with a task and collect their reports.
+- `dispatch start|list` to start sessions with a task in the board's terminal.
 
 Run `claude-code-kanban --help` or see the [CLI reference](https://nikiforovall.blog/claude-code-kanban/reference/cli/).
 

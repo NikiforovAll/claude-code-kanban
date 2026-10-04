@@ -1,38 +1,35 @@
 # Dispatch
 
-`claude-code-kanban dispatch start` lets one Claude Code session start another through cck. The new session runs in cck's embedded terminal, so the user can open it at any time. It is an ordinary session, not a child: the board shows no tree. Its card carries a marker instead: `/api/sessions` carries `dispatched: {parent, outcome}`, and the card shows a send icon whose tooltip names the starter and the outcome, and whose click reveals the starter. The markers are kept in `<config dir>/.cck/dispatched.json` (`lib/retention.js`), so they outlive the dispatch record and a restart, and they expire with the session's transcript (see `docs/retention.md`).
+`claude-code-kanban dispatch start` lets one Claude Code session start another through cck. It is a thin wrapper: cck runs `claude` in its embedded terminal with a fresh session id, the cck flags and any args after `--`, and types the spec as the first message. The user can open the terminal at any time.
+
+The started session is an ordinary session, not a child: the board shows no tree. Its card carries a marker: `/api/sessions` carries `dispatched: {parent}`, and the card shows a send icon whose tooltip names the starter and whose click reveals it. The markers are kept in `<config dir>/.cck/dispatched.json` (`lib/retention.js`), so they outlive the terminal and a restart, and they expire with the session's transcript (see `docs/retention.md`).
+
+cck has no report channel. The two sessions talk with Claude Code's own `SendMessage`, and the starter writes the report instruction into the spec (`skill-guides/dispatch.md`).
 
 ## Flow
 
 ```
-starter  dispatch start --cwd <dir> --spec-file <f> --name <n> --group <g> [--peer <p>] [--report] [--model <m>] [--worktree [n]]
-cck      POST /api/dispatch -> record + terminal.startNew(prompt) -> {dispatch, session, cwd, group}
-started  (only with --report) dispatch done <id> --cap <cap> --outcome succeeded|failed --summary <text>
-starter  dispatch wait [<id>...] --timeout 15m, or a pushed line from the dispatch postman
+starter  dispatch start --cwd <dir> --spec-file <f> --name <n> [--group <g>] [--model <m>] [--worktree [n]] [-- <claude args>]
+cck      POST /api/dispatch -> terminal.startNew -> {session, cwd, group}
+started  SendMessage to the starter, as the spec says
 ```
 
-- The starter id comes from `CLAUDE_CODE_SESSION_ID` and is stored as `parent`. It routes a report to the starter's inbox and lets the board follow the starter into a named group. The board shows the starter's name, not the id, in the send icon's tooltip.
-- `POST /api/dispatch` needs the terminal token, which the CLI reads from `<config dir>/.cck/terminal-tokens/<port>.json` for the board it reaches (`CCK_URL`, `PORT`, then `server.json`). Each board writes its own file, so two boards on one config dir do not overwrite each other's token. `done` needs only the per-dispatch capability from the preamble; the started session never holds the terminal token.
-- With neither `--report` nor `--peer` the prompt is the task alone. Otherwise it starts with a preamble (`formatPreamble`): `--peer` names the starter's Claude Code peer to ask with `SendMessage`, and `--report` adds the exact `done` command. The peer name goes into the prompt verbatim, so the server accepts only `isPeerName` values.
-- Records are in memory (`lib/dispatch.js`). The terminals die with the server, so a restart loses nothing that could still settle. A session whose terminal ends before `done` settles as `exited`.
-- A report is pushed to the starter only with `--report`, on the `dispatch` doorbell topic, so a `dispatch` postman never gets task-move lines.
+- The starter id comes from `CLAUDE_CODE_SESSION_ID` and is stored as `parent`. It links the card back to the starter.
+- `POST /api/dispatch` needs the terminal token, which the CLI reads from `<config dir>/.cck/terminal-tokens/<port>.json` for the board it reaches (`CCK_URL`, `PORT`, then `server.json`). Each board writes its own file, so two boards on one config dir do not overwrite each other's token. The started session never holds the token.
+- Args after `--` go to `claude` after `--session-id` (`claudeArgsFor` in `lib/terminal.js`). They reach a shell command line inside plain quotes, so `parseNewSpec` refuses a value with a quote, `%` or a control character, more than 64 args, and the flags cck sets or that would not start a new session (`OWNED_FLAGS`). A restored terminal runs `claude --resume <id>` without them.
+- The running list is in memory (`lib/dispatch.js`): an entry lives while the session's terminal runs. It feeds the placeholder and `dispatch list`.
 
 ## Placement
 
-A started session must not jump into a group after it appears, so its place is decided when it starts:
+A started session must not jump into a group after it appears, so its place is decided when it starts. Only an explicit `--group <g>` (kebab-case, `^[a-z0-9]+(-[a-z0-9]+)*$`) puts it in a group; without the flag it goes to its project block. The starter's own group is never inherited, so each dispatch states its group.
 
-1. `--group <g>` (kebab-case, `^[a-z0-9]+(-[a-z0-9]+)*$`), else
-2. the starter's transient group, else
-3. the starter's named group, which only the browser knows (resolved at render time from `startedBy`), else
-4. its project block.
-
-`dispatch-update` makes the board fetch `GET /api/dispatch` and show a "starting" placeholder in that place until the transcript appears. `/api/sessions` then carries `dispatchGroup` and `startedBy`, so the real card lands in the same place.
+`dispatch-update` makes the board fetch `GET /api/dispatch` and show a "starting" placeholder in that place until the transcript appears. `/api/sessions` then carries `dispatchGroup`, so the real card lands in the same place.
 
 ## Transient groups
 
 `lib/dispatch-groups.js`, persisted in `<config dir>/.cck/dispatch-groups.json` as `{version: 1, sessions: {<id>: <group>}}`.
 
-- `--group` puts the started session in the group. The starter stays where it is, because moving it would jump it under the user. Each started session records its starter in `starters` (`{<started id>: <starter id>}` in the same file), so the starter's later dispatches default to the group of its latest one. The link goes when that session leaves the group.
+- `--group` puts the started session in the group. The starter stays where it is, because moving it would jump it under the user.
 - A group lives while any member's claude runs (a cck terminal or a live registry pid), and for 60 s after (a claude that has not registered yet, a resume, registry lag).
 - After that, only pinned members (`pins.json`) stay. So a pinned group survives a server restart; everything else returns to its project block, once its session has ended.
 - Named groups (localStorage) win: a session the user placed, or whose project sits in a named group, stays there. A named group with the transient group's name takes its sessions in.

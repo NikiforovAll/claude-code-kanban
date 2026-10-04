@@ -96,7 +96,7 @@ describe('CLI server resolution', () => {
     const board = () => http.createServer((req, res) => {
       seen.push({ port: req.socket.localPort, token: req.headers['x-terminal-token'] });
       res.setHeader('Content-Type', 'application/json');
-      res.end('{"dispatch":"d1","session":"s1","cwd":"."}');
+      res.end('{"session":"s1","cwd":"."}');
     });
     const boards = [board(), board()];
     await Promise.all(boards.map((s) => new Promise((r) => s.listen(0, '127.0.0.1', r))));
@@ -114,6 +114,33 @@ describe('CLI server resolution', () => {
       assert.deepEqual(seen, [{ port: ownerPort, token: 'owner-token' }, { port: pinnedPort, token: 'pinned-token' }]);
     } finally {
       for (const s of boards) s.close();
+    }
+  });
+
+  it('passes the args after -- to claude and keeps them out of its own flags', async () => {
+    let body;
+    const srv = http.createServer((req, res) => {
+      let raw = '';
+      req.on('data', (c) => { raw += c; });
+      req.on('end', () => {
+        body = JSON.parse(raw);
+        res.setHeader('Content-Type', 'application/json');
+        res.end('{"session":"s1","cwd":"."}');
+      });
+    });
+    await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    try {
+      const port = srv.address().port;
+      const dir = tempConfigDir({ port, pid: process.pid });
+      fs.mkdirSync(path.join(dir, '.cck', 'terminal-tokens'));
+      fs.writeFileSync(path.join(dir, '.cck', 'terminal-tokens', `${port}.json`), JSON.stringify({ pid: process.pid, token: 't' }));
+      const argv = ['dispatch', 'start', '--spec', 'x', '--cwd', dir, '--name', 'a', '--', '--permission-mode', 'auto', '--worktree'];
+      assert.equal((await runCli(argv, { CLAUDE_CONFIG_DIR: dir })).code, 0);
+      assert.deepEqual(body.claudeArgs, ['--permission-mode', 'auto', '--worktree']);
+      assert.equal(body.name, 'a');
+      assert.equal(body.worktree, false);
+    } finally {
+      srv.close();
     }
   });
 
