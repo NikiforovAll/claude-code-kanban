@@ -35,6 +35,7 @@ export default defineConfig({
 						{ label: 'Embedded terminal', slug: 'guides/embedded-terminal' },
 						{ label: 'Session groups', slug: 'guides/session-groups' },
 						{ label: 'Dispatch tasks to other sessions', slug: 'guides/dispatch' },
+						{ label: 'Orchestration patterns', slug: 'guides/dispatch-patterns' },
 						{ label: 'Claude Code plugin skills', slug: 'guides/plugin-skills' },
 						{ label: 'Run inside Claude Code Hub', slug: 'guides/claude-code-hub' },
 					],

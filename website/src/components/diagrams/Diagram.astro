@@ -1,0 +1,22 @@
+---
+import './diagram.css';
+
+interface Props {
+  title: string;
+  viewBox: string;
+}
+const { title, viewBox } = Astro.props;
+const arrow = `arrow-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+---
+
+<figure class="diagram">
+  <svg viewBox={viewBox} role="img" aria-label={title} style={`--d-arrow: url(#${arrow})`}>
+    <defs>
+      <marker id={arrow} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0 0 L10 5 L0 10 z" class="d-head" />
+      </marker>
+    </defs>
+    <slot />
+  </svg>
+  <figcaption>{title}</figcaption>
+</figure>

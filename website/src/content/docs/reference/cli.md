@@ -246,12 +246,12 @@ Lists the project paths the board knows, newest activity first. These are the fo
 
 ## dispatch
 
-Starts a Claude Code session in the embedded terminal to do a task, and collects its report. See [Dispatch tasks to other sessions](/claude-code-kanban/guides/dispatch/) for how to use it.
+Starts a Claude Code session in the embedded terminal to do a task. See [Dispatch tasks to other sessions](/claude-code-kanban/guides/dispatch/) for how to use it.
 
 ### dispatch start
 
 ```bash
-claude-code-kanban dispatch start --cwd <dir> (--spec <text> | --spec-file <path>) [--name <n>] [--group <g>] [--report] [--peer <name>] [--model <m>] [--worktree [name]] [--json]
+claude-code-kanban dispatch start --cwd <dir> (--spec <text> | --spec-file <path>) [--name <n>] [--group <g>] [--model <m>] [--worktree [name]] [--json] [-- <claude args>...]
 ```
 
 | Flag | What it does |
@@ -259,19 +259,20 @@ claude-code-kanban dispatch start --cwd <dir> (--spec <text> | --spec-file <path
 | `--cwd <dir>` | Folder to run in. Default is the current folder. It must be a known project (a folder where a session already ran) or a folder picked in the New session dialog during this server run. |
 | `--spec <text>` | The task. Write it so that it makes sense with no other context. |
 | `--spec-file <path>` | Reads the task from a file. |
-| `--name <n>` | Session name: up to 80 letters, digits, spaces, `.`, `_` and `-`. The first character must be a letter or a digit. |
+| `--name <n>` | Session name: up to 80 letters, digits, spaces, `.`, `_` and `-`. The first character must be a letter or a digit. It is also the session's peer name for `SendMessage`. |
 | `--group <g>` | Shows the new session in this [session group](/claude-code-kanban/guides/session-groups/). The name must be kebab-case, for example `auth-refactor`. Default is the group of the session that runs the command. |
-| `--report` | Asks the new session to report its outcome back. |
-| `--peer <name>` | The Claude Code peer name of the session that starts the dispatch. The new session sends its questions and findings there with `SendMessage`. See [Talk during the run](/claude-code-kanban/guides/dispatch/#talk-during-the-run). |
 | `--model <m>` | `fable`, `opus`, `sonnet` or `haiku`. |
 | `--worktree [name]` | Runs the session in a new git worktree. |
 | `--json` | Prints JSON. |
+| `-- <claude args>` | Everything after `--` goes to `claude` as it is, for example `-- --permission-mode auto`. See [Pass claude flags](/claude-code-kanban/guides/dispatch/#pass-claude-flags). |
 
 On success it prints:
 
 ```text
-Started d_1a2b3c4d5e6f (session <uuid>) in <cwd> [group]
+Started session <uuid> in <cwd> [group]
 ```
+
+cck sends no report back. Say in the spec how the session reports, for example with `SendMessage`.
 
 `dispatch start` reads the terminal token from `<config-dir>/.cck/terminal-tokens/<port>.json`, where `<port>` is the port of the board it reaches. The server writes that file only when the terminal is on. Without it the command fails with `No terminal token for <dir> at <board-url>. The cck server must be running with the terminal enabled.` Other refusals:
 
@@ -279,28 +280,9 @@ Started d_1a2b3c4d5e6f (session <uuid>) in <cwd> [group]
 - `429 30 terminals are open; end one first` when all terminals are in use (30 by default).
 - `400 invalid name`, `invalid worktree name`, `invalid model` or `invalid prompt` when a value is not valid or the spec is longer than 32 KB.
 - A group name that is not kebab-case. The CLI suggests a fixed name, for example `try --group auth-refactor`.
+- `invalid claude arg: no quotes, % or control characters`, or `cck sets <flag>` for a flag cck owns, after `--`.
 
-The command records the session that ran it, from `CLAUDE_CODE_SESSION_ID`, as the parent. `dispatch wait` and `dispatch list` use it.
-
-### dispatch done
-
-```bash
-claude-code-kanban dispatch done <id> --cap <cap> --outcome succeeded|failed (--summary <text> | --summary-file <path>)
-```
-
-The started session runs this to report. With `--report`, its first prompt carries the dispatch id, the capability and the exact command. It prints `Reported <id>: <outcome>`.
-
-A dispatch settles once. A second report fails with `already <status>`. The server keeps up to 4000 characters of the summary. If the session's terminal ends before it reports, the dispatch settles as `exited`.
-
-### dispatch wait
-
-```bash
-claude-code-kanban dispatch wait [<id>...] [--timeout <dur>] [--json]
-```
-
-Waits until one of the dispatches settles. Without ids it waits on the dispatches that the current session started. Outside Claude Code, where `CLAUDE_CODE_SESSION_ID` is not set, it uses every dispatch on the board. `--timeout` takes a number with `s`, `m` or `h`, for example `90s`, `15m` or `1h`. A number with no unit is seconds. The default is `10m`.
-
-It prints each settled dispatch with its status, session and summary, then the ones that still run. A timeout only marks a checkpoint. The command prints `Timed out; still running: <ids>` and exits with code 0. To keep waiting, run it again with the ids that still run. The command returns at once if a selected dispatch already settled.
+The command records the session that ran it, from `CLAUDE_CODE_SESSION_ID`, as the parent. `dispatch list` uses it.
 
 ### dispatch list
 
@@ -308,9 +290,9 @@ It prints each settled dispatch with its status, session and summary, then the o
 claude-code-kanban dispatch list [--all] [--json]
 ```
 
-Lists the dispatches that the current session started, newest first. Outside Claude Code, where `CLAUDE_CODE_SESSION_ID` is not set, it lists every dispatch on the board. `--all` lists every dispatch on this board.
+Lists the sessions that the current session started and that still run in the board's terminal. Outside Claude Code, where `CLAUDE_CODE_SESSION_ID` is not set, it lists every one on the board. `--all` lists every one on this board.
 
-The server keeps dispatch records in memory. A server restart clears them. It keeps settled records for 24 hours.
+The list lives in the server's memory. A session leaves it when its terminal ends, and a server restart clears it.
 
 ## skills get
 
@@ -327,7 +309,7 @@ Prints a guide that ships with this version. The only guide now is `dispatch`, w
 | `CCK_URL` | Full base URL that subcommands connect to. Wins over `PORT` and `server.json`. |
 | `PORT` | The server port, and the port that subcommands connect to. |
 | `CLAUDE_CONFIG_DIR`, `CLAUDE_DIR` | Config dir, when `--dir` is not given. |
-| `CLAUDE_CODE_SESSION_ID` | Set by Claude Code. `dispatch start` records it as the parent. `dispatch wait` and `dispatch list` use it to find your dispatches. |
+| `CLAUDE_CODE_SESSION_ID` | Set by Claude Code. `dispatch start` records it as the parent. `dispatch list` uses it to find your dispatches. |
 | `PREVIEW_SESSION` | Default for `--session` in `preview-doc` and `link-doc`. |
 
 For server and terminal settings, see [Configuration](/claude-code-kanban/reference/configuration/).

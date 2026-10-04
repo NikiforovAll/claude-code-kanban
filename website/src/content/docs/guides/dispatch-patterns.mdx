@@ -1,0 +1,169 @@
+---
+title: Orchestration patterns
+description: Orchestrator-workers, prompt chaining, evaluator-optimizer, hierarchical, handoff and human-in-the-loop, built from dispatch start and SendMessage.
+---
+
+import Sequence from '../../../components/diagrams/Sequence.astro';
+
+[Dispatch](/claude-code-kanban/guides/dispatch/) gives you two parts: `dispatch start`, which starts a Claude Code session in the board's terminal, and Claude Code's `SendMessage`, which carries messages between sessions. Every pattern below uses only these two. The pattern names come from Anthropic's [Building effective agents](https://www.anthropic.com/engineering/building-effective-agents) and Microsoft's [AI agent orchestration patterns](https://learn.microsoft.com/en-us/azure/architecture/ai-ml/guide/ai-agent-design-patterns).
+
+In the diagrams, the **orchestrator** is the session that starts the others, and a **worker** is a session it started. A solid arrow is a `dispatch start` with its spec. A dashed arrow is a `SendMessage`.
+
+## Request-reply
+
+The base of every pattern that gets a result back. cck sends nothing back by itself, so the spec asks the worker to reply:
+
+```text
+When you are done, or cannot finish, send the result to <orchestrator> with the SendMessage tool, then stop.
+```
+
+`<orchestrator>` is the orchestrator's peer name. Without it, the worker sees a list of peers and cannot tell which one started it. Claude Code picks the name, often from the folder (`claude-code-hub-06`). `ListAgents` prints it as "This session is &lt;name&gt;", and the board shows it as **Peer name** in the session info. The reply arrives in the orchestrator as a new turn, so the orchestrator does not poll. The reply format is free.
+
+<Sequence
+  title="Request-reply"
+  actors={['Orchestrator', 'Worker']}
+  hub={0}
+  steps={[
+    { from: 0, to: 1, label: 'dispatch start', detail: 'spec: the task, and "reply to <orchestrator>"' },
+    { from: 1, to: 0, label: 'SendMessage', detail: 'the result', alt: true },
+  ]}
+/>
+
+## Handoff
+
+The orchestrator passes the task on and does not wait for a result. The worker owns the task from then on. Leave the reply line out of the spec, or pass `--handoff` to the `dispatch` skill. This is also called *fire-and-forget*. You follow the worker in the sidebar, or open its terminal.
+
+<Sequence
+  title="Handoff"
+  actors={['Orchestrator', 'Worker']}
+  hub={0}
+  steps={[
+    { from: 0, to: 1, label: 'dispatch start', detail: 'spec: the task, no reply' },
+  ]}
+/>
+
+## Orchestrator-workers
+
+The orchestrator splits a task into parts, starts one worker per part, and combines the replies. The workers run at the same time. Anthropic calls running independent parts at the same time *parallelization (sectioning)*; Microsoft calls it *concurrent* orchestration. Elsewhere it is also called *fan-out/fan-in*.
+
+<Sequence
+  title="Orchestrator-workers"
+  actors={['Orchestrator', 'Worker A', 'Worker B', 'Worker C']}
+  hub={0}
+  steps={[
+    { from: 0, to: 1, label: 'dispatch start', detail: '--group audit' },
+    { from: 0, to: 2, label: 'dispatch start' },
+    { from: 0, to: 3, label: 'dispatch start' },
+    { from: 1, to: 0, label: 'SendMessage', detail: 'result A', alt: true },
+    { from: 3, to: 0, label: 'SendMessage', detail: 'result C', alt: true },
+    { from: 2, to: 0, label: 'SendMessage', detail: 'result B', alt: true },
+  ]}
+/>
+
+```bash
+for part in api ui docs; do
+  claude-code-kanban dispatch start --cwd . --spec-file "spec-$part.md" --name "audit-$part" --group audit -- --permission-mode auto
+done
+```
+
+- Give each worker a unique `--name`, so each reply shows who sent it.
+- One `--group` keeps the workers together in the sidebar.
+- Workers that edit the same files each need their own `--worktree`.
+
+The `dispatch` skill uses request-reply, handoff and orchestrator-workers on its own. For the patterns below, it proposes the pattern and waits for your answer, unless you named the pattern yourself.
+
+## Prompt chaining
+
+The task runs as a fixed sequence of steps. The orchestrator starts the next worker only after the previous one replies, and puts that reply into the next spec. Microsoft calls this *sequential* orchestration.
+
+<Sequence
+  title="Prompt chaining"
+  actors={['Orchestrator', 'Step 1', 'Step 2']}
+  hub={0}
+  steps={[
+    { from: 0, to: 1, label: 'dispatch start', detail: 'spec: step 1' },
+    { from: 1, to: 0, label: 'SendMessage', detail: 'output 1', alt: true },
+    { from: 0, to: 2, label: 'dispatch start', detail: 'spec: step 2 + output 1' },
+    { from: 2, to: 0, label: 'SendMessage', detail: 'output 2', alt: true },
+  ]}
+/>
+
+The orchestrator can check each output before it starts the next step, and stop the chain when a check fails.
+
+## Evaluator-optimizer
+
+One worker makes a result, and another checks it and sends feedback, in a loop, until the evaluator accepts it. Give each worker the other's `--name` in its spec, so they talk to each other directly.
+
+<Sequence
+  title="Evaluator-optimizer"
+  actors={['Orchestrator', 'Generator', 'Evaluator']}
+  hub={0}
+  steps={[
+    { from: 0, to: 1, label: 'dispatch start', detail: 'make it; send drafts to evaluator' },
+    { from: 0, to: 2, label: 'dispatch start', detail: 'check drafts; reply to generator' },
+    { from: 1, to: 2, label: 'SendMessage', detail: 'draft', alt: true },
+    { from: 2, to: 1, label: 'SendMessage', detail: 'feedback', alt: true },
+    { from: 1, to: 2, label: 'SendMessage', detail: 'revised draft', alt: true },
+    { from: 2, to: 0, label: 'SendMessage', detail: 'accepted result', alt: true },
+  ]}
+/>
+
+Put a limit on the rounds in the specs, for example "stop after 3 rounds and send what you have".
+
+## Hierarchical
+
+A worker can be an orchestrator too. It starts its own workers and replies up once they are done. The tree can go as deep as you like, though every level adds a hop each result has to travel. Each card on the board links to the session that started it, so you can follow the tree up with the send icon.
+
+<Sequence
+  title="Hierarchical"
+  actors={['Orchestrator', 'Sub-orchestrator', 'Worker']}
+  hub={0}
+  steps={[
+    { from: 0, to: 1, label: 'dispatch start', detail: 'spec: own part, may dispatch' },
+    { from: 1, to: 2, label: 'dispatch start', detail: 'reply to <sub-orchestrator>' },
+    { from: 2, to: 1, label: 'SendMessage', detail: 'result', alt: true },
+    { from: 1, to: 0, label: 'SendMessage', detail: 'combined result', alt: true },
+  ]}
+/>
+
+The sub-orchestrator's spec tells it to wait for its workers before it replies, and to give them its own peer name.
+
+## Human-in-the-loop
+
+A person makes the decisions that agents should not make alone. A worker asks the orchestrator, and the orchestrator asks the user when the decision is theirs. The orchestrator can also steer a worker at any time with a short message, and the user can open any worker's terminal and type to it.
+
+<Sequence
+  title="Human-in-the-loop"
+  actors={['User', 'Orchestrator', 'Worker']}
+  hub={1}
+  steps={[
+    { from: 2, to: 1, label: 'SendMessage', detail: 'question', alt: true },
+    { from: 1, to: 0, label: 'asks', detail: 'when the decision is the user\'s' },
+    { from: 0, to: 1, label: 'answers' },
+    { from: 1, to: 2, label: 'SendMessage', detail: 'answer', alt: true },
+    { from: 1, to: 2, label: 'SendMessage', detail: 'steer: change of plan', alt: true },
+  ]}
+/>
+
+Add a line to the worker's spec:
+
+```text
+When you need a decision, ask <orchestrator> with the SendMessage tool and keep working on what does not depend on the answer.
+```
+
+A message arrives between the worker's steps, not inside a running tool call.
+
+## Sessions started outside cck
+
+`dispatch start` is one way to start a worker, not the only one. A session you start yourself, in your own terminal, in the background, or with any other tool, also shows up in `ListAgents` and takes `SendMessage`, so every pattern on this page works with it too. The board shows it as an ordinary session. Its card has no send icon, it does not show in `dispatch list`, and it goes into a group only when you put it there.
+
+Use `dispatch start` when you want the worker in the board's terminal, where you can open it, and placed next to its orchestrator from the first frame.
+
+## Limits
+
+- **A crash sends nothing.** A worker that dies never replies. `SendMessage` with `notify_when_idle: true` sends one notice on the worker's next idle, and `dispatch list` shows which workers still run.
+- **A reply is the worker's own claim.** Run the tests or read the diff before you build on it.
+- **Peer names must be unique.** A name another live session uses needs its `[ref]` from `ListAgents`.
+- **Permission prompts hold work.** A worker in a mode that asks for approval stops until someone answers in its terminal or on the board. Pass `-- --permission-mode auto` or allow the tools it needs.
+- **A first start in a new folder asks to trust the folder.** Open the worker's terminal and answer, or start it in a folder Claude Code already trusts.
+- **Flags after `--` are for the first run.** When the server restarts, the terminal comes back with `claude --resume <id>` alone.

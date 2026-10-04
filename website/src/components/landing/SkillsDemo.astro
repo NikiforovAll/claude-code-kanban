@@ -30,13 +30,14 @@ const scenes: Scene[] = [
         text: `Target:      api/test/checkout.test.js and the code it covers
 Change:      make "applies the coupon" pass on every run
 Constraints: keep the public API of api/checkout.js
-Acceptance:  npm test -- checkout passes 10 times in a row`,
+Acceptance:  npm test -- checkout passes 10 times in a row
+Report:      send the result to shop-main with SendMessage`,
       },
       {
         kind: 'tool',
         name: 'Bash',
-        arg: 'claude-code-kanban dispatch start --cwd ~/dev/shop --spec-file spec.md --name fix-flaky-checkout --group checkout --peer shop-main --report --json',
-        result: 'dispatch d_4f1c9a2b7e01, session 7c2e9b10',
+        arg: 'claude-code-kanban dispatch start --cwd ~/dev/shop --spec-file spec.md --name fix-flaky-checkout --group checkout --json -- --permission-mode auto',
+        result: 'session 7c2e9b10',
       },
       {
         kind: 'text',
@@ -44,7 +45,7 @@ Acceptance:  npm test -- checkout passes 10 times in a row`,
       },
       {
         kind: 'event',
-        text: '[kanban board] Dispatch d_4f1c9a2b7e01 (session 7c2e9b10) reported success. Summary: The test raced the price cache. It now waits for the cache to load. No other test changed.',
+        text: 'Message from fix-flaky-checkout: The test raced the price cache. It now waits for the cache to load. No other test changed.',
       },
       { kind: 'tool', name: 'Bash', arg: 'npm test -- checkout', result: '14 passed' },
       { kind: 'text', text: 'I checked the report: the test passes, and the change is in api/test/checkout.test.js only.' },
@@ -59,21 +60,22 @@ Acceptance:  npm test -- checkout passes 10 times in a row`,
       guide,
       {
         kind: 'text',
-        text: 'The three packages are in one repo, so each session gets its own worktree. I start all three, then collect.',
+        text: 'The three packages are in one repo, so each session gets its own worktree. I start all three; each messages me when done.',
       },
       {
         kind: 'tool',
         name: 'Bash',
-        arg: 'claude-code-kanban dispatch start --cwd ~/dev/shop --spec-file api.md --name express5-api --group express-5 --worktree --report --json',
-        result: 'dispatch d_91ab03c4d5e6',
+        arg: 'claude-code-kanban dispatch start --cwd ~/dev/shop --spec-file api.md --name express5-api --group express-5 --worktree --json',
+        result: 'session 91ab03c4',
       },
-      { kind: 'tool', name: 'Bash', arg: 'claude-code-kanban dispatch start … --name express5-web …', result: 'dispatch d_2c7f80e1a9b3' },
-      { kind: 'tool', name: 'Bash', arg: 'claude-code-kanban dispatch start … --name express5-worker …', result: 'dispatch d_e05d6b1f7a28' },
-      { kind: 'tool', name: 'Bash', arg: 'claude-code-kanban dispatch wait --timeout 15m --json', result: '2 settled, 1 running' },
+      { kind: 'tool', name: 'Bash', arg: 'claude-code-kanban dispatch start … --name express5-web …', result: 'session 2c7f80e1' },
+      { kind: 'tool', name: 'Bash', arg: 'claude-code-kanban dispatch start … --name express5-worker …', result: 'session e05d6b1f' },
+      { kind: 'event', text: 'Message from express5-api: done, tests pass in the worktree.' },
+      { kind: 'event', text: 'Message from express5-web: done, tests pass in the worktree.' },
       { kind: 'tool', name: 'Bash', arg: 'claude-code-kanban session peek e05d6b1f --limit 20', result: 'express5-worker is running its tests' },
       {
         kind: 'text',
-        text: 'api and web are done, and their tests pass in their worktrees. worker is still at work, so I wait for it again.',
+        text: 'api and web are done, and their tests pass in their worktrees. worker is still at work; its message will come here.',
       },
     ],
   },

@@ -1,0 +1,54 @@
+---
+import Diagram from './Diagram.astro';
+
+interface Step {
+  from: number;
+  to: number;
+  label: string;
+  detail?: string;
+  alt?: boolean;
+}
+interface Props {
+  title: string;
+  actors: string[];
+  steps: Step[];
+  /** Index of the actor drawn in the accent color. */
+  hub?: number;
+}
+const { title, actors, steps, hub } = Astro.props;
+
+const W = 760;
+const PAD = 110;
+const HEAD = 40;
+const ROW = 58;
+const TOP = 12;
+const colX = actors.map((_, i) => PAD + (i * (W - 2 * PAD)) / Math.max(1, actors.length - 1));
+const bodyTop = TOP + HEAD + 12;
+const H = bodyTop + steps.length * ROW + 8;
+const rows = steps.map((s, i) => {
+  const y = bodyTop + i * ROW + 30;
+  const dir = Math.sign(colX[s.to] - colX[s.from]);
+  return { ...s, y, x1: colX[s.from] + dir * 4, x2: colX[s.to] - dir * 6, mid: (colX[s.from] + colX[s.to]) / 2 };
+});
+---
+
+<Diagram title={title} viewBox={`0 0 ${W} ${H}`}>
+  {
+    colX.map((x, i) => (
+      <g>
+        <line x1={x} y1={TOP + HEAD} x2={x} y2={H - 4} class="d-life" />
+        <rect x={x - 90} y={TOP} width="180" height={HEAD} rx="8" class={i === hub ? 'd-box d-box-hub' : 'd-box'} />
+        <text x={x} y={TOP + HEAD / 2 + 5} class="d-title">{actors[i]}</text>
+      </g>
+    ))
+  }
+  {
+    rows.map((r) => (
+      <g class={r.alt ? 'd-alt' : undefined}>
+        <text x={r.mid} y={r.y - 9} class="d-label">{r.label}</text>
+        <line x1={r.x1} y1={r.y} x2={r.x2} y2={r.y} class={r.alt ? 'd-link d-link-dashed' : 'd-link'} />
+        {r.detail && <text x={r.mid} y={r.y + 18} class="d-detail">{r.detail}</text>}
+      </g>
+    ))
+  }
+</Diagram>

@@ -11,16 +11,11 @@ In Claude Code the skills have the plugin name as a prefix:
 |---|---|---|
 | `/claude-code-kanban:kanban` | You only | Opens, pins, previews and links things on the board. |
 | `/claude-code-kanban:follow` | You only | Makes card moves on the board into instructions for this session. |
-| `/claude-code-kanban:dispatch` | You or Claude | Starts other sessions through the board and collects their reports. |
+| `/claude-code-kanban:dispatch` | You or Claude | Starts other sessions in the board's terminal. |
 
-Two of the skills start a monitor. A monitor is a background process that Claude Code runs for the rest of the session. It prints one line each time the board has news for the session, and Claude Code gives each line to Claude.
+The `follow` skill starts the `kanban-doorbell` monitor. A monitor is a background process that Claude Code runs for the rest of the session. It prints a line when a task of this session moves on the board, or when you send it review comments, and Claude Code gives each line to Claude.
 
-| Monitor | Starts when | Prints |
-|---|---|---|
-| `kanban-doorbell` | You run `follow` | A line when a task of this session moves on the board, or when you send it review comments. |
-| `kanban-dispatch-inbox` | The `dispatch` skill runs | A line when a session this session dispatched reports or exits. |
-
-The skills need the board server. If the server is not running, a CLI command fails with `Cannot reach cck server for <dir> on port <n>`. Start the server with `claude-code-kanban`, then try again. The monitors print nothing while the server is down. They try again every 15 seconds and connect when the server starts.
+The skills need the board server. If the server is not running, a CLI command fails with `Cannot reach cck server for <dir> on port <n>`. Start the server with `claude-code-kanban`, then try again. The monitor prints nothing while the server is down. It tries again every 15 seconds and connects when the server starts.
 
 ## kanban
 
@@ -102,7 +97,7 @@ Then add tasks to the session and drag a card from Pending to In Progress on the
 ## dispatch
 
 ```text
-/claude-code-kanban:dispatch <task> [--report] [--group <name>] [--model haiku|sonnet|opus|fable] [--worktree [name]]
+/claude-code-kanban:dispatch <task> [--handoff] [--group <name>] [--model haiku|sonnet|opus|fable] [--worktree [name]] [-- <claude args>]
 ```
 
 This skill starts other Claude Code sessions through the board. You can type it, and Claude can also start it when you ask it to dispatch or delegate a task. The skill tells Claude to load the dispatch guide first:
@@ -113,20 +108,12 @@ claude-code-kanban skills get dispatch
 
 The guide comes with the installed `claude-code-kanban` package, so it always matches the commands that version accepts. If `skills get` is an unknown command, the installed version is too old. Update Claude Code Kanban.
 
-The skill also starts the `kanban-dispatch-inbox` monitor. When a session dispatched with `--report` reports or exits, the dispatching session gets a line like this:
-
-```text
-[kanban board] Dispatch <id> (session <uuid>) <reported success|reported failure|ended without a report>. Summary: <text>
-```
-
-The line has no `Summary:` part when the session sent no summary, for example when it exits without a report. A dispatch without `--report` sends no line. The inbox keeps lines that arrived before it started, so a report is not lost when the inbox starts late.
-
-Dispatch needs the embedded terminal. See [Dispatch tasks to other sessions](/claude-code-kanban/guides/dispatch/) for the full flow.
+By default, Claude asks the started session to reply with `SendMessage`. Add `--handoff` when you do not need a reply: Claude passes the task on and moves on, and you follow the session on the board. For bigger tasks the skill picks one of the [orchestration patterns](/claude-code-kanban/guides/dispatch-patterns/). Dispatch needs the embedded terminal. See [Dispatch tasks to other sessions](/claude-code-kanban/guides/dispatch/) for the full flow.
 
 Example prompts:
 
 ```text
-/claude-code-kanban:dispatch fix the flaky login test in ~/dev/app --report
-Dispatch a session in this repo to update the changelog. I do not need a report.
+/claude-code-kanban:dispatch fix the flaky login test in ~/dev/app and message me when it is done -- --permission-mode auto
+/claude-code-kanban:dispatch update the changelog in this repo --handoff
 Dispatch two sessions in separate worktrees, one for the API and one for the UI, in a group named api-ui, and tell me when both are done.
 ```

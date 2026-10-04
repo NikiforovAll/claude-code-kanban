@@ -1,0 +1,97 @@
+.diagram {
+  margin: 1.5rem 0;
+  overflow-x: auto;
+}
+.diagram svg {
+  width: 100%;
+  min-width: 560px;
+}
+.diagram figcaption {
+  margin-top: 0.5rem;
+  font-size: var(--sl-text-sm);
+  color: var(--c-ink3);
+  text-align: center;
+}
+.diagram text {
+  text-anchor: middle;
+}
+.diagram .d-box {
+  fill: var(--c-surface);
+  stroke: var(--c-border);
+  stroke-width: 1.5;
+}
+.diagram .d-box-hub {
+  stroke: var(--c-accent);
+}
+.diagram .d-group {
+  fill: none;
+  stroke: var(--c-border);
+  stroke-width: 1.5;
+  stroke-dasharray: 6 5;
+}
+.diagram .d-group-active {
+  stroke: var(--c-accent);
+}
+.diagram .d-dim {
+  opacity: 0.5;
+}
+.diagram .d-life {
+  stroke: var(--c-border);
+  stroke-dasharray: 4 5;
+}
+.diagram .d-link {
+  stroke: var(--c-ink1);
+  stroke-width: 1.5;
+  fill: none;
+  marker-end: var(--d-arrow);
+}
+.diagram .d-link-accent {
+  stroke: var(--c-accent);
+}
+.diagram .d-link-dashed {
+  stroke-dasharray: 6 4;
+}
+.diagram .d-alt text {
+  fill: var(--c-ink3);
+}
+.diagram .d-mine {
+  fill: color-mix(in srgb, var(--c-accent) 16%, transparent);
+  stroke: var(--c-accent);
+  stroke-width: 1.5;
+}
+.diagram .d-sender {
+  fill: var(--c-accent);
+}
+.diagram .d-head {
+  fill: var(--c-ink1);
+}
+.diagram .d-title {
+  fill: var(--c-ink1);
+  font-size: 14px;
+  font-weight: 600;
+}
+.diagram .d-label {
+  fill: var(--c-ink1);
+  font-family: var(--sl-font-mono);
+  font-size: 13px;
+}
+.diagram .d-detail,
+.diagram .d-note {
+  fill: var(--c-ink3);
+  font-size: 12px;
+}
+.diagram .d-detail {
+  font-family: var(--sl-font-mono);
+}
+.diagram .d-start {
+  text-anchor: start;
+}
+.diagram .d-end {
+  text-anchor: end;
+}
+.diagram .d-yes {
+  fill: var(--sl-color-green-high);
+}
+.diagram .d-no {
+  fill: var(--sl-color-red-high);
+}

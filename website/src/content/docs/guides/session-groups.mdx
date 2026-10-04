@@ -49,7 +49,7 @@ When a session starts another session with `dispatch start --group <name>`, the 
 
 A temporary group works like this:
 
-- It holds the started session. It also holds the starting session, unless that session is already in a group.
+- It holds the started sessions. The starting session stays where it is.
 - The server saves it in `<config-dir>/.cck/dispatch-groups.json`, so it is not stored in the browser.
 - It stays while the Claude process of any member runs, and for 60 seconds after the last one stops.
 - After that, only pinned members stay in the group. The other sessions go back to their project block. Because pinned members stay, a group with a pinned session is still there after a server restart.
@@ -60,12 +60,7 @@ If a named group already has the same name as a temporary group, the named group
 
 ### Where a started session goes
 
-Claude Code Kanban picks the place for a started session when it starts, so the card does not move after it shows. It uses the first match in this list:
-
-1. The group given with `--group`.
-2. The temporary group of the starting session.
-3. The named group of the starting session.
-4. The project block of the started session.
+Claude Code Kanban picks the place for a started session when it starts, so the card does not move after it shows. A session started with `--group` goes to that group. A session started without it goes to its project block, even when the starting session is in a group.
 
 Until the first transcript line arrives, the board shows a "starting" placeholder card in that place.
 
