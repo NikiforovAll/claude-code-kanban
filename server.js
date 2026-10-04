@@ -3315,6 +3315,15 @@ app.post('/api/terminal/pick-folder', async (req, res) => {
   }
 });
 
+// The New session dialog's "Stay here": the PTY starts headless and the board keeps its view.
+app.post('/api/terminal/start', (req, res) => {
+  if (!terminal.authorized(req.get('x-terminal-token'))) return res.status(401).json({ error: 'invalid terminal token' });
+  const { id, cwd, name, model, worktree, prompt } = req.body || {};
+  const started = terminal.startNew({ id, cwd, name, model, worktree, prompt });
+  if (started.error) return res.status(started.status).json({ error: started.error });
+  res.status(201).json({ session: started.id, cwd: started.cwd });
+});
+
 // The hub's eviction check reads this to keep a pool with live PTYs alive.
 app.get('/api/terminals', (_req, res) => {
   res.setHeader('Cache-Control', 'no-store');

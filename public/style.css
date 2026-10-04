@@ -6861,6 +6861,17 @@ select.form-input option:checked {
 
 .ns-footer {
   align-items: center;
+  margin-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.ns-stay {
+  margin-right: auto;
+  color: var(--text-tertiary);
+}
+
+.new-session-modal.ns-resume .ns-stay {
+  visibility: hidden;
 }
 
 .ns-footer .btn-primary:disabled {

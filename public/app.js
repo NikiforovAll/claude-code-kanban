@@ -12568,7 +12568,8 @@ const newSpecs = new Map();
 // Sessions another session started (`dispatch start`), shown where they will stay until
 // their transcript appears. Kept apart from newSpecs: their prompt is already sent.
 const dispatchSpecs = new Map();
-const ns = { projects: [], picked: [], matches: [], idx: -1, folder: '', browsing: false, resume: false };
+const ns = { projects: [], picked: [], matches: [], idx: -1, folder: '', busy: false, resume: false };
+const NEW_SESSION_STAY_KEY = 'new-session-stay';
 
 const PLACEHOLDER_NAMES = { pick: 'Resume session', dispatch: 'Started session', new: 'New session' };
 const PLACEHOLDER_HINTS = {
@@ -12627,9 +12628,13 @@ async function loadDispatches() {
 
 async function onDispatchUpdate() {
   await loadDispatches();
+  refreshPlaceholders();
+  fetchSessions(false).catch(() => {});
+}
+
+function refreshPlaceholders() {
   sessions = mergePlaceholders(sessions.filter((s) => !s.placeholder));
   renderSessions();
-  fetchSessions(false).catch(() => {});
 }
 
 // With no first message there is no transcript, so an ended placeholder leaves nothing to come back to.
@@ -12708,6 +12713,7 @@ function openNewSession(folder, resume = false) {
   for (const id of ['ns-name', 'ns-wt-name', 'ns-prompt']) document.getElementById(id).value = '';
   document.getElementById('ns-wt').checked = false;
   document.getElementById('ns-model').value = '';
+  document.getElementById('ns-stay').checked = store.getItem(NEW_SESSION_STAY_KEY) === 'true';
   setNewSessionError('');
   const current = viewMode === 'session' ? sessions.find((s) => s.id === currentSessionId)?.project : null;
   setNewSessionFolder(folder || current || '');
@@ -12841,36 +12847,44 @@ function renderNewSessionForm() {
   const problem = newSessionProblem(v);
   setNewSessionError(problem);
   const start = document.getElementById('ns-start');
-  start.disabled = !v.cwd || !!problem || ns.browsing;
+  start.disabled = !v.cwd || !!problem || ns.busy;
   const verb = ns.resume ? 'Resume' : 'Start';
   start.textContent = v.cwd ? `${verb} in ${pathBasename(v.cwd)}` : verb;
 }
 
+// Resolves to the response body, or to { error } with the message for the dialog.
+async function newSessionPost(url, body, failure) {
+  try {
+    const res = await terminalFetch(url, 'POST', body);
+    const out = await res.json().catch(() => ({}));
+    if (res.ok) return out;
+    return { error: res.status === 401 ? STALE_TOKEN_MSG : out.error || `${failure} (${res.status})` };
+  } catch (e) {
+    return { error: e.message };
+  }
+}
+
+function setNewSessionBusy(on) {
+  ns.busy = on;
+  renderNewSessionForm();
+}
+
 async function browseNewSessionFolder() {
-  if (ns.browsing) return;
-  ns.browsing = true;
+  if (ns.busy) return;
   closeFolderList();
   const btn = document.getElementById('ns-browse');
   btn.textContent = 'Opening…';
-  renderNewSessionForm();
-  try {
-    const start = ns.folder || ns.picked[0] || ns.projects[0];
-    const res = await terminalFetch('/api/terminal/pick-folder', 'POST', start ? { start } : null);
-    const body = await res.json().catch(() => ({}));
-    if (res.status === 401) setNewSessionError(STALE_TOKEN_MSG);
-    else if (!res.ok) setNewSessionError(body.error || `Folder dialog failed (${res.status})`);
-    else if (body.path) {
-      ns.picked = [body.path, ...ns.picked.filter((p) => p !== body.path)];
-      setNewSessionFolder(body.path);
-    }
-  } catch (e) {
-    setNewSessionError(e.message);
-  } finally {
-    ns.browsing = false;
-    btn.textContent = 'Browse…';
-    renderNewSessionForm();
-    document.getElementById(ns.folder ? fieldAfterFolder() : 'ns-folder').focus();
+  setNewSessionBusy(true);
+  const start = ns.folder || ns.picked[0] || ns.projects[0];
+  const r = await newSessionPost('/api/terminal/pick-folder', start ? { start } : null, 'Folder dialog failed');
+  if (r.path) {
+    ns.picked = [r.path, ...ns.picked.filter((p) => p !== r.path)];
+    setNewSessionFolder(r.path);
   }
+  btn.textContent = 'Browse…';
+  setNewSessionBusy(false);
+  if (r.error) setNewSessionError(r.error);
+  document.getElementById(ns.folder ? fieldAfterFolder() : 'ns-folder').focus();
 }
 
 function fieldAfterFolder() {
@@ -12879,13 +12893,34 @@ function fieldAfterFolder() {
 
 function startNewSession() {
   const v = newSessionValues();
-  if (!v.cwd || newSessionProblem(v) || ns.browsing) return;
+  if (!v.cwd || newSessionProblem(v) || ns.busy) return;
   const id = crypto.randomUUID();
   newSpecs.set(id, { ...(ns.resume ? { cwd: v.cwd } : v), mode: ns.resume ? 'pick' : 'new', startedAt: Date.now() });
-  sessions = mergePlaceholders(sessions.filter((s) => !s.placeholder));
   setTerminalMode(id, true);
+  if (!ns.resume && document.getElementById('ns-stay').checked) return startNewSessionInBackground(id, v);
+  sessions = mergePlaceholders(sessions.filter((s) => !s.placeholder));
   closeNewSession();
   fetchTasks(id).then(() => sessionsList.querySelector('.session-item.active')?.scrollIntoView({ block: 'nearest' }));
+}
+
+async function startNewSessionInBackground(id, v) {
+  refreshPlaceholders();
+  setNewSessionBusy(true);
+  const r = await newSessionPost('/api/terminal/start', { id, ...v }, 'Start failed');
+  setNewSessionBusy(false);
+  if (r.error) {
+    dropPlaceholder(id);
+    return setNewSessionError(r.error);
+  }
+  // A server started before the page's code changed ignores the id and picks its own.
+  if (r.session !== id) {
+    const spec = newSpecs.get(id);
+    forgetPlaceholder(id);
+    newSpecs.set(r.session, spec);
+    setTerminalMode(r.session, true);
+    refreshPlaceholders();
+  }
+  closeNewSession();
 }
 
 const SpeechRecognitionApi = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -12963,6 +12998,9 @@ function initNewSession() {
     renderNewSessionForm();
     if (e.target.checked) document.getElementById('ns-wt-name').focus();
   });
+  document
+    .getElementById('ns-stay')
+    .addEventListener('change', (e) => store.setItem(NEW_SESSION_STAY_KEY, String(e.target.checked)));
   for (const id of ['ns-name', 'ns-wt-name', 'ns-prompt', 'ns-model']) {
     document.getElementById(id).addEventListener('input', renderNewSessionForm);
   }
