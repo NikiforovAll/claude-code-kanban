@@ -19,8 +19,8 @@ A leading `~` expands to your home directory.
 The plugin goes into the config dir that `--install` targets. Pass the same `--dir` to `--install`, `--uninstall` and the server:
 
 ```sh
-npx claude-code-kanban --install --dir=~/.claude-work
-npx claude-code-kanban --dir=~/.claude-work --open
+claude-code-kanban --install --dir=~/.claude-work
+claude-code-kanban --dir=~/.claude-work --open
 ```
 
 When the dir is not `~/.claude`, the installer runs the `claude` CLI with `CLAUDE_CONFIG_DIR` set to that dir.
@@ -50,7 +50,7 @@ Flags win over environment variables. The server reads the port only from `PORT`
 The embedded terminal is off when Claude Code Kanban runs alone. Turn it on with `--enable-terminal`, or with `"enabled": true` in `CCK_TERMINAL`. Inside Claude Code Hub it is on by default, and the hub passes its `terminal` block as `CCK_TERMINAL`.
 
 ```sh
-CCK_TERMINAL='{"enabled":true,"fontSize":14}' npx claude-code-kanban
+CCK_TERMINAL='{"enabled":true,"fontSize":14}' claude-code-kanban
 ```
 
 | Field | Default | What it does |
@@ -93,7 +93,7 @@ The server binds to `127.0.0.1` and also listens on `::1` on the same port. It h
 To reach the board from another machine, bind to another address and allow its host name:
 
 ```sh
-npx claude-code-kanban --host 0.0.0.0 --allowed-hosts=my-laptop.local
+claude-code-kanban --host 0.0.0.0 --allowed-hosts=my-laptop.local
 ```
 
 The server then prints `WARNING: listening on 0.0.0.0 - reachable from your network, with no authentication.` Do this only on a network you trust.

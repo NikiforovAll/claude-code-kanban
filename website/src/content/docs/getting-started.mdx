@@ -1,6 +1,6 @@
 ---
 title: Getting started
-description: Install the Claude Code integration, start the board, and see your first session live.
+description: Install the command and the Claude Code integration, start the board, and see your first session live.
 ---
 
 import Shot from '../../kit/Shot.astro';
@@ -16,12 +16,24 @@ Claude Code Kanban shows your Claude Code sessions in the browser. Each session 
 - **The `claude` CLI.** The installer runs `claude --version` first. If the command fails, the installer prints `claude CLI not found` and stops.
 - **`@lydell/node-pty` (optional).** The embedded terminal needs this package. npm installs it as an optional dependency. If you turn on the terminal and the package does not load, the server prints `Terminal unavailable: <reason>`. The board works without it.
 
+## Install the command
+
+```bash
+npm install -g claude-code-kanban
+```
+
+This installs the `claude-code-kanban` command. To update it, run the same command again.
+
+:::note[Try it without an install]
+`npx claude-code-kanban --open` starts the board with no global install. npx keeps a copy of each version in its cache and can run an old copy, so use the global install to keep the board and to update it.
+:::
+
 ## Install the integration
 
 Run the installer once:
 
 ```bash
-npx claude-code-kanban --install
+claude-code-kanban --install
 ```
 
 The integration is a Claude Code plugin. The installer copies it to `<config-dir>/.cck/plugin`, registers that folder with `claude plugin marketplace add`, and then runs `claude plugin install claude-code-kanban@claude-code-kanban`. If the plugin is already installed, it runs `claude plugin update claude-code-kanban` instead. The config dir is `~/.claude` by default.
@@ -54,13 +66,6 @@ Without the hooks, the board shows tasks only. You get no agent log and no live 
 ## Start the board
 
 ```bash
-npx claude-code-kanban --open
-```
-
-To install the command globally:
-
-```bash
-npm install -g claude-code-kanban
 claude-code-kanban --open
 ```
 
@@ -73,7 +78,7 @@ Claude Task Kanban running at http://localhost:3541
 The default port is 3541. To use another port, set the `PORT` environment variable:
 
 ```bash
-PORT=8080 npx claude-code-kanban
+PORT=8080 claude-code-kanban
 ```
 
 The `--port` flag in `--help` has no effect. If the port is busy, it prints `Port 3541 in use, trying random port...` and uses a random free port. The banner shows the port it got.
@@ -105,7 +110,7 @@ Then restart Claude Code. You can also add a task by hand. Select a session, cli
 When Claude Code Kanban runs by itself, the embedded terminal is off. Start the server with `--enable-terminal` to run Claude Code sessions inside the board:
 
 ```bash
-npx claude-code-kanban --enable-terminal
+claude-code-kanban --enable-terminal
 ```
 
 The server then prints a second line:

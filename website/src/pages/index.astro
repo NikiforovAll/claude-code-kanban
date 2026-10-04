@@ -12,7 +12,7 @@ import { family, url } from '../kit/family';
 
 const GITHUB = 'https://github.com/NikiforovAll/claude-code-kanban';
 const NPM = 'https://www.npmjs.com/package/claude-code-kanban';
-const INSTALL = 'npx claude-code-kanban --open';
+const INSTALL = 'npm install -g claude-code-kanban';
 
 const watch = [
   {
@@ -83,13 +83,17 @@ const drive = [
 ];
 
 const setup = [
+  { title: 'Install the command', cmd: INSTALL, body: 'Run it again to update.' },
   {
     title: 'Install the hooks',
-    cmd: 'npx claude-code-kanban --install',
+    cmd: 'claude-code-kanban --install',
     body: 'The hooks report subagents, waiting prompts, and live activity. The same plugin adds the board skills. Your existing settings stay as they are.',
   },
-  { title: 'Start the board', cmd: INSTALL },
-  { title: 'Use Claude Code as usual', cmd: 'claude', body: 'Tasks, agents, and messages appear on the board.' },
+  {
+    title: 'Start the board',
+    cmd: 'claude-code-kanban --open',
+    body: 'Then use Claude Code as usual. Tasks, agents, and messages appear on the board.',
+  },
 ];
 ---
 
@@ -207,7 +211,7 @@ const setup = [
             the cards you move, show or link a file, pin a session, and find an old one.
           </p>
           <p class="aside">
-            Step 1 of the setup below installs the skills with the hooks. Then type <code>/dispatch</code> and
+            Step 2 of the setup below installs the skills with the hooks. Then type <code>/dispatch</code> and
             your task.
           </p>
         </div>

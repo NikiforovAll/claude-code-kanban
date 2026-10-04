@@ -15,13 +15,13 @@ The embedded terminal runs a real Claude Code process for a session, in the same
 When you run Claude Code Kanban alone, the terminal is off. Start the server with `--enable-terminal`:
 
 ```bash
-npx claude-code-kanban --enable-terminal
+claude-code-kanban --enable-terminal
 ```
 
 You can also set it in the `CCK_TERMINAL` environment variable, as JSON:
 
 ```bash
-CCK_TERMINAL='{"enabled":true}' npx claude-code-kanban
+CCK_TERMINAL='{"enabled":true}' claude-code-kanban
 ```
 
 At start, the server prints a line like this:

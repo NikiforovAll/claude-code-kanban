@@ -12,7 +12,7 @@ When a Claude Code session starts subagents, Claude Code Kanban lists them under
 
 ## Before you start
 
-Subagent tracking needs the plugin hooks. Install them once with `npx claude-code-kanban --install`. See [Getting started](/claude-code-kanban/getting-started/). Without the hooks the board shows tasks only, with no Agents Log.
+Subagent tracking needs the plugin hooks. Install them once with `claude-code-kanban --install`. See [Getting started](/claude-code-kanban/getting-started/). Without the hooks the board shows tasks only, with no Agents Log.
 
 The plugin's mod runs when a subagent starts, finishes, or a teammate goes idle. It writes one JSONL file per agent to `<config-dir>/.cck/agent-activity/<sessionId>/<agentId>.jsonl`. Each line records a change to the agent.
 

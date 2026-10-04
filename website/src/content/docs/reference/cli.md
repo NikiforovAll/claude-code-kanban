@@ -6,10 +6,11 @@ description: Flags and subcommands of the claude-code-kanban command, from start
 The npm package `claude-code-kanban` installs one command, `claude-code-kanban`. With no subcommand it starts the server. With a subcommand it talks to a server that already runs. It needs Node.js 20 or later.
 
 ```bash
-npx claude-code-kanban --open        # without a global install
-npm install -g claude-code-kanban    # or install it once
+npm install -g claude-code-kanban
 claude-code-kanban --open
 ```
+
+`npx claude-code-kanban` runs the command with no global install. See [Install the command](/claude-code-kanban/getting-started/#install-the-command).
 
 ## Help and version
 
@@ -50,7 +51,7 @@ A flag wins over its environment variable.
 Set the port with the `PORT` environment variable. The default is 3541.
 
 ```bash
-PORT=8080 npx claude-code-kanban
+PORT=8080 claude-code-kanban
 ```
 
 If the port is busy, the server prints `Port 3541 in use, trying random port...` and listens on a random free port.
@@ -83,9 +84,9 @@ Open that link to use the terminal. The token changes on each start unless you s
 | `--dir <path>` | Installs into or removes from another Claude config dir. `CLAUDE_CONFIG_DIR` works too. |
 
 ```bash
-npx claude-code-kanban --install
-npx claude-code-kanban --uninstall
-npx claude-code-kanban --install --dir ~/.claude-work
+claude-code-kanban --install
+claude-code-kanban --uninstall
+claude-code-kanban --install --dir ~/.claude-work
 ```
 
 `--install` asks a `[Y/n]` question before it installs the plugin, unless you pass `--yes`. It stops if the `claude` CLI is missing. For each install step and what `--uninstall` removes, see [Install the integration](/claude-code-kanban/getting-started/#install-the-integration).

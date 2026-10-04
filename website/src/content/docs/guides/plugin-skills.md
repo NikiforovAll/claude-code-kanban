@@ -3,7 +3,7 @@ title: Claude Code plugin skills
 description: Use the kanban, follow and dispatch skills to drive the board from Claude Code and let the board drive Claude Code.
 ---
 
-The Claude Code Kanban plugin adds three skills to Claude Code. `npx claude-code-kanban --install` installs the plugin, together with its hooks. See [Getting started](/claude-code-kanban/getting-started/).
+The Claude Code Kanban plugin adds three skills to Claude Code. `claude-code-kanban --install` installs the plugin, together with its hooks. See [Getting started](/claude-code-kanban/getting-started/).
 
 In Claude Code the skills have the plugin name as a prefix:
 

@@ -21,25 +21,35 @@ Watch the tour on YouTube: [light](https://youtu.be/QbvDBFyfC7s), [dark](https:/
 
 You need Node.js 20 or later and the `claude` CLI.
 
-### 1. Install the integration (one time)
+### 1. Install the command
 
 ```bash
-npx claude-code-kanban --install
+npm install -g claude-code-kanban
+```
+
+To update, run the same command again.
+
+To try it without an install, run `npx claude-code-kanban --open`. npx keeps a copy of each version in its cache and can run an old copy, so use the global install to keep the board and to update it.
+
+### 2. Install the integration (one time)
+
+```bash
+claude-code-kanban --install
 ```
 
 The installer adds a Claude Code plugin with hooks, skills and a mod for context use and cost (Claude Code 2.1.287 or later). It asks before it installs and keeps your other settings. Without the hooks, the board shows tasks only: no agent log, no live activity, no waiting prompts.
 
-To remove it, run `npx claude-code-kanban --uninstall`. For another Claude config dir, pass the same `--dir=<path>` (or set `CLAUDE_CONFIG_DIR`) to `--install`, `--uninstall` and the server. See [Getting started](https://nikiforovall.blog/claude-code-kanban/getting-started/) for each install step.
+To remove it, run `claude-code-kanban --uninstall`. For another Claude config dir, pass the same `--dir=<path>` (or set `CLAUDE_CONFIG_DIR`) to `--install`, `--uninstall` and the server. See [Getting started](https://nikiforovall.blog/claude-code-kanban/getting-started/) for each install step.
 
-### 2. Start the board
+### 3. Start the board
 
 ```bash
-npx claude-code-kanban --open
+claude-code-kanban --open
 ```
 
-The board runs at `http://localhost:3541`. To install the command globally, run `npm install -g claude-code-kanban`, then `claude-code-kanban --open`.
+The board runs at `http://localhost:3541`.
 
-### 3. Use Claude Code as usual
+### 4. Use Claude Code as usual
 
 Run `claude` in any project. You do not configure anything per project. Claude Code writes task files and transcripts to the config dir, and the board watches them and sends each change to the browser.
 
@@ -107,10 +117,10 @@ Run `claude-code-kanban --help` or see the [CLI reference](https://nikiforovall.
 ## Configuration
 
 ```bash
-PORT=8080 npx claude-code-kanban               # Custom port. If it is busy, the server uses a random free port.
-npx claude-code-kanban --dir=~/.claude-work    # Another Claude config dir (or CLAUDE_CONFIG_DIR)
-npx claude-code-kanban --enable-terminal       # Turn on the embedded terminal
-EDITOR="code -w" npx claude-code-kanban        # Command for Open in editor (default: code)
+PORT=8080 claude-code-kanban               # Custom port. If it is busy, the server uses a random free port.
+claude-code-kanban --dir=~/.claude-work    # Another Claude config dir (or CLAUDE_CONFIG_DIR)
+claude-code-kanban --enable-terminal       # Turn on the embedded terminal
+EDITOR="code -w" claude-code-kanban        # Command for Open in editor (default: code)
 ```
 
 - The server listens on `127.0.0.1` only and has no authentication. To reach it from another machine, use `--host` and `--allowed-hosts`, and do it only on a network you trust.

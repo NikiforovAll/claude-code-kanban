@@ -32,7 +32,7 @@ You can also add a task by hand. Open one session and use the **Add task** tile 
 **Fix.** Run the installer again:
 
 ```bash
-npx claude-code-kanban --install
+claude-code-kanban --install
 ```
 
 Make sure the installer and the server use the same Claude config dir. If you use a config dir other than `~/.claude`, pass the same `--dir=<path>` (or set `CLAUDE_CONFIG_DIR`) for `--install` and for the server. Then start a new Claude Code session: the plugin applies to sessions that start after the install.
@@ -53,7 +53,7 @@ See [Getting started](/claude-code-kanban/getting-started/) and [Configuration](
 
 **Cause.** The page cannot reach the Claude Code Kanban server. It stopped, or it never started.
 
-**Fix.** Start the server with `npx claude-code-kanban`, then click **Retry Connection**.
+**Fix.** Start the server with `claude-code-kanban`, then click **Retry Connection**.
 
 ## The port is busy
 
@@ -64,7 +64,7 @@ See [Getting started](/claude-code-kanban/getting-started/) and [Configuration](
 **Fix.** Use the address in the startup line `Claude Task Kanban running at http://localhost:<port>`. The CLI finds the live port by itself, because the server writes it to `<config-dir>/.cck/server.json`. To choose a fixed port, set `PORT`:
 
 ```bash
-PORT=8080 npx claude-code-kanban
+PORT=8080 claude-code-kanban
 ```
 
 ## The CLI cannot reach the server
@@ -107,7 +107,7 @@ PORT=8080 npx claude-code-kanban
 
 **Symptom.** A new terminal fails with `30 terminals are open; end one first`.
 
-**Fix.** End a terminal in the Terminals manager (<kbd>Ctrl+Shift+&#96;</kbd>), or raise `maxSessions` in the `CCK_TERMINAL` JSON, for example `CCK_TERMINAL='{"enabled":true,"maxSessions":50}' npx claude-code-kanban`. Inside Claude Code Hub, set it in the `terminal` block of `~/.claude-hub/config.json`, for example `"terminal": {"maxSessions": 50}`, then restart the hub. See [Configuration](/claude-code-kanban/reference/configuration/).
+**Fix.** End a terminal in the Terminals manager (<kbd>Ctrl+Shift+&#96;</kbd>), or raise `maxSessions` in the `CCK_TERMINAL` JSON, for example `CCK_TERMINAL='{"enabled":true,"maxSessions":50}' claude-code-kanban`. Inside Claude Code Hub, set it in the `terminal` block of `~/.claude-hub/config.json`, for example `"terminal": {"maxSessions": 50}`, then restart the hub. See [Configuration](/claude-code-kanban/reference/configuration/).
 
 ## A board move does not reach Claude
 
@@ -127,7 +127,7 @@ PORT=8080 npx claude-code-kanban
 - The ask lapsed. The mod holds an ask open for `waitSeconds`, 1800 seconds by default.
 - UI approvals are off, or `mode` is `"permission"`, which leaves questions to the terminal.
 
-**Fix.** Answer in the terminal this time. Then check the `approvals` section of `<config-dir>/.cck/config.json`. Remove `"enabled": false`, or set `mode` to `"permission+question"`. If the plugin is missing, run `npx claude-code-kanban --install`. See [Answer prompts from the board](/claude-code-kanban/guides/waiting-prompts/).
+**Fix.** Answer in the terminal this time. Then check the `approvals` section of `<config-dir>/.cck/config.json`. Remove `"enabled": false`, or set `mode` to `"permission+question"`. If the plugin is missing, run `claude-code-kanban --install`. See [Answer prompts from the board](/claude-code-kanban/guides/waiting-prompts/).
 
 ## 403 on a custom hostname
 
@@ -138,7 +138,7 @@ PORT=8080 npx claude-code-kanban
 **Fix.** Add the hostname with `--allowed-hosts`, or `ALLOWED_HOSTS` as a comma-separated list. To reach the server from another machine, also set the bind address:
 
 ```bash
-npx claude-code-kanban --host 0.0.0.0 --allowed-hosts=my-host
+claude-code-kanban --host 0.0.0.0 --allowed-hosts=my-host
 ```
 
 Do this only on a network you trust. The server has no authentication, and the embedded terminal is off on a non-loopback address.
@@ -149,4 +149,4 @@ Do this only on a network you trust. The server has no authentication, and the e
 
 **Cause.** The installer runs `claude --version` first. It needs the `claude` CLI to install the plugin.
 
-**Fix.** Install Claude Code, make sure `claude` is on your `PATH`, then run `npx claude-code-kanban --install` again.
+**Fix.** Install Claude Code, make sure `claude` is on your `PATH`, then run `claude-code-kanban --install` again.
