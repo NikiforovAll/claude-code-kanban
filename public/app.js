@@ -3601,7 +3601,8 @@ function renderSessions() {
     const showCtx = !!session.contextStatus && !zenMode;
     const linkedDocsCount = getSessionPreviewPaths(session.id).length;
     const bookmarksCount = loadPins(session.id).length;
-    const hasScratchpad = _hasScratchpad(_sessionScratchpadKey(session.id));
+    const padEmoji = store.getItem(_padEmojiKey(session.id));
+    const hasScratchpad = !!padEmoji || _hasScratchpad(_sessionScratchpadKey(session.id));
     const tempClass =
       session.hasRecentLog || session.hasRecentActivity || session.inProgress || session.hasWaitingForUser
         ? 'warm'
@@ -3632,7 +3633,7 @@ function renderSessions() {
                 ${isTeam || session.project || showCtx ? `<span class="team-info-btn" onclick="event.stopPropagation(); showSessionInfoModal('${sid}')" title="View session info"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></span>` : ''}
                 ${renderWorkflowBadge(session)}
                 ${renderLoopBadge(session)}
-                ${hasScratchpad ? `<span class="scratchpad-badge" onclick="event.stopPropagation(); openSessionScratchpad('${sid}')" title="Open scratchpad"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></span>` : ''}
+                ${hasScratchpad ? `<span class="scratchpad-badge${padEmoji ? ' has-emoji' : ''}" onclick="event.stopPropagation(); openSessionScratchpad('${sid}')" title="Open scratchpad">${padEmoji ? escapeHtml(padEmoji) : `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`}</span>` : ''}
                 ${bookmarksCount > 0 ? `<span class="bookmarks-badge" onclick="event.stopPropagation(); openSessionWithBookmarks('${sid}')" title="${bookmarksCount} bookmarked message${bookmarksCount > 1 ? 's' : ''}"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>${bookmarksCount}</span>` : ''}
                 ${linkedDocsCount > 0 ? `<span class="linked-docs-badge" onclick="event.stopPropagation(); showSessionInfoModal('${sid}')" title="${linkedDocsCount} linked document${linkedDocsCount > 1 ? 's' : ''}">${linkSvg(10)}${linkedDocsCount}</span>` : ''}
                 ${session.hasPlan && !session.planSourceSessionId ? `<span class="plan-indicator" onclick="event.stopPropagation(); openPlanForSession('${sid}')" title="View plan">${ICON_PLAN}</span>` : ''}
@@ -5802,6 +5803,7 @@ const SHORTCUT_TABS = [
           { keys: ['Enter'], label: 'Toggle task detail panel' },
           { keys: ['D'], label: 'Delete selected task' },
           { keys: ['N'], label: 'Toggle scratchpad (in the sidebar: the item under the cursor)' },
+          { keys: ['Ctrl', 'E'], combo: true, label: 'Set the session scratchpad emoji (in the scratchpad)' },
           { keys: ['R'], label: 'Refresh data' },
           { keys: ['Esc'], label: 'Close panel / clear selection' },
         ],
@@ -6048,6 +6050,140 @@ function _hasScratchpad(key) {
   return !!(store.getItem(key) || '').trim();
 }
 
+// Not under SESSION_PAD_PREFIX: _parsePadKey would read it as a session pad.
+const PAD_EMOJI_PREFIX = 'pad-emoji-';
+const PAD_EMOJIS = [
+  '🔥',
+  '🚧',
+  '🐛',
+  '✅',
+  '⭐',
+  '📌',
+  '💡',
+  '🧪',
+  '🚀',
+  '⚠️',
+  '🔒',
+  '🧹',
+  '📝',
+  '🎯',
+  '🧭',
+  '🛠️',
+  '🔍',
+  '📦',
+  '🎨',
+  '⏳',
+  '❓',
+  '💬',
+  '🧠',
+  '🏁',
+];
+const PAD_EMOJI_COLS = 8;
+const _scratchpadEmojiBtn = document.getElementById('scratchpad-emoji-btn');
+const _scratchpadEmojiPicker = document.getElementById('scratchpad-emoji-picker');
+const _scratchpadEmojiGrid = document.getElementById('scratchpad-emoji-grid');
+const _scratchpadEmojiInput = document.getElementById('scratchpad-emoji-input');
+_scratchpadEmojiGrid.style.gridTemplateColumns = `repeat(${PAD_EMOJI_COLS}, 1fr)`;
+let _scratchpadEmojiCursor = 0;
+
+function _padEmojiKey(sessionId) {
+  return PAD_EMOJI_PREFIX + sessionId;
+}
+
+function _scratchpadEmojiSessionId() {
+  const pad = _parsePadKey(_scratchpadKey() || '');
+  return pad?.kind === 'session' ? pad.id : null;
+}
+
+function _firstGrapheme(s) {
+  const seg = new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(s.trim());
+  return seg[Symbol.iterator]().next().value?.segment || '';
+}
+
+function _syncScratchpadEmojiBtn() {
+  const sid = _scratchpadEmojiSessionId();
+  _scratchpadEmojiBtn.hidden = !sid;
+  const emoji = sid ? store.getItem(_padEmojiKey(sid)) : null;
+  _scratchpadEmojiBtn.textContent = emoji || '+';
+  _scratchpadEmojiBtn.classList.toggle('set', !!emoji);
+  _scratchpadEmojiBtn.title = `${emoji ? 'Change' : 'Set'} scratchpad emoji (Ctrl+E)`;
+}
+
+function _markScratchpadEmojiCursor() {
+  _scratchpadEmojiGrid.querySelectorAll('button').forEach((b, i) => {
+    b.classList.toggle('kb', i === _scratchpadEmojiCursor);
+  });
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML onclick
+function toggleScratchpadEmojiPicker() {
+  if (_scratchpadEmojiPicker.classList.contains('open')) _closeScratchpadEmojiPicker();
+  else _openScratchpadEmojiPicker();
+}
+
+function _openScratchpadEmojiPicker() {
+  const sid = _scratchpadEmojiSessionId();
+  if (!sid) return;
+  const cur = store.getItem(_padEmojiKey(sid));
+  _scratchpadEmojiCursor = Math.max(0, PAD_EMOJIS.indexOf(cur));
+  _scratchpadEmojiGrid.innerHTML = PAD_EMOJIS.map(
+    (e, i) => `<button type="button" data-i="${i}" class="${e === cur ? 'cur' : ''}">${e}</button>`,
+  ).join('');
+  _markScratchpadEmojiCursor();
+  _scratchpadEmojiInput.value = '';
+  _scratchpadEmojiPicker.classList.add('open');
+  _scratchpadEmojiPicker.focus();
+}
+
+function _closeScratchpadEmojiPicker(refocus = true) {
+  if (!_scratchpadEmojiPicker.classList.contains('open')) return;
+  _scratchpadEmojiPicker.classList.remove('open');
+  if (refocus) _scratchpadTextarea.focus();
+}
+
+function setScratchpadEmoji(value) {
+  const sid = _scratchpadEmojiSessionId();
+  if (!sid) return;
+  const emoji = _firstGrapheme(value || '');
+  if (emoji) store.setItem(_padEmojiKey(sid), emoji);
+  else store.removeItem(_padEmojiKey(sid));
+  _syncScratchpadEmojiBtn();
+  _closeScratchpadEmojiPicker();
+  renderSessions();
+}
+
+_scratchpadEmojiGrid.addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-i]');
+  if (b) setScratchpadEmoji(PAD_EMOJIS[+b.dataset.i]);
+});
+
+// Stops propagation so the global handler does not read Escape as "close the scratchpad".
+_scratchpadEmojiPicker.addEventListener('keydown', (e) => {
+  e.stopPropagation();
+  if (matchKey(e, 'Escape')) {
+    e.preventDefault();
+    _closeScratchpadEmojiPicker();
+    return;
+  }
+  if (e.target === _scratchpadEmojiInput) {
+    if (matchKey(e, 'Enter') && _scratchpadEmojiInput.value.trim()) {
+      e.preventDefault();
+      setScratchpadEmoji(_scratchpadEmojiInput.value);
+    }
+    return;
+  }
+  const moves = { ArrowRight: 1, ArrowLeft: -1, ArrowDown: PAD_EMOJI_COLS, ArrowUp: -PAD_EMOJI_COLS };
+  const move = matchKey(e, e.key) && moves[e.key];
+  if (move) {
+    e.preventDefault();
+    _scratchpadEmojiCursor = Math.min(PAD_EMOJIS.length - 1, Math.max(0, _scratchpadEmojiCursor + move));
+    _markScratchpadEmojiCursor();
+  } else if (matchKey(e, 'Enter')) {
+    e.preventDefault();
+    setScratchpadEmoji(PAD_EMOJIS[_scratchpadEmojiCursor]);
+  }
+});
+
 function _scratchpadKey() {
   if (_scratchpadKeyOverride) return _scratchpadKeyOverride;
   if (currentSessionId) return _sessionScratchpadKey(currentSessionId);
@@ -6084,6 +6220,8 @@ function showScratchpad(keyOverride) {
   if (!key) return;
   _scratchpadTextarea.value = store.getItem(key) || '';
   _scratchpadCharcount.textContent = `${_scratchpadTextarea.value.length} chars`;
+  _syncScratchpadEmojiBtn();
+  _closeScratchpadEmojiPicker(false);
   _scratchpadModal.classList.add('visible');
   _scratchpadTextarea.focus();
 }
@@ -6094,6 +6232,7 @@ function closeScratchpad() {
     _scratchpadSaveTimer = null;
   }
   saveScratchpad();
+  _closeScratchpadEmojiPicker(false);
   _scratchpadKeyOverride = null;
   _scratchpadModal.classList.remove('visible');
 }
@@ -6126,6 +6265,10 @@ _scratchpadTextarea.addEventListener('input', () => {
 // Bound on the textarea: the global handler returns early on TEXTAREA targets.
 _scratchpadTextarea.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') closeScratchpad();
+  else if (e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey && e.code === 'KeyE' && _scratchpadEmojiSessionId()) {
+    e.preventDefault();
+    _openScratchpadEmojiPicker();
+  }
 });
 
 // Vimium eats Escape inside a text field and only blurs it, so the page never sees the key.
@@ -6164,8 +6307,21 @@ function _updateStorageTotal() {
   if (el) el.textContent = `${(_getStorageTotalSize() / 1024).toFixed(1)} KB`;
 }
 
-function _getKnownSessionIds() {
-  return new Set(sessions.map((s) => s.id));
+// From the server, because `sessions` is only the sidebar's loaded page (docs/session-scanning.md).
+// Loaded sessions are added for placeholders whose transcript does not exist yet.
+let _storageKnownSessions = null;
+
+async function _fetchKnownSessions() {
+  const res = await fetch('/api/sessions/known');
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const known = new Map((await res.json()).map((s) => [s.id, s]));
+  for (const s of sessions) known.set(s.id, s);
+  _storageKnownSessions = known;
+  return known;
+}
+
+function _storageSessionMap() {
+  return _storageKnownSessions ?? new Map(sessions.map((s) => [s.id, s]));
 }
 
 function _sessionLabel(session, id) {
@@ -6173,7 +6329,7 @@ function _sessionLabel(session, id) {
 }
 
 function _groupByProject(sessionIds) {
-  const sessionMap = new Map(sessions.map((s) => [s.id, s]));
+  const sessionMap = _storageSessionMap();
   const groups = new Map();
   const orphans = [];
   for (const id of sessionIds) {
@@ -6208,14 +6364,18 @@ function _renderOrphanGroup(count, innerHtml) {
   return _renderProjectGroup('Orphaned', `<span class="storage-item-badge orphan">${count}</span>`, innerHtml);
 }
 
-function showStorageManager() {
+async function showStorageManager() {
+  _storageKnownSessions = null;
   _updateStorageTotal();
-  _updateOrphanedCount();
   document.querySelectorAll('.storage-tab').forEach((t) => {
     t.classList.toggle('active', t.dataset.tab === 'sessions');
   });
-  document.getElementById('storage-modal').classList.add('visible');
+  const modal = document.getElementById('storage-modal');
+  modal.classList.add('visible');
+  const known = await _fetchKnownSessions().catch(() => null);
+  if (!modal.classList.contains('visible')) return;
   _renderStorageTab();
+  if (known) _updateOrphanedCount(known);
 }
 
 function closeStorageManager() {
@@ -6360,20 +6520,31 @@ function _storageUnpinMessage(sessionId, pinId) {
 }
 
 function _renderStorageScratchpads() {
-  const allItems = [];
+  const groupItems = [];
+  const projectItems = [];
+  const scratchBySession = new Map();
+  const sessionItem = (id) => {
+    if (!scratchBySession.has(id))
+      scratchBySession.set(id, { key: _sessionScratchpadKey(id), kind: 'session', id, chars: 0 });
+    return scratchBySession.get(id);
+  };
   for (const key of store.keys()) {
+    if (key.startsWith(PAD_EMOJI_PREFIX)) {
+      sessionItem(key.slice(PAD_EMOJI_PREFIX.length)).emoji = store.getItem(key);
+      continue;
+    }
     const parsed = _parsePadKey(key);
     if (!parsed) continue;
-    allItems.push({ key, ...parsed, chars: (store.getItem(key) || '').length });
+    const chars = (store.getItem(key) || '').length;
+    if (parsed.kind === 'session') sessionItem(parsed.id).chars = chars;
+    else (parsed.kind === 'group' ? groupItems : projectItems).push({ key, ...parsed, chars });
   }
-  if (!allItems.length) return '<div class="storage-empty">No scratchpads</div>';
+  if (!groupItems.length && !projectItems.length && !scratchBySession.size) {
+    return '<div class="storage-empty">No scratchpads</div>';
+  }
 
-  const groupItems = allItems.filter((i) => i.kind === 'group');
-  const projectItems = allItems.filter((i) => i.kind === 'project');
-  const sessionItems = allItems.filter((i) => i.kind === 'session');
-  const sessionIds = sessionItems.map((i) => i.id);
-  const { groups: projectGroups, orphans } = _groupByProject(sessionIds);
-  const scratchBySession = new Map(sessionItems.map((i) => [i.id, i]));
+  const { groups: projectGroups, orphans } = _groupByProject(scratchBySession.keys());
+  const sessionMap = _storageSessionMap();
 
   function renderScratchItem(item) {
     const jsKey = escAttrJs(item.key);
@@ -6386,13 +6557,10 @@ function _renderStorageScratchpads() {
         label = escapeHtml(_projectLabel(item.id));
         break;
       default:
-        label = _sessionLabel(
-          sessions.find((s) => s.id === item.id),
-          item.id,
-        );
+        label = _sessionLabel(sessionMap.get(item.id), item.id);
     }
     return `<div class="storage-item">
-      <span class="storage-item-id" title="${escapeHtml(item.id)}">${label}</span>
+      <span class="storage-item-id" title="${escapeHtml(item.id)}">${item.emoji ? `${escapeHtml(item.emoji)} ` : ''}${label}</span>
       <span class="storage-item-badge">${item.kind}</span>
       <span class="storage-item-meta">${item.chars} chars</span>
       <div class="storage-item-actions">
@@ -6463,6 +6631,11 @@ function _storagePreviewPin(sessionId, pinId) {
 
 function _storageDeleteScratchpad(key) {
   store.removeItem(key);
+  const pad = _parsePadKey(key);
+  if (pad?.kind === 'session' && store.getItem(_padEmojiKey(pad.id))) {
+    store.removeItem(_padEmojiKey(pad.id));
+    renderSessions();
+  }
   _renderStorageTab();
   _updateStorageTotal();
 }
@@ -6541,43 +6714,42 @@ function _storageClearLinkedDocs(sessionId) {
   afterLinkedDocsChanged(sessionId);
 }
 
-function _findOrphanedKeys() {
-  const known = _getKnownSessionIds();
+function _findOrphanedKeys(known) {
   if (!known.size) return [];
   const orphaned = [];
   for (const id of pinnedSessionIds) if (!known.has(id)) orphaned.push(`__pinned__${id}`);
   for (const id of stickySessionIds) if (!known.has(id)) orphaned.push(`__sticky__${id}`);
+  const sessionKeyPrefixes = ['pinned-messages-', PAD_EMOJI_PREFIX, PREVIEW_STORAGE_PREFIX, PAD_LINKED_PREFIX];
   for (const key of store.keys()) {
     const pad = _parsePadKey(key);
     if (pad?.kind === 'group') {
       if (!sgGroupById(pad.id)) orphaned.push(key);
-    } else if (key.startsWith('pinned-messages-')) {
-      if (!known.has(key.slice('pinned-messages-'.length))) orphaned.push(key);
-    } else if (pad?.kind === 'session') {
-      if (!known.has(pad.id)) orphaned.push(key);
-    } else if (key.startsWith(PREVIEW_STORAGE_PREFIX)) {
-      if (!known.has(key.slice(PREVIEW_STORAGE_PREFIX.length))) orphaned.push(key);
-    } else if (key.startsWith(PAD_LINKED_PREFIX)) {
-      if (!known.has(key.slice(PAD_LINKED_PREFIX.length))) orphaned.push(key);
+      continue;
     }
+    const prefix = pad ? null : sessionKeyPrefixes.find((p) => key.startsWith(p));
+    const id = pad?.kind === 'session' ? pad.id : prefix && key.slice(prefix.length);
+    if (id && !known.has(id)) orphaned.push(key);
   }
   return orphaned;
 }
 
-function _updateOrphanedCount() {
+function _updateOrphanedCount(known) {
   const btn = document.getElementById('storage-cleanup-btn');
   if (!btn) return;
-  const count = _findOrphanedKeys().length;
+  const count = _findOrphanedKeys(known).length;
   btn.textContent = count ? `Clean Orphaned (${count})` : 'Clean Orphaned';
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML onclick
-function cleanupOrphanedStorage() {
-  if (!sessions.length) {
-    showToast('Sessions not loaded yet — try again after they appear');
+async function cleanupOrphanedStorage() {
+  let known;
+  try {
+    known = await _fetchKnownSessions();
+  } catch {
+    showToast('Could not list sessions — nothing was cleaned');
     return;
   }
-  const orphaned = _findOrphanedKeys();
+  const orphaned = _findOrphanedKeys(known);
   let pinsChanged = false;
   for (const key of orphaned) {
     if (key.startsWith('__pinned__')) {
@@ -6597,7 +6769,7 @@ function cleanupOrphanedStorage() {
   renderSessions();
   _renderStorageTab();
   _updateStorageTotal();
-  _updateOrphanedCount();
+  _updateOrphanedCount(known);
 }
 //#endregion
 

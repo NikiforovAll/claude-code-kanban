@@ -1623,6 +1623,30 @@ app.get('/api/sessions/search', (req, res) => {
   res.json(hits.slice(0, SESSION_SEARCH_MAX).map((h) => h.id));
 });
 
+app.get('/api/sessions/known', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    const known = new Map();
+    for (const [id, meta] of Object.entries(loadSessionMetadata())) {
+      known.set(id, { id, project: meta.project || null, name: getSessionDisplayName(id, meta) });
+    }
+    const add = (id, project = null) => {
+      if (!known.has(id)) known.set(id, { id, project, name: null });
+    };
+    for (const dir of [TASKS_DIR, AGENT_ACTIVITY_DIR]) {
+      if (!existsSync(dir)) continue;
+      for (const d of readdirSync(dir, { withFileTypes: true })) if (d.isDirectory()) add(d.name);
+    }
+    for (const map of Object.values(loadAllTaskMaps().listToSessions)) {
+      for (const [id, info] of Object.entries(map)) add(id, info.project || null);
+    }
+    res.json([...known.values()]);
+  } catch (error) {
+    console.error('Error listing known sessions:', error);
+    res.status(500).json({ error: 'Failed to list known sessions' });
+  }
+});
+
 function isTempPath(p) {
   const rel = path.relative(TEMP_ROOT, p);
   return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel);

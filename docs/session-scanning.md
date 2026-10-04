@@ -42,6 +42,8 @@ These run only when an API request is served (no background timer).
 | `getWorkflowInfoSummary()` (Workflow-tool script badge) | `workflowIndexCache` (`Map<sessionId, scripts[]>`) | `WORKFLOW_INDEX_TTL_MS = 5000` ms | `server.js` |
 | `readWorkflowJournal()` / `getWorkflowMeta()` (workflow run + live views) | `workflowJournalCache` / `workflowMetaCache` | `cachedByMtime`, keyed by file path | `server.js` |
 
+> `GET /api/sessions/known` returns `{id, project, name}` for each key of `loadSessionMetadata()` plus each folder in the tasks and agent-activity dirs and each session mapped to a custom task list, with no file reads per session. The Storage manager groups saved data by project and finds orphans against it, because the client's `sessions` holds only the sidebar's loaded, filtered page.
+
 > `extractAgentResultFromTranscript()` fills the response of a subagent whose `lastMessage` is empty: the last `SubagentHandback` message or formatted `StructuredOutput` input in a 1 MB tail read of its transcript, else its last assistant text. The text fallback is the usual path today, because the plugin's mod gets an empty `turn.complete` answer for a subagent; it stops running once that answer is filled.
 
 > `readRecentMessages()` dispatches transcript lines by `type`. Besides `user`/`assistant`/`teammate`, it surfaces `queue-operation` (`operation: 'enqueue'`) lines as user messages flagged `queued: true`. Queued text lives at the top-level `content`, not under `message.content`, and is never re-emitted as a `type:'user'` line, so without this branch it never renders.

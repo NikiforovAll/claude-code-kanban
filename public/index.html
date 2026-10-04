@@ -691,8 +691,18 @@
   </div>
   <div id="scratchpad-modal" class="modal-overlay" onclick="closeScratchpad()">
     <div class="modal scratchpad-modal" onclick="event.stopPropagation()">
-      <div class="modal-header">
-        <h3 class="modal-title">Scratchpad</h3>
+      <div class="modal-header scratchpad-header">
+        <div class="scratchpad-title-row">
+          <button id="scratchpad-emoji-btn" class="scratchpad-emoji-btn" type="button" onclick="toggleScratchpadEmojiPicker()"></button>
+          <h3 class="modal-title">Scratchpad</h3>
+        </div>
+        <div id="scratchpad-emoji-picker" class="scratchpad-emoji-picker" tabindex="-1">
+          <div id="scratchpad-emoji-grid" class="scratchpad-emoji-grid"></div>
+          <div class="scratchpad-emoji-row">
+            <input id="scratchpad-emoji-input" class="form-input" maxlength="16" placeholder="Paste" aria-label="Custom emoji">
+            <button type="button" class="btn btn-secondary" onclick="setScratchpadEmoji('')">Clear</button>
+          </div>
+        </div>
         <button class="modal-close" aria-label="Close dialog" onclick="closeScratchpad()">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M18 6L6 18M6 6l12 12"/>
