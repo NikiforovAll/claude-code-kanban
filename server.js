@@ -22,6 +22,7 @@ const {
   readRecentMessages: _readRecentMessagesUncached,
   readMessagesPage: _readMessagesPageUncached,
   readSessionInfoFromJsonl,
+  modelDisplayName,
   buildSessionDigest,
   readCompactSummaries,
   readArtifactLinks,
@@ -303,9 +304,12 @@ function getContextStatus(sessionId, meta) {
 }
 
 function getContextFields(sessionId, meta) {
+  // A team dir has no transcript of its own; its lead's transcript has the requests.
+  const m = meta?.teamLeaderId ? sessionMetadataCache[meta.teamLeaderId] : meta;
+  const reply = m?.lastReply;
   return {
     contextStatus: getContextStatus(sessionId, meta),
-    cacheTtl: meta?.cacheTtl || null,
+    cache: reply ? { ttl: m.cacheTtl || null, ...reply, modelName: modelDisplayName(reply.model) } : null,
   };
 }
 
@@ -827,6 +831,7 @@ function refreshSessionMetadataPath(jsonlPath) {
   if (info.compactBoundaryUuid) existing.compactBoundaryUuid = info.compactBoundaryUuid;
   existing.permissionMode = info.permissionMode;
   existing.cacheTtl = info.cacheTtl;
+  existing.lastReply = info.lastReply;
   return true;
 }
 
@@ -915,7 +920,8 @@ function loadSessionMetadata() {
           logicalParentUuid: sessionInfo.logicalParentUuid || null,
           compactBoundaryUuid: sessionInfo.compactBoundaryUuid || null,
           permissionMode: sessionInfo.permissionMode,
-          cacheTtl: sessionInfo.cacheTtl || null
+          cacheTtl: sessionInfo.cacheTtl || null,
+          lastReply: sessionInfo.lastReply || null
         };
         sessionIds.push(sessionId);
       }

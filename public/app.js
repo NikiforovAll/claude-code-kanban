@@ -8951,10 +8951,10 @@ const INPUT_PRICE_PER_MTOK = [
 function cacheRewrite(usage, modelId, writeRate) {
   const price = INPUT_PRICE_PER_MTOK.find(([prefix]) => modelId?.startsWith(prefix))?.[1];
   const tokens =
-    (usage.input_tokens || 0) +
-    (usage.cache_read_input_tokens || 0) +
-    (usage.cache_creation_input_tokens || 0) +
-    (usage.output_tokens || 0);
+    (usage?.input_tokens || 0) +
+    (usage?.cache_read_input_tokens || 0) +
+    (usage?.cache_creation_input_tokens || 0) +
+    (usage?.output_tokens || 0);
   if (!price || !tokens) return null;
   return { tokens, usd: (tokens / 1e6) * price * writeRate };
 }
@@ -8985,47 +8985,48 @@ function tickCacheTimers() {
   }
 }
 
-function renderCacheTimer(lastRequestAt, ttl, usage, modelId) {
+function renderCacheTimer({ at, ttl, usage, model }) {
   const cache = CACHE_TTL[ttl];
-  if (!lastRequestAt || !cache) return '';
-  const expiresAt = lastRequestAt + cache.ms;
-  const rewrite = cacheRewrite(usage, modelId, cache.write);
+  if (!at || !cache) return '';
+  const expiresAt = at + cache.ms;
+  const rewrite = cacheRewrite(usage, model, cache.write);
   const expiredText = rewrite ? `expired · ~${formatCost(rewrite.usd)}` : 'expired';
   const { text, color } = formatCacheLeft(expiresAt, expiredText);
   cacheTimerInterval ??= setInterval(tickCacheTimers, 1000);
-  const at = new Date(expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const clock = new Date(expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const cost = rewrite
     ? ` It writes ${formatTokens(rewrite.tokens / 1000)} tokens again, about ${formatCost(rewrite.usd)} at list price.`
     : '';
-  const title = `Prompt cache, ${ttl} TTL. Expires at ${at}; the next request after that writes it again.${cost}`;
+  const title = `Prompt cache, ${ttl} TTL. Expires at ${clock}; the next request after that writes it again.${cost}`;
   return `<div class="stat-item" title="${escapeHtml(title)}"><span class="stat-label">Cache</span><span class="stat-value cache-timer" data-expires="${escapeHtml(expiresAt)}" data-expired-text="${escapeHtml(expiredText)}" style="color:${color}">${text}</span></div>`;
 }
 
+// The Cache row and the current-usage rows come from the transcript (session.cache); the rest needs the plugin's file.
 function renderContextDetail(session, { tokens = true } = {}) {
   const ctx = getCtx(session);
-  if (!ctx) return '';
-  const raw = session.contextStatus;
-  const totalK = ctx.size / 1000;
-  const color = getContextColor(ctx.usedTokens, ctx.modelName);
+  const reply = session.cache;
+  if (!ctx && !reply) return '';
+  const usage = reply?.usage;
+  const cost = session.contextStatus?.cost || {};
+  const color = ctx && getContextColor(ctx.usedTokens, ctx.modelName);
+  const title = ctx?.modelName || reply?.modelName || 'Context Window';
 
-  const cw = raw.context_window || {};
-  const usage = cw.current_usage || {};
-  const cost = raw.cost || {};
-  const tokenRows = tokens
-    ? `<div class="stat-item"><span class="stat-label">Cache read</span><span class="stat-value">${formatTokens((usage.cache_read_input_tokens || 0) / 1000)}</span></div>
-            <div class="stat-item"><span class="stat-label">Cache write</span><span class="stat-value">${formatTokens((usage.cache_creation_input_tokens || 0) / 1000)}</span></div>
-            <div class="stat-item"><span class="stat-label">Current input</span><span class="stat-value">${formatTokens((usage.input_tokens || 0) / 1000)}</span></div>
-            <div class="stat-item"><span class="stat-label">Current output</span><span class="stat-value">${formatTokens((usage.output_tokens || 0) / 1000)}</span></div>
-            <div class="stat-divider"></div>
-            <div class="stat-item"><span class="stat-label">Total input</span><span class="stat-value">${formatTokens(ctx.inputTokens / 1000)}</span></div>
+  const usageRows =
+    tokens && usage
+      ? `<div class="stat-item"><span class="stat-label">Cache read</span><span class="stat-value">${formatTokens(usage.cache_read_input_tokens / 1000)}</span></div>
+            <div class="stat-item"><span class="stat-label">Cache write</span><span class="stat-value">${formatTokens(usage.cache_creation_input_tokens / 1000)}</span></div>
+            <div class="stat-item"><span class="stat-label">Current input</span><span class="stat-value">${formatTokens(usage.input_tokens / 1000)}</span></div>
+            <div class="stat-item"><span class="stat-label">Current output</span><span class="stat-value">${formatTokens(usage.output_tokens / 1000)}</span></div>
+            <div class="stat-divider"></div>`
+      : '';
+  const totalRows =
+    tokens && ctx
+      ? `<div class="stat-item"><span class="stat-label">Total input</span><span class="stat-value">${formatTokens(ctx.inputTokens / 1000)}</span></div>
             ${ctx.outputTokens ? `<div class="stat-item"><span class="stat-label">Total output</span><span class="stat-value">${formatTokens(ctx.outputTokens / 1000)}</span></div>` : ''}
             <div class="stat-divider"></div>`
-    : '';
-
-  return `
-        <div class="detail-context">
-          <div class="detail-context-title">${ctx.modelName ? escapeHtml(ctx.modelName) : 'Context Window'}</div>
-          <div class="detail-context-bar">
+      : '';
+  const bar = ctx
+    ? `<div class="detail-context-bar">
             <div class="context-bar-track">
               <div class="context-bar-fill" style="width:${ctx.pct}%;background:${color}"></div>
               ${renderMarkers(ctx.markers)}
@@ -9033,12 +9034,19 @@ function renderContextDetail(session, { tokens = true } = {}) {
           </div>
           <div class="detail-context-summary">
             <span style="color:${color}">${Math.round(ctx.pct)}% used</span>
-            <span${ctx.compacts ? ` title="Auto-compact window · model window ${escapeHtml(formatTokens(ctx.modelSize / 1000))}"` : ''}>${formatTokens(ctx.usedTokens / 1000)} / ${formatTokens(totalK)}</span>
-          </div>
+            <span${ctx.compacts ? ` title="Auto-compact window · model window ${escapeHtml(formatTokens(ctx.modelSize / 1000))}"` : ''}>${formatTokens(ctx.usedTokens / 1000)} / ${formatTokens(ctx.size / 1000)}</span>
+          </div>`
+    : '';
+
+  return `
+        <div class="detail-context">
+          <div class="detail-context-title">${escapeHtml(title)}</div>
+          ${bar}
           <div class="detail-context-stats">
-            ${tokenRows}
-            <div class="stat-item"><span class="stat-label">Cost</span><span class="stat-value" style="color:${getCostColor(cost.total_cost_usd)}">${formatCost(cost.total_cost_usd)}</span></div>
-            ${renderCacheTimer(raw.cache?.last_request_at, session.cacheTtl, usage, raw.model?.id)}
+            ${usageRows}
+            ${totalRows}
+            ${ctx ? `<div class="stat-item"><span class="stat-label">Cost</span><span class="stat-value" style="color:${getCostColor(cost.total_cost_usd)}">${formatCost(cost.total_cost_usd)}</span></div>` : ''}
+            ${reply ? renderCacheTimer(reply) : ''}
             ${cost.total_duration_ms != null ? `<div class="stat-item"><span class="stat-label">Duration</span><span class="stat-value">${formatDuration(cost.total_duration_ms)}</span></div>` : ''}
             ${cost.total_api_duration_ms != null ? `<div class="stat-item"><span class="stat-label">API time</span><span class="stat-value">${formatDuration(cost.total_api_duration_ms)}</span></div>` : ''}
             ${cost.total_lines_added != null ? `<div class="stat-item"><span class="stat-label">Lines</span><span class="stat-value"><span style="color:${CONTEXT_COLORS.green}">+${(cost.total_lines_added || 0).toLocaleString()}</span> / <span style="color:${CONTEXT_COLORS.red}">-${(cost.total_lines_removed || 0).toLocaleString()}</span></span></div>` : ''}
@@ -10533,9 +10541,10 @@ function showInfoModal(session, teamConfig, tasks, planContent, parentInfo) {
   });
   html += `</div>`;
 
-  if (session.contextStatus) {
+  const contextHtml = renderContextDetail(session);
+  if (contextHtml) {
     html += `<hr style="border: none; border-top: 1px solid var(--border); margin: 12px 0;">`;
-    html += renderContextDetail(session);
+    html += contextHtml;
   }
 
   if (planContent) {

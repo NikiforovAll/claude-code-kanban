@@ -1,4 +1,4 @@
-const { describe, it, before, after } = require('node:test');
+const { describe, it, before, after, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const { readFileSync, writeFileSync, appendFileSync, mkdirSync, mkdtempSync, rmSync } = require('fs');
 const path = require('path');
@@ -28,7 +28,8 @@ const {
   extractAgentResultFromTranscript,
   readScratchpadCreations,
   updateLoopInfo,
-  buildLoopInfoFromState
+  buildLoopInfoFromState,
+  modelDisplayName
 } = require('../lib/parsers');
 
 const ajv = new Ajv({ allErrors: true, strict: false });
@@ -634,6 +635,68 @@ describe('Parser: readSessionInfoFromJsonl', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  describe('lastReply', () => {
+    const T = (s) => `2026-01-01T00:00:${String(s).padStart(2, '0')}Z`;
+    const user = (s, isSidechain = false) => `${JSON.stringify({ type: 'user', isSidechain, timestamp: T(s), cwd: 'C:/proj', message: { role: 'user', content: 'hi' } })}\n`;
+    const reply = (s, { model = 'claude-opus-5-5', write = 0, read = 100, isSidechain = false } = {}) => `${JSON.stringify({
+      type: 'assistant', isSidechain, timestamp: T(s), cwd: 'C:/proj',
+      message: { role: 'assistant', model, content: [], usage: { input_tokens: 1, cache_read_input_tokens: read, cache_creation_input_tokens: write, output_tokens: 2, cache_creation: { ephemeral_5m_input_tokens: write } } },
+    })}\n`;
+    const compact = `${JSON.stringify({ type: 'system', subtype: 'compact_boundary', timestamp: T(50) })}\n`;
+    const usage = (read, write) => ({ input_tokens: 1, cache_read_input_tokens: read, cache_creation_input_tokens: write, output_tokens: 2 });
+    let dir;
+    let p;
+    beforeEach(() => {
+      dir = mkdtempSync(path.join(os.tmpdir(), 'cck-reply-'));
+      p = path.join(dir, 's.jsonl');
+    });
+    afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+    it('takes the last main-thread reply, timed by the request before it, as the file grows', () => {
+      writeFileSync(p, user(1) + reply(5, { write: 300 }));
+      assert.deepEqual(readSessionInfoFromJsonl(p).lastReply, { at: Date.parse(T(1)), model: 'claude-opus-5-5', usage: usage(100, 300) });
+      appendFileSync(p, user(10) + reply(12, { model: '<synthetic>' }) + user(20, true) + reply(22, { isSidechain: true }));
+      assert.equal(readSessionInfoFromJsonl(p).lastReply.at, Date.parse(T(1)));
+      appendFileSync(p, reply(14, { model: 'claude-fable-5-1', read: 400 }));
+      const info = readSessionInfoFromJsonl(p);
+      assert.deepEqual(info.lastReply, { at: Date.parse(T(10)), model: 'claude-fable-5-1', usage: usage(400, 0) });
+      assert.equal(info.cacheTtl, '5m', 'a full cache hit moves the time but keeps the TTL');
+    });
+
+    it('a compaction after the reply clears its usage', () => {
+      writeFileSync(p, user(1) + reply(5) + compact);
+      assert.deepEqual(readSessionInfoFromJsonl(p).lastReply, { at: Date.parse(T(1)), model: 'claude-opus-5-5', usage: null });
+    });
+
+    it('a cold read of a big file finds a reply behind a long last line', () => {
+      const pad = (n) => `${JSON.stringify({ type: 'progress', data: 'x'.repeat(n) })}\n`;
+      writeFileSync(p, pad(1_200_000) + user(1) + reply(5, { write: 300 }) + compact + pad(200_000));
+      assert.deepEqual(readSessionInfoFromJsonl(p).lastReply, { at: Date.parse(T(1)), model: 'claude-opus-5-5', usage: null });
+    });
+
+    it('a cold read with no reply in the last 2 MB drops the head reply', () => {
+      const pad = (n) => `${JSON.stringify({ type: 'progress', data: 'x'.repeat(n) })}\n`;
+      writeFileSync(p, user(1) + reply(5, { write: 300 }) + pad(1_200_000) + pad(2_500_000));
+      const info = readSessionInfoFromJsonl(p);
+      assert.equal(info.lastReply, null);
+      assert.equal(info.cacheTtl, null);
+    });
+
+    it('a cold read finds a reply many short lines back, across chunk edges', () => {
+      const pad = (n) => `${JSON.stringify({ type: 'progress', data: 'x'.repeat(n) })}\n`;
+      writeFileSync(p, pad(1_200_000) + user(1) + reply(5, { write: 300 }) + pad(997).repeat(300));
+      assert.deepEqual(readSessionInfoFromJsonl(p).lastReply, { at: Date.parse(T(1)), model: 'claude-opus-5-5', usage: usage(100, 300) });
+    });
+  });
+
+  it('modelDisplayName matches the plugin mod', () => {
+    assert.equal(modelDisplayName('claude-opus-5-5'), 'Opus 5.5');
+    assert.equal(modelDisplayName('claude-haiku-4-5-20251001'), 'Haiku 4.5');
+    assert.equal(modelDisplayName('claude-fable-5-1[1m]'), 'Fable 5.1');
+    assert.equal(modelDisplayName('claude-opus-4-20250514'), 'Opus 4');
+    assert.equal(modelDisplayName('gpt-x'), 'gpt-x');
   });
 });
 
