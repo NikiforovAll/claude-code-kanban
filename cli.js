@@ -747,6 +747,7 @@ async function runSessionViewCli(args) {
     return 1;
   }
   const asJson = args.includes('--json');
+  const rateLimits = asJson ? null : cliGetJson('/api/rate-limits', 'Rate limits').catch(() => ({}));
   const resolved = await resolveSessionByIdOrPrefix(idArg);
   if (!resolved) return 1;
   let list;
@@ -775,7 +776,6 @@ async function runSessionViewCli(args) {
   if (ctx) {
     const cw = ctx.context_window || {};
     const cost = ctx.cost || {};
-    const rl = ctx.rate_limits || {};
     const modelName = ctx.model?.display_name || ctx.model?.id || '-';
     const modelExtras = [
       ctx.effort?.level,
@@ -790,9 +790,11 @@ async function runSessionViewCli(args) {
       ? ` · ${cost.total_api_duration_ms != null ? formatAge(cost.total_api_duration_ms) : '-'} api / ${formatAge(cost.total_duration_ms)} total · +${cost.total_lines_added || 0}/-${cost.total_lines_removed || 0}`
       : '';
     lines.push(`  Cost: ${fmtCost(cost.total_cost_usd)}${timing}`);
-    if (rl.five_hour || rl.seven_day) {
-      lines.push(`  Limits: 5h ${rl.five_hour?.used_percentage ?? '-'}% · 7d ${rl.seven_day?.used_percentage ?? '-'}%`);
-    }
+  }
+  // Account-wide, so not read from this session's file, which can be days old.
+  const rl = await rateLimits;
+  if (rl.five_hour || rl.seven_day) {
+    lines.push(`  Limits: 5h ${rl.five_hour?.used_percentage ?? '-'}% · 7d ${rl.seven_day?.used_percentage ?? '-'}%`);
   }
   console.log(lines.join('\n'));
   return 0;

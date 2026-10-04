@@ -20,7 +20,7 @@ All defined in `server.js`. Each watcher emits an SSE event to connected clients
 
 Notable options:
 - `agentActivityWatcher` uses `awaitWriteFinish: { stabilityThreshold: 150, pollInterval: 50 }` to coalesce rapid writes.
-- `contextStatusWatcher` has `ignoreInitial: false` (others ignore initial scan).
+- `contextStatusWatcher` has `ignoreInitial: false` (others ignore initial scan). It fills `contextStatusCache`, which has no entry cap: it mirrors the files, which the retention sweep bounds. It broadcasts nothing during the initial scan and one `context-update` on `ready`.
 
 Session discovery proper happens via `projectsWatcher` on `~/.claude/projects/**/*.jsonl`.
 
@@ -33,7 +33,7 @@ These run only when an API request is served (no background timer).
 | `loadSessionMetadata()` | `sessionMetadataCache` | `METADATA_CACHE_TTL = 10000` ms (per-path dirty set for hot updates) | `server.js:389` |
 | `readSessionInfoFromJsonl()` | `sessionInfoCache` + `customTitleCache` | per path, valid while `sameFileGrown` (same inode, not shorter, and a new mtime only with new bytes); `slug`+`projectPath`+`logicalParentUuid`+`compactBoundaryUuid` pinned, `cwd`, title and `permissionMode` (the latest of a prompt line, an `auto_mode`/`auto_mode_exit` attachment or a `permission-mode` line, for the auto-mode waiting check) and `cacheTtl` (`5m`/`1h` from the `cache_creation` split of the last main-thread reply that wrote the prompt cache, for the cache timer in the context stats) refreshed from appended bytes only; saved to disk, see [Persistent session cache](#3a-persistent-session-cache) | `lib/parsers.js` |
 | `getGitBranch(cwd)` | `gitBranchCache` | `GIT_BRANCH_TTL_MS = 30000` ms, keyed by `cwd` | `server.js` + `lib/git-branch.js` |
-| `getAutoCompact(claudeDir, project)` (compaction window for the context bar; runs only for sessions with `contextStatus`) | `fileCache`, one entry per settings file: `<config dir>/settings.json`, `<project>/.claude/settings.json`, `<project>/.claude/settings.local.json`; misses cached too | keyed by `mtimeMs`: one `statSync` per file per call, a read only after a change | `lib/auto-compact.js`, cache in `lib/claude-settings.js` |
+| `getAutoCompact(claudeDir, project)` (compaction window for the context bar; runs in `/api/sessions` after the limit slice, once per project, only for rows with `contextStatus`) | `fileCache`, one entry per settings file: `<config dir>/settings.json`, `<project>/.claude/settings.json`, `<project>/.claude/settings.local.json`; misses cached too | keyed by `mtimeMs`: one `statSync` per file per call, a read only after a change | `lib/auto-compact.js`, cache in `lib/claude-settings.js` |
 | `worktrees.resolve(dir)` | `createWorktreeStore` | hits saved to `.cck/worktrees.json`, pruned by the retention sweep; misses in memory, capped at 500 | `lib/worktrees.js` |
 | Task-map scan | `sessionToTaskListCache` | `TASK_MAP_SCAN_TTL = 5000` ms | `server.js:271` |
 | `readRecentMessages()` / session info | `messageCache` (keyed by mtime) | invalidates on file mtime change | `server.js:382` |
@@ -155,7 +155,7 @@ Recent Claude Code releases auto-create a single-member **self-team** per sessio
 | Timer | Interval | Purpose |
 |---|---|---|
 | `cleanupAgentActivity` | 60 min (`CLEANUP_INTERVAL_MS`) | prune old agent-activity files |
-| `cleanupContextStatus` | 30 min | prune stale context-status files |
+| `runRetention` | 60 min, first run 5 min after start | drop per-session state, context-status files included, whose transcript is gone (`docs/retention.md`) |
 | SSE heartbeat | 30 s | keep-alive on `/api/events` |
 
 No timer enumerates projects or sessions.

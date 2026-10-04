@@ -12,14 +12,14 @@ const MEASURE: SessionMeasureInput = {
   changed: ['context', 'rateLimits', 'cost'],
 }
 
-function engine(on: On, env: Record<string, string>, sessionId: string) {
+function engine(on: On, env: Record<string, string>, sessionId: string | (() => string)) {
   const writes: { path: string; text: string }[] = []
   on('fs.write', (_$, e) => {
     writes.push({ path: e.path.replaceAll('\\', '/'), text: e.text })
     return { value: undefined }
   })
   on('env.get', (_$, e) => ({ value: env[e.name] }))
-  on('session.id', () => ({ value: sessionId }))
+  on('session.id', () => ({ value: typeof sessionId === 'function' ? sessionId() : sessionId }))
   on('session.model', () => ({ value: 'claude-opus-5-5' }))
   on('session.measure', (_$, e) => ({ changed: [...e.changed] }))
   return writes
@@ -51,6 +51,37 @@ test('session.measure writes no cache entry before the first request', async ($,
   await $.session.measure(MEASURE)
 
   expect(JSON.parse(writes[0]?.text ?? '{}').cache).toBeUndefined()
+})
+
+const USAGE = { input_tokens: 2, output_tokens: 100, cache_read_input_tokens: 5000, cache_creation_input_tokens: 300 }
+
+test('after /clear the new session id does not get the old request', async ($, on) => {
+  let sid = 'sid-old'
+  const writes = engine(on, { CLAUDE_CONFIG_DIR: 'C:/cfg' }, () => sid)
+  on('session.usage', () => ({ value: MEASURE }))
+  on('session.end', (_$, e) => ({ sessionId: e.sessionId }))
+  on('turn.step', async function* (_$, e) {
+    return { turnId: e.turnId, index: e.index, answer: 'ok', toolUses: [], stopReason: 'end_turn', usage: { ...USAGE, model: 'claude-fable-5-1' } }
+  })
+
+  const step = $.turn.step({ turnId: 't1', index: 0, model: 'claude-fable-5-1', messageCount: 1 })
+  for await (const _ of step);
+  await step.result
+  expect(writes.length).toBe(1)
+  const old = JSON.parse(writes.at(-1)?.text ?? '{}')
+  expect(old.cache?.last_request_at).toBeGreaterThan(0)
+  expect(old.context_window.current_usage).toEqual(USAGE)
+  expect(old.model.id).toBe('claude-fable-5-1')
+
+  await $.session.end({ reason: 'clear', sessionId: 'sid-old', resume: {} as never })
+  sid = 'sid-new'
+  await $.session.measure(MEASURE)
+
+  expect(writes.at(-1)?.path).toBe('C:/cfg/.cck/context-status/sid-new.json')
+  const fresh = JSON.parse(writes.at(-1)?.text ?? '{}')
+  expect(fresh.cache).toBeUndefined()
+  expect(fresh.context_window.current_usage).toBeNull()
+  expect(fresh.model.id).toBe('claude-opus-5-5')
 })
 
 test('toStatus adds the last request time', async () => {

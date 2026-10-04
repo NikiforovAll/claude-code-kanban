@@ -42,22 +42,17 @@ function cckDir($: EngineInterface) {
   return cck
 }
 
-let lastUsage: ModelUsage | undefined
-let lastModel: string | undefined
-let lastRequestAt: number | undefined
-const lastWritten = new Map<string, string>()
+// Keyed by session id: `/clear` keeps the process and changes the id.
+const sessions = new Map<string, { req?: { usage: ModelUsage; model: string; at: number }; written?: string }>()
 
-async function write($: EngineInterface, m: Measure) {
-  const [sessionId, model, dir] = await Promise.all([
-    $.session.id(),
-    lastModel ?? $.session.model(),
-    cckDir($),
-  ])
-  const text = JSON.stringify(toStatus(model, m, lastUsage, lastRequestAt))
-  const file = `${dir}/context-status/${sessionId}.json`
-  if (lastWritten.get(file) === text) return
-  await $.fs.write(file, text)
-  lastWritten.set(file, text)
+async function write($: EngineInterface, m: Measure, id?: string) {
+  const [sessionId, dir] = await Promise.all([id ?? $.session.id(), cckDir($)])
+  const s = sessions.get(sessionId) ?? {}
+  const model = s.req?.model ?? (await $.session.model())
+  const text = JSON.stringify(toStatus(model, m, s.req?.usage, s.req?.at))
+  if (s.written === text) return
+  await $.fs.write(`${dir}/context-status/${sessionId}.json`, text)
+  sessions.set(sessionId, { ...s, written: text })
 }
 
 export const register: Register = on => {
@@ -65,16 +60,20 @@ export const register: Register = on => {
     const result = yield* next(e)
     if (e.agentId === undefined && result.usage) {
       const { model, ...usage } = result.usage
-      lastUsage = usage
-      lastModel = model
-      lastRequestAt = Date.now()
-      await write($, await $.session.usage())
+      const sessionId = await $.session.id()
+      sessions.set(sessionId, { ...sessions.get(sessionId), req: { usage, model, at: Date.now() } })
+      await write($, await $.session.usage(), sessionId)
     }
     return result
   })
 
   on('session.measure', async ($, e, next) => {
     await write($, e)
+    return next(e)
+  })
+
+  on('session.end', async ($, e, next) => {
+    sessions.delete(e.sessionId)
     return next(e)
   })
 }

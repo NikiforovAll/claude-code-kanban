@@ -5,8 +5,8 @@ State that cck writes under `<config dir>/.cck/` must not grow without a limit. 
 ## Who owns the data
 
 - **User-managed:** pins (`pins.json`) and linked docs (`linked-docs.json`). The user adds and removes them, and the hub's storage manager clears them. cck does not expire them.
-- **cck-generated, short-lived:** `context-status/` and `agent-activity/`. The sweeps in the `CLEANUP` region of `server.js` delete `context-status/` files older than 2 h every 30 minutes, and `agent-activity/` entries older than 2 days every hour.
-- **cck-generated, per session:** dispatch markers (`dispatched.json`) and reviews (`reviews/<session id>/<ts>.md`). They live as long as the session's transcript. The rest of this doc covers them.
+- **cck-generated, short-lived:** `agent-activity/`. The sweep in the `CLEANUP` region of `server.js` deletes entries older than 2 days every hour.
+- **cck-generated, per session:** dispatch markers (`dispatched.json`), reviews (`reviews/<session id>/<ts>.md`) and context status (`context-status/<session id>.json`, written by the plugin mod). They live as long as the session's transcript, so an idle session keeps its context, cost and prompt-cache row. The rest of this doc covers them.
 - **cck-generated, per project:** worktrees (`worktrees.json`). See [Worktrees](#worktrees).
 - **Caches:** `session-cache.json` is rebuilt cold when it passes 8 MB (`lib/session-cache.js`).
 
@@ -21,7 +21,7 @@ Claude Code deletes transcripts on the same schedule, so cck never keeps state f
 
 - **Known transcripts** come from `scanTranscripts()`: the `.jsonl` names under `projects/*/`, read with async directory listings, with no stat and no parse. It does not use the session metadata cache, because that cache only updates when a board asks for sessions, so it can miss new transcripts while no board is open. When the list is empty (no `projects/` dir, or a failed read), the transcript check is skipped, so a bad read cannot delete everything; the age check still runs.
 - **Grace period:** a started session writes its transcript a moment after cck records it, and a review folder exists a moment before its file. Entries younger than one hour are never dropped.
-- **Cap:** `dispatched.json` also keeps only the newest 500 entries, for users who keep transcripts forever.
+- **Cap:** for users who keep transcripts forever, `dispatched.json` keeps only the newest 500 entries and `context-status/` the newest 2000 files by mtime (`MAX_CONTEXT_STATUS`). Past 2000 sessions in the retention window, the oldest idle ones lose their context status before their transcript goes.
 
 ## Worktrees
 

@@ -3,7 +3,16 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { createDispatchedStore, scanTranscripts, pruneSessionDirs, retentionMs, GRACE_MS, MAX_DISPATCHED, DAY_MS } = require('../lib/retention');
+const {
+  createDispatchedStore,
+  scanTranscripts,
+  pruneSessionDirs,
+  pruneContextStatus,
+  retentionMs,
+  GRACE_MS,
+  MAX_DISPATCHED,
+  DAY_MS,
+} = require('../lib/retention');
 
 const roots = [];
 after(() => {
@@ -120,6 +129,55 @@ describe('pruneSessionDirs', () => {
 
   it('returns 0 when the folder does not exist', async () => {
     assert.equal(await pruneSessionDirs(path.join(tempDir(), 'missing'), { known: null, maxAgeMs: MONTH }), 0);
+  });
+});
+
+describe('pruneContextStatus', () => {
+  function status(dir, sid, ageMs, now) {
+    const file = path.join(dir, `${sid}.json`);
+    fs.writeFileSync(file, '{}');
+    const t = (now - ageMs) / 1000;
+    fs.utimesSync(file, t, t);
+    return file;
+  }
+
+  it('removes files of gone sessions past the grace period and old files, keeps the rest', async () => {
+    const dir = tempDir();
+    const now = Date.now();
+    const gone = status(dir, 'gone', GRACE_MS + 1000, now);
+    const young = status(dir, 'young', 1000, now);
+    const old = status(dir, 'old', MONTH + 1000, now);
+    const idle = status(dir, 'idle', 3 * DAY_MS, now);
+    fs.writeFileSync(path.join(dir, 'notes.txt'), '');
+    const removed = await pruneContextStatus(dir, { known: new Set(['old', 'idle']), maxAgeMs: MONTH, now });
+    assert.equal(removed, 2);
+    assert.equal(fs.existsSync(gone), false);
+    assert.equal(fs.existsSync(old), false);
+    assert.ok(fs.existsSync(young));
+    assert.ok(fs.existsSync(idle));
+    assert.ok(fs.existsSync(path.join(dir, 'notes.txt')));
+  });
+
+  it('prunes by age only when the scan found no transcripts', async () => {
+    const dir = tempDir();
+    const now = Date.now();
+    const idle = status(dir, 'idle', 3 * DAY_MS, now);
+    const old = status(dir, 'old', MONTH + 1000, now);
+    assert.equal(await pruneContextStatus(dir, { known: null, maxAgeMs: MONTH, now }), 1);
+    assert.ok(fs.existsSync(idle));
+    assert.equal(fs.existsSync(old), false);
+  });
+
+  it('keeps only the newest files past the cap', async () => {
+    const dir = tempDir();
+    const now = Date.now();
+    const files = [1, 2, 3, 4].map((h) => status(dir, `s${h}`, h * 60 * 60 * 1000, now));
+    assert.equal(await pruneContextStatus(dir, { known: null, maxAgeMs: MONTH, now, max: 2 }), 2);
+    assert.deepEqual(files.map((f) => fs.existsSync(f)), [true, true, false, false]);
+  });
+
+  it('returns 0 when the folder does not exist', async () => {
+    assert.equal(await pruneContextStatus(path.join(tempDir(), 'missing'), { known: null, maxAgeMs: MONTH }), 0);
   });
 });
 

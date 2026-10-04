@@ -13216,7 +13216,7 @@ msgContentEl.addEventListener('wheel', function (e) {
   }
 });
 
-const footerState = { version: null, plugin: null, limitsKey: null, timer: null };
+const footerState = { version: null, plugin: null, limitsKey: null, timer: null, resetTimer: null };
 function formatResetIn(epochSec) {
   if (!epochSec) return null;
   const ms = epochSec * 1000 - Date.now();
@@ -13305,14 +13305,10 @@ function refreshRateLimits() {
   if (footerState.timer) return;
   footerState.timer = setTimeout(() => {
     footerState.timer = null;
-    fetch('/api/context-status')
+    fetch('/api/rate-limits')
       .then((r) => r.json())
-      .then((all) => {
-        let freshest = null;
-        for (const e of Object.values(all || {})) {
-          if (e?.rate_limits && (!freshest || (e._updatedAt || 0) > (freshest._updatedAt || 0))) freshest = e;
-        }
-        const rl = freshest?.rate_limits || null;
+      .then((rl) => {
+        scheduleRateLimitReset(rl);
         const fh = rl?.five_hour?.used_percentage ?? null;
         const sd = rl?.seven_day?.used_percentage ?? null;
         const key = `${fh}|${sd}`;
@@ -13322,6 +13318,18 @@ function refreshRateLimits() {
       })
       .catch(() => {});
   }, 1500);
+}
+
+// No context-update comes when a window resets on an idle board, so refetch at the earliest reset.
+function scheduleRateLimitReset(rl) {
+  clearTimeout(footerState.resetTimer);
+  footerState.resetTimer = null;
+  const resets = Object.values(rl || {})
+    .map((b) => b?.resets_at)
+    .filter((s) => s > 0);
+  if (!resets.length) return;
+  const ms = Math.min(...resets) * 1000 - Date.now() + 1000;
+  footerState.resetTimer = setTimeout(refreshRateLimits, Math.min(Math.max(ms, 0), 2 ** 31 - 1));
 }
 fetch('/api/version')
   .then((r) => r.json())

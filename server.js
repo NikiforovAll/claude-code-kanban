@@ -48,7 +48,8 @@ const { readLiveSessions, isPidAlive, isSessionLive } = require('./lib/live-sess
 const { createProcStats } = require('./lib/proc-stats');
 const { createDispatchRegistry } = require('./lib/dispatch');
 const { createGroupStore, isGroupName, suggestGroupName } = require('./lib/dispatch-groups');
-const { createDispatchedStore, scanTranscripts, pruneSessionDirs, retentionMs } = require('./lib/retention');
+const { createDispatchedStore, scanTranscripts, pruneSessionDirs, pruneContextStatus, retentionMs } = require('./lib/retention');
+const { freshRateLimits } = require('./lib/rate-limits');
 const { createWorktreeStore } = require('./lib/worktrees');
 const { readGitBranch, sessionGitBranch } = require('./lib/git-branch');
 const { createLinkedDocStore, linkUrl } = require('./lib/linked-docs');
@@ -209,7 +210,6 @@ const SESSION_STALE_MS = 5 * 60 * 1000;
 // never the "active" status (which stays accurate via hasRecentLog).
 const SESSION_GRACE_MS = 2 * 60 * 1000;
 const WAITING_RESOLVE_GRACE_MS = 15 * 1000;
-const CTX_CLEANUP_MAX_AGE_MS = 2 * 60 * 60 * 1000;
 const CLEANUP_MAX_AGE_MS = 2 * 24 * 60 * 60 * 1000;
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 const RETENTION_FIRST_RUN_MS = 5 * 60 * 1000;
@@ -303,10 +303,8 @@ function getContextStatus(sessionId, meta) {
 }
 
 function getContextFields(sessionId, meta) {
-  const contextStatus = getContextStatus(sessionId, meta);
   return {
-    contextStatus,
-    autoCompact: contextStatus ? getAutoCompact(CLAUDE_DIR, meta?.project) : null,
+    contextStatus: getContextStatus(sessionId, meta),
     cacheTtl: meta?.cacheTtl || null,
   };
 }
@@ -1574,7 +1572,14 @@ app.get('/api/sessions', async (req, res) => {
     }
 
     // Loop info can mean a full read of the transcript, so only the rows sent pay for it.
-    for (const s of sessions) s.loopInfo = getLoopInfoSummary(s);
+    // Same for autoCompact: up to 3 settings stats per call.
+    const autoCompactByProject = new Map();
+    for (const s of sessions) {
+      s.loopInfo = getLoopInfoSummary(s);
+      if (!s.contextStatus) continue;
+      if (!autoCompactByProject.has(s.project)) autoCompactByProject.set(s.project, getAutoCompact(CLAUDE_DIR, s.project));
+      s.autoCompact = autoCompactByProject.get(s.project);
+    }
 
     res.json(withDispatchPlacement(sessions));
     startPrewarm();
@@ -2380,13 +2385,13 @@ app.get('/api/teams/:name', (req, res) => {
 // The resultUnavailable latch is persisted on the agent record. Bump this when
 // extractAgentResultFromTranscript finds more, so agents latched earlier rescan once.
 const RESULT_SCAN = 3;
+// Same for the modelUnavailable latch and extractModelFromTranscript.
+const MODEL_SCAN = 2;
 
 app.get('/api/sessions/:sessionId/agents', async (req, res) => {
   const sessionId = resolveSessionId(req.params.sessionId);
   const agentDir = path.join(AGENT_ACTIVITY_DIR, sessionId);
   if (!existsSync(agentDir)) return res.json({ agents: [], waitingForUser: null });
-// Same for the modelUnavailable latch and extractModelFromTranscript.
-const MODEL_SCAN = 2;
   try {
     const metadata = loadSessionMetadata();
     const meta = metadata[sessionId] || {};
@@ -2527,12 +2532,13 @@ const MODEL_SCAN = 2;
     const agentsNeedingModel = agents.filter(a => !a.model && a.modelUnavailable !== MODEL_SCAN);
     if (agentsNeedingModel.length && meta.jsonlPath) {
       for (const agent of agentsNeedingModel) {
+        const jsonl = subagentJsonlForExtraction(meta, agent.agentId);
         let model = null;
         try { model = extractModelFromTranscript(jsonl); } catch (_) {}
         if (model) {
           agent.model = model;
           delete agent.modelUnavailable;
-        const jsonl = subagentJsonlForExtraction(meta, agent.agentId);
+          delete agent.modelAlias;
           dirty.add(agent);
           continue;
         }
@@ -2552,7 +2558,6 @@ const MODEL_SCAN = 2;
           agent.modelUnavailable = MODEL_SCAN;
           dirty.add(agent);
         }
-          delete agent.modelAlias;
       }
     }
 
@@ -4078,6 +4083,10 @@ app.get('/api/context-status', (_req, res) => {
   res.json(Object.fromEntries(contextStatusCache));
 });
 
+app.get('/api/rate-limits', (_req, res) => {
+  res.json(freshRateLimits(contextStatusCache.values(), Date.now() / 1000));
+});
+
 app.use('/api', (_req, res) => {
   res.status(404).json({ error: 'Not found' });
 });
@@ -4261,47 +4270,35 @@ agentActivityWatcher.on('all', (event, filePath) => {
 const contextStatusWatcher = chokidar.watch(CONTEXT_STATUS_DIR, {
   persistent: true,
   ignoreInitial: false,
+  alwaysStat: true,
   depth: 0
 });
 
-contextStatusWatcher.on('all', (event, filePath) => {
+// The initial scan adds one event per kept file (up to MAX_CONTEXT_STATUS), so it broadcasts once at the end.
+let contextStatusReady = false;
+contextStatusWatcher.on('ready', () => {
+  contextStatusReady = true;
+  broadcast({ type: 'context-update', sessionId: null });
+});
+
+contextStatusWatcher.on('all', (event, filePath, stats) => {
   if (!filePath.endsWith('.json')) return;
   const sessionId = path.basename(filePath, '.json');
   if (event === 'add' || event === 'change') {
     try {
       const data = JSON.parse(readFileSync(filePath, 'utf8'));
-      try { data._updatedAt = statSync(filePath).mtimeMs; } catch (_) { data._updatedAt = Date.now(); }
+      data._updatedAt = stats?.mtimeMs ?? Date.now();
       contextStatusCache.set(sessionId, data);
-      evictStaleCache(contextStatusCache);
     } catch { /* ignore malformed */ }
-    broadcast({ type: 'context-update', sessionId });
   } else if (event === 'unlink') {
     contextStatusCache.delete(sessionId);
-    broadcast({ type: 'context-update', sessionId });
-  }
+  } else return;
+  if (contextStatusReady) broadcast({ type: 'context-update', sessionId });
 });
 
 // #endregion
 
 // #region CLEANUP
-async function cleanupContextStatus() {
-  try {
-    const entries = await fs.readdir(CONTEXT_STATUS_DIR);
-    const now = Date.now();
-    for (const f of entries) {
-      if (!f.endsWith('.json')) continue;
-      try {
-        const fp = path.join(CONTEXT_STATUS_DIR, f);
-        const st = statSync(fp);
-        if (now - st.mtimeMs > CTX_CLEANUP_MAX_AGE_MS) {
-          await fs.unlink(fp);
-          contextStatusCache.delete(path.basename(f, '.json'));
-        }
-      } catch { /* ignore */ }
-    }
-  } catch { /* dir may not exist */ }
-}
-
 async function cleanupAgentActivity() {
   try {
     const entries = await fs.readdir(AGENT_ACTIVITY_DIR, { withFileTypes: true });
@@ -4332,16 +4329,17 @@ async function cleanupAgentActivity() {
   } catch { /* agent-activity dir may not exist */ }
 }
 
-// Dispatch markers, reviews and worktrees: see docs/retention.md.
+// Dispatch markers, reviews, context status and worktrees: see docs/retention.md.
 async function runRetention() {
   try {
     const scan = await scanTranscripts(PROJECTS_DIR);
     const opts = { known: scan?.ids, maxAgeMs: retentionMs(CLAUDE_DIR) };
     const markers = dispatched.prune(opts);
     const reviews = await pruneSessionDirs(REVIEW_DIR, opts);
+    const contexts = await pruneContextStatus(CONTEXT_STATUS_DIR, opts);
     const wts = worktrees.prune(scan?.dirs);
-    if (markers || reviews || wts) {
-      console.log(`[retention] removed ${markers} dispatch markers, ${reviews} reviews, ${wts} worktrees`);
+    if (markers || reviews || contexts || wts) {
+      console.log(`[retention] removed ${markers} dispatch markers, ${reviews} reviews, ${contexts} context status files, ${wts} worktrees`);
     }
   } catch (e) {
     console.warn('[retention] failed:', e.message);
@@ -4349,9 +4347,7 @@ async function runRetention() {
 }
 
 cleanupAgentActivity();
-cleanupContextStatus();
 setInterval(cleanupAgentActivity, CLEANUP_INTERVAL_MS);
-setInterval(cleanupContextStatus, 30 * 60 * 1000);
 // Later than the startup scan and prewarm, so the first sweep never competes with them.
 setTimeout(() => {
   runRetention();
