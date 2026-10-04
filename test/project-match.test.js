@@ -1,6 +1,6 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert');
-const { projectMatcher, isExactProjectFilter } = require('../public/project-match');
+const { projectMatcher, isExactProjectFilter, sessionProjectKey } = require('../public/project-match');
 
 describe('projectMatcher', () => {
   it('selects one project for an absolute path', () => {
@@ -41,5 +41,23 @@ describe('projectMatcher', () => {
     assert.equal(isExactProjectFilter('C:/dev/app'), true);
     assert.equal(isExactProjectFilter('/srv'), true);
     assert.equal(isExactProjectFilter('app'), false);
+  });
+});
+
+describe('sessionProjectKey', () => {
+  it('lists worktree sessions under their repo, next to its own sessions', () => {
+    const repo = 'C:\\dev\\app';
+    const list = [
+      { id: 'main', project: repo, worktree: null },
+      { id: 'a', project: `${repo}\\.claude\\worktrees\\fix-a`, worktree: { repo, name: 'fix-a' } },
+      { id: 'b', project: 'C:\\dev\\app-fix-b', worktree: { repo, name: 'app-fix-b' } },
+    ];
+    assert.deepEqual([...new Set(list.map(sessionProjectKey))], [repo]);
+  });
+
+  it('falls back to the project, then to null', () => {
+    assert.equal(sessionProjectKey({ project: '/srv/app' }), '/srv/app');
+    assert.equal(sessionProjectKey({ project: null }), null);
+    assert.equal(sessionProjectKey(undefined), null);
   });
 });

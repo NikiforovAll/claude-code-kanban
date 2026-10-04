@@ -47,7 +47,7 @@ const { createDispatchRegistry, formatPreamble, formatDispatchLine, isPeerName, 
 const { createGroupStore, isGroupName, suggestGroupName } = require('./lib/dispatch-groups');
 const { createDispatchedStore, scanTranscripts, pruneSessionDirs, retentionMs } = require('./lib/retention');
 const { createWorktreeStore } = require('./lib/worktrees');
-const { readGitBranch } = require('./lib/git-branch');
+const { readGitBranch, sessionGitBranch } = require('./lib/git-branch');
 const { createLinkedDocStore, linkUrl } = require('./lib/linked-docs');
 const { pickFolder } = require('./lib/folder-dialog');
 const { loadSessionCache, saveSessionCache } = require('./lib/session-cache');
@@ -342,15 +342,6 @@ const worktrees = createWorktreeStore({
   },
   save: (data) => writeJsonAtomic(WORKTREES_FILE, data),
 });
-
-// Only look up the branch when cwd has diverged from the launch project — that's
-// the only case the JSONL value is wrong.
-function resolveSessionGitBranch(meta) {
-  if (meta.cwd && meta.project && meta.cwd !== meta.project) {
-    return getGitBranch(meta.cwd) || meta.gitBranch || null;
-  }
-  return meta.gitBranch || null;
-}
 
 function getSessionLogStat(meta) {
   if (!meta.jsonlPath) return { mtime: null, hasMessages: false };
@@ -1168,6 +1159,7 @@ function buildSessionObject(id, meta, overrides = {}) {
   const logStat = overrides._logStat || getSessionLogStat(meta);
   const logMtime = logStat.mtime;
   const logAge = logMtime ? Date.now() - logMtime : Infinity;
+  const worktree = worktrees.resolve(meta.project);
   return {
     id,
     name: getSessionDisplayName(id, meta),
@@ -1176,8 +1168,8 @@ function buildSessionObject(id, meta, overrides = {}) {
     project: meta.project || null,
     cwd: meta.cwd || null,
     description: meta.description || null,
-    gitBranch: resolveSessionGitBranch(meta),
-    worktree: worktrees.resolve(meta.project),
+    gitBranch: sessionGitBranch(meta, !!worktree, getGitBranch),
+    worktree,
     customTitle: meta.customTitle || null,
     taskCount: 0,
     completed: 0,

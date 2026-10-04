@@ -1,7 +1,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
-const { readGitBranch } = require('../lib/git-branch');
+const { readGitBranch, sessionGitBranch } = require('../lib/git-branch');
 
 const ROOT = path.resolve('/dev');
 const REPO = path.join(ROOT, 'repo');
@@ -60,5 +60,30 @@ describe('readGitBranch', () => {
       return;
     }
     assert.equal(readGitBranch(__dirname), expected === 'HEAD' ? null : expected);
+  });
+});
+
+describe('sessionGitBranch', () => {
+  const wt = path.join(REPO, '.claude', 'worktrees', 'fix-a');
+  const branchAt = (cwd) => (cwd.startsWith(wt) ? 'worktree-fix-a' : 'feature');
+
+  it('reads HEAD for a worktree session whose transcript records the main branch', () => {
+    const meta = { project: wt, cwd: wt, gitBranch: 'main' };
+    assert.equal(sessionGitBranch(meta, true, branchAt), 'worktree-fix-a');
+  });
+
+  it('trusts the transcript in an ordinary checkout that cwd never left', () => {
+    const meta = { project: REPO, cwd: REPO, gitBranch: 'main' };
+    assert.equal(sessionGitBranch(meta, false, branchAt), 'main');
+  });
+
+  it('reads HEAD when cwd left the project', () => {
+    const meta = { project: REPO, cwd: path.join(ROOT, 'other'), gitBranch: 'main' };
+    assert.equal(sessionGitBranch(meta, false, branchAt), 'feature');
+  });
+
+  it('falls back to the transcript when HEAD has no branch', () => {
+    const meta = { project: wt, cwd: wt, gitBranch: 'main' };
+    assert.equal(sessionGitBranch(meta, true, () => null), 'main');
   });
 });

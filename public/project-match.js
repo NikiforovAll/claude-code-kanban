@@ -23,7 +23,12 @@ const projectMatch = (() => {
       return p === q || (!!repo && normalizeProjectPath(repo) === q);
     };
   }
-  return { normalizeProjectPath, isExactProjectPath, isExactProjectFilter, projectMatcher };
+  // The project a session is listed under. A worktree transcript is filed under the worktree
+  // path, so `session.project` alone would show each worktree as a project of its own.
+  function sessionProjectKey(session) {
+    return session?.worktree?.repo || session?.project || null;
+  }
+  return { normalizeProjectPath, isExactProjectPath, isExactProjectFilter, projectMatcher, sessionProjectKey };
 })();
 
 if (typeof module === 'object' && module.exports) module.exports = projectMatch;

@@ -4,7 +4,8 @@ const STORAGE_NS = window.__STORAGE_NS__ ? `${window.__STORAGE_NS__}:` : '';
 // Theme is hub-wide (echoed to every app via hub:theme), so it stays shared across config dirs.
 const GLOBAL_KEYS = new Set(['theme', 'color-theme']);
 const nsKey = (k) => (GLOBAL_KEYS.has(k) ? k : STORAGE_NS + k);
-const { normalizeProjectPath, isExactProjectPath, isExactProjectFilter, projectMatcher } = projectMatch;
+const { normalizeProjectPath, isExactProjectPath, isExactProjectFilter, projectMatcher, sessionProjectKey } =
+  projectMatch;
 const store = {
   keys() {
     const out = [];
@@ -3781,7 +3782,7 @@ function renderSessions() {
         // Each session under its own project block, so a worktree session reads as its repo's.
         const byProject = new Map();
         for (const s of bucket) {
-          const key = s.project || '';
+          const key = sessionProjectKey(s) || '';
           if (!byProject.has(key)) byProject.set(key, []);
           byProject.get(key).push(s);
         }
@@ -3844,9 +3845,10 @@ function renderSessions() {
     const groups = new Map();
     const ungrouped = [];
     for (const session of sgRest) {
-      if (session.project) {
-        if (!groups.has(session.project)) groups.set(session.project, []);
-        groups.get(session.project).push(session);
+      const key = sessionProjectKey(session);
+      if (key) {
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(session);
       } else {
         ungrouped.push(session);
       }
@@ -3861,12 +3863,13 @@ function renderSessions() {
     // back out restores its old slot instead of jumping to the top.
     const latestByPath = new Map();
     for (const s of filteredSessions) {
-      if (!s.project) continue;
+      const key = sessionProjectKey(s);
+      if (!key) continue;
       const t = new Date(s.modifiedAt).getTime();
-      latestByPath.set(s.project, Math.max(latestByPath.get(s.project) ?? -Infinity, t));
+      latestByPath.set(key, Math.max(latestByPath.get(key) ?? -Infinity, t));
     }
     const byRecency = [...latestByPath.keys()].sort((a, b) => latestByPath.get(b) - latestByPath.get(a));
-    const loadedPaths = new Set(sessions.map((s) => s.project));
+    const loadedPaths = new Set(sessions.map(sessionProjectKey));
     stableGroupOrder = mergeOrder(PROJECT_ORDER_KEY, stableGroupOrder, loadedPaths, byRecency);
     const sortedGroups = stableGroupOrder.filter((p) => groups.has(p)).map((p) => [p, groups.get(p)]);
 
@@ -4407,7 +4410,8 @@ function sgGroupForSession(session) {
 }
 
 function sgUserGroupFor(session) {
-  return sgGroupOf('session', session.id) || (session.project ? sgGroupOf('project', session.project) : null);
+  const project = sessionProjectKey(session);
+  return sgGroupOf('session', session.id) || (project ? sgGroupOf('project', project) : null);
 }
 
 // Transient groups come from the server (`dispatch start --group`) and go when their sessions
@@ -4467,7 +4471,8 @@ function sgHostOf(group, session) {
   const m = group.members.find((x) => x.type === 'session' && x.ref === session.id);
   const isMemberProject = (path) => !!path && group.members.some((x) => x.type === 'project' && x.ref === path);
   if (m?.under && isMemberProject(m.under)) return m.under;
-  if (!m?.loose && isMemberProject(session.project)) return session.project;
+  const own = sessionProjectKey(session);
+  if (!m?.loose && isMemberProject(own)) return own;
   return null;
 }
 // `opts.under` places the session under another project block of the group; `opts.loose` lifts it
@@ -4478,9 +4483,9 @@ function sgAssign(groupId, type, ref, opts = {}) {
   sgDetach(type, ref);
   // Pulling a whole project in supersedes the individual placements of its sessions.
   if (type === 'project') {
-    for (const s of sessions) if (s.project === ref) sgDetach('session', s.id);
+    for (const s of sessions) if (sessionProjectKey(s) === ref) sgDetach('session', s.id);
   }
-  const own = type === 'session' ? sessions.find((s) => s.id === ref)?.project : null;
+  const own = type === 'session' ? sessionProjectKey(sessions.find((s) => s.id === ref)) : null;
   // Under its own project block is simply the natural placement - no override needed.
   const under = opts.under && opts.under !== own ? opts.under : null;
   const loose = !under && !!opts.loose;
@@ -4758,7 +4763,7 @@ function sgGroupDropZone(target) {
     return fromHost === path && fromGroupId === pathGroup.id ? null : { zone, groupId: pathGroup.id, under: path };
   }
   // Stacking a session onto its own project block would only fold it back where it sits today.
-  if (dragSession?.project === path) return releasable ? { zone } : null;
+  if (dragSession && sessionProjectKey(dragSession) === path) return releasable ? { zone } : null;
   return { zone, pairWith: path };
 }
 
@@ -4811,7 +4816,11 @@ function sgOnDrop(e) {
     // Stacked onto an ungrouped item: seed a group, then let the user name it in place.
     const target = hit.pairWith
       ? { type: 'project', ref: hit.pairWith, path: hit.pairWith }
-      : { type: 'session', ref: hit.pairSession, path: sessions.find((s) => s.id === hit.pairSession)?.project };
+      : {
+          type: 'session',
+          ref: hit.pairSession,
+          path: sessionProjectKey(sessions.find((s) => s.id === hit.pairSession)),
+        };
     const group = sgCreateGroup(target.path ? target.path.split(/[/\\]/).pop() : '');
     sgAssign(group.id, target.type, target.ref);
     sgAssign(group.id, drag.kind, drag.ref);
@@ -5253,7 +5262,7 @@ function expandActiveGroups({ onlyNew = false } = {}) {
 function uncollapseFor(session) {
   const group = sgGroupForSession(session);
   const keys = [
-    session.project || '__ungrouped__',
+    sessionProjectKey(session) || '__ungrouped__',
     ...pinnedCollapseKeys(session),
     group && sgKey(group.id),
     SECTION_GROUPS,
@@ -5271,7 +5280,11 @@ function pinnedCollapseKeys(session) {
   if (!isInPinnedGroup(session)) return [];
   const group = sgGroupForSession(session);
   const host = sgHostOf(group, session);
-  return [pinKey(session.project || '__ungrouped__'), host && pinKey(host), group && `__pinned_group_${group.id}__`];
+  return [
+    pinKey(sessionProjectKey(session) || '__ungrouped__'),
+    host && pinKey(host),
+    group && `__pinned_group_${group.id}__`,
+  ];
 }
 
 // A card that moves into a collapsed Pinned sub-section would vanish from under the click.
