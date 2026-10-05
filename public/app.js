@@ -7978,6 +7978,7 @@ function isPreviewLinkedToCurrentSession() {
 }
 
 function updatePreviewLinkBtn() {
+  document.getElementById('preview-pane-btn').style.display = paneSessionId() ? '' : 'none';
   const btn = document.getElementById('preview-link-btn');
   if (!btn) return;
   if (!currentSessionId) {
@@ -12042,6 +12043,14 @@ function addPane(raw) {
   paneStore.add(sid, t.kind, t.target, t.title);
   closePanePop();
   syncPanes();
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+function openPreviewInPane() {
+  const filePath = currentPreviewPath;
+  if (!filePath || !paneSessionId()) return;
+  closePreviewModal();
+  addPane(filePath);
 }
 
 function describePaneInput(value) {
