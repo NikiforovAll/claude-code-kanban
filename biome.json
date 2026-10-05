@@ -34,7 +34,8 @@
       "server.js",
       "cli.js",
       "install.js",
-      "lib/**/*.js"
+      "lib/**/*.js",
+      "!!**/.claude/worktrees"
     ]
   },
   "overrides": [
