@@ -7629,6 +7629,18 @@ function bridgedFrameEls() {
   return [...document.querySelectorAll('iframe[srcdoc]')].filter((f) => bridgedFrames.has(f));
 }
 
+// A previewed page always hands back the zoom keys, so Ctrl +/-/0 scales it like a markdown
+// preview instead of zooming the whole board. A bridged frame is on screen only in a zoomable view.
+const ZOOM_CLAIMS = ['ctrlKey', 'metaKey'].flatMap((mod) =>
+  [false, true].flatMap((shiftKey) =>
+    Object.keys(ZOOM_KEYS).map((k) =>
+      k.length === 1
+        ? { [mod]: true, shiftKey, key: k, code: '' }
+        : { [mod]: true, shiftKey, key: 'Unidentified', code: k },
+    ),
+  ),
+);
+
 function sendBridgeClaims(frames, claims) {
   for (const f of frames) f.contentWindow?.postMessage({ type: `${REVIEW_MSG}claims`, ...claims }, '*');
 }
@@ -7984,7 +7996,7 @@ function createPreviewFrame(className, srcdoc) {
   frame.setAttribute('referrerpolicy', 'no-referrer');
   frame.srcdoc = srcdoc;
   bridgedFrames.add(frame);
-  frame.addEventListener('load', () => sendBridgeClaims([frame], keyClaims()));
+  frame.addEventListener('load', () => sendBridgeClaims([frame], bridgeClaims(keyClaims())));
   return frame;
 }
 
@@ -12067,7 +12079,7 @@ async function loadPaneView(sid, pane, view) {
   }
   if (pane.kind === 'url') {
     const frame = document.createElement('iframe');
-    frame.className = 'pane-frame';
+    frame.className = 'pane-frame modal-zoomable';
     frame.setAttribute('sandbox', PANE_URL_SANDBOX);
     frame.setAttribute('referrerpolicy', 'no-referrer');
     frame.title = pane.title;
@@ -12087,7 +12099,7 @@ async function loadPaneView(sid, pane, view) {
     if (r.ok) data = await r.json();
   } catch {}
   if (data?.kind === 'html') {
-    const frame = createPreviewFrame('pane-frame', data.content + REVIEW_BRIDGE_TAG);
+    const frame = createPreviewFrame('pane-frame modal-zoomable', data.content + REVIEW_BRIDGE_TAG);
     frame.title = pane.title;
     view.appendChild(frame);
     attachPaneReview(view, sid, fileReviewOpts(data.path, data.kind, frame, frame));
@@ -12973,6 +12985,10 @@ function keyClaims() {
   return { keys: terminalClaims(), forward: hub.forwardCombos() };
 }
 
+function bridgeClaims(claims) {
+  return { ...claims, keys: [...claims.keys, ...ZOOM_CLAIMS] };
+}
+
 function pushTerminalClaims() {
   if (terminalClaimsQueued) return;
   terminalClaimsQueued = true;
@@ -12981,7 +12997,7 @@ function pushTerminalClaims() {
     const bridged = bridgedFrameEls();
     if (!termFrame.inited && !bridged.length) return;
     const claims = keyClaims();
-    sendBridgeClaims(bridged, claims);
+    sendBridgeClaims(bridged, bridgeClaims(claims));
     if (!termFrame.inited) return;
     const sig = JSON.stringify(claims);
     if (sig === termFrame.claims) return;
