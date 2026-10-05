@@ -422,7 +422,7 @@ describe('terminal restore', () => {
   const GAP_MS = 60;
   const SAVE_MS = 20;
 
-  function service(restore, initial) {
+  function service(restore, initial, { live = [], dead = new Set() } = {}) {
     const store = { data: initial, loads: 0, saves: 0 };
     const pty = fakePty();
     const t = createTerminalService({
@@ -438,7 +438,9 @@ describe('terminal restore', () => {
       which: (n) => n,
       isLiveElsewhere: (id) => id === ELSEWHERE,
       resolveCwd: (id) => ([A, B, ELSEWHERE].includes(id) ? os.tmpdir() : null),
-      liveSessions: () => [],
+      liveSessions: () => live,
+      isPidAlive: (pid) => !dead.has(pid),
+      exitPollMs: SAVE_MS,
     });
     return { t, pty, store };
   }
@@ -462,6 +464,55 @@ describe('terminal restore', () => {
     t.shutdown();
     await wait(SAVE_MS * 3);
     assert.deepEqual(store.data.sessions, [B]);
+  });
+
+  it('stops restoring a terminal whose claude exited to its shell, and resumes when claude is back', async () => {
+    const live = [];
+    const { t, store } = service(true, { sessions: [A] }, { live });
+    t.restore();
+    await until(() => t.list().length === 1);
+    live.push({ sessionId: A, pid: 4242, startedAt: Date.now() });
+    await until(() => t.claudePids()[A] === 4242);
+    assert.equal(t.paste(A, 'hi'), true);
+
+    live.length = 0;
+    await until(() => store.data.sessions.length === 0);
+    assert.deepEqual(t.claudePids(), {});
+    assert.equal(t.paste(A, 'hi'), false);
+    assert.deepEqual(t.list().map((s) => s.id), [A]);
+
+    live.push({ sessionId: A, pid: 4343, startedAt: Date.now() });
+    await until(() => store.data.sessions.length === 1);
+    assert.deepEqual(store.data.sessions, [A]);
+    assert.equal(t.claudePids()[A], 4343);
+    t.shutdown();
+  });
+
+  it('counts a crashed claude as gone, and a claude with no entry yet as starting', async () => {
+    const live = [];
+    const dead = new Set();
+    const { t, store } = service(true, { sessions: [A, B] }, { live, dead });
+    t.restore();
+    await until(() => t.list().length === 2);
+    live.push({ sessionId: B, pid: 5000, startedAt: Date.now() });
+    await until(() => t.claudePids()[B] === 5000);
+
+    dead.add(5000);
+    await until(() => store.data.sessions.length === 1);
+    assert.deepEqual(store.data.sessions, [A]);
+    t.shutdown();
+  });
+
+  it('keeps a /clear, which moves the entry to a new session id under the same pid', async () => {
+    const live = [{ sessionId: A, pid: 6000, startedAt: Date.now() }];
+    const { t, store } = service(true, { sessions: [A] }, { live });
+    t.restore();
+    await until(() => t.claudePids()[A] === 6000);
+    live[0] = { ...live[0], sessionId: B };
+    await wait(SAVE_MS * 4);
+    assert.deepEqual(store.data.sessions, [A]);
+    assert.equal(t.claudePids()[A], 6000);
+    t.shutdown();
   });
 
   it('neither reads the list nor starts anything when restore is off', async () => {
