@@ -2444,6 +2444,14 @@ body.booting .boot-splash {
   overflow-x: auto;
 }
 
+code.language-tree .hljs-punctuation {
+  color: var(--text-muted);
+}
+
+code.language-tree .hljs-title {
+  font-weight: 600;
+}
+
 .detail-desc code {
   background: color-mix(in srgb, var(--text-muted) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
