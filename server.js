@@ -4013,7 +4013,7 @@ function paneRouteError(res, error, what) {
   res.status(error.status || 500).json({ error: error.message || `${what} failed`, code });
 }
 
-async function resolvePaneTarget(target) {
+async function resolvePaneTarget(target, base) {
   const url = linkUrl(target);
   if (url) {
     if (isOwnOrigin(url, { boardPort, boardHosts, hubUrl: process.env.HUB_URL })) {
@@ -4021,10 +4021,11 @@ async function resolvePaneTarget(target) {
     }
     return { kind: 'url', target: url };
   }
-  if (!path.isAbsolute(fileUrlToPath(target))) {
-    throw previewError(400, 'target must be an http(s) URL or an absolute file path', 'bad_target');
+  const hasBase = typeof base === 'string' && path.isAbsolute(base);
+  if (!hasBase && !path.isAbsolute(fileUrlToPath(target))) {
+    throw previewError(400, 'target must be an http(s) URL, an absolute file path, or a relative path with an absolute base', 'bad_target');
   }
-  const abs = resolvePreviewPath(target);
+  const abs = resolvePreviewPath(target, base);
   const { kind } = await validatePreviewFile(abs);
   return { kind, target: await fs.realpath(abs) };
 }
@@ -4036,9 +4037,9 @@ app.get('/api/panes/:sessionId', (req, res) => {
 
 app.post('/api/panes/:sessionId', async (req, res) => {
   try {
-    const { target, title } = req.body || {};
+    const { target, base, title } = req.body || {};
     if (typeof target !== 'string' || !target) throw previewError(400, 'target is required', 'bad_target');
-    res.json(panes.add(req.params.sessionId, { ...(await resolvePaneTarget(target)), title }));
+    res.json(panes.add(req.params.sessionId, { ...(await resolvePaneTarget(target, base)), title }));
   } catch (error) {
     paneRouteError(res, error, 'POST /api/panes');
   }

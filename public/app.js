@@ -12237,14 +12237,11 @@ const PANE_MENU_ACTIONS = {
 };
 
 // The server takes only absolute paths, and linked docs can be relative to the session's folder.
-function paneTargetFrom(raw, baseDir) {
+function paneTargetFrom(raw) {
   const value = raw.trim().replace(/^(["'])(.*)\1$/, '$2');
   if (!value) return null;
   const url = linkUrl(value);
-  if (!url) {
-    const absolute = isAbsolutePath(value) || /^file:/i.test(value);
-    return { kind: 'file', target: absolute || !baseDir ? value : `${baseDir.replace(/[\\/]+$/, '')}/${value}` };
-  }
+  if (!url) return { kind: 'file', target: value };
   const u = new URL(url);
   // allow-scripts with allow-same-origin on cck's own origin would lift the sandbox.
   const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(u.hostname);
@@ -12257,13 +12254,16 @@ function paneTargetFrom(raw, baseDir) {
 // The same target again answers the existing pane, so this also switches to it.
 async function addPane(raw) {
   const sid = paneSessionId();
-  const t = sid && paneTargetFrom(raw, getSessionBaseDir(sid));
+  const t = sid && paneTargetFrom(raw);
   if (!t) return;
   if (t.error) {
     showToast(t.error);
     return;
   }
-  const res = await paneRequest('POST', `/api/panes/${encodeURIComponent(sid)}`, { target: t.target });
+  const res = await paneRequest('POST', `/api/panes/${encodeURIComponent(sid)}`, {
+    target: t.target,
+    base: getSessionBaseDir(sid) || undefined,
+  });
   if (!res.pane) {
     showToast(res.error, 'error');
     return;
