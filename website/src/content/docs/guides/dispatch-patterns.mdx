@@ -153,6 +153,16 @@ When you need a decision, ask <orchestrator> with the SendMessage tool and keep 
 
 A message arrives between the worker's steps, not inside a running tool call.
 
+## Shared board
+
+The workers use the orchestrator's task list instead of keeping their own, so all work shows on one board. Pass `--task-list` to each `dispatch start`. The orchestrator still assigns each card, as in [Track dispatches as cards](/claude-code-kanban/guides/dispatch/#track-dispatches-as-cards), and the spec names the worker's card:
+
+```text
+Your card is task 3 in the task list. Set it to completed when done.
+```
+
+The `dispatch` skill uses this pattern only when you ask for it. See [Share one task list](/claude-code-kanban/guides/dispatch/#share-one-task-list).
+
 ## Sessions started outside cck
 
 `dispatch start` is one way to start a worker, not the only one. A session you start yourself, in your own terminal, in the background, or with any other tool, also shows up in `ListAgents` and takes `SendMessage`, so every pattern on this page works with it too. The board shows it as an ordinary session. Its card has no send icon, it does not show in `dispatch list`, and it goes into a group only when you put it there.

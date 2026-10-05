@@ -20,6 +20,7 @@ Propose these first, unless the user named one. Each adds steps, rounds or sessi
 | Evaluator-optimizer | There is a clear acceptance bar and a second look improves the result |
 | Hierarchical | A part is itself large enough to split |
 | Human-in-the-loop | The spec leaves a choice the user should make |
+| Shared board | The user wants the workers to pick cards from one task list |
 
 ## Request-reply
 
@@ -48,3 +49,7 @@ A worker that dispatches its own workers and replies once they all have. Your co
 ## Human-in-the-loop
 
 Add to the worker's spec: `When you need a decision, ask <your peer name> with the SendMessage tool and keep working on what does not depend on the answer.` Ask the user when the decision is theirs, and reply with `SendMessage`. You can steer a running worker the same way at any time.
+
+## Shared board
+
+Every worker uses your task list instead of its own, so all cards show on one board. Pass `--task-list` with no value to each `dispatch start`. You assign the cards as in Track on the board (optional); the spec names the worker's card and tells it to set that card to `completed` when done.

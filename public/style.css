@@ -2929,6 +2929,22 @@ code.language-tree .hljs-title {
   letter-spacing: 0;
 }
 
+.task-owner-link {
+  border: none;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.task-owner-link:hover {
+  text-decoration: underline;
+}
+
+.task-owner-link svg {
+  width: 10px;
+  height: 10px;
+  flex-shrink: 0;
+}
+
 /* #endregion */
 
 /* #region TEAM_MODAL */

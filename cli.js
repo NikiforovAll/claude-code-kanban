@@ -228,7 +228,7 @@ const COMMANDS = {
     verbs: {
       start: {
         summary: 'Start claude in cck\'s terminal with a task; prints the session id',
-        usage: 'claude-code-kanban dispatch start --cwd <dir> (--spec <text> | --spec-file <path>) [--name <n>] [--group <g>] [--model <m>] [--worktree [name]] [--json] [-- <claude args>...]',
+        usage: 'claude-code-kanban dispatch start --cwd <dir> (--spec <text> | --spec-file <path>) [--name <n>] [--group <g>] [--model <m>] [--worktree [name]] [--task-list [id]] [--json] [-- <claude args>...]',
         flags: {
           '--cwd <dir>': 'Folder to run in (a known project, default: current dir)',
           '--spec <text>': 'The task, self-contained; sent as the first message',
@@ -237,12 +237,14 @@ const COMMANDS = {
           '--group <g>': 'Show it with this session in a kebab-case group (default: this session\'s group)',
           '--model <m>': 'fable, opus, sonnet or haiku',
           '--worktree [name]': 'Run in a new git worktree',
+          '--task-list [id]': 'Use this task list instead of its own (default: this session\'s list), so its cards show on one board with yours. Off unless given',
           '--json': 'Output JSON',
           '-- <claude args>': 'Passed to claude as they are, e.g. --permission-mode auto. No quotes, % or control characters; cck sets --session-id, --name, --model and --worktree',
         },
         notes: 'Needs the terminal token, so it runs on the machine of the cck server. cck sends no report: say in the spec how the session reports back. Run `claude-code-kanban skills get dispatch` for how to write the spec.',
         examples: [
           'claude-code-kanban dispatch start --cwd . --spec-file spec.md --name fix-login-redirect --group auth-refactor --model sonnet -- --permission-mode auto',
+          'claude-code-kanban dispatch start --cwd . --spec-file spec.md --name api-worker --task-list',
         ],
         run: runDispatchStartCli,
       },
@@ -1079,12 +1081,19 @@ async function runDispatchStartCli(argv) {
     return usageError(COMMANDS.dispatch.verbs.start, `Group names are kebab-case${hint ? `: try --group ${hint}` : ', e.g. auth-refactor'}`);
   }
   const worktree = args.includes('--worktree') ? getArgValue(args, 'worktree') || true : false;
+  const hasTaskList = args.some(a => a === '--task-list' || a.startsWith('--task-list='));
+  const ownList = process.env.CLAUDE_CODE_TASK_LIST_ID || process.env.CLAUDE_CODE_SESSION_ID;
+  const taskList = hasTaskList ? getArgValue(args, 'task-list') || ownList || null : null;
+  if (hasTaskList && !taskList) {
+    return usageError(COMMANDS.dispatch.verbs.start, 'No task list id: pass --task-list <id> outside a Claude Code session');
+  }
   const body = {
     cwd: canonicalDir(getArgValue(args, 'cwd') || '.'),
     spec,
     name: getArgValue(args, 'name'),
     model: getArgValue(args, 'model'),
     worktree,
+    taskList,
     group,
     claudeArgs,
     parent: process.env.CLAUDE_CODE_SESSION_ID || null,

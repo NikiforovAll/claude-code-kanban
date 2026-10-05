@@ -4036,6 +4036,14 @@ function openBlockers(task) {
   return (task.blockedBy || []).filter((id) => findSiblingTask(task, id)?.status !== 'completed');
 }
 
+function renderOwnerBadge(task) {
+  const c = getOwnerColor(task.owner);
+  const style = `background:${c.bg};color:${c.color}`;
+  const target = task.ownerSessionId;
+  if (!target) return `<span class="task-owner-badge" style="${style}">${escapeHtml(task.owner)}</span>`;
+  return `<button type="button" class="task-owner-badge task-owner-link" style="${style}" title="Open dispatched session" onclick="event.stopPropagation(); revealSession('${escAttrJs(target)}')">${ICON_DISPATCHED}${escapeHtml(task.owner)}</button>`;
+}
+
 function renderTaskCard(task) {
   const blockers = openBlockers(task);
   const isBlocked = blockers.length > 0;
@@ -4059,16 +4067,7 @@ function renderTaskCard(task) {
           <div class="task-id">
             <span>#${taskId}</span>
             ${isBlocked ? `<span class="task-blocked" title="Blocked">waiting on ${blockers.map((id) => `#${escapeHtml(id)}`).join(' ')}</span>` : ''}
-            ${
-              task.owner
-                ? (
-                    () => {
-                      const c = getOwnerColor(task.owner);
-                      return `<span class="task-owner-badge" style="background:${c.bg};color:${c.color}">${escapeHtml(task.owner)}</span>`;
-                    }
-                  )()
-                : ''
-            }
+            ${task.owner ? renderOwnerBadge(task) : ''}
           </div>
           <div class="task-title">${escapeHtml(task.subject)}</div>
           ${task.status === 'in_progress' && task.activeForm ? `<div class="task-active">${escapeHtml(task.activeForm)}</div>` : ''}
@@ -5531,7 +5530,7 @@ async function showTaskDetail(taskId, sessionId = null) {
 
         <div class="detail-section" style="display: flex; gap: 12px; align-items: center;">
           <div>${statusLabels[task.status] || ''}</div>
-          ${task.owner ? `<div style="font-size: 13px; color: ${getOwnerColor(task.owner).color}; font-weight: 500;">${escapeHtml(task.owner)}</div>` : ''}
+          ${task.owner ? renderOwnerBadge(task) : ''}
         </div>
 
         <div class="detail-section">
@@ -12255,26 +12254,74 @@ function paneMenuKeydown(e) {
   menuKeydown(e, [...menu.querySelectorAll('.pane-menu-item')], closePaneMenu);
 }
 
+async function deleteBoardTasks(onlyCompleted) {
+  const sid = paneSessionId();
+  if (!sid) return;
+  const count = currentTasks.filter((t) => !onlyCompleted || t.status === 'completed').length;
+  if (!count) {
+    showToast(onlyCompleted ? 'No completed tasks' : 'No tasks', 'info');
+    return;
+  }
+  const noun = `${count} ${onlyCompleted ? 'completed ' : ''}task${count === 1 ? '' : 's'}`;
+  const ok = await confirmModal({
+    title: onlyCompleted ? 'Delete Completed Tasks' : 'Delete All Tasks',
+    message: `Delete ${noun}? This cannot be undone.`,
+    okLabel: 'Delete',
+  });
+  if (!ok) return;
+  const q = onlyCompleted ? '?status=completed' : '';
+  const res = await paneRequest('DELETE', `/api/tasks/${encodeURIComponent(sid)}${q}`);
+  if (res.error) {
+    showToast(`Failed to delete tasks: ${res.error}`, 'error');
+    return;
+  }
+  if (detailPanel.classList.contains('visible')) closeDetailPanel();
+  showToast(`Deleted ${res.deleted.length} task${res.deleted.length === 1 ? '' : 's'}`, 'success');
+  await refreshCurrentView();
+}
+
+const paneMenuItem = (act, label) =>
+  `<button class="pane-menu-item" role="menuitem" data-pane-act="${escapeHtml(act)}">${label}</button>`;
+
 function openPaneMenu(x, y, id) {
+  if (id === 'board') {
+    showPaneMenu(
+      x,
+      y,
+      id,
+      'Board actions',
+      '<div class="pane-menu-label">Board</div>' +
+        paneMenuItem('deleteCompleted', 'Delete completed tasks') +
+        paneMenuItem('deleteAll', 'Delete all tasks'),
+    );
+    return;
+  }
   const pane = paneById(id);
   if (!pane) return;
+  const url = pane.kind === 'url';
+  showPaneMenu(
+    x,
+    y,
+    pane.id,
+    'Pane actions',
+    `<div class="pane-menu-label" title="${escapeHtml(pane.target)}">${escapeHtml(pane.target)}</div>` +
+      paneMenuItem('copy', url ? 'Copy URL' : 'Copy path') +
+      paneMenuItem('open', url ? 'Open in new tab' : 'Open in preview') +
+      paneMenuItem('reload', 'Reload') +
+      paneMenuItem('close', 'Close pane'),
+  );
+}
+
+function showPaneMenu(x, y, id, ariaLabel, html) {
   closePaneMenu();
   sgCloseMenu();
-  const url = pane.kind === 'url';
-  const item = (act, label) =>
-    `<button class="pane-menu-item" role="menuitem" data-pane-act="${escapeHtml(act)}">${label}</button>`;
   const menu = document.createElement('div');
   menu.id = 'pane-menu';
   menu.className = 'pane-menu';
   menu.setAttribute('role', 'menu');
-  menu.setAttribute('aria-label', 'Pane actions');
-  menu.dataset.pane = pane.id;
-  menu.innerHTML =
-    `<div class="pane-menu-label" title="${escapeHtml(pane.target)}">${escapeHtml(pane.target)}</div>` +
-    item('copy', url ? 'Copy URL' : 'Copy path') +
-    item('open', url ? 'Open in new tab' : 'Open in preview') +
-    item('reload', 'Reload') +
-    item('close', 'Close pane');
+  menu.setAttribute('aria-label', ariaLabel);
+  menu.dataset.pane = id;
+  menu.innerHTML = html;
   placeMenu(menu, x, y);
   document.addEventListener('keydown', paneMenuKeydown, true);
   menu.querySelector('.pane-menu-item').focus();
@@ -12285,6 +12332,8 @@ const PANE_MENU_ACTIONS = {
   open: openPaneExternally,
   reload: reloadPane,
   close: closePane,
+  deleteCompleted: () => deleteBoardTasks(true),
+  deleteAll: () => deleteBoardTasks(false),
 };
 
 // The server takes only absolute paths, and linked docs can be relative to the session's folder.
@@ -12396,7 +12445,7 @@ paneStrip.addEventListener('auxclick', (e) => {
 });
 paneStrip.addEventListener('contextmenu', (e) => {
   const tab = e.target.closest('.pane-tab');
-  if (!tab || tab.dataset.pane === 'board') return;
+  if (!tab) return;
   e.preventDefault();
   openPaneMenu(e.clientX, e.clientY, tab.dataset.pane);
 });

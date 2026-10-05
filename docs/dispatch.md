@@ -17,6 +17,8 @@ started  SendMessage to the starter, as the spec says
 - The starter id comes from `CLAUDE_CODE_SESSION_ID` and is stored as `parent`. It links the card back to the starter.
 - `POST /api/dispatch` needs the terminal token, which the CLI reads from `<config dir>/.cck/terminal-tokens/<port>.json` for the board it reaches (`CCK_URL`, `PORT`, then `server.json`). Each board writes its own file, so two boards on one config dir do not overwrite each other's token. The started session never holds the token.
 - Args after `--` go to `claude` after `--session-id` (`claudeArgsFor` in `lib/terminal.js`). They reach a shell command line inside plain quotes, so `parseNewSpec` refuses a value with a quote, `%` or a control character, more than 64 args, and the flags cck sets or that would not start a new session (`OWNED_FLAGS`). A restored terminal runs `claude --resume <id>` without them.
+- `--task-list [id]` (opt-in) sets `CLAUDE_CODE_TASK_LIST_ID` in the PTY env, never on the command line, so the session shares that task list; with no value the CLI sends the starter's own list (`CLAUDE_CODE_TASK_LIST_ID`, else `CLAUDE_CODE_SESSION_ID`). `ptyEnv` strips an inherited value, so no terminal shares a list unless asked. `terminals.json` keeps it as `taskLists: {<id>: <list>}`, so a restored terminal resumes with it.
+- A task in the starter's list whose `owner` is a started session's name links to that session (`addOwnerSessions` in `server.js`, see `docs/session-scanning.md`).
 - The running list is in memory (`lib/dispatch.js`): an entry lives while the session's terminal runs. It feeds the placeholder and `dispatch list`.
 
 ## Placement

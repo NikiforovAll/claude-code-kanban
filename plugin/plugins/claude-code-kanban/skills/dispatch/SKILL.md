@@ -24,6 +24,14 @@ When you are done, or cannot finish, send the result to <your peer name> with th
 
 `--handoff` is a skill argument that drops the reply line: the session owns the task, and the user follows it on the board. Keep it out of the `dispatch start` command.
 
+## Track on the board (optional)
+
+When the user asks to track the dispatched work, give each worker a card:
+
+1. Create one card per worker with `TaskCreate`.
+2. Right after each `dispatch start`, set the card's `owner` to the worker's `--name` and its status to `in_progress`. The card then links to the worker's session.
+3. Set the card to `completed` when the worker reports.
+
 ## Orchestration patterns
 
 Use request-reply, handoff or orchestrator-workers directly. When another shape fits better (a separate reviewer, steps that feed each other, a sub-orchestrator, a decision for the user), propose it in one line, the pattern and why, and dispatch only after the user agrees, unless the user named it. Details: [references/orchestration-patterns.md](references/orchestration-patterns.md).

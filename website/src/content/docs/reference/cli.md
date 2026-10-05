@@ -280,7 +280,7 @@ Starts a Claude Code session in the embedded terminal to do a task. See [Dispatc
 ### dispatch start
 
 ```bash
-claude-code-kanban dispatch start --cwd <dir> (--spec <text> | --spec-file <path>) [--name <n>] [--group <g>] [--model <m>] [--worktree [name]] [--json] [-- <claude args>...]
+claude-code-kanban dispatch start --cwd <dir> (--spec <text> | --spec-file <path>) [--name <n>] [--group <g>] [--model <m>] [--worktree [name]] [--task-list [id]] [--json] [-- <claude args>...]
 ```
 
 | Flag | What it does |
@@ -292,6 +292,7 @@ claude-code-kanban dispatch start --cwd <dir> (--spec <text> | --spec-file <path
 | `--group <g>` | Shows the new session in this [session group](/claude-code-kanban/guides/session-groups/). The name must be kebab-case, for example `auth-refactor`. Default is the group of the session that runs the command. |
 | `--model <m>` | `fable`, `opus`, `sonnet` or `haiku`. |
 | `--worktree [name]` | Runs the session in a new git worktree. |
+| `--task-list [id]` | The session uses this task list instead of its own. With no value, it uses the current session's list. Off unless given. See [Share one task list](/claude-code-kanban/guides/dispatch/#share-one-task-list). |
 | `--json` | Prints JSON. |
 | `-- <claude args>` | Everything after `--` goes to `claude` as it is, for example `-- --permission-mode auto`. See [Pass claude flags](/claude-code-kanban/guides/dispatch/#pass-claude-flags). |
 
@@ -307,7 +308,7 @@ cck sends no report back. Say in the spec how the session reports, for example w
 
 - `403 folder is not a known project or a folder picked in this run` when the folder is not a known project.
 - `429 30 terminals are open; end one first` when all terminals are in use (30 by default).
-- `400 invalid name`, `invalid worktree name`, `invalid model` or `invalid prompt` when a value is not valid or the spec is longer than 32 KB.
+- `400 invalid name`, `invalid worktree name`, `invalid task list id`, `invalid model` or `invalid prompt` when a value is not valid or the spec is longer than 32 KB.
 - A group name that is not kebab-case. The CLI suggests a fixed name, for example `try --group auth-refactor`.
 - `invalid claude arg: no quotes, % or control characters`, or `cck sets <flag>` for a flag cck owns, after `--`.
 

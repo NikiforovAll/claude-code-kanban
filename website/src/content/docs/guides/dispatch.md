@@ -45,6 +45,27 @@ claude-code-kanban dispatch start --cwd . --spec-file spec.md --name docs-audit 
 - cck sets `--session-id`, `--name`, `--model` and `--worktree` itself; use its flags for them. It refuses `--resume`, `--continue`, `--fork-session` and `--print`, because they do not start a new session.
 - When the server restarts, the terminal comes back with `claude --resume <id>`, without these flags.
 
+## Track dispatches as cards
+
+Cards for dispatched work are optional. To get them, ask Claude to track the dispatch on the board.
+
+A card's owner can link to the session that does the work. Set the card's `owner` to the started session's `--name`, and the owner badge shows the send icon; a click opens that session. The badge links only to a session that the list's session started. When two of its started sessions share the name, the badge shows no link.
+
+The `dispatch` skill has the session that dispatches assign the card, because it creates the card and knows the name. Right after `dispatch start`, it sets the card's `owner` and moves it to `in_progress`, then sets it to `completed` when the started session reports. You can also assign cards yourself, for example in your prompt.
+
+## Share one task list
+
+By default, each started session keeps its own task list. Pass `--task-list` to make it use another list, so its cards show on one board with yours:
+
+```bash
+claude-code-kanban dispatch start --cwd . --spec-file spec.md --name api-worker --task-list
+```
+
+- With no value, it uses the current session's list. Pass `--task-list <id>` for another list.
+- cck sets `CLAUDE_CODE_TASK_LIST_ID` in the session's terminal, not on the command line. A terminal never inherits the variable from the server, so a list is shared only when you pass the flag.
+- The setting survives a server restart: a restored terminal resumes with the same list.
+- Assign the cards as in [Track dispatches as cards](#track-dispatches-as-cards). In the spec, name the session's card and tell it to set the card to `completed` when done.
+
 ## Groups
 
 Pass `--group` to show the new session under that group in the sidebar. Pass it on each dispatch that belongs in the group: a dispatch without it goes to its project. The session that ran `dispatch start` stays where it is.

@@ -172,6 +172,14 @@ describe('new session options', () => {
     assert.equal(parseNewSpec({ cwd: '/p', worktree: '../up' }), 'worktree name');
     assert.equal(parseNewSpec({ cwd: '/p', worktree: 1 }), 'worktree name');
     assert.equal(parseNewSpec({ cwd: '/p', model: 'opus; x' }), 'model');
+    assert.equal(parseNewSpec({ cwd: '/p', taskList: '../up' }), 'task list id');
+    assert.equal(parseNewSpec({ cwd: '/p', taskList: 'a/b' }), 'task list id');
+  });
+  it('keeps a task list id off the command line', () => {
+    const spec = parseNewSpec({ cwd: '/p', taskList: SESSION });
+    assert.equal(spec.taskList, SESSION);
+    assert.deepEqual(claudeArgsFor('new', SESSION, spec), ['--session-id', SESSION]);
+    assert.equal(parseNewSpec({ cwd: '/p' }).taskList, null);
   });
 });
 
@@ -227,6 +235,17 @@ describe('ptyEnv', () => {
     } finally {
       if (saved === undefined) delete process.env.CCK_URL;
       else process.env.CCK_URL = saved;
+    }
+  });
+
+  it('drops an inherited task list, so sharing one stays opt-in', () => {
+    const saved = process.env.CLAUDE_CODE_TASK_LIST_ID;
+    process.env.CLAUDE_CODE_TASK_LIST_ID = 'inherited';
+    try {
+      assert.equal(ptyEnv({ claudeDir: '/c', isDefaultDir: true }).CLAUDE_CODE_TASK_LIST_ID, undefined);
+    } finally {
+      if (saved === undefined) delete process.env.CLAUDE_CODE_TASK_LIST_ID;
+      else process.env.CLAUDE_CODE_TASK_LIST_ID = saved;
     }
   });
 });
@@ -393,10 +412,10 @@ function fakePty({ holdExit = false } = {}) {
   const spawned = [];
   return {
     spawned,
-    spawn(_file, args) {
+    spawn(_file, args, opts) {
       let onExit = () => {};
       const p = {
-        pid: 100000 + spawned.length, args,
+        pid: 100000 + spawned.length, args, env: opts?.env,
         onData() {}, onExit(cb) { onExit = cb; }, write() {}, resize() {}, pause() {}, resume() {},
         exit() { onExit({ exitCode: 0 }); },
         kill() { if (!holdExit) setImmediate(() => onExit({ exitCode: 0 })); },
@@ -464,6 +483,17 @@ describe('terminal restore', () => {
     t.shutdown();
     await wait(SAVE_MS * 3);
     assert.deepEqual(store.data.sessions, [B]);
+  });
+
+  it('resumes a terminal with the task list it was saved with, and saves only valid ones', async () => {
+    const { t, pty, store } = service(true, { sessions: [A, B], taskLists: { [A]: 'shared-list', [B]: '../up', [UNKNOWN]: 'x' } });
+    t.restore();
+    await until(() => t.list().length === 2 && store.saves > 0);
+    const envOf = (id) => pty.spawned.find((p) => p.args.join(' ').includes(id)).env;
+    assert.equal(envOf(A).CLAUDE_CODE_TASK_LIST_ID, 'shared-list');
+    assert.equal(envOf(B).CLAUDE_CODE_TASK_LIST_ID, undefined);
+    assert.deepEqual(store.data.taskLists, { [A]: 'shared-list' });
+    t.shutdown();
   });
 
   it('stops restoring a terminal whose claude exited to its shell, and resumes when claude is back', async () => {

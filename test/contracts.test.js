@@ -571,6 +571,7 @@ describe('Parser: buildAgentProgressMap', () => {
 
 describe('Parser: readSessionInfoFromJsonl', () => {
   const jsonlPath = path.join(FIXTURES_DIR, 'session.jsonl');
+  const pickNames = ({ customTitle, agentName }) => ({ customTitle, agentName });
 
   it('reads slug from fixture', () => {
     const info = readSessionInfoFromJsonl(jsonlPath);
@@ -593,6 +594,37 @@ describe('Parser: readSessionInfoFromJsonl', () => {
     assert.equal(info.projectPath, null);
     assert.equal(info.gitBranch, null);
     assert.equal(info.customTitle, null);
+    assert.equal(info.agentName, null);
+  });
+
+  it('keeps the agent name apart from the title, and takes the last one as the file grows', () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'cck-name-'));
+    const p = path.join(dir, 's.jsonl');
+    const line = (o) => `${JSON.stringify({ ...o, sessionId: 's' })}\n`;
+    try {
+      writeFileSync(p, line({ type: 'user', cwd: '/p', slug: 's' }) + line({ type: 'ai-title', aiTitle: 'Generated' }));
+      assert.deepEqual(pickNames(readSessionInfoFromJsonl(p)), { customTitle: 'Generated', agentName: null });
+      appendFileSync(p, line({ type: 'agent-name', agentName: 'worker-a' }) + line({ type: 'ai-title', aiTitle: 'Generated' }));
+      assert.deepEqual(pickNames(readSessionInfoFromJsonl(p)), { customTitle: 'Generated', agentName: 'worker-a' });
+      appendFileSync(p, line({ type: 'custom-title', customTitle: 'Renamed' }) + line({ type: 'agent-name', agentName: 'renamed' }));
+      assert.deepEqual(pickNames(readSessionInfoFromJsonl(p)), { customTitle: 'Renamed', agentName: 'renamed' });
+      appendFileSync(p, line({ type: 'user', cwd: '/p' }));
+      assert.deepEqual(pickNames(readSessionInfoFromJsonl(p)), { customTitle: 'Renamed', agentName: 'renamed' });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('finds the agent name on a first read when it comes before the custom title', () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'cck-name-'));
+    const p = path.join(dir, 's.jsonl');
+    const line = (o) => `${JSON.stringify({ ...o, sessionId: 's' })}\n`;
+    try {
+      writeFileSync(p, line({ type: 'user', cwd: '/p' }) + line({ type: 'agent-name', agentName: 'release' }) + line({ type: 'custom-title', customTitle: 'release' }));
+      assert.deepEqual(pickNames(readSessionInfoFromJsonl(p)), { customTitle: 'release', agentName: 'release' });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('reads permissionMode from the last prompt, permission-mode line or auto-mode attachment, as the file grows', () => {

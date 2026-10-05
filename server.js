@@ -828,12 +828,14 @@ function refreshSessionMetadataPath(jsonlPath) {
   if (shadow) {
     if (!existing.slug && info.slug) existing.slug = info.slug;
     if (!existing.customTitle && info.customTitle) existing.customTitle = info.customTitle;
+    if (!existing.agentName && info.agentName) existing.agentName = info.agentName;
     return true;
   }
   if (info.slug) existing.slug = info.slug;
   if (info.cwd) existing.cwd = info.cwd;
   if (info.gitBranch) existing.gitBranch = info.gitBranch;
   if (info.customTitle) existing.customTitle = info.customTitle;
+  if (info.agentName) existing.agentName = info.agentName;
   if (info.logicalParentUuid) existing.logicalParentUuid = info.logicalParentUuid;
   if (info.compactBoundaryUuid) existing.compactBoundaryUuid = info.compactBoundaryUuid;
   existing.permissionMode = info.permissionMode;
@@ -912,6 +914,7 @@ function loadSessionMetadata() {
         if (existing?.project && !candidateProject) {
           if (!existing.slug && sessionInfo.slug) existing.slug = sessionInfo.slug;
           if (!existing.customTitle && sessionInfo.customTitle) existing.customTitle = sessionInfo.customTitle;
+          if (!existing.agentName && sessionInfo.agentName) existing.agentName = sessionInfo.agentName;
           if (!existing.gitBranch && sessionInfo.gitBranch) existing.gitBranch = sessionInfo.gitBranch;
           sessionIds.push(sessionId);
           continue;
@@ -923,6 +926,7 @@ function loadSessionMetadata() {
           cwd: sessionInfo.cwd || null,
           gitBranch: sessionInfo.gitBranch || null,
           customTitle: sessionInfo.customTitle || null,
+          agentName: sessionInfo.agentName || null,
           jsonlPath: jsonlPath,
           logicalParentUuid: sessionInfo.logicalParentUuid || null,
           compactBoundaryUuid: sessionInfo.compactBoundaryUuid || null,
@@ -1680,6 +1684,27 @@ app.get('/api/projects', (_req, res) => {
 });
 
 // API: Get tasks for a session
+// A card's owner links to the session of that name that the list's session dispatched.
+// A name two of its dispatched sessions share gets no link.
+function addOwnerSessions(tasks, listIdOf) {
+  const lists = new Set(tasks.filter((t) => t.owner).map(listIdOf));
+  if (!lists.size) return;
+  const childIds = [...dispatched.entries()].filter(([, e]) => lists.has(e.parent));
+  if (!childIds.length) return;
+  const metadata = loadSessionMetadata();
+  const children = new Map();
+  for (const [id, { parent }] of childIds) {
+    const name = metadata[id]?.agentName;
+    if (!name) continue;
+    const key = `${parent}\n${name}`;
+    children.set(key, children.has(key) ? null : id);
+  }
+  for (const t of tasks) {
+    const id = t.owner && children.get(`${listIdOf(t)}\n${t.owner}`);
+    if (id) t.ownerSessionId = id;
+  }
+}
+
 app.get('/api/sessions/:sessionId', async (req, res) => {
   try {
     const sessionPath = taskDirFor(req.params.sessionId);
@@ -1704,6 +1729,7 @@ app.get('/api/sessions/:sessionId', async (req, res) => {
 
     // Sort by ID (numeric)
     tasks.sort((a, b) => parseInt(a.id, 10) - parseInt(b.id, 10));
+    addOwnerSessions(tasks, () => req.params.sessionId);
 
     res.json(tasks);
   } catch (error) {
@@ -1751,6 +1777,7 @@ app.get('/api/projects/:encodedPath/tasks', (req, res) => {
       }
     }
     tasks.sort((a, b) => parseInt(a.id, 10) - parseInt(b.id, 10));
+    addOwnerSessions(tasks, (t) => t._taskDir);
     res.json(tasks);
   } catch (error) {
     console.error('Error getting project tasks:', error);
@@ -3413,13 +3440,13 @@ function withDispatchPlacement(sessions) {
 // TERMINAL_TOKEN_FILE. The started session never holds it.
 app.post('/api/dispatch', terminalRoute(async (req, res) => {
   if (!terminal.authorized(req.get('x-terminal-token'))) return res.status(401).json({ error: 'invalid terminal token' });
-  const { cwd, spec, name, model, worktree, parent, group, claudeArgs } = req.body || {};
+  const { cwd, spec, name, model, worktree, taskList, parent, group, claudeArgs } = req.body || {};
   if (typeof spec !== 'string' || !spec.trim()) return res.status(400).json({ error: 'spec is required' });
   if (parent != null && !(typeof parent === 'string' && isUUID(parent))) return res.status(400).json({ error: 'invalid parent' });
   if (group != null && !isGroupName(group)) {
     return res.status(400).json({ error: `group must be kebab-case, e.g. ${suggestGroupName(group) || 'my-group'}` });
   }
-  const started = await terminal.startNew({ cwd, name, model, worktree, prompt: spec.trim(), extraArgs: claudeArgs });
+  const started = await terminal.startNew({ cwd, name, model, worktree, taskList, prompt: spec.trim(), extraArgs: claudeArgs });
   if (started.error) return res.status(started.status).json({ error: started.error });
   dispatches.add({ session: started.id, parent, cwd: started.cwd, name, group: group || null, worktree });
   dispatched.record(started.id, parent);
@@ -3578,37 +3605,67 @@ app.put('/api/tasks/:sessionId/:taskId', async (req, res) => {
   }
 });
 
+// A deleted task can't block anything, so drop the dangling reference instead of
+// refusing the delete -- a stale blockedBy id would pin the other task as BLOCKED forever.
+async function deleteTasks(dir, shouldDelete) {
+  let files;
+  try {
+    files = (await fs.readdir(dir)).filter((f) => f.endsWith('.json'));
+  } catch (e) {
+    if (e.code === 'ENOENT') return [];
+    throw e;
+  }
+  const tasks = [];
+  for (const file of files) {
+    try {
+      tasks.push({ file, task: JSON.parse(await fs.readFile(path.join(dir, file), 'utf8')) });
+    } catch (e) {
+      console.error(`Error parsing ${file}:`, e);
+    }
+  }
+  const doomed = tasks.filter((t) => shouldDelete(t));
+  const doomedIds = new Set(doomed.map(({ task }) => task.id));
+  const strip = (ids) => ids?.filter((id) => !doomedIds.has(id));
+
+  await Promise.all(
+    tasks
+      .filter(({ task }) => !doomedIds.has(task.id))
+      .map(({ file, task }) => {
+        const before = JSON.stringify(task);
+        task.blockedBy = strip(task.blockedBy);
+        task.blocks = strip(task.blocks);
+        if (JSON.stringify(task) === before) return null;
+        return fs.writeFile(path.join(dir, file), JSON.stringify(task, null, 2));
+      }),
+  );
+  // Delete the task file
+  await Promise.all(doomed.map(({ file }) => fs.unlink(path.join(dir, file))));
+  return [...doomedIds];
+}
+
 // API: Delete a task
 app.delete('/api/tasks/:sessionId/:taskId', async (req, res) => {
   try {
     const { sessionId, taskId } = req.params;
-    const sessionPath = taskDirFor(sessionId);
-    const taskPath = path.join(sessionPath, `${taskId}.json`);
-
-    if (!existsSync(taskPath)) {
-      return res.status(404).json({ error: 'Task not found' });
-    }
-
-    // A deleted task can't block anything, so drop the dangling reference instead of
-    // refusing the delete -- a stale blockedBy id would pin the other task as BLOCKED forever.
-    const taskFiles = readdirSync(sessionPath).filter(f => f.endsWith('.json'));
-
-    for (const file of taskFiles) {
-      const otherPath = path.join(sessionPath, file);
-      const otherTask = JSON.parse(readFileSync(otherPath, 'utf8'));
-      if (otherTask.blockedBy?.includes(taskId)) {
-        otherTask.blockedBy = otherTask.blockedBy.filter(id => id !== taskId);
-        await fs.writeFile(otherPath, JSON.stringify(otherTask, null, 2));
-      }
-    }
-
-    // Delete the task file
-    await fs.unlink(taskPath);
-
+    const deleted = await deleteTasks(taskDirFor(sessionId), ({ file }) => file === `${taskId}.json`);
+    if (!deleted.length) return res.status(404).json({ error: 'Task not found' });
     res.json({ success: true, taskId });
   } catch (error) {
     console.error('Error deleting task:', error);
     res.status(500).json({ error: 'Failed to delete task' });
+  }
+});
+
+// API: Delete every task in a list, or with ?status=completed only the completed ones
+app.delete('/api/tasks/:sessionId', async (req, res) => {
+  try {
+    const { status } = req.query;
+    if (status !== undefined && status !== 'completed') return res.status(400).json({ error: 'Invalid status' });
+    const deleted = await deleteTasks(taskDirFor(req.params.sessionId), ({ task }) => !status || task.status === status);
+    res.json({ success: true, deleted });
+  } catch (error) {
+    console.error('Error deleting tasks:', error);
+    res.status(500).json({ error: 'Failed to delete tasks' });
   }
 });
 
