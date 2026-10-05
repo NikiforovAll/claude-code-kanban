@@ -7472,7 +7472,7 @@ function postToReviewFrame(type, id) {
 
 // Runs inside the preview iframe as source text, so it must not close over anything outside
 // its own body and arguments.
-function reviewBridge(textBefore, headingBefore, rangeAt) {
+function reviewBridge(textBefore, headingBefore, rangeAt, comboOf, fieldSelector) {
   const P = 'cck-review:';
   const marks = new Map();
   let pending = null;
@@ -7549,11 +7549,51 @@ function reviewBridge(textBefore, headingBefore, rangeAt) {
   };
   document.addEventListener('mousedown', clear);
   document.addEventListener('scroll', clear, true);
+  // The sandbox has no allow-top-navigation and the board never sees events in here, so web links
+  // and the keys the board claims go up as messages. A srcdoc document resolves relative hrefs,
+  // `#id` too, against the board's URL, and loading that here ends on an error page because the
+  // board refuses framing; a hash goes to location.hash instead, which stays on about:srcdoc.
+  const openLink = (e) => {
+    if (e.defaultPrevented || (e.type === 'auxclick' && e.button !== 1)) return;
+    const a = e.target.closest?.('a[href]');
+    const href = a?.getAttribute('href');
+    if (!href) return;
+    if (/^https?:\/\//i.test(href)) {
+      e.preventDefault();
+      send({ type: 'link', href: a.href });
+      return;
+    }
+    if (/^[a-z][a-z0-9+.-]*:/i.test(href)) return;
+    e.preventDefault();
+    if (href.startsWith('#') && e.type === 'click') location.hash = href;
+  };
+  document.addEventListener('click', openLink);
+  document.addEventListener('auxclick', openLink);
+  // The terminal frame's claim format (terminal-frame.js keySigs).
+  const keySigs = (e) => {
+    const mods = [e.ctrlKey && 'ctrl', e.altKey && 'alt', e.shiftKey && 'shift', e.metaKey && 'meta']
+      .filter(Boolean)
+      .join('+');
+    return [e.code && `${mods}|c:${e.code}`, typeof e.key === 'string' && `${mods}|k:${e.key.toLowerCase()}`].filter(
+      Boolean,
+    );
+  };
+  let claims = new Set();
+  let forward = new Set();
+  document.addEventListener('keydown', (e) => {
+    if (e.defaultPrevented || e.target.closest?.(fieldSelector)) return;
+    if (!forward.has(comboOf(e)) && !keySigs(e).some((s) => claims.has(s))) return;
+    e.preventDefault();
+    send({ type: 'key', key: e.key, code: e.code, ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, meta: e.metaKey });
+  });
   addEventListener('message', (e) => {
     if (e.source !== parent || typeof e.data?.type !== 'string' || !e.data.type.startsWith(P)) return;
     const type = e.data.type.slice(P.length);
     const range = marks.get(e.data.id);
-    if (type === 'mark' && pending) {
+    if (type === 'claims') {
+      claims = new Set(e.data.keys.map((c) => keySigs(c)[0]));
+      forward = new Set(e.data.forward);
+    } else if (type === 'mark' && pending) {
       marks.set(e.data.id, pending);
       hl?.add(pending);
       pending = null;
@@ -7575,7 +7615,34 @@ function reviewBridge(textBefore, headingBefore, rangeAt) {
   });
 }
 
-const REVIEW_BRIDGE_TAG = `<script>(${reviewBridge})(${reviewTextBefore}, ${reviewHeadingBefore}, ${reviewRangeAt});</script>`;
+const TEXT_FIELD_SELECTOR = 'input, textarea, select, [contenteditable]';
+
+const REVIEW_BRIDGE_TAG = `<script>(${reviewBridge})(${reviewTextBefore}, ${reviewHeadingBefore}, ${reviewRangeAt}, ${ClaudeHub.comboOf}, ${JSON.stringify(TEXT_FIELD_SELECTOR)});</script>`;
+
+// Frames from createPreviewFrame, which carry the bridge. A URL pane is another site and must
+// not drive the board.
+const bridgedFrames = new WeakSet();
+
+function bridgedFrameEls() {
+  return [...document.querySelectorAll('iframe[srcdoc]')].filter((f) => bridgedFrames.has(f));
+}
+
+function sendBridgeClaims(frames, claims) {
+  for (const f of frames) f.contentWindow?.postMessage({ type: `${REVIEW_MSG}claims`, ...claims }, '*');
+}
+
+window.addEventListener('message', (e) => {
+  const type =
+    typeof e.data?.type === 'string' && e.data.type.startsWith(REVIEW_MSG) && e.data.type.slice(REVIEW_MSG.length);
+  if (type !== 'link' && type !== 'key') return;
+  const frame = bridgedFrameEls().find((f) => f.contentWindow === e.source);
+  if (!frame) return;
+  if (type === 'key') replayKey(e.data, frame);
+  else {
+    const url = linkUrl(e.data.href);
+    if (url) hub.openExternal(url);
+  }
+});
 
 function reviewPopEl() {
   let el = document.getElementById('review-pop');
@@ -7914,6 +7981,8 @@ function createPreviewFrame(className, srcdoc) {
   frame.setAttribute('sandbox', 'allow-scripts allow-popups');
   frame.setAttribute('referrerpolicy', 'no-referrer');
   frame.srcdoc = srcdoc;
+  bridgedFrames.add(frame);
+  frame.addEventListener('load', () => sendBridgeClaims([frame], keyClaims()));
   return frame;
 }
 
@@ -7924,6 +7993,10 @@ function renderHtmlPreview(bodyEl, content) {
   bodyEl.appendChild(createPreviewFrame('preview-html-frame', content + REVIEW_BRIDGE_TAG));
 }
 
+function isAbsolutePath(p) {
+  return /^([a-zA-Z]:[\\/]|[\\/])/.test(p);
+}
+
 function bindPreviewRelativeLinks(bodyEl, baseOf = () => currentPreviewPath) {
   if (bodyEl.dataset.relLinkBound) return;
   bodyEl.addEventListener('click', (e) => {
@@ -7932,11 +8005,10 @@ function bindPreviewRelativeLinks(bodyEl, baseOf = () => currentPreviewPath) {
     const href = a.getAttribute('href');
     if (!href || href.startsWith('#')) return;
     const isAbsoluteUrl = /^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith('//');
-    const isAbsolutePath = href.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(href);
     if (isAbsoluteUrl) return;
     const cleanHref = href.replace(/#.*$/, '');
     e.preventDefault();
-    openPreviewByPath(cleanHref, isAbsolutePath ? undefined : baseOf(a), openFileInEditor);
+    openPreviewByPath(cleanHref, isAbsolutePath(href) ? undefined : baseOf(a), openFileInEditor);
   });
   bodyEl.dataset.relLinkBound = '1';
 }
@@ -8756,6 +8828,7 @@ function setupEventSource() {
         console.warn('[SSE] Reconnected after drop — forcing full refresh');
         fetchSessions().catch(() => {});
         if (currentSessionId) fetchTasks(currentSessionId);
+        refetchPaneLayout();
         if (terminalAvailable())
           loadTerminals()
             .then(renderSessions)
@@ -8861,6 +8934,10 @@ function setupEventSource() {
 
       if (data.type === 'session:pin') {
         handleSessionPinEvent(data);
+      }
+
+      if (data.type === 'pane:changed') {
+        applyPaneLayout(data.sessionId, data.layout);
       }
 
       if (data.type === 'team-update') {
@@ -11734,56 +11811,85 @@ function filterByOwner(value) {
 //#endregion
 
 //#region PANES
-// UI spike: the layouts live in memory and every session gets seeded panes. The server store
-// (lib/panes.js, /api/panes, `pane:changed` over SSE) replaces paneStore; nothing else here
-// touches a layout. Its shape is the server's: {active, panes: [{id, kind, target, title, addedAt}]}.
-// `frameable` stands in for the probe result the server will store on add.
-const PANE_STUB_FILE =
-  'C:/Users/nikiforovall/AppData/Local/Temp/claude/C--Users-nikiforovall-dev-claude-code-hub/39c6319d-80ee-4e45-a0e3-fac64ce4a94c/scratchpad/session-working-panes-prototype.html';
-const PANE_STUB_SEED = [
-  { kind: 'url', target: 'http://localhost:3543/', title: 'Cost' },
-  { kind: 'file', target: PANE_STUB_FILE, title: 'prototype.html' },
-  { kind: 'url', target: 'http://localhost:3542/', title: 'Marketplace' },
-  { kind: 'url', target: 'http://localhost:3544/', title: 'Memory' },
-  { kind: 'url', target: 'https://github.com/', title: 'GitHub' },
-];
-const PANE_STUB_BLOCKED_HOSTS = new Set(['github.com', 'www.github.com', 'google.com', 'www.google.com']);
-const paneStub = new Map();
-let paneSeq = 0;
+// Layouts come from /api/panes and `pane:changed` (the pane contract, lib/panes.js). Every write
+// bumps the layout's rev and the event carries the whole layout, so a copy is replaced only by
+// a higher rev: the echo of this tab's own write and a late GET both lose to what it holds.
+// Which tab is on screen is this browser tab's own state, never the server's.
+const PANE_EMPTY_LAYOUT = { panes: [] };
+const paneLayouts = new Map();
+let paneLayoutSid = null;
 
-function stubPane(kind, target, title) {
-  const frameable = kind !== 'url' || !PANE_STUB_BLOCKED_HOSTS.has(new URL(target).hostname);
-  return { id: `p${++paneSeq}`, kind, target, title, addedAt: Date.now(), frameable };
+// Stub until the server probes framing (contract Step 4).
+const PANE_STUB_BLOCKED_HOSTS = new Set(['github.com', 'www.github.com', 'google.com', 'www.google.com']);
+
+function paneFrameable(pane) {
+  return pane.kind !== 'url' || !PANE_STUB_BLOCKED_HOSTS.has(new URL(pane.target).hostname);
 }
 
-const paneStore = {
-  get(sessionId) {
-    if (!paneStub.has(sessionId)) {
-      paneStub.set(sessionId, {
-        active: 'board',
-        panes: PANE_STUB_SEED.map((s) => stubPane(s.kind, s.target, s.title)),
-      });
-    }
-    return paneStub.get(sessionId);
-  },
-  add(sessionId, kind, target, title) {
-    const layout = paneStore.get(sessionId);
-    const pane = stubPane(kind, target, title);
-    layout.panes.push(pane);
-    layout.active = pane.id;
-    return pane;
-  },
-  remove(sessionId, paneId) {
-    const layout = paneStore.get(sessionId);
-    const i = layout.panes.findIndex((p) => p.id === paneId);
-    if (i < 0) return;
-    layout.panes.splice(i, 1);
-    if (layout.active === paneId) layout.active = layout.panes[Math.min(i, layout.panes.length - 1)]?.id || 'board';
-  },
-  setActive(sessionId, active) {
-    paneStore.get(sessionId).active = active;
-  },
-};
+function paneLayout(sid) {
+  return paneLayouts.get(sid) || PANE_EMPTY_LAYOUT;
+}
+
+function applyPaneLayout(sid, layout) {
+  const held = paneLayouts.get(sid);
+  if (!layout || (held && layout.rev <= held.rev)) return;
+  paneLayouts.set(sid, layout);
+  const targets = new Map(layout.panes.map((p) => [p.id, p.target]));
+  for (const p of held?.panes || []) {
+    if (targets.get(p.id) !== p.target) unmountPane(sid, p.id);
+  }
+  if (!targets.has(getActivePaneId(sid))) setActivePaneId(sid, 'board');
+  if (sid === paneSessionId()) syncPanes();
+}
+
+async function fetchPaneLayout(sid) {
+  try {
+    const r = await fetch(`/api/panes/${encodeURIComponent(sid)}`);
+    if (r.ok) applyPaneLayout(sid, await r.json());
+  } catch {}
+}
+
+function refetchPaneLayout() {
+  const sid = paneSessionId();
+  if (sid) fetchPaneLayout(sid);
+}
+
+async function paneRequest(method, path, body) {
+  try {
+    const r = await fetch(path, {
+      method,
+      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const data = await r.json().catch(() => ({}));
+    return r.ok ? data : { error: data.error || `${method} failed (${r.status})`, code: data.code };
+  } catch {
+    return { error: 'The board is not reachable', code: 'network' };
+  }
+}
+
+// sessionStorage `cck.paneActive`: {[sessionId]: paneId} in recency order.
+const PANE_ACTIVE_KEY = 'cck.paneActive';
+const PANE_ACTIVE_CAP = 20;
+let paneActive = {};
+try {
+  const map = JSON.parse(sessionStorage.getItem(PANE_ACTIVE_KEY));
+  if (map && typeof map === 'object') paneActive = map;
+} catch {}
+
+function getActivePaneId(sid) {
+  return paneActive[sid] || 'board';
+}
+
+function setActivePaneId(sid, id) {
+  if (getActivePaneId(sid) === id) return;
+  delete paneActive[sid];
+  if (id !== 'board') paneActive[sid] = id;
+  paneActive = Object.fromEntries(Object.entries(paneActive).slice(-PANE_ACTIVE_CAP));
+  try {
+    sessionStorage.setItem(PANE_ACTIVE_KEY, JSON.stringify(paneActive));
+  } catch {}
+}
 
 const PANE_FRAME_LIMIT = 3;
 const PANE_URL_SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-popups allow-downloads';
@@ -11813,14 +11919,19 @@ function paneSessionId() {
   return viewMode === 'session' ? currentSessionId : null;
 }
 
-function activePane(layout) {
-  return layout.panes.find((p) => p.id === layout.active) || null;
+function activePane(sid) {
+  const id = getActivePaneId(sid);
+  return paneLayout(sid).panes.find((p) => p.id === id) || null;
 }
 
 function syncPanes() {
   const sid = paneSessionId();
-  const layout = sid ? paneStore.get(sid) : null;
-  const pane = layout ? activePane(layout) : null;
+  if (sid !== paneLayoutSid) {
+    paneLayoutSid = sid;
+    if (sid) fetchPaneLayout(sid);
+  }
+  const layout = sid ? paneLayout(sid) : null;
+  const pane = sid ? activePane(sid) : null;
   sessionView.classList.toggle('has-panes', !!layout);
   sessionView.classList.toggle('pane-mode', !!pane);
   if (!layout || wantsTerminal()) closePanePop();
@@ -11836,8 +11947,9 @@ function syncPanes() {
 }
 
 function renderPaneTabs(sid, layout) {
+  const active = getActivePaneId(sid);
   const tab = (id, cls, inner, tip) =>
-    `<div class="pane-tab ${cls}${layout.active === id ? ' on' : ''}" role="tab" data-pane="${escapeHtml(id)}" title="${escapeHtml(tip)}">${inner}</div>`;
+    `<div class="pane-tab ${cls}${active === id ? ' on' : ''}" role="tab" data-pane="${escapeHtml(id)}" title="${escapeHtml(tip)}">${inner}</div>`;
   const board = tab(
     'board',
     'pinned',
@@ -11845,12 +11957,12 @@ function renderPaneTabs(sid, layout) {
     'Board',
   );
   const panes = layout.panes.map((p) => {
-    const state = p.frameable === false ? 'blocked' : paneFrames.has(`${sid}/${p.id}`) ? 'loaded' : '';
+    const state = !paneFrameable(p) ? 'blocked' : paneFrames.has(`${sid}/${p.id}`) ? 'loaded' : '';
     const stateTip = state === 'blocked' ? 'Site refuses framing' : state ? 'Loaded' : 'Unloaded (loads on open)';
     return tab(
       p.id,
       '',
-      `${PANE_ICONS[p.kind]}<span class="pane-title">${escapeHtml(p.title)}</span><span class="state ${state}" title="${stateTip}"></span><button class="pane-x" data-close="${escapeHtml(p.id)}" title="Close pane" aria-label="Close pane">×</button>`,
+      `${p.kind === 'url' ? PANE_ICONS.url : PANE_ICONS.file}<span class="pane-title">${escapeHtml(p.title)}</span><span class="state ${state}" title="${stateTip}"></span><button class="pane-x" data-close="${escapeHtml(p.id)}" title="Close pane" aria-label="Close pane">×</button>`,
       p.target,
     );
   });
@@ -11899,7 +12011,7 @@ function mountPane(sid, pane) {
 }
 
 async function loadPaneView(sid, pane, view) {
-  if (pane.frameable === false) {
+  if (!paneFrameable(pane)) {
     view.insertAdjacentHTML(
       'beforeend',
       paneCardHtml(
@@ -11922,10 +12034,7 @@ async function loadPaneView(sid, pane, view) {
   }
   let data = null;
   try {
-    const qs = new URLSearchParams({ path: pane.target });
-    const base = getSessionBaseDir(sid);
-    if (base) qs.set('base', base);
-    const r = await fetch(`/api/preview?${qs}`);
+    const r = await fetch(`/api/preview?${new URLSearchParams({ path: pane.target })}`);
     if (r.ok) data = await r.json();
   } catch {}
   if (data?.kind === 'html') {
@@ -12024,7 +12133,7 @@ function unmountPane(sid, paneId) {
 function selectPane(id) {
   const sid = paneSessionId();
   if (!sid) return;
-  paneStore.setActive(sid, id);
+  setActivePaneId(sid, id);
   closePanePop();
   syncPanes();
 }
@@ -12033,27 +12142,33 @@ function selectPane(id) {
 function cyclePane(step) {
   const sid = paneSessionId();
   if (!sid || wantsTerminal()) return false;
-  const layout = paneStore.get(sid);
-  const ids = ['board', ...layout.panes.map((p) => p.id)];
-  const i = ids.indexOf(layout.active);
+  const ids = ['board', ...paneLayout(sid).panes.map((p) => p.id)];
+  const i = ids.indexOf(getActivePaneId(sid));
   selectPane(ids[(i + step + ids.length) % ids.length]);
   return true;
 }
 
-function closePane(paneId) {
+async function closePane(paneId) {
   const sid = paneSessionId();
   if (!sid) return;
-  paneStore.remove(sid, paneId);
+  if (getActivePaneId(sid) === paneId) {
+    const panes = paneLayout(sid).panes;
+    const i = panes.findIndex((p) => p.id === paneId);
+    setActivePaneId(sid, (panes[i + 1] || panes[i - 1])?.id || 'board');
+  }
   unmountPane(sid, paneId);
   syncPanes();
+  const res = await paneRequest('DELETE', `/api/panes/${encodeURIComponent(sid)}/${encodeURIComponent(paneId)}`);
+  if (res.layout) applyPaneLayout(sid, res.layout);
+  else if (res.code === 'no_pane') fetchPaneLayout(sid);
+  else showToast(res.error, 'error');
 }
 
 // With no id, the active pane.
 function paneById(id) {
   const sid = paneSessionId();
   if (!sid) return null;
-  const layout = paneStore.get(sid);
-  return id == null ? activePane(layout) : layout.panes.find((p) => p.id === id) || null;
+  return id == null ? activePane(sid) : paneLayout(sid).panes.find((p) => p.id === id) || null;
 }
 
 function reloadPane(id) {
@@ -12121,35 +12236,41 @@ const PANE_MENU_ACTIONS = {
   close: closePane,
 };
 
-function paneTargetFrom(raw) {
+// The server takes only absolute paths, and linked docs can be relative to the session's folder.
+function paneTargetFrom(raw, baseDir) {
   const value = raw.trim().replace(/^(["'])(.*)\1$/, '$2');
   if (!value) return null;
   const url = linkUrl(value);
-  if (!url) return { kind: 'file', target: value, title: linkedDocLabel(value) };
+  if (!url) {
+    const absolute = isAbsolutePath(value) || /^file:/i.test(value);
+    return { kind: 'file', target: absolute || !baseDir ? value : `${baseDir.replace(/[\\/]+$/, '')}/${value}` };
+  }
   const u = new URL(url);
   // allow-scripts with allow-same-origin on cck's own origin would lift the sandbox.
   const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(u.hostname);
   if (u.origin === location.origin || (loopback && u.port === location.port)) {
     return { error: 'A pane cannot show this board' };
   }
-  return { kind: 'url', target: url, title: linkedDocLabel(url) };
+  return { kind: 'url', target: url };
 }
 
-function addPane(raw) {
+// The same target again answers the existing pane, so this also switches to it.
+async function addPane(raw) {
   const sid = paneSessionId();
-  const t = sid && paneTargetFrom(raw);
+  const t = sid && paneTargetFrom(raw, getSessionBaseDir(sid));
   if (!t) return;
   if (t.error) {
     showToast(t.error);
     return;
   }
-  const layout = paneStore.get(sid);
-  const same = layout.panes.find((p) => canonicalPath(p.target) === canonicalPath(t.target));
-  if (same) {
-    selectPane(same.id);
+  const res = await paneRequest('POST', `/api/panes/${encodeURIComponent(sid)}`, { target: t.target });
+  if (!res.pane) {
+    showToast(res.error, 'error');
     return;
   }
-  paneStore.add(sid, t.kind, t.target, t.title);
+  setActivePaneId(sid, res.pane.id);
+  applyPaneLayout(sid, res.layout);
+  if (sid !== paneSessionId()) return;
   closePanePop();
   syncPanes();
 }
@@ -12411,8 +12532,6 @@ function toggleTerminal() {
 function terminalPaneFocused() {
   return document.getElementById('terminal-pane').contains(document.activeElement);
 }
-
-const TEXT_FIELD_SELECTOR = 'input, textarea, select, [contenteditable]';
 
 function inPageField(e) {
   const field = e.target?.closest?.(TEXT_FIELD_SELECTOR);
@@ -12684,7 +12803,7 @@ function onTerminalFrameMessage(t, m) {
       termFrame.reload = false;
       reconnectTerminal();
     }
-  } else if (t === 'key') replayTerminalKey(m);
+  } else if (t === 'key') replayKey(m, document.getElementById('terminal-key-proxy'));
   // Chrome does not always fire focusin on the iframe element when its content takes focus.
   else if (t === 'focused') terminalHadFocus = terminalPaneFocused();
   else if (t === 'opening') {
@@ -12704,8 +12823,7 @@ function onTerminalFrameMessage(t, m) {
 // The frame hands back the keys the board acts on. Replaying them on a textarea inside the pane gives
 // the document listeners the target they saw when xterm lived here: the shortcut runs, the SDK
 // forwards a hub key, and the text-field guard keeps the board's own keys out.
-function replayTerminalKey(m) {
-  const target = document.getElementById('terminal-key-proxy');
+function replayKey(m, target) {
   target.dispatchEvent(
     new KeyboardEvent('keydown', {
       key: m.key,
@@ -12756,13 +12874,20 @@ let terminalClaimsQueued = false;
 
 // The claims depend on state (the hub's welcome, a slow connect, the session), so every change re-sends
 // them. One state change calls this several times, and the probe is about 1,500 shortcut checks.
+function keyClaims() {
+  return { keys: terminalClaims(), forward: hub.forwardCombos() };
+}
+
 function pushTerminalClaims() {
-  if (!termFrame.inited || terminalClaimsQueued) return;
+  if (terminalClaimsQueued) return;
   terminalClaimsQueued = true;
   queueMicrotask(() => {
     terminalClaimsQueued = false;
+    const bridged = bridgedFrameEls();
+    if (!termFrame.inited && !bridged.length) return;
+    const claims = keyClaims();
+    sendBridgeClaims(bridged, claims);
     if (!termFrame.inited) return;
-    const claims = { keys: terminalClaims(), forward: hub.forwardCombos() };
     const sig = JSON.stringify(claims);
     if (sig === termFrame.claims) return;
     termFrame.claims = sig;
@@ -14164,19 +14289,23 @@ document.getElementById('help-docs')?.addEventListener('click', (e) => {
   hub.openExternal(e.currentTarget.href);
 });
 
+function webUrl(href) {
+  let url;
+  try {
+    url = new URL(href, window.location.href);
+  } catch (_) {
+    return null;
+  }
+  return url.protocol === 'http:' || url.protocol === 'https:' ? url : null;
+}
+
 document.addEventListener('click', (e) => {
   const a = e.target.closest?.('a[href]');
   if (!a) return;
   const href = a.getAttribute('href');
   if (!href) return;
-  let url;
-  try {
-    url = new URL(href, window.location.href);
-  } catch (_) {
-    return;
-  }
-  if (url.origin === window.location.origin) return;
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') return;
+  const url = webUrl(href);
+  if (!url || url.origin === window.location.origin) return;
   e.preventDefault();
   e.stopPropagation();
   hub.openExternal(url.href);
