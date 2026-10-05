@@ -3526,6 +3526,7 @@ code.language-tree .hljs-title {
 .pane-tab.on {
   background: var(--bg-deep);
   border-color: var(--border);
+  border-top-color: var(--accent);
   color: var(--text-primary);
 }
 
