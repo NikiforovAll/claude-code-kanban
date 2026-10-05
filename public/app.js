@@ -5814,7 +5814,8 @@ const SHORTCUT_TABS = [
       {
         title: 'View',
         rows: [
-          { keys: ['['], label: 'Toggle sidebar' },
+          { keys: ['\\'], label: 'Toggle sidebar' },
+          { keys: ['[', ']'], label: 'Previous / next tab (Board and panes)' },
           { keys: ['T'], label: 'Toggle theme' },
           { keys: ['Shift', 'S'], combo: true, label: 'Storage manager' },
           { keys: ['Ctrl', 'Shift', 'Z'], combo: true, label: 'Zen mode (current session only)' },
@@ -6979,9 +6980,13 @@ document.addEventListener('keydown', (e) => {
   }
 
   // Global shortcuts
-  if (e.key === '[') {
+  if (matchKey(e, '\\')) {
     e.preventDefault();
     toggleSidebar();
+    return;
+  }
+  if (matchKey(e, '[', ']') && cyclePane(e.key === ']' ? 1 : -1)) {
+    e.preventDefault();
     return;
   }
   if (e.code === 'KeyL' && e.shiftKey) {
@@ -11670,6 +11675,368 @@ function filterByOwner(value) {
 
 //#endregion
 
+//#region PANES
+// UI spike: the layouts live in memory and every session gets seeded panes. The server store
+// (lib/panes.js, /api/panes, `pane:changed` over SSE) replaces paneStore; nothing else here
+// touches a layout. Its shape is the server's: {active, panes: [{id, kind, target, title, addedAt}]}.
+// `frameable` stands in for the probe result the server will store on add.
+const PANE_STUB_FILE =
+  'C:/Users/nikiforovall/AppData/Local/Temp/claude/C--Users-nikiforovall-dev-claude-code-hub/39c6319d-80ee-4e45-a0e3-fac64ce4a94c/scratchpad/session-working-panes-prototype.html';
+const PANE_STUB_SEED = [
+  { kind: 'url', target: 'http://localhost:3543/', title: 'Cost' },
+  { kind: 'file', target: PANE_STUB_FILE, title: 'prototype.html' },
+  { kind: 'url', target: 'http://localhost:3542/', title: 'Marketplace' },
+  { kind: 'url', target: 'http://localhost:3544/', title: 'Memory' },
+  { kind: 'url', target: 'https://github.com/', title: 'GitHub' },
+];
+const PANE_STUB_BLOCKED_HOSTS = new Set(['github.com', 'www.github.com', 'google.com', 'www.google.com']);
+const paneStub = new Map();
+let paneSeq = 0;
+
+function stubPane(kind, target, title) {
+  const frameable = kind !== 'url' || !PANE_STUB_BLOCKED_HOSTS.has(new URL(target).hostname);
+  return { id: `p${++paneSeq}`, kind, target, title, addedAt: Date.now(), frameable };
+}
+
+const paneStore = {
+  get(sessionId) {
+    if (!paneStub.has(sessionId)) {
+      paneStub.set(sessionId, {
+        active: 'board',
+        panes: PANE_STUB_SEED.map((s) => stubPane(s.kind, s.target, s.title)),
+      });
+    }
+    return paneStub.get(sessionId);
+  },
+  add(sessionId, kind, target, title) {
+    const layout = paneStore.get(sessionId);
+    const pane = stubPane(kind, target, title);
+    layout.panes.push(pane);
+    layout.active = pane.id;
+    return pane;
+  },
+  remove(sessionId, paneId) {
+    const layout = paneStore.get(sessionId);
+    const i = layout.panes.findIndex((p) => p.id === paneId);
+    if (i < 0) return;
+    layout.panes.splice(i, 1);
+    if (layout.active === paneId) layout.active = layout.panes[Math.min(i, layout.panes.length - 1)]?.id || 'board';
+  },
+  setActive(sessionId, active) {
+    paneStore.get(sessionId).active = active;
+  },
+};
+
+const PANE_FRAME_LIMIT = 3;
+const PANE_URL_SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-popups allow-downloads';
+const PANE_ICONS = {
+  board:
+    '<svg class="kind" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="5" height="16" rx="1"/><rect x="10" y="4" width="5" height="10" rx="1"/><rect x="17" y="4" width="4" height="13" rx="1"/></svg>',
+  url: '<svg class="kind" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/></svg>',
+  file: '<svg class="kind" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>',
+  warning:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12" y2="17"/></svg>',
+};
+// Map order is recency: the first entry is the one evicted. Keys are `${sessionId}/${paneId}`,
+// and the limit spans sessions, so a session switch cannot pile up frames.
+const paneFrames = new Map();
+const paneViews = document.getElementById('pane-views');
+const paneTabs = document.getElementById('pane-tabs');
+const panePop = document.getElementById('pane-pop');
+
+function paneSessionId() {
+  return viewMode === 'session' ? currentSessionId : null;
+}
+
+function activePane(layout) {
+  return layout.panes.find((p) => p.id === layout.active) || null;
+}
+
+function syncPanes() {
+  const sid = paneSessionId();
+  const layout = sid ? paneStore.get(sid) : null;
+  const pane = layout ? activePane(layout) : null;
+  sessionView.classList.toggle('has-panes', !!layout);
+  sessionView.classList.toggle('pane-mode', !!pane);
+  if (!layout) {
+    closePanePop();
+    for (const el of paneViews.children) el.classList.remove('on');
+    return;
+  }
+  if (wantsTerminal()) closePanePop();
+  const key = pane ? mountPane(sid, pane) : null;
+  for (const el of paneViews.children) el.classList.toggle('on', el.dataset.key === key);
+  // Off screen, a framed page keeps focus and takes keys the user aims at the board.
+  if (!pane && paneViews.contains(document.activeElement)) document.activeElement.blur();
+  for (const b of document.querySelectorAll('.pane-tool')) b.disabled = !pane;
+  renderPaneTabs(sid, layout);
+}
+
+function renderPaneTabs(sid, layout) {
+  const tab = (id, cls, inner, tip) =>
+    `<div class="pane-tab ${cls}${layout.active === id || (id === 'board' && !activePane(layout)) ? ' on' : ''}" role="tab" data-pane="${escapeHtml(id)}" title="${escapeHtml(tip)}">${inner}</div>`;
+  const board = tab(
+    'board',
+    'pinned',
+    `${PANE_ICONS.board}<span class="pane-title">Board</span><span class="pin-meta">${currentTasks.length}</span>`,
+    'Board',
+  );
+  const panes = layout.panes.map((p) => {
+    const state = p.frameable === false ? 'blocked' : paneFrames.has(`${sid}/${p.id}`) ? 'loaded' : '';
+    const stateTip = state === 'blocked' ? 'Site refuses framing' : state ? 'Loaded' : 'Unloaded (loads on open)';
+    return tab(
+      p.id,
+      '',
+      `${PANE_ICONS[p.kind] || PANE_ICONS.file}<span class="pane-title">${escapeHtml(p.title)}</span><span class="state ${state}" title="${stateTip}"></span><button class="pane-x" data-close="${escapeHtml(p.id)}" title="Close pane" aria-label="Close pane">×</button>`,
+      p.target,
+    );
+  });
+  paneTabs.innerHTML = board + (panes.length ? '<span class="pane-sep"></span>' : '') + panes.join('');
+  paneTabs.querySelector('.pane-tab.on')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+}
+
+function paneAddrHtml(pane) {
+  return `<div class="pane-addr"><span class="pane-chip ${pane.kind}">${pane.kind}</span><span class="pane-target">${escapeHtml(pane.target)}</span><span class="pane-who">added ${formatDate(pane.addedAt)}</span></div>`;
+}
+
+function paneCardHtml(title, text, button) {
+  return `<div class="pane-card"><div class="pane-card-box">${PANE_ICONS.warning}<h3>${escapeHtml(title)}</h3><p>${escapeHtml(text)}</p><button class="pane-card-btn" data-pane-open>${escapeHtml(button)}</button></div></div>`;
+}
+
+// Returns the key of the view to show. A blocked pane is a card with no frame, so it is
+// rebuilt on each visit and stays out of the LRU.
+function mountPane(sid, pane) {
+  const key = `${sid}/${pane.id}`;
+  const existing = paneFrames.get(key);
+  if (existing) {
+    paneFrames.delete(key);
+    paneFrames.set(key, existing);
+    return key;
+  }
+  const view = document.createElement('div');
+  view.className = 'pane-view';
+  view.dataset.key = key;
+  if (pane.kind === 'url' && pane.frameable === false) {
+    for (const el of paneViews.querySelectorAll('.pane-view.blocked')) el.remove();
+    view.classList.add('blocked');
+    const host = new URL(pane.target).hostname;
+    view.innerHTML =
+      paneAddrHtml(pane) +
+      paneCardHtml(
+        `${host} does not allow framing`,
+        'The site sends X-Frame-Options or a frame-ancestors policy. The pane keeps the link with the session.',
+        'Open in new tab',
+      );
+    paneViews.appendChild(view);
+    return key;
+  }
+  view.innerHTML = paneAddrHtml(pane);
+  const frame = document.createElement('iframe');
+  frame.className = 'pane-frame';
+  frame.setAttribute('referrerpolicy', 'no-referrer');
+  frame.title = pane.title;
+  view.appendChild(frame);
+  paneViews.appendChild(view);
+  paneFrames.set(key, view);
+  loadPaneFrame(sid, pane, view);
+  while (paneFrames.size > PANE_FRAME_LIMIT) {
+    const [oldKey, oldView] = paneFrames.entries().next().value;
+    paneFrames.delete(oldKey);
+    oldView.remove();
+  }
+  return key;
+}
+
+async function loadPaneFrame(sid, pane, view) {
+  const frame = view.querySelector('iframe');
+  if (pane.kind === 'url') {
+    frame.setAttribute('sandbox', PANE_URL_SANDBOX);
+    frame.src = pane.target;
+    return;
+  }
+  // Same rules as the preview modal: opaque origin, assets inlined by the server.
+  frame.setAttribute('sandbox', 'allow-scripts allow-popups');
+  let data = null;
+  try {
+    const qs = new URLSearchParams({ path: pane.target, base: getSessionBaseDir(sid) });
+    const r = await fetch(`/api/preview?${qs}`);
+    if (r.ok) data = await r.json();
+  } catch {}
+  if (data?.kind === 'html') {
+    frame.srcdoc = data.content;
+    return;
+  }
+  frame.remove();
+  const [title, text] = !data
+    ? ['Preview unavailable', 'The server could not read this file.']
+    : data.exists === false
+      ? ['File not found', pane.target]
+      : ['Not an HTML file', 'A file pane frames HTML. Open it in the preview window instead.'];
+  view.insertAdjacentHTML('beforeend', paneCardHtml(title, text, 'Open in preview'));
+}
+
+function unmountPane(sid, paneId) {
+  const key = `${sid}/${paneId}`;
+  paneFrames.get(key)?.remove();
+  paneFrames.delete(key);
+  paneViews.querySelector(`.pane-view.blocked[data-key="${CSS.escape(key)}"]`)?.remove();
+}
+
+function selectPane(id) {
+  const sid = paneSessionId();
+  if (!sid) return;
+  paneStore.setActive(sid, id);
+  closePanePop();
+  syncPanes();
+}
+
+// Returns false when the tabs are not on screen, so the key keeps its other meaning.
+function cyclePane(step) {
+  const sid = paneSessionId();
+  if (!sid || wantsTerminal()) return false;
+  const layout = paneStore.get(sid);
+  const ids = ['board', ...layout.panes.map((p) => p.id)];
+  const i = Math.max(0, ids.indexOf(activePane(layout) ? layout.active : 'board'));
+  selectPane(ids[(i + step + ids.length) % ids.length]);
+  return true;
+}
+
+function closePane(paneId) {
+  const sid = paneSessionId();
+  if (!sid) return;
+  paneStore.remove(sid, paneId);
+  unmountPane(sid, paneId);
+  syncPanes();
+}
+
+function reloadActivePane() {
+  const sid = paneSessionId();
+  const pane = sid && activePane(paneStore.get(sid));
+  if (!pane) return;
+  unmountPane(sid, pane.id);
+  syncPanes();
+}
+
+function openActivePaneExternally() {
+  const sid = paneSessionId();
+  const pane = sid && activePane(paneStore.get(sid));
+  if (!pane) return;
+  if (pane.kind === 'url') hub.openExternal(pane.target);
+  else openPreviewByPath(pane.target, getSessionBaseDir(sid));
+}
+
+function paneTargetFrom(raw) {
+  const value = raw.trim().replace(/^"(.*)"$/, '$1');
+  if (!value) return null;
+  const url = linkUrl(value);
+  if (!url) {
+    const title = value.split(/[\\/]/).filter(Boolean).pop() || value;
+    return { kind: 'file', target: value, title };
+  }
+  const u = new URL(url);
+  // allow-scripts with allow-same-origin on cck's own origin would lift the sandbox.
+  const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(u.hostname);
+  if (u.origin === location.origin || (loopback && u.port === location.port)) {
+    return { error: 'A pane cannot show this board' };
+  }
+  return { kind: 'url', target: url, title: linkedDocLabel(url) };
+}
+
+function addPane(raw) {
+  const sid = paneSessionId();
+  const t = sid && paneTargetFrom(raw);
+  if (!t) return;
+  if (t.error) {
+    showToast(t.error);
+    return;
+  }
+  const layout = paneStore.get(sid);
+  const same = layout.panes.find((p) => canonicalPath(p.target) === canonicalPath(t.target));
+  if (same) {
+    selectPane(same.id);
+    return;
+  }
+  paneStore.add(sid, t.kind, t.target, t.title);
+  closePanePop();
+  syncPanes();
+}
+
+function describePaneInput(value) {
+  if (!value.trim()) return 'http(s) → url pane · a path to an .html file → file pane';
+  const t = paneTargetFrom(value);
+  if (t?.error) return t.error;
+  return t?.kind === 'url' ? 'Kind: url · framed live' : 'Kind: file · rendered like the HTML preview';
+}
+
+function openPanePop() {
+  const sid = paneSessionId();
+  if (!sid) return;
+  const docs = getSessionPreviewPaths(sid);
+  document.getElementById('pane-pop-docs').innerHTML = docs.length
+    ? docs
+        .map(
+          (d) =>
+            `<button class="pane-pop-row" data-promote="${escapeHtml(d)}" title="${escapeHtml(d)}">${linkUrl(d) ? PANE_ICONS.url : PANE_ICONS.file}<span>${escapeHtml(linkedDocLabel(d))}</span></button>`,
+        )
+        .join('')
+    : '<div class="pane-pop-empty">This session has no linked docs.</div>';
+  const input = document.getElementById('pane-pop-input');
+  input.value = '';
+  document.getElementById('pane-pop-detect').textContent = describePaneInput('');
+  panePop.classList.add('visible');
+  input.focus();
+}
+
+function closePanePop() {
+  panePop.classList.remove('visible');
+}
+
+paneTabs.addEventListener('click', (e) => {
+  const close = e.target.closest('[data-close]');
+  if (close) {
+    closePane(close.dataset.close);
+    return;
+  }
+  const tab = e.target.closest('.pane-tab');
+  if (tab) selectPane(tab.dataset.pane);
+});
+paneTabs.addEventListener('auxclick', (e) => {
+  const tab = e.target.closest('.pane-tab');
+  if (e.button === 1 && tab && tab.dataset.pane !== 'board') closePane(tab.dataset.pane);
+});
+paneViews.addEventListener('click', (e) => {
+  if (e.target.closest('[data-pane-open]')) openActivePaneExternally();
+});
+document.getElementById('pane-add').addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (panePop.classList.contains('visible')) closePanePop();
+  else openPanePop();
+});
+document.getElementById('pane-reload').addEventListener('click', reloadActivePane);
+document.getElementById('pane-open').addEventListener('click', openActivePaneExternally);
+panePop.addEventListener('click', (e) => {
+  e.stopPropagation();
+  const row = e.target.closest('[data-promote]');
+  if (row) addPane(row.dataset.promote);
+});
+document.getElementById('pane-pop-input').addEventListener('input', (e) => {
+  document.getElementById('pane-pop-detect').textContent = describePaneInput(e.target.value);
+});
+document.getElementById('pane-pop-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    addPane(e.target.value);
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    e.stopPropagation();
+    closePanePop();
+  }
+});
+document.addEventListener('click', (e) => {
+  if (!panePop.contains(e.target)) closePanePop();
+});
+//#endregion
+
 //#region TERMINAL
 // The kanban and the terminal share one slot: terminal mode hides #main-content and shows
 // the pane. The PTY lives on the server (lib/terminal.js) and outlives the pane, so
@@ -11890,6 +12257,7 @@ function syncTerminal() {
     btn.classList.toggle('active', on);
   }
   sessionView.classList.toggle('terminal-mode', on);
+  syncPanes();
   pushTerminalClaims();
   if (!on) {
     // A hidden xterm textarea drops focus, but a display:none iframe keeps it and would take keys unseen.

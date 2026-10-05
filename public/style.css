@@ -3412,6 +3412,377 @@ body.booting .boot-splash {
 
 /* #endregion */
 
+/* #region PANES */
+.pane-strip {
+  position: relative;
+  display: none;
+  align-items: stretch;
+  gap: 2px;
+  padding: 6px 12px 0;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.session-view.has-panes .pane-strip {
+  display: flex;
+}
+
+.session-view.terminal-mode .pane-strip,
+.session-view.terminal-mode .pane-views {
+  display: none;
+}
+
+.session-view.pane-mode .kanban,
+.session-view.pane-mode .agent-footer {
+  display: none;
+}
+
+.pane-tabs {
+  display: flex;
+  gap: 2px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.pane-tab {
+  position: relative;
+  top: 1px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 240px;
+  padding: 6px 8px 6px 11px;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: 7px 7px 0 0;
+  background: none;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.pane-tab:hover {
+  background: var(--bg-hover);
+}
+
+.pane-tab.on {
+  background: var(--bg-deep);
+  border-color: var(--border);
+  color: var(--text-primary);
+}
+
+.pane-tab.pinned {
+  padding-right: 12px;
+  font-weight: 500;
+}
+
+.pane-tab .pane-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pane-tab .pin-meta {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 400;
+}
+
+.pane-tab .kind {
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+
+.pane-tab .state {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border: 1px solid var(--text-muted);
+  border-radius: 50%;
+}
+
+.pane-tab .state.loaded {
+  background: var(--success);
+  border-color: var(--success);
+}
+
+.pane-tab .state.blocked {
+  background: var(--warning);
+  border-color: var(--warning);
+}
+
+.pane-tab .pane-x {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.pane-tab .pane-x:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.pane-sep {
+  flex: none;
+  width: 1px;
+  margin: 6px 6px 8px;
+  background: var(--border);
+}
+
+.pane-add {
+  align-self: center;
+  margin: 0 0 4px 4px;
+}
+
+.pane-hint {
+  align-self: center;
+  margin: 0 0 4px 8px;
+  color: var(--text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.pane-tools {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin: 0 0 4px auto;
+}
+
+.pane-tool:disabled {
+  opacity: 0.35;
+  cursor: default;
+  background: none;
+}
+
+.pane-views {
+  position: relative;
+  display: none;
+  flex: 1;
+  min-height: 0;
+  background: var(--bg-deep);
+}
+
+.session-view.pane-mode:not(.terminal-mode) .pane-views {
+  display: flex;
+}
+
+.pane-view {
+  position: absolute;
+  inset: 0;
+  display: none;
+  flex-direction: column;
+}
+
+.pane-view.on {
+  display: flex;
+}
+
+.pane-addr {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-deep);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+
+.pane-chip {
+  padding: 1px 7px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  color: var(--text-secondary);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.pane-chip.url {
+  border-color: color-mix(in srgb, var(--team) 40%, transparent);
+  color: var(--team);
+}
+
+.pane-chip.file {
+  border-color: color-mix(in srgb, var(--plan) 50%, transparent);
+  color: var(--plan);
+}
+
+.pane-addr .pane-target {
+  overflow: hidden;
+  color: var(--text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pane-addr .pane-who {
+  margin-left: auto;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.pane-frame {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  border: 0;
+  background: #fff;
+}
+
+.pane-card {
+  display: grid;
+  flex: 1;
+  place-items: center;
+  font-family: var(--font-mono);
+}
+
+.pane-card-box {
+  max-width: 460px;
+  padding: 26px 28px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  text-align: center;
+}
+
+.pane-card-box svg {
+  width: 30px;
+  height: 30px;
+  color: var(--warning);
+}
+
+.pane-card-box h3 {
+  margin: 10px 0 6px;
+  font-family: var(--font-serif);
+  font-size: 17px;
+}
+
+.pane-card-box p {
+  margin: 0 0 16px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.pane-card-btn {
+  padding: 6px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.pane-pop {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 12px;
+  z-index: 20;
+  display: none;
+  width: 440px;
+  max-width: calc(100% - 24px);
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg-elevated);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 18%);
+  font-family: var(--font-mono);
+}
+
+.pane-pop.visible {
+  display: block;
+}
+
+.pane-pop input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  outline: none;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font: 12px var(--font-mono);
+}
+
+.pane-pop input:focus {
+  border-color: var(--accent);
+}
+
+.pane-pop-detect {
+  min-height: 16px;
+  margin: 6px 2px 10px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.pane-pop-label {
+  margin: 6px 2px;
+  color: var(--text-muted);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.pane-pop-docs {
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.pane-pop-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 6px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--text-secondary);
+  font: 12px var(--font-mono);
+  text-align: left;
+  cursor: pointer;
+}
+
+.pane-pop-row:hover,
+.pane-pop-row:focus-visible {
+  background: var(--bg-hover);
+}
+
+.pane-pop-row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pane-pop-row svg {
+  flex: none;
+  width: 13px;
+  height: 13px;
+}
+
+.pane-pop-empty {
+  padding: 4px 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+/* #endregion */
+
 /* #region MESSAGE_PANEL */
 .message-panel {
   position: fixed;
