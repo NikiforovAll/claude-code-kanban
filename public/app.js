@@ -4958,6 +4958,7 @@ function sgOpenMenuForKbSelection() {
 
 function sgOpenMenu(x, y, kind, ref) {
   sgCloseMenu();
+  closePaneMenu();
   const current = sgGroupOf(kind, ref);
   const label = kind === 'project' ? 'project' : 'session';
   const rows = sessionGroups
@@ -7901,7 +7902,7 @@ function bindPreviewRelativeLinks(bodyEl, baseOf = () => currentPreviewPath) {
     if (isAbsoluteUrl) return;
     const cleanHref = href.replace(/#.*$/, '');
     e.preventDefault();
-    openPreviewByPath(cleanHref, isAbsolutePath ? undefined : baseOf(), openFileInEditor);
+    openPreviewByPath(cleanHref, isAbsolutePath ? undefined : baseOf(a), openFileInEditor);
   });
   bodyEl.dataset.relLinkBound = '1';
 }
@@ -7978,7 +7979,8 @@ function isPreviewLinkedToCurrentSession() {
 }
 
 function updatePreviewLinkBtn() {
-  document.getElementById('preview-pane-btn').style.display = paneSessionId() ? '' : 'none';
+  const paneBtn = document.getElementById('preview-pane-btn');
+  if (paneBtn) paneBtn.style.display = paneSessionId() ? '' : 'none';
   const btn = document.getElementById('preview-link-btn');
   if (!btn) return;
   if (!currentSessionId) {
@@ -11894,15 +11896,17 @@ async function loadPaneView(sid, pane, view) {
   if (data?.kind) {
     const doc = document.createElement('div');
     doc.className = 'pane-doc rendered-md';
+    doc.dataset.path = data.path;
     renderPreviewContent(doc, data.path, data.content, data.kind);
     view.appendChild(doc);
     return;
   }
-  const [title, text, button] = !data
-    ? ['Preview unavailable', 'The server could not read this file.', 'Try in preview']
+  const [title, text] = !data
+    ? ['Preview unavailable', 'The server could not read this file.']
     : data.exists === false
-      ? ['File not found', pane.target, 'Try in preview']
-      : ['Nothing to preview', 'cck cannot render this file.', 'Open in editor'];
+      ? ['File not found', pane.target]
+      : ['Nothing to preview', 'cck cannot render this file.'];
+  const button = data && data.exists !== false ? 'Open in editor' : 'Try in preview';
   view.insertAdjacentHTML('beforeend', paneCardHtml(title, text, button));
 }
 
@@ -11944,7 +11948,7 @@ function paneById(id) {
   const sid = paneSessionId();
   if (!sid) return null;
   const layout = paneStore.get(sid);
-  return layout.panes.find((p) => p.id === (id ?? layout.active)) || null;
+  return id == null ? activePane(layout) : layout.panes.find((p) => p.id === id) || null;
 }
 
 function reloadPane(id) {
@@ -11957,16 +11961,15 @@ function reloadPane(id) {
 function openPaneExternally(id) {
   const pane = paneById(id);
   if (!pane) return;
-  if (pane.kind === 'url') hub.openExternal(pane.target);
-  else openPreviewByPath(pane.target, getSessionBaseDir(paneSessionId()), openFileInEditor);
+  openLinkedDoc(pane.target, getSessionBaseDir(paneSessionId()));
 }
 
 function copyPaneTarget(id) {
   const pane = paneById(id);
   if (!pane) return;
   navigator.clipboard.writeText(pane.target).then(
-    () => showToast(pane.kind === 'url' ? 'URL copied' : 'Path copied'),
-    () => showToast('Copy failed'),
+    () => showToast(pane.kind === 'url' ? 'URL copied' : 'Path copied', 'success'),
+    () => showToast('Copy failed', 'error'),
   );
 }
 
@@ -11985,6 +11988,7 @@ function openPaneMenu(x, y, id) {
   const pane = paneById(id);
   if (!pane) return;
   closePaneMenu();
+  sgCloseMenu();
   const url = pane.kind === 'url';
   const item = (act, label) =>
     `<button class="pane-menu-item" role="menuitem" data-pane-act="${act}">${label}</button>`;
@@ -12113,13 +12117,8 @@ document.addEventListener('click', (e) => {
 window.addEventListener('blur', closePaneMenu);
 paneViews.addEventListener('click', (e) => {
   if (e.target.closest('[data-pane-open]')) openPaneExternally();
-  const a = e.target.closest('.pane-doc a[href]');
-  if (a && /^https?:/i.test(a.getAttribute('href'))) {
-    e.preventDefault();
-    hub.openExternal(a.href);
-  }
 });
-bindPreviewRelativeLinks(paneViews, () => paneById()?.target);
+bindPreviewRelativeLinks(paneViews, (a) => a.closest('.pane-doc')?.dataset.path);
 paneTabs.addEventListener('scroll', updatePaneFades, { passive: true });
 paneTabs.addEventListener(
   'wheel',
@@ -14043,7 +14042,6 @@ document.getElementById('help-docs')?.addEventListener('click', (e) => {
 });
 
 document.addEventListener('click', (e) => {
-  if (!hub.inHub) return;
   const a = e.target.closest?.('a[href]');
   if (!a) return;
   const href = a.getAttribute('href');

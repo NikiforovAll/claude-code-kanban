@@ -3650,15 +3650,6 @@ body.booting .boot-splash {
   word-break: break-word;
 }
 
-.pane-doc .preview-image {
-  display: block;
-  max-width: 100%;
-  margin: 0 auto;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--bg-hover);
-}
-
 .pane-card {
   display: grid;
   flex: 1;
@@ -6058,14 +6049,17 @@ body.light .msg-assistant .msg-text {
   padding-right: 8px;
 }
 
-#preview-modal-body .preview-image {
+.preview-image {
   display: block;
   max-width: 100%;
-  max-height: 70vh;
   margin: 0 auto;
   border: 1px solid var(--border);
   border-radius: 4px;
   background: var(--bg-hover);
+}
+
+#preview-modal-body .preview-image {
+  max-height: 70vh;
 }
 
 #preview-modal-meta {
