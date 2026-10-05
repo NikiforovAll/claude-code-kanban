@@ -13961,6 +13961,9 @@ document.addEventListener('DOMContentLoaded', () => {
       if (lang === 'mermaid') {
         return `<pre class="mermaid" data-original="${escapeHtml(text)}">${escapeHtml(text)}</pre>`;
       }
+      if (treeHighlight.wantsTree(lang, text)) {
+        return `<pre><code class="hljs language-tree">${treeHighlight.highlightTree(text)}</code></pre>`;
+      }
       let highlighted;
       if (lang && hljs.getLanguage(lang)) {
         highlighted = hljs.highlight(text, { language: lang }).value;
