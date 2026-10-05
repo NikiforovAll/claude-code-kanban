@@ -11986,7 +11986,7 @@ function syncPanes() {
 function renderPaneTabs(sid, layout) {
   const active = getActivePaneId(sid);
   const tab = (id, cls, inner, tip) =>
-    `<div class="pane-tab ${cls}${active === id ? ' on' : ''}" role="tab" data-pane="${escapeHtml(id)}" title="${escapeHtml(tip)}">${inner}</div>`;
+    `<div class="pane-tab ${escapeHtml(cls)}${active === id ? ' on' : ''}" role="tab" data-pane="${escapeHtml(id)}" title="${escapeHtml(tip)}">${inner}</div>`;
   const board = tab(
     'board',
     'pinned',
@@ -11999,7 +11999,7 @@ function renderPaneTabs(sid, layout) {
     return tab(
       p.id,
       '',
-      `${p.kind === 'url' ? PANE_ICONS.url : PANE_ICONS.file}<span class="pane-title">${escapeHtml(p.title)}</span><span class="state ${state}" title="${stateTip}"></span><button class="pane-x" data-close="${escapeHtml(p.id)}" title="Close pane" aria-label="Close pane">×</button>`,
+      `${p.kind === 'url' ? PANE_ICONS.url : PANE_ICONS.file}<span class="pane-title">${escapeHtml(p.title)}</span><span class="state ${escapeHtml(state)}" title="${escapeHtml(stateTip)}"></span><button class="pane-x" data-close="${escapeHtml(p.id)}" title="Close pane" aria-label="Close pane">×</button>`,
       p.target,
     );
   });
@@ -12262,7 +12262,7 @@ function openPaneMenu(x, y, id) {
   sgCloseMenu();
   const url = pane.kind === 'url';
   const item = (act, label) =>
-    `<button class="pane-menu-item" role="menuitem" data-pane-act="${act}">${label}</button>`;
+    `<button class="pane-menu-item" role="menuitem" data-pane-act="${escapeHtml(act)}">${label}</button>`;
   const menu = document.createElement('div');
   menu.id = 'pane-menu';
   menu.className = 'pane-menu';
