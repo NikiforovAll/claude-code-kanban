@@ -160,19 +160,15 @@ The preview cannot show a web page. With an `http://` or `https://` URL, `doc pr
 
 ## pane
 
-Adds live panes to a session's view: a web URL or a local HTML file, each a tab next to Board. The commands take `--session` like `doc`.
-
-:::note
-The pane commands are planned. This version has their help, but each one fails with `pane <verb> is not implemented yet.`
-:::
+Adds live panes to a session's view: a web URL or a local file, each a tab next to Board. The commands take `--session` like `doc`.
 
 ### pane add
 
 ```bash
-claude-code-kanban pane add <url|file.html> [--title <text>] [--session <id>] [--json]
+claude-code-kanban pane add <url|file> [--title <text>] [--session <id>] [--json]
 ```
 
-Adds a pane and prints its id. The board does not switch to it; the user opens the tab. `--title` sets the tab title; without it the tab shows the page title, else the host or file name.
+Adds a pane and prints its id and title. The board does not switch to it; the user opens the tab. The same target added again prints the pane it already has, marked `(already there)`. A URL on the board's or the hub's own origin is refused. A file must be one the board can preview: HTML, markdown, text or an image.
 
 ### pane rm
 
@@ -188,7 +184,7 @@ Removes the pane.
 claude-code-kanban pane list [--session <id>] [--json]
 ```
 
-Lists the session's panes in tab order. `--json` prints `{active, panes: [{id, kind, target, title, addedAt}]}`.
+Lists the session's panes in tab order as a table of id, kind, title and target. `--json` prints `{rev, panes: [{id, kind, target, title, addedAt}], updatedAt}`.
 
 ## session
 

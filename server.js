@@ -15,6 +15,8 @@ const { createNetGuard } = require('./lib/net-guard');
 const { isContained } = require('./lib/contain');
 const { resolveScratchSubdir, listScratchDir } = require('./lib/scratch-files');
 const { fileUrlToPath } = require('./lib/file-url');
+const { httpError: previewError } = require('./lib/http-error');
+const { oneLine } = require('./lib/one-line');
 const { pluginStatus } = require('./lib/plugin-status');
 const { getAutoCompact } = require('./lib/auto-compact');
 
@@ -3705,25 +3707,19 @@ const PREVIEW_MAX_BYTES = 8 * 1024 * 1024;
 // Source in a modal is for reading, not for scrolling a generated bundle.
 const PREVIEW_TEXT_MAX_BYTES = 2 * 1024 * 1024;
 
-function previewError(status, message) {
-  const err = new Error(message);
-  err.status = status;
-  return err;
-}
-
 // Existence + kind of a file target, with the HTTP status codes both the preview and
 // the link-a-file endpoints report. `kind` is null for anything the previewer can't
 // render — the caller decides whether that disqualifies the path.
 async function statFileTarget(absPath) {
   try {
     const stats = await fs.stat(absPath);
-    if (!stats.isFile()) throw previewError(400, 'Not a file');
+    if (!stats.isFile()) throw previewError(400, 'Not a file', 'not_a_file');
     const kind = previewKindFor(absPath);
     return { size: stats.size, kind: kind === 'image' ? kind : await confirmKind(absPath, kind) };
   } catch (e) {
     if (e.status) throw e;
-    if (e.code === 'ENOENT') throw previewError(404, 'File not found');
-    if (e.code === 'EISDIR') throw previewError(400, 'Not a file');
+    if (e.code === 'ENOENT') throw previewError(404, 'File not found', 'file_not_found');
+    if (e.code === 'EISDIR') throw previewError(400, 'Not a file', 'not_a_file');
     throw e;
   }
 }
@@ -3731,7 +3727,7 @@ async function statFileTarget(absPath) {
 function enforcePreviewSize(kind, size) {
   const max = kind === 'text' ? PREVIEW_TEXT_MAX_BYTES : PREVIEW_MAX_BYTES;
   if (size > max) {
-    throw previewError(400, `Preview too large (${Math.round(size / 1048576)}MB, max ${max / 1048576}MB)`);
+    throw previewError(400, `Preview too large (${Math.round(size / 1048576)}MB, max ${max / 1048576}MB)`, 'too_large');
   }
 }
 
@@ -3739,7 +3735,7 @@ function enforcePreviewSize(kind, size) {
 // validation (and its status codes) but never the content.
 async function validatePreviewFile(absPath) {
   const { kind, size } = await statFileTarget(absPath);
-  if (!kind) throw previewError(400, 'Not a previewable text, markdown, HTML or image file');
+  if (!kind) throw previewError(400, 'Not a previewable text, markdown, HTML or image file', 'not_previewable');
   enforcePreviewSize(kind, size);
   return { kind, size };
 }
@@ -3977,16 +3973,34 @@ app.get('/api/file/resolve', async (req, res) => {
 // #endregion
 
 // #region PANES
-// Tabs next to Board in a session view. Each write broadcasts the whole layout, so a tab
-// replaces its copy instead of applying a diff.
+// Tabs next to Board in a session view. Each change broadcasts the whole layout with its rev,
+// so a tab replaces its copy when the rev is newer instead of applying a diff. Another board
+// on the same config dir writes the same file; the watcher broadcasts its changes here.
+const panesFileStamp = () => {
+  try {
+    const s = statSync(PANES_FILE);
+    return `${s.mtimeMs}:${s.size}`;
+  } catch {
+    return null;
+  }
+};
+let panesStamp;
 const panes = createPaneStore({
   load: () => {
+    const stamp = panesFileStamp();
+    if (stamp === panesStamp) return undefined;
+    panesStamp = stamp;
     try { return JSON.parse(readFileSync(PANES_FILE, 'utf8')); } catch { return null; }
   },
-  save: (data) => writeJsonAtomic(PANES_FILE, data),
+  save: (data) => {
+    writeJsonAtomic(PANES_FILE, data);
+    panesStamp = panesFileStamp();
+  },
+  onChange: (sessionId, layout) => broadcast({ type: 'pane:changed', sessionId, layout }),
 });
-
-const broadcastPanes = (sessionId, layout) => broadcast({ type: 'pane:changed', sessionId, layout });
+chokidar.watch(PANES_FILE, { ignoreInitial: true }).on('all', (event) => {
+  if (event === 'add' || event === 'change') panes.reload();
+});
 
 let boardPort = null;
 const boardHosts = [...net.ALLOWED_HOSTS.split(','), net.EXPOSED ? net.BIND_HOST : '']
@@ -3995,22 +4009,24 @@ const boardHosts = [...net.ALLOWED_HOSTS.split(','), net.EXPOSED ? net.BIND_HOST
 
 function paneRouteError(res, error, what) {
   if (!error.status) console.error(`Error in ${what}:`, error);
-  res.status(error.status || 500).json({ error: error.message || `${what} failed` });
+  const code = error.status ? error.code : 'internal';
+  res.status(error.status || 500).json({ error: error.message || `${what} failed`, code });
 }
 
 async function resolvePaneTarget(target) {
   const url = linkUrl(target);
   if (url) {
     if (isOwnOrigin(url, { boardPort, boardHosts, hubUrl: process.env.HUB_URL })) {
-      throw previewError(400, 'A pane cannot show the board or the hub itself');
+      throw previewError(400, 'A pane cannot show the board or the hub itself', 'own_origin');
     }
     return { kind: 'url', target: url };
   }
+  if (!path.isAbsolute(fileUrlToPath(target))) {
+    throw previewError(400, 'target must be an http(s) URL or an absolute file path', 'bad_target');
+  }
   const abs = resolvePreviewPath(target);
-  if (!abs) throw previewError(400, 'target must be an http(s) URL or a file path');
-  const { kind } = await statFileTarget(abs);
-  if (kind !== 'html') throw previewError(400, 'A file pane must be an HTML file');
-  return { kind: 'file', target: abs };
+  const { kind } = await validatePreviewFile(abs);
+  return { kind, target: await fs.realpath(abs) };
 }
 
 app.get('/api/panes/:sessionId', (req, res) => {
@@ -4021,12 +4037,8 @@ app.get('/api/panes/:sessionId', (req, res) => {
 app.post('/api/panes/:sessionId', async (req, res) => {
   try {
     const { target, title } = req.body || {};
-    if (typeof target !== 'string' || !target) return res.status(400).json({ error: 'target is required' });
-    const resolved = await resolvePaneTarget(target);
-    const { sessionId } = req.params;
-    const { pane, added, layout } = panes.add(sessionId, { ...resolved, title: typeof title === 'string' ? title.trim() : '' });
-    if (added) broadcastPanes(sessionId, layout);
-    res.json({ pane, added, layout });
+    if (typeof target !== 'string' || !target) throw previewError(400, 'target is required', 'bad_target');
+    res.json(panes.add(req.params.sessionId, { ...(await resolvePaneTarget(target)), title }));
   } catch (error) {
     paneRouteError(res, error, 'POST /api/panes');
   }
@@ -4034,11 +4046,7 @@ app.post('/api/panes/:sessionId', async (req, res) => {
 
 app.patch('/api/panes/:sessionId', (req, res) => {
   try {
-    const { active, order } = req.body || {};
-    const { sessionId } = req.params;
-    const { changed, layout } = panes.update(sessionId, { active, order });
-    if (changed) broadcastPanes(sessionId, layout);
-    res.json({ layout });
+    res.json({ layout: panes.reorder(req.params.sessionId, req.body?.order) });
   } catch (error) {
     paneRouteError(res, error, 'PATCH /api/panes');
   }
@@ -4047,8 +4055,7 @@ app.patch('/api/panes/:sessionId', (req, res) => {
 app.delete('/api/panes/:sessionId/:paneId', (req, res) => {
   const { sessionId, paneId } = req.params;
   const layout = panes.remove(sessionId, paneId);
-  if (!layout) return res.status(404).json({ error: `No pane ${paneId} in session ${sessionId}` });
-  broadcastPanes(sessionId, layout);
+  if (!layout) return res.status(404).json({ error: `No pane ${paneId} in session ${sessionId}`, code: 'no_pane' });
   res.json({ layout });
 });
 // #endregion
@@ -4067,11 +4074,7 @@ function parseReviewBody(body) {
   const { source, comments } = body || {};
   if (!source || !REVIEW_KIND_RE.test(source.kind)) throw previewError(400, 'source.kind is required');
   // The label is pasted into the terminal; an ESC could end bracketed paste and submit text.
-  const label = String(source.label || '')
-    // biome-ignore lint/suspicious/noControlCharactersInRegex: strips control characters on purpose
-    .replace(/[\x00-\x1f\x7f]/g, ' ')
-    .trim()
-    .slice(0, 200);
+  const label = oneLine(source.label, 200);
   if (!label) throw previewError(400, 'source.label is required');
   if (!Array.isArray(comments) || !comments.length || comments.length > REVIEW_MAX_COMMENTS) {
     throw previewError(400, `comments must hold 1 to ${REVIEW_MAX_COMMENTS} items`);

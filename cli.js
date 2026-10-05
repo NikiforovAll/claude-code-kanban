@@ -59,23 +59,23 @@ const COMMANDS = {
     },
   },
   pane: {
-    summary: 'Add live panes (a URL or a local HTML file) to a session\'s view, without switching to them',
+    summary: 'Add live panes (a URL or a local file) to a session\'s view, without switching to them',
     verbs: {
       add: {
         summary: 'Add a pane to a session; it opens as a tab next to Board, in the background',
-        usage: 'claude-code-kanban pane add <url|file.html> [--title <text>] [--session <id>] [--json]',
+        usage: 'claude-code-kanban pane add <url|file> [--title <text>] [--session <id>] [--json]',
         flags: {
-          '<url|file.html>': 'An http(s) URL, or a local HTML file (relative paths resolve against the current dir)',
-          '--title <text>': 'Tab title (default: the page title, else the host or file name)',
+          '<url|file>': 'An http(s) URL, or a local HTML, markdown, text or image file (relative paths resolve against the current dir)',
+          '--title <text>': 'Tab title (default: the host or file name)',
           [SESSION_FLAG]: SESSION_FLAG_HELP,
           '--json': 'Output JSON (the new pane)',
         },
-        notes: 'The board does not switch to the new pane; the user opens it. Prints the pane id.',
+        notes: 'The board does not switch to the new pane; the user opens it. Prints the pane id. The same target added again prints the pane it already has. A URL on the board\'s or the hub\'s own origin is refused, and a file must be one the board can preview.',
         examples: [
           'claude-code-kanban pane add http://localhost:8228',
           'claude-code-kanban pane add ./report.html --title Report',
         ],
-        planned: true,
+        run: runPaneAddCli,
       },
       rm: {
         summary: 'Remove a pane from a session',
@@ -85,16 +85,16 @@ const COMMANDS = {
           [SESSION_FLAG]: SESSION_FLAG_HELP,
         },
         examples: ['claude-code-kanban pane rm p3'],
-        planned: true,
+        run: runPaneRmCli,
       },
       list: {
         summary: 'List the panes of a session, in tab order',
         usage: 'claude-code-kanban pane list [--session <id>] [--json]',
         flags: {
           [SESSION_FLAG]: SESSION_FLAG_HELP,
-          '--json': 'Output JSON ({active, panes: [{id, kind, target, title, addedAt}]})',
+          '--json': 'Output JSON ({rev, panes: [{id, kind, target, title, addedAt}], updatedAt})',
         },
-        planned: true,
+        run: runPaneListCli,
       },
     },
   },
@@ -309,12 +309,6 @@ function runCli(argv) {
       printLeafHelp(cli.entry);
       process.exit(0);
     }
-    // Contract first: a planned verb ships its help before its server side exists.
-    if (cli.entry.planned) {
-      console.error(`${cli.entry.name} is not implemented yet.`);
-      process.exitCode = 1;
-      return true;
-    }
     cli.entry.run(cli.args, cli.entry)
       .then(code => { process.exitCode = code; })
       .catch(e => { console.error(e.message); process.exitCode = 1; });
@@ -368,7 +362,7 @@ function printNounHelp(noun) {
     console.log(`Usage: claude-code-kanban ${noun} <subcommand> [args] [--flags]\n`);
     console.log('Subcommands:');
     for (const [vName, v] of Object.entries(entry.verbs)) {
-      console.log(`  ${vName.padEnd(12)}${v.planned ? '(planned) ' : ''}${v.summary}`);
+      console.log(`  ${vName.padEnd(12)}${v.summary}`);
     }
     console.log(`\nRun \`claude-code-kanban help ${noun} <subcommand>\` for flags and examples.`);
   } else {
@@ -472,12 +466,14 @@ async function cliFetch(urlPath, init) {
   }
 }
 
-// Every write verb posts JSON and reports failure the same way; `label` names the verb
-// in the error line. Returns false when the server refused, so callers just return 1.
-// Returns the parsed response body ({} when empty), or null after printing the failure.
-async function cliPostJson(urlPath, body, label, headers = {}) {
+const cliPostJson = (urlPath, body, label, headers) => cliSendJson('POST', urlPath, body, label, headers);
+
+// Every write verb sends JSON and reports failure the same way; `label` names the verb
+// in the error line. Returns the parsed response body ({} when empty), or null after
+// printing the failure, so callers just return 1.
+async function cliSendJson(method, urlPath, body, label, headers = {}) {
   const res = await cliFetch(urlPath, {
-    method: 'POST',
+    method,
     headers: { 'Content-Type': 'application/json', ...headers },
     body: JSON.stringify(body)
   });
@@ -504,7 +500,7 @@ async function runPreviewCli(args) {
   // No $CLAUDE_CODE_SESSION_ID fallback: a session here switches the board's focus, and the
   // agent must not move the board unless asked.
   const sessionId = getArgValue(args, 'session') || process.env.PREVIEW_SESSION || null;
-  const abs = path.resolve(filePathArg);
+  const abs = cliPath(filePathArg);
   try {
     if (!await cliPostJson('/api/preview', { path: abs, sessionId }, 'Preview')) return 1;
     console.log(`Preview opened: ${abs}${sessionId ? ` (session ${sessionId})` : ''}`);
@@ -549,12 +545,65 @@ async function runDocLinkCli(args, entry) {
   const resolved = await resolveSessionArg(entry, args, 'linked docs are stored per session.');
   if (!resolved) return 1;
   const unlink = entry === COMMANDS.doc.verbs.unlink;
-  return postDocLink(linkUrl(filePathArg) || path.resolve(filePathArg), resolved.id, { unlink });
+  return postDocLink(cliTarget(filePathArg), resolved.id, { unlink });
 }
 
 async function runDocListCli(args, entry) {
   const resolved = await resolveSessionArg(entry, args, 'linked docs are stored per session.');
   return resolved ? printLinkedDocs(resolved.id, args.includes('--json')) : 1;
+}
+
+// The server resolves a path against its own cwd, so a relative one is made absolute here.
+const cliTarget = (arg) => linkUrl(arg) || cliPath(arg);
+
+const PANES_WHY = 'panes are stored per session.';
+
+const panesPath = (sessionId, paneId) =>
+  `/api/panes/${encodeURIComponent(sessionId)}${paneId ? `/${encodeURIComponent(paneId)}` : ''}`;
+
+async function runPaneAddCli(args, entry) {
+  const [target] = positionals(args, ['--session', '--title']);
+  if (!target) {
+    printLeafHelp(entry);
+    return 1;
+  }
+  const resolved = await resolveSessionArg(entry, args, PANES_WHY);
+  if (!resolved) return 1;
+  try {
+    const body = { target: cliTarget(target), title: getArgValue(args, 'title') || '' };
+    const out = await cliPostJson(panesPath(resolved.id), body, 'Pane add');
+    if (!out) return 1;
+    if (args.includes('--json')) console.log(JSON.stringify(out.pane, null, 2));
+    else console.log(`${out.pane.id}  ${out.pane.title}${out.added ? '' : ' (already there)'}`);
+    return 0;
+  } catch (e) { reportCliError(e); return 1; }
+}
+
+async function runPaneRmCli(args, entry) {
+  const [paneId] = positionals(args, ['--session']);
+  if (!paneId) {
+    printLeafHelp(entry);
+    return 1;
+  }
+  const resolved = await resolveSessionArg(entry, args, PANES_WHY);
+  if (!resolved) return 1;
+  try {
+    if (!await cliSendJson('DELETE', panesPath(resolved.id, paneId), undefined, 'Pane rm')) return 1;
+    console.log(`Removed pane ${paneId} from session ${resolved.id.slice(0, 8)}`);
+    return 0;
+  } catch (e) { reportCliError(e); return 1; }
+}
+
+async function runPaneListCli(args, entry) {
+  const resolved = await resolveSessionArg(entry, args, PANES_WHY);
+  if (!resolved) return 1;
+  try {
+    const layout = await cliGetJson(panesPath(resolved.id), 'Pane list');
+    if (args.includes('--json')) console.log(JSON.stringify(layout, null, 2));
+    else if (!layout.panes.length) console.log(`No panes for session ${resolved.id.slice(0, 8)}.`);
+    else printTable(['ID', 'KIND', 'TITLE', 'TARGET'], layout.panes.map((p) => [p.id, p.kind, p.title, p.target]));
+    return 0;
+  } catch (e) { reportCliError(e); return 1; }
 }
 
 async function printLinkedDocs(sessionId, asJson) {
@@ -980,12 +1029,17 @@ function positionals(args, valueFlags) {
 // The server matches the folder against known project paths by string, so an 8.3 short name
 // or a differently cased drive letter from the shell must become the long, canonical form.
 function canonicalDir(dir) {
-  try { return fs.realpathSync.native(path.resolve(dir)); } catch (_) { return path.resolve(dir); }
+  try { return fs.realpathSync.native(cliPath(dir)); } catch (_) { return cliPath(dir); }
+}
+
+// Every path argument goes through here. Git Bash hands a native node `/c/x` for `C:\x`.
+function cliPath(arg) {
+  return path.resolve(process.platform === 'win32' ? arg.replace(/^\/([a-zA-Z])(?=\/|$)/, '$1:/') : arg);
 }
 
 function textArg(args, name) {
   const file = getArgValue(args, `${name}-file`);
-  return file ? fs.readFileSync(path.resolve(file), 'utf8') : getArgValue(args, name);
+  return file ? fs.readFileSync(cliPath(file), 'utf8') : getArgValue(args, name);
 }
 
 async function runDispatchStartCli(argv) {

@@ -232,12 +232,37 @@ describe('CLI argument parsing', () => {
     assert.match(stderr, /--session is required[\s\S]*help doc list/);
   });
 
-  it('pane verbs are stubs until the pane store lands', async () => {
-    const verbs = ['add', 'rm', 'list'];
-    const runs = await Promise.all(verbs.map((verb) => runCli(['pane', verb, 'x'], env())));
-    runs.forEach(({ code, stderr }, i) => {
-      assert.equal(code, 1);
-      assert.match(stderr, new RegExp(`pane ${verbs[i]} is not implemented yet`));
+  it('pane verbs call the pane routes of the resolved session', async () => {
+    const seen = [];
+    const pane = { id: 'p1', kind: 'url', target: 'http://localhost:8228/', title: 'Sideshow', addedAt: 1 };
+    const srv = http.createServer((req, res) => {
+      let raw = '';
+      req.on('data', (c) => { raw += c; });
+      req.on('end', () => {
+        seen.push(`${req.method} ${req.url} ${raw}`.trim());
+        res.setHeader('Content-Type', 'application/json');
+        if (req.url.startsWith('/api/session/resolve')) return res.end('{"id":"abcdef12-full"}');
+        if (req.method === 'POST') return res.end(JSON.stringify({ pane, added: true, layout: {} }));
+        if (req.method === 'DELETE') return res.end('{"layout":{}}');
+        res.end(JSON.stringify({ rev: 1, panes: [pane], updatedAt: 1 }));
+      });
     });
+    await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    try {
+      const cliEnv = { CLAUDE_CONFIG_DIR: tempConfigDir(), PORT: String(srv.address().port) };
+      const run = (args) => runCli(['pane', ...args, '--session', 'abcdef'], cliEnv);
+      const [add, rm, list] = await Promise.all([run(['add', 'http://localhost:8228', '--title', 'Sideshow']), run(['rm', 'p1']), run(['list'])]);
+      assert.equal(add.code, 0, add.stderr);
+      assert.match(add.stdout, /^p1 {2}Sideshow/);
+      assert.equal(rm.code, 0, rm.stderr);
+      assert.match(list.stdout, /ID +KIND +TITLE +TARGET\np1 +url +Sideshow +http:\/\/localhost:8228\//);
+      assert.deepEqual(seen.filter((s) => !s.includes('/resolve')).sort(), [
+        'DELETE /api/panes/abcdef12-full/p1',
+        'GET /api/panes/abcdef12-full',
+        'POST /api/panes/abcdef12-full {"target":"http://localhost:8228/","title":"Sideshow"}',
+      ]);
+    } finally {
+      srv.close();
+    }
   });
 });

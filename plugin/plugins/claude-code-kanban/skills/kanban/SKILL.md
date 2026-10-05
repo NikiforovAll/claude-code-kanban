@@ -15,7 +15,7 @@ This session id is `${CLAUDE_SESSION_ID}`. `--session` defaults to it through `$
 | Command | Subcommands |
 |---|---|
 | `doc` | `link`, `unlink` a file or URL to the session · `list` its links · `preview` a file in a modal |
-| `pane` | `add` a URL or HTML file as a background tab · `rm` · `list` (planned) |
+| `pane` | `add` a URL or a local file as a background tab · `rm` · `list` |
 | `session` | `list` · `search <text>` · `open <id>` focuses it · `view <id>` stats and transcript path · `plan <id>` · `agents <id>` · `pin <id>` |
 | `task` | `list` for a session, a project or the whole board |
 | `project` | `list` |
@@ -43,4 +43,3 @@ To have card moves arrive in this session as instructions, the user types `/clau
 ## Troubleshooting
 
 - **"Cannot reach cck server…"** → the error names the config dir and the port it tried. Ask the user to start the server with `claude-code-kanban`. If it runs elsewhere, set `PORT=<n>` or `CCK_URL=<url>` when invoking the CLI.
-- **"… is not implemented yet"** → the command is in the contract, and this cck version does not run it yet. Stop and tell the user.
