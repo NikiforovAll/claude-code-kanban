@@ -4877,7 +4877,7 @@ function initSessionGroupsDnd() {
   sessionsList.addEventListener('contextmenu', sgOnContextMenu);
   // The Menu key fires contextmenu at the focused element, which by then is our menu.
   document.addEventListener('contextmenu', (e) => {
-    if (e.target.closest?.('.sg-menu')) e.preventDefault();
+    if (e.target.closest?.('.sg-menu, .pane-menu')) e.preventDefault();
   });
   sessionsList.addEventListener('keydown', (e) => {
     const input = e.target.closest?.('.sg-name-input');
@@ -4918,11 +4918,8 @@ function sgCloseMenu() {
   if (menu) menu.remove();
 }
 
-// Capture phase: the global handler would otherwise read these keys as sidebar shortcuts.
-function sgMenuKeydown(e) {
-  const menu = document.getElementById('sg-menu');
-  if (!menu || e.ctrlKey || e.altKey || e.metaKey) return;
-  const items = [...menu.querySelectorAll('.sg-menu-item')];
+// Run in the capture phase: the global handler would otherwise read these keys as sidebar shortcuts.
+function menuKeydown(e, items, close) {
   const i = items.indexOf(document.activeElement);
   e.stopPropagation();
   if (e.key === 'Enter' || e.key === ' ') return;
@@ -4932,8 +4929,21 @@ function sgMenuKeydown(e) {
   else if (matchKey(e, 'ArrowUp')) next = i < 0 ? items.length - 1 : (i - 1 + items.length) % items.length;
   else if (e.key === 'Home') next = 0;
   else if (e.key === 'End') next = items.length - 1;
-  else if (e.key === 'Escape' || e.key === 'Tab') sgCloseMenu();
+  else if (e.key === 'Escape' || e.key === 'Tab') close();
   if (next !== null) items[next]?.focus();
+}
+
+function placeMenu(menu, x, y) {
+  document.body.appendChild(menu);
+  const rect = menu.getBoundingClientRect();
+  menu.style.left = `${Math.min(x, window.innerWidth - rect.width - 8)}px`;
+  menu.style.top = `${Math.min(y, window.innerHeight - rect.height - 8)}px`;
+}
+
+function sgMenuKeydown(e) {
+  const menu = document.getElementById('sg-menu');
+  if (!menu || e.ctrlKey || e.altKey || e.metaKey) return;
+  menuKeydown(e, [...menu.querySelectorAll('.sg-menu-item')], sgCloseMenu);
 }
 
 function sgOpenMenuForKbSelection() {
@@ -4969,10 +4979,7 @@ function sgOpenMenu(x, y, kind, ref) {
         ${rows}
         <button class="sg-menu-item" role="menuitem" data-sg-move="__new__">+ New group…</button>
         ${current ? `<button class="sg-menu-item sg-menu-remove" role="menuitem" data-sg-move="__none__">Remove from “${escapeHtml(current.name)}”</button>` : ''}`;
-  document.body.appendChild(menu);
-  const rect = menu.getBoundingClientRect();
-  menu.style.left = `${Math.min(x, window.innerWidth - rect.width - 8)}px`;
-  menu.style.top = `${Math.min(y, window.innerHeight - rect.height - 8)}px`;
+  placeMenu(menu, x, y);
   document.addEventListener('keydown', sgMenuKeydown, true);
   menu.querySelector('.sg-menu-item')?.focus();
 }
@@ -11816,10 +11823,6 @@ function updatePaneFades() {
   paneTabs.classList.toggle('fade-r', scrollLeft + clientWidth < scrollWidth - 1);
 }
 
-function paneAddrHtml(pane) {
-  return `<div class="pane-addr"><span class="pane-chip ${pane.kind}">${pane.kind}</span><span class="pane-target">${escapeHtml(pane.target)}</span><span class="pane-who">added ${formatDate(pane.addedAt)}</span></div>`;
-}
-
 function paneCardHtml(title, text, button) {
   return `<div class="pane-card"><div class="pane-card-box">${PANE_ICONS.warning}<h3>${escapeHtml(title)}</h3><p>${escapeHtml(text)}</p><button class="btn btn-primary" data-pane-open>${escapeHtml(button)}</button></div></div>`;
 }
@@ -11836,7 +11839,6 @@ function mountPane(sid, pane) {
   const view = document.createElement('div');
   view.className = 'pane-view';
   view.dataset.key = key;
-  view.innerHTML = paneAddrHtml(pane);
   paneViews.appendChild(view);
   paneFrames.set(key, view);
   loadPaneView(sid, pane, view);
@@ -11925,21 +11927,78 @@ function closePane(paneId) {
   syncPanes();
 }
 
-function reloadActivePane() {
+// With no id, the active pane.
+function paneById(id) {
   const sid = paneSessionId();
-  const pane = sid && activePane(paneStore.get(sid));
+  if (!sid) return null;
+  const layout = paneStore.get(sid);
+  return layout.panes.find((p) => p.id === (id ?? layout.active)) || null;
+}
+
+function reloadPane(id) {
+  const pane = paneById(id);
   if (!pane) return;
-  unmountPane(sid, pane.id);
+  unmountPane(paneSessionId(), pane.id);
   syncPanes();
 }
 
-function openActivePaneExternally() {
-  const sid = paneSessionId();
-  const pane = sid && activePane(paneStore.get(sid));
+function openPaneExternally(id) {
+  const pane = paneById(id);
   if (!pane) return;
   if (pane.kind === 'url') hub.openExternal(pane.target);
-  else openPreviewByPath(pane.target, getSessionBaseDir(sid));
+  else openPreviewByPath(pane.target, getSessionBaseDir(paneSessionId()));
 }
+
+function copyPaneTarget(id) {
+  const pane = paneById(id);
+  if (!pane) return;
+  navigator.clipboard.writeText(pane.target).then(
+    () => showToast(pane.kind === 'url' ? 'URL copied' : 'Path copied'),
+    () => showToast('Copy failed'),
+  );
+}
+
+function closePaneMenu() {
+  document.removeEventListener('keydown', paneMenuKeydown, true);
+  document.getElementById('pane-menu')?.remove();
+}
+
+function paneMenuKeydown(e) {
+  const menu = document.getElementById('pane-menu');
+  if (!menu || e.ctrlKey || e.altKey || e.metaKey) return;
+  menuKeydown(e, [...menu.querySelectorAll('.pane-menu-item')], closePaneMenu);
+}
+
+function openPaneMenu(x, y, id) {
+  const pane = paneById(id);
+  if (!pane) return;
+  closePaneMenu();
+  const url = pane.kind === 'url';
+  const item = (act, label) =>
+    `<button class="pane-menu-item" role="menuitem" data-pane-act="${act}">${label}</button>`;
+  const menu = document.createElement('div');
+  menu.id = 'pane-menu';
+  menu.className = 'pane-menu';
+  menu.setAttribute('role', 'menu');
+  menu.setAttribute('aria-label', 'Pane actions');
+  menu.dataset.pane = pane.id;
+  menu.innerHTML =
+    `<div class="pane-menu-label" title="${escapeHtml(pane.target)}">${escapeHtml(pane.target)}</div>` +
+    item('copy', url ? 'Copy URL' : 'Copy path') +
+    item('open', url ? 'Open in new tab' : 'Open in preview') +
+    item('reload', 'Reload') +
+    item('close', 'Close pane');
+  placeMenu(menu, x, y);
+  document.addEventListener('keydown', paneMenuKeydown, true);
+  menu.querySelector('.pane-menu-item').focus();
+}
+
+const PANE_MENU_ACTIONS = {
+  copy: copyPaneTarget,
+  open: openPaneExternally,
+  reload: reloadPane,
+  close: closePane,
+};
 
 function paneTargetFrom(raw) {
   const value = raw.trim().replace(/^(["'])(.*)\1$/, '$2');
@@ -12017,8 +12076,23 @@ paneStrip.addEventListener('auxclick', (e) => {
   const tab = e.target.closest('.pane-tab');
   if (e.button === 1 && tab && tab.dataset.pane !== 'board') closePane(tab.dataset.pane);
 });
+paneStrip.addEventListener('contextmenu', (e) => {
+  const tab = e.target.closest('.pane-tab');
+  if (!tab || tab.dataset.pane === 'board') return;
+  e.preventDefault();
+  openPaneMenu(e.clientX, e.clientY, tab.dataset.pane);
+});
+document.addEventListener('click', (e) => {
+  const menu = document.getElementById('pane-menu');
+  if (!menu) return;
+  const act = e.target.closest('.pane-menu-item')?.dataset.paneAct;
+  if (act) PANE_MENU_ACTIONS[act](menu.dataset.pane);
+  if (act || !menu.contains(e.target)) closePaneMenu();
+});
+// A click inside a pane's frame never reaches this document, but it takes focus from the window.
+window.addEventListener('blur', closePaneMenu);
 paneViews.addEventListener('click', (e) => {
-  if (e.target.closest('[data-pane-open]')) openActivePaneExternally();
+  if (e.target.closest('[data-pane-open]')) openPaneExternally();
 });
 paneTabs.addEventListener('scroll', updatePaneFades, { passive: true });
 paneTabs.addEventListener(
@@ -12033,8 +12107,8 @@ paneTabs.addEventListener(
 );
 new ResizeObserver(updatePaneFades).observe(paneTabs);
 document.getElementById('pane-add').addEventListener('click', openPanePop);
-document.getElementById('pane-reload').addEventListener('click', reloadActivePane);
-document.getElementById('pane-open').addEventListener('click', openActivePaneExternally);
+document.getElementById('pane-reload').addEventListener('click', () => reloadPane());
+document.getElementById('pane-open').addEventListener('click', () => openPaneExternally());
 panePopDocs.addEventListener('click', (e) => {
   const row = e.target.closest('[data-promote]');
   if (row) addPane(row.dataset.promote);

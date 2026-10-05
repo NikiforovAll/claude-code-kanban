@@ -3632,50 +3632,6 @@ body.booting .boot-splash {
   display: flex;
 }
 
-.pane-addr {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 14px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-deep);
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-}
-
-.pane-chip {
-  padding: 1px 7px;
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  color: var(--text-secondary);
-  font-size: 10px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.pane-chip.url {
-  border-color: color-mix(in srgb, var(--team) 40%, transparent);
-  color: var(--team);
-}
-
-.pane-chip.file {
-  border-color: color-mix(in srgb, var(--plan) 50%, transparent);
-  color: var(--plan);
-}
-
-.pane-addr .pane-target {
-  overflow: hidden;
-  color: var(--text-secondary);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.pane-addr .pane-who {
-  margin-left: auto;
-  color: var(--text-muted);
-  white-space: nowrap;
-}
-
 .pane-frame {
   flex: 1;
   width: 100%;
@@ -8384,8 +8340,9 @@ pre.mermaid svg {
   color: var(--text-primary);
 }
 
-/* Move-to-group menu (right-click / long-press) */
-.sg-menu {
+/* Move-to-group menu (right-click / long-press); the pane tab menu shares the look */
+.sg-menu,
+.pane-menu {
   position: fixed;
   z-index: 3000;
   min-width: 180px;
@@ -8400,7 +8357,8 @@ pre.mermaid svg {
   gap: 1px;
 }
 
-.sg-menu-label {
+.sg-menu-label,
+.pane-menu-label {
   padding: 6px 8px 4px;
   font-size: 10px;
   text-transform: uppercase;
@@ -8408,7 +8366,8 @@ pre.mermaid svg {
   color: var(--text-muted);
 }
 
-.sg-menu-item {
+.sg-menu-item,
+.pane-menu-item {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -8425,12 +8384,26 @@ pre.mermaid svg {
 }
 
 .sg-menu-item:hover,
-.sg-menu-item:focus-visible {
+.sg-menu-item:focus-visible,
+.pane-menu-item:hover,
+.pane-menu-item:focus-visible {
   background: var(--bg-hover);
   outline: none;
 }
 
 .sg-menu-remove {
   color: var(--text-secondary);
+}
+
+.pane-menu {
+  font-family: var(--font-mono);
+}
+
+.pane-menu-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-transform: none;
+  letter-spacing: 0;
+  white-space: nowrap;
 }
 /* #endregion */
