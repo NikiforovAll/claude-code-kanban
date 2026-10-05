@@ -7280,25 +7280,52 @@ function reviewItems() {
   return (activeReview && reviewDrafts.get(activeReview.key)) || [];
 }
 
+// Only one review is live. Each modal mounts on top of the stack, keyed by its panel, and
+// closing it brings back the review beneath. `reviewBase` (the pane on screen) is live only
+// when the stack is empty.
+const reviewStack = [];
+let reviewBase = null;
+
 // `context(range)` adds view-specific citation fields to a comment on the host DOM;
 // `onComment()` runs after a comment is added; `onSent()` runs after a batch is delivered.
-function mountReview({
-  contentEl,
-  panelEl,
-  hostEl,
-  source,
-  frame,
-  context,
-  onComment,
-  onSent,
-  sessionId = currentSessionId,
-}) {
-  unmountReview();
+function mountReview(opts) {
+  dropReviewEntry(opts.panelEl);
+  reviewStack.push({ sessionId: currentSessionId, ...opts });
+  showTopReview();
+}
+
+// Unmounts only the review that panel holds, so a modal under another one keeps it.
+function unmountReview(panelEl) {
+  dropReviewEntry(panelEl);
+  showTopReview();
+}
+
+function setBaseReview(opts) {
+  if (reviewBase === opts) return;
+  reviewBase = opts;
+  showTopReview();
+}
+
+function dropReviewEntry(panelEl) {
+  const i = reviewStack.findIndex((o) => o.panelEl === panelEl);
+  if (i >= 0) reviewStack.splice(i, 1);
+}
+
+function showTopReview() {
+  const opts = reviewStack.at(-1) || reviewBase;
+  if (activeReview && activeReview.opts === opts) return;
+  stopReview();
+  if (opts) startReview(opts);
+}
+
+function startReview(opts) {
+  const { contentEl, panelEl, hostEl, source, frame, context, onComment, onSent, sessionId } = opts;
   if (!sessionId) return;
   const ctl = new AbortController();
   const { signal } = ctl;
   const key = reviewKey(sessionId, source);
   activeReview = {
+    opts,
     contentEl,
     panelEl,
     hostEl,
@@ -7326,9 +7353,7 @@ function mountReview({
   renderReviewPanel();
 }
 
-// With `ownPanel`, unmounts only the review that panel holds, so a modal under another one keeps it.
-function unmountReview(ownPanel) {
-  if (ownPanel && activeReview?.panelEl !== ownPanel) return;
+function stopReview() {
   closeReviewPop();
   if (!activeReview) return;
   const { ctl, panelEl, hostEl } = activeReview;
@@ -7954,16 +7979,21 @@ function openPreviewModal(filePath, content, kind) {
   document.getElementById('preview-modal-meta').textContent = filePath;
   document.getElementById('preview-modal').classList.add('visible');
   updatePreviewLinkBtn();
-  if (kind === 'image') return unmountReview();
-  mountReview({
-    contentEl: bodyEl,
-    panelEl: document.getElementById('preview-review-panel'),
-    hostEl: document.querySelector('#preview-modal .modal'),
-    source: { kind: 'file', label: fileName, path: filePath },
-    frame: isHtml ? bodyEl.querySelector('iframe') : null,
-    context: kind === 'text' ? (range) => ({ line: sourceLineOf(bodyEl, range) }) : null,
-    onSent: closePreviewModal,
-  });
+  const panelEl = document.getElementById('preview-review-panel');
+  const opts = fileReviewOpts(filePath, kind, bodyEl, isHtml ? bodyEl.querySelector('iframe') : null);
+  if (!opts) return unmountReview(panelEl);
+  mountReview({ ...opts, panelEl, hostEl: document.querySelector('#preview-modal .modal'), onSent: closePreviewModal });
+}
+
+// Null for an image, which takes no comments.
+function fileReviewOpts(filePath, kind, contentEl, frame) {
+  if (kind === 'image') return null;
+  return {
+    contentEl,
+    frame,
+    source: { kind: 'file', label: pathBasename(filePath), path: filePath },
+    context: kind === 'text' ? (range) => ({ line: sourceLineOf(contentEl, range) }) : null,
+  };
 }
 
 function sourceLineOf(bodyEl, range) {
@@ -11759,6 +11789,7 @@ const PANE_ICONS = {
 // Map order is recency: the first entry is the one evicted. Keys are `${sessionId}/${paneId}`,
 // and the limit spans sessions, so a session switch cannot pile up frames.
 const paneFrames = new Map();
+const paneReviews = new WeakMap();
 const paneViews = document.getElementById('pane-views');
 const paneTabs = document.getElementById('pane-tabs');
 const panePin = document.getElementById('pane-pin');
@@ -11789,6 +11820,7 @@ function syncPanes() {
   // Off screen, a framed page keeps focus and takes keys the user aims at the board.
   const focused = document.activeElement;
   if (paneViews.contains(focused) && (wantsTerminal() || !focused.closest('.pane-view.on'))) focused.blur();
+  syncPaneReview();
   if (!layout) return;
   for (const b of document.querySelectorAll('.pane-tool')) b.disabled = !pane;
   renderPaneTabs(sid, layout);
@@ -11888,9 +11920,10 @@ async function loadPaneView(sid, pane, view) {
     if (r.ok) data = await r.json();
   } catch {}
   if (data?.kind === 'html') {
-    const frame = createPreviewFrame('pane-frame', data.content);
+    const frame = createPreviewFrame('pane-frame', data.content + REVIEW_BRIDGE_TAG);
     frame.title = pane.title;
     view.appendChild(frame);
+    attachPaneReview(view, sid, fileReviewOpts(data.path, data.kind, frame, frame));
     return;
   }
   if (data?.kind) {
@@ -11899,6 +11932,7 @@ async function loadPaneView(sid, pane, view) {
     doc.dataset.path = data.path;
     renderPreviewContent(doc, data.path, data.content, data.kind);
     view.appendChild(doc);
+    attachPaneReview(view, sid, fileReviewOpts(data.path, data.kind, doc, null));
     return;
   }
   const [title, text] = !data
@@ -11908,6 +11942,21 @@ async function loadPaneView(sid, pane, view) {
       : ['Nothing to preview', 'cck cannot render this file.'];
   const button = data && data.exists !== false ? 'Open in editor' : 'Try in preview';
   view.insertAdjacentHTML('beforeend', paneCardHtml(title, text, button));
+}
+
+function attachPaneReview(view, sessionId, opts) {
+  if (!opts) return;
+  const panelEl = document.createElement('aside');
+  panelEl.className = 'review-panel';
+  panelEl.hidden = true;
+  view.appendChild(panelEl);
+  paneReviews.set(view, { ...opts, panelEl, hostEl: view, sessionId });
+  syncPaneReview();
+}
+
+function syncPaneReview() {
+  const view = wantsTerminal() ? null : paneViews.querySelector('.pane-view.on');
+  setBaseReview((view && paneReviews.get(view)) || null);
 }
 
 function unmountPane(sid, paneId) {
@@ -12057,28 +12106,50 @@ function openPreviewInPane() {
   addPane(filePath);
 }
 
-function describePaneInput(value) {
-  const t = paneTargetFrom(value);
+let panePopMatches = [];
+// -1 means Enter adds the typed value.
+let panePopIdx = -1;
+
+function describePaneInput() {
+  const doc = panePopMatches[panePopIdx];
+  const t = doc ? null : paneTargetFrom(panePopInput.value);
   panePopDetect.classList.toggle('error', !!t?.error);
-  panePopDetect.textContent = !t
-    ? 'http(s) → url pane · a file path → file pane'
-    : t.error || (t.kind === 'url' ? 'Kind: url · framed live' : 'Kind: file · rendered like the preview');
+  panePopDetect.textContent = doc
+    ? `Enter opens ${linkedDocLabel(doc)}`
+    : !t
+      ? 'Search linked docs · http(s) → url pane · a file path → file pane'
+      : t.error || (t.kind === 'url' ? 'Kind: url · framed live' : 'Kind: file · rendered like the preview');
+}
+
+function renderPanePopDocs() {
+  const docs = getSessionPreviewPaths(paneSessionId());
+  const query = panePopInput.value.trim();
+  panePopMatches = query ? rankFolders(docs, query) : docs;
+  panePopIdx = query && panePopMatches.length ? 0 : -1;
+  panePopDocs.innerHTML = panePopMatches.length
+    ? panePopMatches
+        .map(
+          (d, i) =>
+            `<button class="pane-pop-row${i === panePopIdx ? ' active' : ''}" data-doc="${escapeHtml(d)}" title="${escapeHtml(d)}">${linkUrl(d) ? PANE_ICONS.url : PANE_ICONS.file}<span>${escapeHtml(linkedDocLabel(d))}</span></button>`,
+        )
+        .join('')
+    : `<div class="pane-pop-empty">${docs.length ? 'No linked doc matches. Enter adds what you typed.' : 'This session has no linked docs.'}</div>`;
+  describePaneInput();
+}
+
+function movePanePopHighlight(step) {
+  panePopIdx = Math.max(-1, Math.min(panePopMatches.length - 1, panePopIdx + step));
+  panePopDocs.querySelectorAll('.pane-pop-row').forEach((row, i) => {
+    row.classList.toggle('active', i === panePopIdx);
+    if (i === panePopIdx) row.scrollIntoView({ block: 'nearest' });
+  });
+  describePaneInput();
 }
 
 function openPanePop() {
-  const sid = paneSessionId();
-  if (!sid) return;
-  const docs = getSessionPreviewPaths(sid);
-  panePopDocs.innerHTML = docs.length
-    ? docs
-        .map(
-          (d) =>
-            `<button class="pane-pop-row" data-promote="${escapeHtml(d)}" title="${escapeHtml(d)}">${linkUrl(d) ? PANE_ICONS.url : PANE_ICONS.file}<span>${escapeHtml(linkedDocLabel(d))}</span></button>`,
-        )
-        .join('')
-    : '<div class="pane-pop-empty">This session has no linked docs.</div>';
+  if (!paneSessionId()) return;
   panePopInput.value = '';
-  describePaneInput('');
+  renderPanePopDocs();
   panePop.classList.add('visible');
   panePopInput.focus();
 }
@@ -12135,29 +12206,25 @@ document.getElementById('pane-add').addEventListener('click', openPanePop);
 document.getElementById('pane-reload').addEventListener('click', () => reloadPane());
 document.getElementById('pane-open').addEventListener('click', () => openPaneExternally());
 panePopDocs.addEventListener('click', (e) => {
-  const row = e.target.closest('[data-promote]');
-  if (row) addPane(row.dataset.promote);
+  const row = e.target.closest('[data-doc]');
+  if (row) addPane(row.dataset.doc);
 });
-panePopInput.addEventListener('input', (e) => describePaneInput(e.target.value));
+panePopInput.addEventListener('input', renderPanePopDocs);
 panePop.addEventListener('keydown', (e) => {
-  const input = panePopInput;
   if (e.key === 'Escape') {
     e.preventDefault();
     e.stopPropagation();
     closePanePop();
     return;
   }
-  if (e.key === 'Enter' && e.target === input) {
+  if (e.target !== panePopInput) return;
+  if (e.key === 'Enter') {
     e.preventDefault();
-    addPane(input.value);
-    return;
+    addPane(panePopMatches[panePopIdx] ?? panePopInput.value);
+  } else if (matchKey(e, 'ArrowDown', 'ArrowUp')) {
+    e.preventDefault();
+    movePanePopHighlight(e.key === 'ArrowDown' ? 1 : -1);
   }
-  if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
-  const stops = [input, ...panePop.querySelectorAll('.pane-pop-row')];
-  const i = stops.indexOf(e.target);
-  if (i < 0 || stops.length < 2) return;
-  e.preventDefault();
-  stops[Math.max(0, Math.min(stops.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1)))].focus();
 });
 //#endregion
 

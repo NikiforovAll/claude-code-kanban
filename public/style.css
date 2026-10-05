@@ -3632,6 +3632,19 @@ body.booting .boot-splash {
   display: flex;
 }
 
+.pane-view:has(> .review-panel) {
+  flex-direction: row;
+}
+
+.pane-view:has(> .review-panel) > :not(.review-panel) {
+  width: auto;
+  min-width: 0;
+}
+
+.pane-view > .review-panel {
+  padding: 12px;
+}
+
 .pane-frame {
   flex: 1;
   width: 100%;
@@ -3762,7 +3775,8 @@ body.booting .boot-splash {
 }
 
 .pane-pop-row:hover,
-.pane-pop-row:focus-visible {
+.pane-pop-row:focus-visible,
+.pane-pop-row.active {
   background: var(--bg-hover);
   color: var(--text-primary);
 }
