@@ -31,5 +31,5 @@ A crashed session sends nothing. To learn when one ends, `SendMessage` it with `
 
 ```bash
 claude-code-kanban dispatch list --json            # still running in cck's terminal
-claude-code-kanban session peek <session-id> --limit 20
+claude-code-kanban session view <session-id>       # its transcript path; read the last lines
 ```

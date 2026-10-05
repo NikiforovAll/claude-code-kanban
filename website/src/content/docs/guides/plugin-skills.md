@@ -9,7 +9,7 @@ In Claude Code the skills have the plugin name as a prefix:
 
 | Skill | Who can start it | What it does |
 |---|---|---|
-| `/claude-code-kanban:kanban` | You only | Opens, pins, previews and links things on the board. |
+| `/claude-code-kanban:kanban` | You or Claude | Runs the board's CLI: links docs, adds panes, opens and pins sessions. |
 | `/claude-code-kanban:follow` | You only | Makes card moves on the board into instructions for this session. |
 | `/claude-code-kanban:dispatch` | You or Claude | Starts other sessions in the board's terminal. |
 
@@ -20,32 +20,22 @@ The skills need the board server. If the server is not running, a CLI command fa
 ## kanban
 
 ```text
-/claude-code-kanban:kanban [open|pin|unpin|preview|link] [target]
+/claude-code-kanban:kanban [doc|pane|session|task|project|dispatch] <subcommand> [target]
 ```
 
-Claude does not start this skill by itself. You type it. With no argument, it opens the current session on the board. It also pins the session and switches the board to active sessions.
+The skill is a thin wrapper over the [CLI](/claude-code-kanban/reference/cli/). The argument is a command and its subcommand, and the current session is the default target. Claude reads the CLI help, one level at a time, before it runs a command, so the help is the reference and the skill needs no change when a command does. With no argument, the skill changes nothing on the board and tells you what the commands can do.
 
-Each argument runs a [CLI](/claude-code-kanban/reference/cli/) command for the current session:
+The skill does not move the board while you work. `doc link` adds a file, or an `http(s)` URL such as a pull request, to the linked documents of the session. `pane add` adds a live pane as a tab next to Board, and the board does not switch to it. Only `doc preview` opens something on your screen: the preview modal. HTML renders in a sandboxed iframe. The server embeds the local stylesheets, scripts and images that the page refers to, such as `./style.css`, up to 4 MB for each file and 16 MB in total. Remote URLs load as usual.
 
-| Argument | CLI command |
-|---|---|
-| none, or `open` | `session open <id>` |
-| `pin` | `session pin <id>`, with `--sticky` to keep it at the top |
-| `unpin` | `session pin <id> --unpin` |
-| `preview <file>` | `preview-doc <file> --session <id>` |
-| `link <file\|url>` | `link-doc <file\|url> --session <id>`, with `--unlink` to remove it |
-
-`preview` opens a Markdown or HTML file in the preview modal of every open board tab. HTML renders in a sandboxed iframe. The server embeds the local stylesheets, scripts and images that the page refers to, such as `./style.css`, up to 4 MB for each file and 16 MB in total. Remote URLs load as usual. `link` adds any file, or an `http(s)` URL such as a pull request, to the linked documents of the session and opens no modal. Use `link` when you do not want a popup while you work.
-
-The skill can also read the board with no changes. It uses `session list`, `session view` and `session peek`. `session list` shows 10 rows and always includes pinned sessions. `session peek` shows the last 10 messages by default, and 50 at most.
+To learn what another session did, Claude reads its transcript. `session view <id>` prints the transcript path, and `session search <text> --json` prints it for each match.
 
 Example prompts:
 
 ```text
 /claude-code-kanban:kanban
-/claude-code-kanban:kanban pin sticky
-/claude-code-kanban:kanban preview docs/plan.md
-/claude-code-kanban:kanban link notes/findings.md
+/claude-code-kanban:kanban session pin --sticky
+/claude-code-kanban:kanban doc preview docs/plan.md
+/claude-code-kanban:kanban doc link notes/findings.md
 /claude-code-kanban:kanban show the active sessions from the last 12 hours
 ```
 

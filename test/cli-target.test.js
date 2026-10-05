@@ -40,8 +40,8 @@ describe('CLI server resolution', () => {
     await new Promise((r) => srv.listen(0, '127.0.0.1', r));
     try {
       const dir = tempConfigDir({ port: srv.address().port, pid: process.pid });
-      await runCli(['session', 'pins', '--json'], { CLAUDE_CONFIG_DIR: dir });
-      assert.deepEqual(hits, ['/api/session/pins']);
+      await runCli(['project', 'list', '--json'], { CLAUDE_CONFIG_DIR: dir });
+      assert.deepEqual(hits, ['/api/projects']);
     } finally {
       srv.close();
     }
@@ -226,9 +226,18 @@ describe('CLI argument parsing', () => {
     }
   });
 
-  it('link-doc needs a session for --list', async () => {
-    const { code, stderr } = await runCli(['link-doc', '--list'], { ...env(), PREVIEW_SESSION: '' });
+  it('doc list needs a session', async () => {
+    const { code, stderr } = await runCli(['doc', 'list'], { ...env(), PREVIEW_SESSION: '', CLAUDE_CODE_SESSION_ID: '' });
     assert.equal(code, 1);
-    assert.match(stderr, /--session is required[\s\S]*help link-doc/);
+    assert.match(stderr, /--session is required[\s\S]*help doc list/);
+  });
+
+  it('pane verbs are stubs until the pane store lands', async () => {
+    const verbs = ['add', 'rm', 'list'];
+    const runs = await Promise.all(verbs.map((verb) => runCli(['pane', verb, 'x'], env())));
+    runs.forEach(({ code, stderr }, i) => {
+      assert.equal(code, 1);
+      assert.match(stderr, new RegExp(`pane ${verbs[i]} is not implemented yet`));
+    });
   });
 });

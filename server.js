@@ -3819,7 +3819,7 @@ app.post('/api/preview', async (req, res) => {
 // API: Link a file to a session's sidebar docs without opening the preview modal.
 // Not extension-restricted, matching /api/file/resolve — an unpreviewable link just
 // opens in the editor. Unlinking skips the stat so a deleted file can still be removed.
-// An http(s) URL is linked as it is. `open` comes from `preview-doc <url>`: a tab cannot
+// An http(s) URL is linked as it is. `open` comes from `doc preview <url>`: a tab cannot
 // open a URL without a click, so the tab on screen offers an Open button.
 app.post('/api/document/link', async (req, res) => {
   try {

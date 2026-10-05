@@ -4,36 +4,99 @@ const { getClaudeDir, displayPath } = require('./lib/claude-dir');
 const { isGroupName, suggestGroupName } = require('./lib/dispatch-groups');
 const { linkUrl } = require('./public/link-url');
 // Help is auto-generated from this table — keep flags/usage in sync with `run` behavior.
+const SESSION_FLAG = '--session <id>';
+const SESSION_FLAG_HELP = 'Session, full id or unique prefix (default: $PREVIEW_SESSION, else $CLAUDE_CODE_SESSION_ID)';
+
 const COMMANDS = {
-  'preview-doc': {
-    summary: 'Open a markdown or HTML file in the preview modal on connected browser tabs',
-    usage: 'claude-code-kanban preview-doc <file.md|file.html|url> [--session <id>]',
-    flags: {
-      '--session <id>': 'Switch focused session in the browser (does not link the file). Required for a URL.',
+  doc: {
+    summary: 'Show documents to the user: link them to a session, or open the preview',
+    verbs: {
+      link: {
+        summary: 'Link a file or URL to a session, with no modal',
+        usage: 'claude-code-kanban doc link <file|url> [--session <id>]',
+        flags: {
+          '<file|url>': 'Any file type; one the preview cannot render opens in the editor. An http(s) URL opens in a new tab.',
+          [SESSION_FLAG]: SESSION_FLAG_HELP,
+        },
+        notes: 'The server keeps the link, so it shows when a browser tab opens later. Prefer this over `doc preview` while the user works.',
+        examples: [
+          'claude-code-kanban doc link ./design.md',
+          'claude-code-kanban doc link https://github.com/org/repo/pull/12',
+        ],
+        run: runDocLinkCli,
+      },
+      unlink: {
+        summary: 'Remove a linked file or URL from a session',
+        usage: 'claude-code-kanban doc unlink <file|url> [--session <id>]',
+        flags: {
+          '<file|url>': 'The linked path or URL; the file need not exist',
+          [SESSION_FLAG]: SESSION_FLAG_HELP,
+        },
+        examples: ['claude-code-kanban doc unlink ./design.md'],
+        run: runDocLinkCli,
+      },
+      list: {
+        summary: 'Print the docs linked to a session',
+        usage: 'claude-code-kanban doc list [--session <id>] [--json]',
+        flags: {
+          [SESSION_FLAG]: SESSION_FLAG_HELP,
+          '--json': 'Output JSON',
+        },
+        run: runDocListCli,
+      },
+      preview: {
+        summary: 'Open a markdown or HTML file in the preview modal on connected browser tabs',
+        usage: 'claude-code-kanban doc preview <file.md|file.html|url> [--session <id>]',
+        flags: {
+          [SESSION_FLAG]: 'Switch focused session in the browser (does not link the file; default: $PREVIEW_SESSION). For a URL, the session it links to (default: $PREVIEW_SESSION, else $CLAUDE_CODE_SESSION_ID).',
+        },
+        notes: 'The modal opens on the user\'s screen: the only command that does. HTML renders in a sandboxed iframe; local stylesheets, scripts and images are inlined. Relative paths resolve against the current dir. An http(s) URL is linked to the session instead, and the tab on screen shows an Open button.',
+        examples: [
+          'claude-code-kanban doc preview ./notes.md --session $CLAUDE_SESSION_ID',
+        ],
+        run: runPreviewCli,
+      },
     },
-    notes: 'HTML renders in a sandboxed iframe; local stylesheets, scripts and images are inlined. Relative paths resolve against the current dir. An http(s) URL is linked to the session instead, and the tab on screen shows an Open button.',
-    examples: [
-      'claude-code-kanban preview-doc ./notes.md --session $CLAUDE_SESSION_ID',
-    ],
-    run: runPreviewCli,
   },
-  'link-doc': {
-    summary: 'Link a file or URL to a session in the sidebar without opening the preview modal',
-    usage: 'claude-code-kanban link-doc <file|url> --session <id> [--unlink] | link-doc --list --session <id> [--json]',
-    flags: {
-      '<file|url>': 'Any file type; one the preview cannot render opens in the editor. An http(s) URL opens in a new tab.',
-      '--session <id>': 'Session to link the file to (required unless $PREVIEW_SESSION is set); full id or unique prefix',
-      '--unlink': 'Remove the link instead of adding it (the file need not exist)',
-      '--list': 'Print the docs the server holds for the session',
-      '--json': 'With --list: output JSON',
+  pane: {
+    summary: 'Add live panes (a URL or a local HTML file) to a session\'s view, without switching to them',
+    verbs: {
+      add: {
+        summary: 'Add a pane to a session; it opens as a tab next to Board, in the background',
+        usage: 'claude-code-kanban pane add <url|file.html> [--title <text>] [--session <id>] [--json]',
+        flags: {
+          '<url|file.html>': 'An http(s) URL, or a local HTML file (relative paths resolve against the current dir)',
+          '--title <text>': 'Tab title (default: the page title, else the host or file name)',
+          [SESSION_FLAG]: SESSION_FLAG_HELP,
+          '--json': 'Output JSON (the new pane)',
+        },
+        notes: 'The board does not switch to the new pane; the user opens it. Prints the pane id.',
+        examples: [
+          'claude-code-kanban pane add http://localhost:8228',
+          'claude-code-kanban pane add ./report.html --title Report',
+        ],
+        planned: true,
+      },
+      rm: {
+        summary: 'Remove a pane from a session',
+        usage: 'claude-code-kanban pane rm <pane-id> [--session <id>]',
+        flags: {
+          '<pane-id>': 'The id `pane add` or `pane list` printed',
+          [SESSION_FLAG]: SESSION_FLAG_HELP,
+        },
+        examples: ['claude-code-kanban pane rm p3'],
+        planned: true,
+      },
+      list: {
+        summary: 'List the panes of a session, in tab order',
+        usage: 'claude-code-kanban pane list [--session <id>] [--json]',
+        flags: {
+          [SESSION_FLAG]: SESSION_FLAG_HELP,
+          '--json': 'Output JSON ({active, panes: [{id, kind, target, title, addedAt}]})',
+        },
+        planned: true,
+      },
     },
-    notes: 'The server keeps the link, so it shows when a browser tab opens later.',
-    examples: [
-      'claude-code-kanban link-doc ./design.md --session $CLAUDE_SESSION_ID',
-      'claude-code-kanban link-doc https://github.com/org/repo/pull/12 --session $CLAUDE_SESSION_ID',
-      'claude-code-kanban link-doc --list --session $CLAUDE_SESSION_ID',
-    ],
-    run: runLinkDocCli,
   },
   session: {
     summary: 'List, search, open and inspect Claude Code sessions',
@@ -78,12 +141,13 @@ const COMMANDS = {
         run: runSessionOpenCli,
       },
       view: {
-        summary: 'Show full session stats (metadata + context window + cost)',
+        summary: 'Show full session stats (metadata + context window + cost) and the transcript path',
         usage: 'claude-code-kanban session view <id> [--json]',
         flags: {
           '<id>': 'Full session id, or a unique prefix',
           '--json': 'Output JSON instead of formatted sections',
         },
+        notes: 'To learn what a session did, read its transcript (a .jsonl file, newest lines last).',
         examples: ['claude-code-kanban session view $CLAUDE_SESSION_ID'],
         run: runSessionViewCli,
       },
@@ -121,26 +185,6 @@ const COMMANDS = {
           'claude-code-kanban session pin $CLAUDE_SESSION_ID --unpin',
         ],
         run: runSessionPinCli,
-      },
-      pins: {
-        summary: 'List sessions pinned/stickied via the dashboard or CLI',
-        usage: 'claude-code-kanban session pins [--sticky] [--json]',
-        flags: {
-          '--sticky': 'Only sessions in sticky state',
-          '--json': 'Output JSON instead of a table',
-        },
-        run: runSessionPinsCli,
-      },
-      peek: {
-        summary: 'Show the last N messages from a session',
-        usage: 'claude-code-kanban session peek <id> [--limit <n>] [--json]',
-        flags: {
-          '<id>': 'Full session id, or a unique prefix',
-          '--limit <n>': 'Number of messages (default: 10, max: 50)',
-          '--json': 'Output JSON instead of formatted lines',
-        },
-        examples: ['claude-code-kanban session peek 3fa9c1 --limit 20'],
-        run: runSessionPeekCli,
       },
     },
   },
@@ -231,7 +275,6 @@ for (const [noun, cmd] of Object.entries(COMMANDS)) {
   cmd.name = noun;
   for (const [verb, v] of Object.entries(cmd.verbs || {})) v.name = `${noun} ${verb}`;
 }
-
 function runCli(argv) {
   if (argv.includes('--version') || argv.includes('-v')) {
     console.log(require('./package.json').version);
@@ -266,7 +309,13 @@ function runCli(argv) {
       printLeafHelp(cli.entry);
       process.exit(0);
     }
-    cli.entry.run(cli.args)
+    // Contract first: a planned verb ships its help before its server side exists.
+    if (cli.entry.planned) {
+      console.error(`${cli.entry.name} is not implemented yet.`);
+      process.exitCode = 1;
+      return true;
+    }
+    cli.entry.run(cli.args, cli.entry)
       .then(code => { process.exitCode = code; })
       .catch(e => { console.error(e.message); process.exitCode = 1; });
     return true;
@@ -319,7 +368,7 @@ function printNounHelp(noun) {
     console.log(`Usage: claude-code-kanban ${noun} <subcommand> [args] [--flags]\n`);
     console.log('Subcommands:');
     for (const [vName, v] of Object.entries(entry.verbs)) {
-      console.log(`  ${vName.padEnd(12)}${v.summary}`);
+      console.log(`  ${vName.padEnd(12)}${v.planned ? '(planned) ' : ''}${v.summary}`);
     }
     console.log(`\nRun \`claude-code-kanban help ${noun} <subcommand>\` for flags and examples.`);
   } else {
@@ -447,12 +496,14 @@ function reportCliError(e) {
 async function runPreviewCli(args) {
   const filePathArg = args.find(a => !a.startsWith('--'));
   if (!filePathArg) {
-    printLeafHelp(COMMANDS['preview-doc']);
+    printLeafHelp(COMMANDS.doc.verbs.preview);
     return 1;
   }
-  const sessionId = getArgValue(args, 'session') || process.env.PREVIEW_SESSION || null;
   const url = linkUrl(filePathArg);
-  if (url) return previewUrlCli(url, sessionId);
+  if (url) return previewUrlCli(url, args);
+  // No $CLAUDE_CODE_SESSION_ID fallback: a session here switches the board's focus, and the
+  // agent must not move the board unless asked.
+  const sessionId = getArgValue(args, 'session') || process.env.PREVIEW_SESSION || null;
   const abs = path.resolve(filePathArg);
   try {
     if (!await cliPostJson('/api/preview', { path: abs, sessionId }, 'Preview')) return 1;
@@ -463,12 +514,9 @@ async function runPreviewCli(args) {
 
 // The modal cannot show a web page, so a URL is linked instead and the tab on screen
 // offers to open it.
-async function previewUrlCli(url, sessionArg) {
-  const entry = COMMANDS['preview-doc'];
-  if (!sessionArg) return usageError(entry, '--session is required for a URL: it is linked to the session.');
-  const resolved = await resolveSessionByIdOrPrefix(sessionArg);
-  if (!resolved) return 1;
-  return postDocLink(url, resolved.id, { open: true });
+async function previewUrlCli(url, args) {
+  const resolved = await resolveSessionArg(COMMANDS.doc.verbs.preview, args, 'a URL is linked to the session.');
+  return resolved ? postDocLink(url, resolved.id, { open: true }) : 1;
 }
 
 async function postDocLink(target, sessionId, { unlink = false, open = false } = {}) {
@@ -482,22 +530,31 @@ async function postDocLink(target, sessionId, { unlink = false, open = false } =
   } catch (e) { reportCliError(e); return 1; }
 }
 
-async function runLinkDocCli(args) {
-  const entry = COMMANDS['link-doc'];
+// Resolved to the full id because the browser keys linked docs by it, so a prefix won't match.
+async function resolveSessionArg(entry, args, why) {
+  const sessionArg = getArgValue(args, 'session') || process.env.PREVIEW_SESSION || process.env.CLAUDE_CODE_SESSION_ID;
+  if (!sessionArg) {
+    usageError(entry, `--session is required: ${why}`);
+    return null;
+  }
+  return resolveSessionByIdOrPrefix(sessionArg);
+}
+
+async function runDocLinkCli(args, entry) {
   const [filePathArg] = positionals(args, ['--session']);
-  const sessionArg = getArgValue(args, 'session') || process.env.PREVIEW_SESSION || null;
-  const list = args.includes('--list');
-  if (!filePathArg && !list) {
+  if (!filePathArg) {
     printLeafHelp(entry);
     return 1;
   }
-  if (!sessionArg) return usageError(entry, '--session is required: linked docs are stored per session.');
-  const unlink = args.includes('--unlink');
-  // Resolved here because the browser keys linked docs by full id, so a prefix won't match.
-  const resolved = await resolveSessionByIdOrPrefix(sessionArg);
+  const resolved = await resolveSessionArg(entry, args, 'linked docs are stored per session.');
   if (!resolved) return 1;
-  if (list) return printLinkedDocs(resolved.id, args.includes('--json'));
+  const unlink = entry === COMMANDS.doc.verbs.unlink;
   return postDocLink(linkUrl(filePathArg) || path.resolve(filePathArg), resolved.id, { unlink });
+}
+
+async function runDocListCli(args, entry) {
+  const resolved = await resolveSessionArg(entry, args, 'linked docs are stored per session.');
+  return resolved ? printLinkedDocs(resolved.id, args.includes('--json')) : 1;
 }
 
 async function printLinkedDocs(sessionId, asJson) {
@@ -693,53 +750,6 @@ async function runSessionPinCli(args) {
   } catch (e) { reportCliError(e); return 1; }
 }
 
-async function runSessionPinsCli(args) {
-  const stickyOnly = args.includes('--sticky');
-  const asJson = args.includes('--json');
-  const pinsMap = await fetchPinsMap();
-  const items = Object.entries(pinsMap)
-    .filter(([, state]) => !stickyOnly || state === 'sticky')
-    .map(([id, state]) => ({ id, state }));
-  if (!items.length) {
-    if (asJson) console.log('[]'); else console.log('No pinned sessions.');
-    return 0;
-  }
-  let sessions;
-  try {
-    sessions = await fetchSessionsList(items.length, items.map(p => p.id));
-  } catch (e) { reportCliError(e); return 1; }
-  const byId = new Map(sessions.map(s => [s.id, s]));
-  const rows = items
-    .map(p => {
-      const s = byId.get(p.id) || {};
-      return {
-        id: p.id,
-        state: p.state,
-        status: s.id ? sessionStatus(s) : '-',
-        age: s.modifiedAt ? formatAge(Date.now() - new Date(s.modifiedAt).getTime()) : '-',
-        project: path.basename(s.project || ''),
-        title: s.customTitle || s.name || s.slug || '',
-      };
-    })
-    .sort((a, b) => (a.state === b.state ? 0 : a.state === 'sticky' ? -1 : 1));
-  if (asJson) {
-    console.log(JSON.stringify(rows, null, 2));
-    return 0;
-  }
-  const w = {
-    id: 8,
-    state: Math.max(5, ...rows.map(r => r.state.length)),
-    status: Math.max(6, ...rows.map(r => r.status.length)),
-    age: Math.max(3, ...rows.map(r => r.age.length)),
-    project: Math.max(7, ...rows.map(r => r.project.length)),
-  };
-  console.log(`${'ID'.padEnd(w.id)}  ${'STATE'.padEnd(w.state)}  ${'STATUS'.padEnd(w.status)}  ${'AGE'.padEnd(w.age)}  ${'PROJECT'.padEnd(w.project)}  TITLE`);
-  for (const r of rows) {
-    console.log(`${r.id.slice(0, 8).padEnd(w.id)}  ${r.state.padEnd(w.state)}  ${r.status.padEnd(w.status)}  ${r.age.padEnd(w.age)}  ${r.project.padEnd(w.project)}  ${r.title}`);
-  }
-  return 0;
-}
-
 async function runSessionViewCli(args) {
   const idArg = args.find(a => !a.startsWith('--'));
   if (!idArg) {
@@ -796,47 +806,9 @@ async function runSessionViewCli(args) {
   if (rl.five_hour || rl.seven_day) {
     lines.push(`  Limits: 5h ${rl.five_hour?.used_percentage ?? '-'}% · 7d ${rl.seven_day?.used_percentage ?? '-'}%`);
   }
+  if (s.jsonlPath) lines.push(`  Transcript: ${s.jsonlPath}`);
   console.log(lines.join('\n'));
   return 0;
-}
-
-async function runSessionPeekCli(args) {
-  const idArg = args.find(a => !a.startsWith('--'));
-  if (!idArg) {
-    printLeafHelp(COMMANDS.session.verbs.peek);
-    return 1;
-  }
-  const parsed = parseLimit(args, { fallback: 10 });
-  if (!parsed.ok) return usageError(COMMANDS.session.verbs.peek, parsed.error);
-  const limit = parsed.limit;
-  const asJson = args.includes('--json');
-  const resolved = await resolveSessionByIdOrPrefix(idArg);
-  if (!resolved) return 1;
-  try {
-    const res = await cliFetch(`/api/sessions/${resolved.id}/messages?limit=${Math.min(limit, 50)}`);
-    if (!res.ok) {
-      console.error(`Peek failed (${res.status}): ${await res.text()}`);
-      return 1;
-    }
-    const { messages } = await res.json();
-    const ordered = [...messages].reverse();
-    if (asJson) {
-      console.log(JSON.stringify(ordered, null, 2));
-      return 0;
-    }
-    if (!ordered.length) {
-      console.log(`No messages for session ${resolved.id.slice(0, 8)}.`);
-      return 0;
-    }
-    console.log(`Session ${resolved.id.slice(0, 8)}${resolved.customTitle ? ` — ${resolved.customTitle}` : ''}`);
-    for (const m of ordered) {
-      const ts = m.timestamp ? new Date(m.timestamp).toLocaleTimeString('en-GB', { hour12: false }) : '--:--:--';
-      const label = (m.type === 'tool_use' ? (m.tool || 'tool') : m.type).padEnd(10);
-      const body = (m.text || m.detail || m.description || '').replace(/\s+/g, ' ').trim();
-      console.log(`[${ts}] ${label} ${body.slice(0, 120)}${body.length > 120 ? '…' : ''}`);
-    }
-    return 0;
-  } catch (e) { reportCliError(e); return 1; }
 }
 
 function printTable(header, rows) {
@@ -1086,4 +1058,4 @@ async function runSkillsGetCli(args) {
   return 0;
 }
 
-module.exports = { runCli };
+module.exports = { runCli, COMMANDS };

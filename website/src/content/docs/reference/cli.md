@@ -106,43 +106,89 @@ The server writes `server.json` on start, so the CLI finds a server that fell ba
 Cannot reach cck server for ~/.claude on port 3541. Start it first with "claude-code-kanban".
 ```
 
-Commands that change the browser view (`preview-doc`, `session open`) act on board tabs that are open at that moment. With no tab open, nothing shows. `link-doc` and `session pin` are also kept by the server, so a tab that opens later shows them.
+Commands that change the browser view (`doc preview`, `session open`) act on board tabs that are open at that moment. With no tab open, nothing shows. `doc link` and `session pin` are also kept by the server, so a tab that opens later shows them.
 
-## preview-doc
+`doc preview` is the only command that opens something on the user's screen. `doc link` and `pane add` change nothing on screen, so prefer them while the user works.
 
-Opens a Markdown or HTML file in the preview modal on every connected board tab.
+## doc
 
-```bash
-claude-code-kanban preview-doc <file.md|file.html|url> [--session <id>]
-```
+Links documents to a session, or shows one in the preview. Where a command takes `--session <id>`, you can give the full session id or a unique prefix. Without the flag, the CLI uses `$PREVIEW_SESSION`, else `$CLAUDE_CODE_SESSION_ID`, which Claude Code sets for its own session. The one exception is `doc preview` of a file, which reads `$PREVIEW_SESSION` only, because there the session switches the focus of the board.
 
-| Flag | What it does |
-| --- | --- |
-| `--session <id>` | Switches the focused session in the browser. It does not link the file to the session. `$PREVIEW_SESSION` is used when you omit the flag. Required for a URL. |
-
-Put the file path first. The CLI reads the first argument that does not start with `--` as the file. On success it prints `Preview opened: <absolute path>`.
-
-The preview cannot show a web page. With an `http://` or `https://` URL, `preview-doc` links it to the session, the same as `link-doc`, and prints `URL linked to session <id>: <url>`. A browser opens a new tab only after a click, so the board tab on screen shows a message with an **Open** button for 8 seconds. Tabs that are not on screen show the message without the button.
-
-## link-doc
-
-Links a file or a web URL to a session in the sidebar. It does not open the preview.
+### doc link
 
 ```bash
-claude-code-kanban link-doc <file|url> --session <id> [--unlink]
-claude-code-kanban link-doc --list --session <id> [--json]
+claude-code-kanban doc link <file|url> [--session <id>]
 ```
 
-| Flag | What it does |
-| --- | --- |
-| `--session <id>` | Session to link to. Required, unless `$PREVIEW_SESSION` is set. Accepts a unique id prefix. |
-| `--unlink` | Removes the link. The file does not need to exist. |
-| `--list` | Prints the documents the server keeps for the session. |
-| `--json` | With `--list`: prints JSON. |
+Links a file or a web URL to the session in the sidebar. It does not open the preview.
 
 An argument that starts with `http://` or `https://` is linked as a URL. The server does not check that the page exists, and it stores the URL in a normal form: the scheme and host in lower case, with the rest as you typed it. Other schemes are refused. A file argument resolves against the current directory and must exist.
 
 The server keeps linked documents in `<config-dir>/.cck/linked-docs.json`, up to 200 per session. Each board tab adds them to its own list when it connects, so a link made with no tab open shows when one opens. In that case the command also prints `No browser tab is open; the board shows it when one opens.` Unlinking in the board removes the server copy too. See [Session log and details](/claude-code-kanban/guides/session-details/).
+
+### doc unlink
+
+```bash
+claude-code-kanban doc unlink <file|url> [--session <id>]
+```
+
+Removes the link. The file does not need to exist.
+
+### doc list
+
+```bash
+claude-code-kanban doc list [--session <id>] [--json]
+```
+
+Prints the documents the server keeps for the session.
+
+### doc preview
+
+```bash
+claude-code-kanban doc preview <file.md|file.html|url> [--session <id>]
+```
+
+Opens a Markdown or HTML file in the preview modal on every connected board tab.
+
+| Flag | What it does |
+| --- | --- |
+| `--session <id>` | Switches the focused session in the browser. It does not link the file to the session. `$PREVIEW_SESSION` is used when you omit the flag. For a URL, the session that the URL is linked to, with the usual default. |
+
+Put the file path first. The CLI reads the first argument that does not start with `--` as the file. On success it prints `Preview opened: <absolute path>`.
+
+The preview cannot show a web page. With an `http://` or `https://` URL, `doc preview` links it to the session, the same as `doc link`, and prints `URL linked to session <id>: <url>`. A browser opens a new tab only after a click, so the board tab on screen shows a message with an **Open** button for 8 seconds. Tabs that are not on screen show the message without the button.
+
+## pane
+
+Adds live panes to a session's view: a web URL or a local HTML file, each a tab next to Board. The commands take `--session` like `doc`.
+
+:::note
+The pane commands are planned. This version has their help, but each one fails with `pane <verb> is not implemented yet.`
+:::
+
+### pane add
+
+```bash
+claude-code-kanban pane add <url|file.html> [--title <text>] [--session <id>] [--json]
+```
+
+Adds a pane and prints its id. The board does not switch to it; the user opens the tab. `--title` sets the tab title; without it the tab shows the page title, else the host or file name.
+
+### pane rm
+
+```bash
+claude-code-kanban pane rm <pane-id> [--session <id>]
+```
+
+Removes the pane.
+
+### pane list
+
+```bash
+claude-code-kanban pane list [--session <id>] [--json]
+```
+
+Lists the session's panes in tab order. `--json` prints `{active, panes: [{id, kind, target, title, addedAt}]}`.
 
 ## session
 
@@ -187,7 +233,7 @@ Focuses the session in connected board tabs.
 claude-code-kanban session view <id> [--json]
 ```
 
-Prints the session's title, status, project, branch and task counts. When the plugin's mod has recorded the session, it also prints the model, context window use, cost and rate limits. `--json` prints the full session object.
+Prints the session's title, status, project, branch and task counts. When the plugin's mod has recorded the session, it also prints the model, context window use, cost and rate limits. The last line is the path of the session's transcript (`Transcript: <path>.jsonl`): to learn what a session did, read it. `--json` prints the full session object, with the path in `jsonlPath`.
 
 ### session pin
 
@@ -195,23 +241,7 @@ Prints the session's title, status, project, branch and task counts. When the pl
 claude-code-kanban session pin <id> [--sticky] [--unpin]
 ```
 
-Pins the session in the sidebar. `--sticky` makes it sticky: always shown, at the top of the list. `--unpin` clears the pin and the sticky state. The server keeps pins in `<config-dir>/.cck/pins.json`, so `session list` and `session pins` see them.
-
-### session pins
-
-```bash
-claude-code-kanban session pins [--sticky] [--json]
-```
-
-Lists pinned sessions, sticky first. `--sticky` shows only sticky sessions.
-
-### session peek
-
-```bash
-claude-code-kanban session peek <id> [--limit <n>] [--json]
-```
-
-Prints the last messages of a session, oldest first. `--limit` sets the count. The default is 10 and the maximum is 50.
+Pins the session in the sidebar. `--sticky` makes it sticky: always shown, at the top of the list. `--unpin` clears the pin and the sticky state. The server keeps pins in `<config-dir>/.cck/pins.json`, so `session list` sees them.
 
 ### session plan
 
@@ -310,7 +340,7 @@ Prints a guide that ships with this version. The only guide now is `dispatch`, w
 | `CCK_URL` | Full base URL that subcommands connect to. Wins over `PORT` and `server.json`. |
 | `PORT` | The server port, and the port that subcommands connect to. |
 | `CLAUDE_CONFIG_DIR`, `CLAUDE_DIR` | Config dir, when `--dir` is not given. |
-| `CLAUDE_CODE_SESSION_ID` | Set by Claude Code. `dispatch start` records it as the parent. `dispatch list` uses it to find your dispatches. |
-| `PREVIEW_SESSION` | Default for `--session` in `preview-doc` and `link-doc`. |
+| `CLAUDE_CODE_SESSION_ID` | Set by Claude Code. Default for `--session` in `doc` and `pane`, after `PREVIEW_SESSION` (see [doc](#doc)). `dispatch start` records it as the parent. `dispatch list` uses it to find your dispatches. |
+| `PREVIEW_SESSION` | First default for `--session` in `doc` and `pane`. |
 
 For server and terminal settings, see [Configuration](/claude-code-kanban/reference/configuration/).

@@ -65,10 +65,10 @@ Its message arrives in your session as a new turn. A message arrives between the
 
 ```bash
 claude-code-kanban dispatch list
-claude-code-kanban session peek <session-id> --limit 20
+claude-code-kanban session view <session-id>
 ```
 
-`dispatch list` shows the sessions the current session started that still run in the board's terminal. Add `--all` to show every one on this board. A session that crashes sends nothing, so look here when a message is late.
+`dispatch list` shows the sessions the current session started that still run in the board's terminal. Add `--all` to show every one on this board. A session that crashes sends nothing, so look here when a message is late. `session view` prints the path of the session's transcript, so Claude can read what the session did.
 
 The card of a started session shows a send icon. Its tooltip names the session that started it, and a click reveals that session.
 
