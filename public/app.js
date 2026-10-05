@@ -6872,6 +6872,7 @@ const MODAL_CLOSERS = {
   'terminal-manager-modal': () => closeTerminalManager(),
   'new-session-modal': () => closeNewSession(),
   'confirm-modal': () => closeConfirmModal?.(false),
+  'pane-pop': () => closePanePop(),
 };
 
 document.addEventListener('keydown', (e) => {
@@ -7865,16 +7866,20 @@ function renderFrontmatterBlock(fm) {
 // allow-same-origin puts it on an opaque origin, so it cannot touch this app's
 // storage, DOM or API. srcdoc has no base URL, so the server has already embedded
 // the document's local assets (lib/inline-assets.js); remote refs load normally.
-function renderHtmlPreview(bodyEl, content) {
-  bodyEl.innerHTML = '';
+function createPreviewFrame(className, srcdoc) {
   const frame = document.createElement('iframe');
-  frame.className = 'preview-html-frame';
+  frame.className = className;
   frame.setAttribute('sandbox', 'allow-scripts allow-popups');
   frame.setAttribute('referrerpolicy', 'no-referrer');
+  frame.srcdoc = srcdoc;
+  return frame;
+}
+
+function renderHtmlPreview(bodyEl, content) {
+  bodyEl.innerHTML = '';
   // After the document's end the parser still adds the script to <body>, and it runs after
   // the page's own scripts.
-  frame.srcdoc = content + REVIEW_BRIDGE_TAG;
-  bodyEl.appendChild(frame);
+  bodyEl.appendChild(createPreviewFrame('preview-html-frame', content + REVIEW_BRIDGE_TAG));
 }
 
 function bindPreviewRelativeLinks(bodyEl) {
@@ -11742,7 +11747,13 @@ const PANE_ICONS = {
 const paneFrames = new Map();
 const paneViews = document.getElementById('pane-views');
 const paneTabs = document.getElementById('pane-tabs');
+const panePin = document.getElementById('pane-pin');
+const paneStrip = document.getElementById('pane-strip');
 const panePop = document.getElementById('pane-pop');
+const panePopInput = document.getElementById('pane-pop-input');
+const panePopDocs = document.getElementById('pane-pop-docs');
+const panePopDetect = document.getElementById('pane-pop-detect');
+let paneTabsHtml = '';
 
 function paneSessionId() {
   return viewMode === 'session' ? currentSessionId : null;
@@ -11758,23 +11769,20 @@ function syncPanes() {
   const pane = layout ? activePane(layout) : null;
   sessionView.classList.toggle('has-panes', !!layout);
   sessionView.classList.toggle('pane-mode', !!pane);
-  if (!layout) {
-    closePanePop();
-    for (const el of paneViews.children) el.classList.remove('on');
-    return;
-  }
-  if (wantsTerminal()) closePanePop();
+  if (!layout || wantsTerminal()) closePanePop();
   const key = pane ? mountPane(sid, pane) : null;
   for (const el of paneViews.children) el.classList.toggle('on', el.dataset.key === key);
   // Off screen, a framed page keeps focus and takes keys the user aims at the board.
-  if (!pane && paneViews.contains(document.activeElement)) document.activeElement.blur();
+  const focused = document.activeElement;
+  if (paneViews.contains(focused) && (wantsTerminal() || !focused.closest('.pane-view.on'))) focused.blur();
+  if (!layout) return;
   for (const b of document.querySelectorAll('.pane-tool')) b.disabled = !pane;
   renderPaneTabs(sid, layout);
 }
 
 function renderPaneTabs(sid, layout) {
   const tab = (id, cls, inner, tip) =>
-    `<div class="pane-tab ${cls}${layout.active === id || (id === 'board' && !activePane(layout)) ? ' on' : ''}" role="tab" data-pane="${escapeHtml(id)}" title="${escapeHtml(tip)}">${inner}</div>`;
+    `<div class="pane-tab ${cls}${layout.active === id ? ' on' : ''}" role="tab" data-pane="${escapeHtml(id)}" title="${escapeHtml(tip)}">${inner}</div>`;
   const board = tab(
     'board',
     'pinned',
@@ -11787,12 +11795,25 @@ function renderPaneTabs(sid, layout) {
     return tab(
       p.id,
       '',
-      `${PANE_ICONS[p.kind] || PANE_ICONS.file}<span class="pane-title">${escapeHtml(p.title)}</span><span class="state ${state}" title="${stateTip}"></span><button class="pane-x" data-close="${escapeHtml(p.id)}" title="Close pane" aria-label="Close pane">×</button>`,
+      `${PANE_ICONS[p.kind]}<span class="pane-title">${escapeHtml(p.title)}</span><span class="state ${state}" title="${stateTip}"></span><button class="pane-x" data-close="${escapeHtml(p.id)}" title="Close pane" aria-label="Close pane">×</button>`,
       p.target,
     );
   });
-  paneTabs.innerHTML = board + (panes.length ? '<span class="pane-sep"></span>' : '') + panes.join('');
+  const pin = board + (panes.length ? '<span class="pane-sep"></span>' : '');
+  const html = panes.join('');
+  // syncPanes runs on every task refresh and search keystroke; skip the rebuild and the reflows.
+  if (pin + html === paneTabsHtml) return;
+  paneTabsHtml = pin + html;
+  panePin.innerHTML = pin;
+  paneTabs.innerHTML = html;
   paneTabs.querySelector('.pane-tab.on')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  updatePaneFades();
+}
+
+function updatePaneFades() {
+  const { scrollLeft, scrollWidth, clientWidth } = paneTabs;
+  paneTabs.classList.toggle('fade-l', scrollLeft > 1);
+  paneTabs.classList.toggle('fade-r', scrollLeft + clientWidth < scrollWidth - 1);
 }
 
 function paneAddrHtml(pane) {
@@ -11800,11 +11821,10 @@ function paneAddrHtml(pane) {
 }
 
 function paneCardHtml(title, text, button) {
-  return `<div class="pane-card"><div class="pane-card-box">${PANE_ICONS.warning}<h3>${escapeHtml(title)}</h3><p>${escapeHtml(text)}</p><button class="pane-card-btn" data-pane-open>${escapeHtml(button)}</button></div></div>`;
+  return `<div class="pane-card"><div class="pane-card-box">${PANE_ICONS.warning}<h3>${escapeHtml(title)}</h3><p>${escapeHtml(text)}</p><button class="btn btn-primary" data-pane-open>${escapeHtml(button)}</button></div></div>`;
 }
 
-// Returns the key of the view to show. A blocked pane is a card with no frame, so it is
-// rebuilt on each visit and stays out of the LRU.
+// Returns the key of the view to show.
 function mountPane(sid, pane) {
   const key = `${sid}/${pane.id}`;
   const existing = paneFrames.get(key);
@@ -11816,29 +11836,10 @@ function mountPane(sid, pane) {
   const view = document.createElement('div');
   view.className = 'pane-view';
   view.dataset.key = key;
-  if (pane.kind === 'url' && pane.frameable === false) {
-    for (const el of paneViews.querySelectorAll('.pane-view.blocked')) el.remove();
-    view.classList.add('blocked');
-    const host = new URL(pane.target).hostname;
-    view.innerHTML =
-      paneAddrHtml(pane) +
-      paneCardHtml(
-        `${host} does not allow framing`,
-        'The site sends X-Frame-Options or a frame-ancestors policy. The pane keeps the link with the session.',
-        'Open in new tab',
-      );
-    paneViews.appendChild(view);
-    return key;
-  }
   view.innerHTML = paneAddrHtml(pane);
-  const frame = document.createElement('iframe');
-  frame.className = 'pane-frame';
-  frame.setAttribute('referrerpolicy', 'no-referrer');
-  frame.title = pane.title;
-  view.appendChild(frame);
   paneViews.appendChild(view);
   paneFrames.set(key, view);
-  loadPaneFrame(sid, pane, view);
+  loadPaneView(sid, pane, view);
   while (paneFrames.size > PANE_FRAME_LIMIT) {
     const [oldKey, oldView] = paneFrames.entries().next().value;
     paneFrames.delete(oldKey);
@@ -11847,26 +11848,42 @@ function mountPane(sid, pane) {
   return key;
 }
 
-async function loadPaneFrame(sid, pane, view) {
-  const frame = view.querySelector('iframe');
-  if (pane.kind === 'url') {
-    frame.setAttribute('sandbox', PANE_URL_SANDBOX);
-    frame.src = pane.target;
+async function loadPaneView(sid, pane, view) {
+  if (pane.frameable === false) {
+    view.insertAdjacentHTML(
+      'beforeend',
+      paneCardHtml(
+        `${new URL(pane.target).hostname} does not allow framing`,
+        'The site sends X-Frame-Options or a frame-ancestors policy. The pane keeps the link with the session.',
+        'Open in new tab',
+      ),
+    );
     return;
   }
-  // Same rules as the preview modal: opaque origin, assets inlined by the server.
-  frame.setAttribute('sandbox', 'allow-scripts allow-popups');
+  if (pane.kind === 'url') {
+    const frame = document.createElement('iframe');
+    frame.className = 'pane-frame';
+    frame.setAttribute('sandbox', PANE_URL_SANDBOX);
+    frame.setAttribute('referrerpolicy', 'no-referrer');
+    frame.title = pane.title;
+    frame.src = pane.target;
+    view.appendChild(frame);
+    return;
+  }
   let data = null;
   try {
-    const qs = new URLSearchParams({ path: pane.target, base: getSessionBaseDir(sid) });
+    const qs = new URLSearchParams({ path: pane.target });
+    const base = getSessionBaseDir(sid);
+    if (base) qs.set('base', base);
     const r = await fetch(`/api/preview?${qs}`);
     if (r.ok) data = await r.json();
   } catch {}
   if (data?.kind === 'html') {
-    frame.srcdoc = data.content;
+    const frame = createPreviewFrame('pane-frame', data.content);
+    frame.title = pane.title;
+    view.appendChild(frame);
     return;
   }
-  frame.remove();
   const [title, text] = !data
     ? ['Preview unavailable', 'The server could not read this file.']
     : data.exists === false
@@ -11879,7 +11896,6 @@ function unmountPane(sid, paneId) {
   const key = `${sid}/${paneId}`;
   paneFrames.get(key)?.remove();
   paneFrames.delete(key);
-  paneViews.querySelector(`.pane-view.blocked[data-key="${CSS.escape(key)}"]`)?.remove();
 }
 
 function selectPane(id) {
@@ -11896,7 +11912,7 @@ function cyclePane(step) {
   if (!sid || wantsTerminal()) return false;
   const layout = paneStore.get(sid);
   const ids = ['board', ...layout.panes.map((p) => p.id)];
-  const i = Math.max(0, ids.indexOf(activePane(layout) ? layout.active : 'board'));
+  const i = ids.indexOf(layout.active);
   selectPane(ids[(i + step + ids.length) % ids.length]);
   return true;
 }
@@ -11926,13 +11942,10 @@ function openActivePaneExternally() {
 }
 
 function paneTargetFrom(raw) {
-  const value = raw.trim().replace(/^"(.*)"$/, '$1');
+  const value = raw.trim().replace(/^(["'])(.*)\1$/, '$2');
   if (!value) return null;
   const url = linkUrl(value);
-  if (!url) {
-    const title = value.split(/[\\/]/).filter(Boolean).pop() || value;
-    return { kind: 'file', target: value, title };
-  }
+  if (!url) return { kind: 'file', target: value, title: linkedDocLabel(value) };
   const u = new URL(url);
   // allow-scripts with allow-same-origin on cck's own origin would lift the sandbox.
   const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(u.hostname);
@@ -11962,17 +11975,18 @@ function addPane(raw) {
 }
 
 function describePaneInput(value) {
-  if (!value.trim()) return 'http(s) → url pane · a path to an .html file → file pane';
   const t = paneTargetFrom(value);
-  if (t?.error) return t.error;
-  return t?.kind === 'url' ? 'Kind: url · framed live' : 'Kind: file · rendered like the HTML preview';
+  panePopDetect.classList.toggle('error', !!t?.error);
+  panePopDetect.textContent = !t
+    ? 'http(s) → url pane · a path to an .html file → file pane'
+    : t.error || (t.kind === 'url' ? 'Kind: url · framed live' : 'Kind: file · rendered like the HTML preview');
 }
 
 function openPanePop() {
   const sid = paneSessionId();
   if (!sid) return;
   const docs = getSessionPreviewPaths(sid);
-  document.getElementById('pane-pop-docs').innerHTML = docs.length
+  panePopDocs.innerHTML = docs.length
     ? docs
         .map(
           (d) =>
@@ -11980,18 +11994,17 @@ function openPanePop() {
         )
         .join('')
     : '<div class="pane-pop-empty">This session has no linked docs.</div>';
-  const input = document.getElementById('pane-pop-input');
-  input.value = '';
-  document.getElementById('pane-pop-detect').textContent = describePaneInput('');
+  panePopInput.value = '';
+  describePaneInput('');
   panePop.classList.add('visible');
-  input.focus();
+  panePopInput.focus();
 }
 
 function closePanePop() {
   panePop.classList.remove('visible');
 }
 
-paneTabs.addEventListener('click', (e) => {
+paneStrip.addEventListener('click', (e) => {
   const close = e.target.closest('[data-close]');
   if (close) {
     closePane(close.dataset.close);
@@ -12000,40 +12013,52 @@ paneTabs.addEventListener('click', (e) => {
   const tab = e.target.closest('.pane-tab');
   if (tab) selectPane(tab.dataset.pane);
 });
-paneTabs.addEventListener('auxclick', (e) => {
+paneStrip.addEventListener('auxclick', (e) => {
   const tab = e.target.closest('.pane-tab');
   if (e.button === 1 && tab && tab.dataset.pane !== 'board') closePane(tab.dataset.pane);
 });
 paneViews.addEventListener('click', (e) => {
   if (e.target.closest('[data-pane-open]')) openActivePaneExternally();
 });
-document.getElementById('pane-add').addEventListener('click', (e) => {
-  e.stopPropagation();
-  if (panePop.classList.contains('visible')) closePanePop();
-  else openPanePop();
-});
+paneTabs.addEventListener('scroll', updatePaneFades, { passive: true });
+paneTabs.addEventListener(
+  'wheel',
+  (e) => {
+    if (!e.deltaY || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+    if (paneTabs.scrollWidth <= paneTabs.clientWidth) return;
+    e.preventDefault();
+    paneTabs.scrollLeft += e.deltaY;
+  },
+  { passive: false },
+);
+new ResizeObserver(updatePaneFades).observe(paneTabs);
+document.getElementById('pane-add').addEventListener('click', openPanePop);
 document.getElementById('pane-reload').addEventListener('click', reloadActivePane);
 document.getElementById('pane-open').addEventListener('click', openActivePaneExternally);
-panePop.addEventListener('click', (e) => {
-  e.stopPropagation();
+panePopDocs.addEventListener('click', (e) => {
   const row = e.target.closest('[data-promote]');
   if (row) addPane(row.dataset.promote);
 });
-document.getElementById('pane-pop-input').addEventListener('input', (e) => {
-  document.getElementById('pane-pop-detect').textContent = describePaneInput(e.target.value);
-});
-document.getElementById('pane-pop-input').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') {
-    e.preventDefault();
-    addPane(e.target.value);
-  } else if (e.key === 'Escape') {
+panePopInput.addEventListener('input', (e) => describePaneInput(e.target.value));
+panePop.addEventListener('keydown', (e) => {
+  const input = panePopInput;
+  if (e.key === 'Escape') {
     e.preventDefault();
     e.stopPropagation();
     closePanePop();
+    return;
   }
-});
-document.addEventListener('click', (e) => {
-  if (!panePop.contains(e.target)) closePanePop();
+  if (e.key === 'Enter' && e.target === input) {
+    e.preventDefault();
+    addPane(input.value);
+    return;
+  }
+  if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+  const stops = [input, ...panePop.querySelectorAll('.pane-pop-row')];
+  const i = stops.indexOf(e.target);
+  if (i < 0 || stops.length < 2) return;
+  e.preventDefault();
+  stops[Math.max(0, Math.min(stops.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1)))].focus();
 });
 //#endregion
 
