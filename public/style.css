@@ -52,6 +52,7 @@
   --font-serif: var(--serif);
   /* reading-surface scale for the message-detail and preview modals (Ctrl +/-/0) */
   --modal-zoom: 1;
+  --review-panel-w: 320px;
 }
 
 /* Tokens derived from theme colors live on body, where color themes set those colors;
@@ -6044,7 +6045,6 @@ body.light .msg-assistant .msg-text {
 /* The comment panel opens beside the content, so the dialog grows by `--review-extra`
    instead of squeezing what is under review. */
 .modal.review-host {
-  --review-panel-w: 320px;
   --review-extra: 0px;
 }
 
