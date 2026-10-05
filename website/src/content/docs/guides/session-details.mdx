@@ -106,7 +106,7 @@ A pane is a live page or a file that shows as a tab next to Board in the session
 - Click × on a tab, or middle-click the tab, to close the pane.
 - Right-click a tab to copy its URL or path, open it in a new browser tab (a file opens in the Preview dialog), reload it or close it. The reload and open buttons at the right of the strip do the same for the pane on screen.
 
-A URL pane frames the page live. A site whose headers refuse framing (`X-Frame-Options` or CSP `frame-ancestors`) shows an **Open in new tab** card instead. A pane cannot show the board or the hub.
+A URL pane frames the page live. A site whose headers refuse framing (`X-Frame-Options` or CSP `frame-ancestors`) shows an **Open in new tab** card instead. A pane cannot show the board or the hub. While a URL pane has focus, board and hub shortcuts such as <kbd>Ctrl+`</kbd> do not work, because the page runs on another origin. Click outside the page first. File panes do not have this limit.
 
 A file pane renders HTML, Markdown, text, source code and images like the Preview dialog. In an HTML pane, web links open in a new browser tab. Select text to comment on it, as in the preview. In a Markdown, text or code pane, <kbd>Ctrl++</kbd> and <kbd>Ctrl+-</kbd> change the text size. Drag the edge of the page to change the reading width, and double-click the edge to reset it. The width applies to every file pane. A file pane does not reload when the file changes: use **Reload**.
 
