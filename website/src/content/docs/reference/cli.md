@@ -168,7 +168,9 @@ Adds live panes to a session's view: a web URL or a local file, each a tab next 
 claude-code-kanban pane add <url|file> [--title <text>] [--session <id>] [--json]
 ```
 
-Adds a pane and prints its id and title. The board does not switch to it; the user opens the tab. The same target added again prints the pane it already has, marked `(already there)`. A URL on the board's or the hub's own origin is refused. A file must be one the board can preview: HTML, markdown, text or an image.
+Adds a pane and prints its id and title. The board does not switch to it; the user opens the tab. The same target added again prints the pane it already has, marked `(already there)`. A URL on the board's or the hub's own origin is refused. A file must be one the board can preview: HTML, markdown, text or an image. A relative path resolves against the current directory.
+
+A site whose headers refuse framing (`X-Frame-Options` or CSP `frame-ancestors`) is still added, and a note line says that its pane shows an "Open in new tab" card. `--json` prints the new pane with `frameable`: `true`, `false`, or `null` when the check could not tell.
 
 ### pane rm
 

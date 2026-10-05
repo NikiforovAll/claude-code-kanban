@@ -96,6 +96,22 @@ The Preview dialog has a **Link to current session** toggle, an Open in editor b
 
 To link from a terminal or an agent, use `doc link <file|url>`. `doc preview` opens a file in the Preview dialog of open tabs and does not link it. `doc preview <url>` links the URL instead, and the tab on screen shows an **Open** button for 8 seconds. See the [CLI reference](/claude-code-kanban/reference/cli/).
 
+## Panes
+
+A pane is a live page or a file that shows as a tab next to Board in the session view. Use panes for pages you keep open while Claude works: a dev server, a report, a design. A session keeps up to 50 panes. The server stores them, so every browser tab and every browser shows the same panes.
+
+- Click **+** at the end of the tab strip to add a pane. Type to search the linked documents of the session, or paste an `http://` or `https://` URL or a file path. A relative path resolves against the session working directory. Press <kbd>Enter</kbd> to add it. Adding a target that is already open goes to its tab.
+- Click **Open in a pane** in the Preview dialog to move the file you are reading into a pane.
+- Press <kbd>[</kbd> or <kbd>]</kbd> to go to the previous or next tab.
+- Click × on a tab, or middle-click the tab, to close the pane.
+- Right-click a tab to copy its URL or path, open it in a new browser tab (a file opens in the Preview dialog), reload it or close it. The reload and open buttons at the right of the strip do the same for the pane on screen.
+
+A URL pane frames the page live. A site whose headers refuse framing (`X-Frame-Options` or CSP `frame-ancestors`) shows an **Open in new tab** card instead. A pane cannot show the board or the hub.
+
+A file pane renders HTML, Markdown, text, source code and images like the Preview dialog. In an HTML pane, web links open in a new browser tab. Select text to comment on it, as in the preview. In a Markdown, text or code pane, <kbd>Ctrl++</kbd> and <kbd>Ctrl+-</kbd> change the text size. Drag the edge of the page to change the reading width, and double-click the edge to reset it. The width applies to every file pane. A file pane does not reload when the file changes: use **Reload**.
+
+Claude adds panes with `pane add <url|file>`. The board does not switch to a new pane, so your view stays where it is. Any local server with a page works as a pane. For example, the scratch viewer: `scratch ui <pad> --browser` prints a URL that `pane add` takes, and the viewer reloads itself when the pad changes.
+
 ## Scratchpad
 
 Press <kbd>N</kbd> to open the scratchpad of the selected session. In the sidebar, <kbd>N</kbd> opens the scratchpad of the item under the cursor. Project headers and group headers have a scratchpad button for a project note or a group note.
