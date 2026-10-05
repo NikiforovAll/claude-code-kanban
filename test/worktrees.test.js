@@ -68,6 +68,18 @@ describe('createWorktreeStore', () => {
     assert.equal(s.resolve(SIDE), null);
   });
 
+  it('reads the submodule checkout from a submodule worktree pointer', () => {
+    const wt = path.join(REPO, 'sub', '.claude', 'worktrees', 'ui');
+    const { s } = store({ files: { [wt]: `gitdir: ${REPO}/.git/modules/sub/worktrees/ui\n` } });
+    assert.deepEqual(s.resolve(wt), { repo: path.join(REPO, 'sub'), name: 'ui' });
+  });
+
+  it('reads a nested submodule checkout', () => {
+    const wt = path.resolve('/dev/elsewhere');
+    const { s } = store({ files: { [wt]: `gitdir: ${REPO}/.git/modules/a/modules/b/worktrees/x` } });
+    assert.deepEqual(s.resolve(wt), { repo: path.join(REPO, 'a', 'b'), name: 'x' });
+  });
+
   it('falls back to the claude worktree path once the checkout is gone', () => {
     const { s } = store();
     assert.deepEqual(s.resolve(CLAUDE_WT), { repo: REPO, name: 'squid' });

@@ -4,7 +4,7 @@
 const express = require('express');
 const path = require('node:path');
 const fs = require('node:fs').promises;
-const { existsSync, readdirSync, readFileSync, writeFileSync, statSync, unlinkSync, mkdirSync, renameSync, openSync, readSync, closeSync, realpathSync } = require('node:fs');
+const { existsSync, readdirSync, readFileSync, writeFileSync, statSync, unlinkSync, mkdirSync, renameSync, openSync, readSync, closeSync, realpathSync, opendirSync } = require('node:fs');
 const _readline = require('node:readline');
 const chokidar = require('chokidar');
 const os = require('node:os');
@@ -1136,10 +1136,25 @@ function getScratchpadDir(id, meta) {
   // harness actually created. Probed only for worktree sessions, and only until one
   // of them exists — before that there is nothing to disambiguate and `byProject`,
   // right for a session started inside the worktree, stands.
+  // A resume from inside the worktree keys a fresh, empty dir on the worktree, so an empty
+  // `byProject` does not beat a `byRepo` that holds the session's files.
   const wt = worktrees.resolve(meta.project);
-  if (!wt || existsSync(byProject)) return byProject;
+  if (!wt) return byProject;
   const byRepo = path.join(SCRATCHPAD_ROOT, encodeProjectDirName(wt.repo), id, 'scratchpad');
-  return existsSync(byRepo) ? byRepo : byProject;
+  if (!existsSync(byRepo)) return byProject;
+  return isEmptyDir(byProject) ? byRepo : byProject;
+}
+
+function isEmptyDir(dir) {
+  let handle;
+  try {
+    handle = opendirSync(dir);
+    return handle.readSync() === null;
+  } catch {
+    return true;
+  } finally {
+    handle?.closeSync();
+  }
 }
 
 function buildSessionObject(id, meta, overrides = {}) {
