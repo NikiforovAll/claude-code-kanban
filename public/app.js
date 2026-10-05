@@ -624,7 +624,7 @@ async function fetchTasks(sessionId) {
     const switched = sessionId !== currentSessionId;
     currentSessionId = sessionId;
     markOpenSessionRead();
-    if (switched) autoRevealLog(sessionId, newTasks.length === 0);
+    if (switched) autoRevealLog(sessionId);
     // A task change in the open session must not reset the messages, the agents or the owner
     // filter: that reset rebuilds the panels and reads as a reload after each card move.
     if (!refresh) {
@@ -799,8 +799,11 @@ function setMessagePanelVisible(open) {
 }
 
 // An empty board has nothing to show, so the log opens in its place. It is not the user's choice,
-// so it is not stored, it closes again on a session with tasks, and a manual close sticks for that session.
-function autoRevealLog(sessionId, empty) {
+// so it is not stored, it closes again on a session with tasks or panes, and a manual close sticks for that session.
+// The pane layout loads after the switch, and applyPaneLayout asks again once it is in.
+function autoRevealLog(sessionId) {
+  if (!paneLayouts.has(sessionId)) return;
+  const empty = !currentTasks.length && !paneLayout(sessionId).panes.length;
   if (empty && !messagePanelOpen && !logDismissed.has(sessionId) && !wantsTerminal()) {
     setMessagePanelVisible(true);
     logAutoOpened = true;
@@ -11871,7 +11874,9 @@ function applyPaneLayout(sid, layout) {
     if (targets.get(p.id) !== p.target) unmountPane(sid, p.id);
   }
   if (!targets.has(getActivePaneId(sid))) setActivePaneId(sid, 'board');
-  if (sid === paneSessionId()) syncPanes();
+  if (sid !== paneSessionId()) return;
+  syncPanes();
+  autoRevealLog(sid);
 }
 
 async function fetchPaneLayout(sid) {
