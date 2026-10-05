@@ -11819,11 +11819,43 @@ const PANE_EMPTY_LAYOUT = { panes: [] };
 const paneLayouts = new Map();
 let paneLayoutSid = null;
 
-// Stub until the server probes framing (contract Step 4).
-const PANE_STUB_BLOCKED_HOSTS = new Set(['github.com', 'www.github.com', 'google.com', 'www.google.com']);
+// Targets the server's probe found refusing framing, kept for the page's life; a reload asks again.
+const paneRefused = new Set();
+
+// Every origin above a pane's frame. Firefox has no ancestorOrigins, so under the hub there it
+// names the board only; a refused frame then shows the browser's own error.
+function paneAncestors() {
+  return [location.origin, ...(location.ancestorOrigins || [])];
+}
 
 function paneFrameable(pane) {
-  return pane.kind !== 'url' || !PANE_STUB_BLOCKED_HOSTS.has(new URL(pane.target).hostname);
+  return pane.kind !== 'url' || !paneRefused.has(pane.target);
+}
+
+// allow-scripts with allow-same-origin on the board's or the hub's origin would lift the sandbox.
+// The server refuses the board's own names, but under the hub the page is served from the
+// hub's proxy port, which only the page knows. Any loopback name reaches the same port.
+const PANE_LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]']);
+
+function paneOwnOrigin(pane) {
+  if (pane.kind !== 'url') return false;
+  const u = new URL(pane.target);
+  const loopback = PANE_LOOPBACK.has(u.hostname);
+  return paneAncestors().some((origin) => {
+    const a = new URL(origin);
+    const host = a.hostname === u.hostname || (loopback && PANE_LOOPBACK.has(a.hostname));
+    return a.protocol === u.protocol && a.port === u.port && host;
+  });
+}
+
+async function probePaneFraming(sid, pane) {
+  const q = new URLSearchParams({ ancestors: paneAncestors().join(',') });
+  const { frameable } = await paneRequest(
+    'GET',
+    `/api/panes/${encodeURIComponent(sid)}/${encodeURIComponent(pane.id)}/framing?${q}`,
+  );
+  if (frameable === false) paneRefused.add(pane.target);
+  return frameable;
 }
 
 function paneLayout(sid) {
@@ -12011,11 +12043,18 @@ function mountPane(sid, pane) {
 }
 
 async function loadPaneView(sid, pane, view) {
+  if (paneOwnOrigin(pane)) {
+    view.insertAdjacentHTML(
+      'beforeend',
+      paneCardHtml('A pane cannot show the board or the hub', pane.target, 'Open in new tab'),
+    );
+    return;
+  }
   if (!paneFrameable(pane)) {
     view.insertAdjacentHTML(
       'beforeend',
       paneCardHtml(
-        `${new URL(pane.target).hostname} does not allow framing`,
+        `${new URL(pane.target).host} does not allow framing`,
         'The site sends X-Frame-Options or a frame-ancestors policy. The pane keeps the link with the session.',
         'Open in new tab',
       ),
@@ -12030,6 +12069,12 @@ async function loadPaneView(sid, pane, view) {
     frame.title = pane.title;
     frame.src = pane.target;
     view.appendChild(frame);
+    // Framed at once; a refusal found by the probe swaps the frame for the card.
+    if ((await probePaneFraming(sid, pane)) === false) {
+      frame.remove();
+      loadPaneView(sid, pane, view);
+      if (sid === paneSessionId()) syncPanes();
+    }
     return;
   }
   let data = null;
@@ -12175,6 +12220,7 @@ function reloadPane(id) {
   const pane = paneById(id);
   if (!pane) return;
   unmountPane(paneSessionId(), pane.id);
+  paneRefused.delete(pane.target);
   syncPanes();
 }
 
@@ -12242,12 +12288,7 @@ function paneTargetFrom(raw) {
   if (!value) return null;
   const url = linkUrl(value);
   if (!url) return { kind: 'file', target: value };
-  const u = new URL(url);
-  // allow-scripts with allow-same-origin on cck's own origin would lift the sandbox.
-  const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(u.hostname);
-  if (u.origin === location.origin || (loopback && u.port === location.port)) {
-    return { error: 'A pane cannot show this board' };
-  }
+  if (paneOwnOrigin({ kind: 'url', target: url })) return { error: 'A pane cannot show the board or the hub' };
   return { kind: 'url', target: url };
 }
 

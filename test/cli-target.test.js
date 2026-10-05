@@ -244,6 +244,7 @@ describe('CLI argument parsing', () => {
         if (req.url.startsWith('/api/session/resolve')) return res.end('{"id":"abcdef12-full"}');
         if (req.method === 'POST') return res.end(JSON.stringify({ pane, added: true, layout: {} }));
         if (req.method === 'DELETE') return res.end('{"layout":{}}');
+        if (req.url.endsWith('/framing')) return res.end('{"frameable":false}');
         res.end(JSON.stringify({ rev: 1, panes: [pane], updatedAt: 1 }));
       });
     });
@@ -253,12 +254,13 @@ describe('CLI argument parsing', () => {
       const run = (args) => runCli(['pane', ...args, '--session', 'abcdef'], cliEnv);
       const [add, rm, list] = await Promise.all([run(['add', 'http://localhost:8228', '--title', 'Sideshow']), run(['rm', 'p1']), run(['list'])]);
       assert.equal(add.code, 0, add.stderr);
-      assert.match(add.stdout, /^p1 {2}Sideshow/);
+      assert.match(add.stdout, /^p1 {2}Sideshow\nnote: localhost:8228 refuses framing/);
       assert.equal(rm.code, 0, rm.stderr);
       assert.match(list.stdout, /ID +KIND +TITLE +TARGET\np1 +url +Sideshow +http:\/\/localhost:8228\//);
       assert.deepEqual(seen.filter((s) => !s.includes('/resolve')).sort(), [
         'DELETE /api/panes/abcdef12-full/p1',
         'GET /api/panes/abcdef12-full',
+        'GET /api/panes/abcdef12-full/p1/framing',
         'POST /api/panes/abcdef12-full {"target":"http://localhost:8228/","title":"Sideshow"}',
       ]);
     } finally {

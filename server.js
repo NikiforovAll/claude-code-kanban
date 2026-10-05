@@ -57,6 +57,7 @@ const { createWorktreeStore } = require('./lib/worktrees');
 const { readGitBranch, sessionGitBranch } = require('./lib/git-branch');
 const { createLinkedDocStore, linkUrl } = require('./lib/linked-docs');
 const { createPaneStore, isOwnOrigin } = require('./lib/panes');
+const { probeFraming, parseOrigin } = require('./lib/frame-policy');
 const { pickFolder } = require('./lib/folder-dialog');
 const { loadSessionCache, saveSessionCache } = require('./lib/session-cache');
 const { countTaskDir } = require('./lib/task-counts');
@@ -4050,6 +4051,27 @@ app.patch('/api/panes/:sessionId', (req, res) => {
     res.json({ layout: panes.reorder(req.params.sessionId, req.body?.order) });
   } catch (error) {
     paneRouteError(res, error, 'PATCH /api/panes');
+  }
+});
+
+// Probes only a pane's own target, so the route cannot fetch an arbitrary URL. `ancestors` is
+// the comma-separated origins above the frame: the board's page origin, then the hub's. The CLI
+// has no page, so without it the board's own origin and HUB_URL stand in; under the hub the page
+// is on the proxy port, which agrees for 'self', 'none' and policies that name neither.
+app.get('/api/panes/:sessionId/:paneId/framing', async (req, res) => {
+  try {
+    const { sessionId, paneId } = req.params;
+    const pane = panes.get(sessionId).panes.find((p) => p.id === paneId && p.kind === 'url');
+    if (!pane) throw previewError(404, `No URL pane ${paneId} in session ${sessionId}`, 'no_pane');
+    const fallback = [`http://localhost:${boardPort}`, process.env.HUB_URL].filter(Boolean).join(',');
+    const ancestors = String(req.query.ancestors || fallback)
+      .split(',')
+      .slice(0, 5)
+      .filter((o) => parseOrigin(o));
+    if (!ancestors.length) throw previewError(400, 'ancestors must name at least one http(s) origin', 'bad_ancestors');
+    res.json({ frameable: await probeFraming(pane.target, ancestors) });
+  } catch (error) {
+    paneRouteError(res, error, 'GET /api/panes/framing');
   }
 });
 

@@ -68,11 +68,11 @@ const COMMANDS = {
           '<url|file>': 'An http(s) URL, or a local HTML, markdown, text or image file (relative paths resolve against the current dir)',
           '--title <text>': 'Tab title (default: the host or file name)',
           [SESSION_FLAG]: SESSION_FLAG_HELP,
-          '--json': 'Output JSON (the new pane)',
+          '--json': 'Output JSON (the new pane, with frameable: true, false, or null when unknown)',
         },
-        notes: 'The board does not switch to the new pane; the user opens it. Prints the pane id. The same target added again prints the pane it already has. A URL on the board\'s or the hub\'s own origin is refused, and a file must be one the board can preview.',
+        notes: 'The board does not switch to the new pane; the user opens it. Prints the pane id. The same target added again prints the pane it already has. A URL on the board\'s or the hub\'s own origin is refused, and a file must be one the board can preview. A site whose headers refuse framing (X-Frame-Options, CSP frame-ancestors) is still added, but its pane shows an "Open in new tab" card, and a note line says so.',
         examples: [
-          'claude-code-kanban pane add http://localhost:8228',
+          'claude-code-kanban pane add http://localhost:5173',
           'claude-code-kanban pane add ./report.html --title Report',
         ],
         run: runPaneAddCli,
@@ -573,8 +573,18 @@ async function runPaneAddCli(args, entry) {
     const body = { target: cliTarget(target), title: getArgValue(args, 'title') || '' };
     const out = await cliPostJson(panesPath(resolved.id), body, 'Pane add');
     if (!out) return 1;
-    if (args.includes('--json')) console.log(JSON.stringify(out.pane, null, 2));
-    else console.log(`${out.pane.id}  ${out.pane.title}${out.added ? '' : ' (already there)'}`);
+    const { pane } = out;
+    let frameable;
+    if (pane.kind === 'url') {
+      try {
+        ({ frameable } = await cliGetJson(`${panesPath(resolved.id, pane.id)}/framing`, 'Pane framing'));
+      } catch {}
+    }
+    if (args.includes('--json')) console.log(JSON.stringify({ ...pane, frameable }, null, 2));
+    else console.log(`${pane.id}  ${pane.title}${out.added ? '' : ' (already there)'}`);
+    if (frameable === false && !args.includes('--json')) {
+      console.log(`note: ${new URL(pane.target).host} refuses framing, so the pane shows an "Open in new tab" card. Look for a URL of the same content that allows framing.`);
+    }
     return 0;
   } catch (e) { reportCliError(e); return 1; }
 }
