@@ -3640,6 +3640,25 @@ body.booting .boot-splash {
   background: #fff;
 }
 
+.pane-doc {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px max(24px, calc((100% - 860px) / 2));
+  font-size: 13px;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.pane-doc .preview-image {
+  display: block;
+  max-width: 100%;
+  margin: 0 auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-hover);
+}
+
 .pane-card {
   display: grid;
   flex: 1;

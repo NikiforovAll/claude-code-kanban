@@ -7889,7 +7889,7 @@ function renderHtmlPreview(bodyEl, content) {
   bodyEl.appendChild(createPreviewFrame('preview-html-frame', content + REVIEW_BRIDGE_TAG));
 }
 
-function bindPreviewRelativeLinks(bodyEl) {
+function bindPreviewRelativeLinks(bodyEl, baseOf = () => currentPreviewPath) {
   if (bodyEl.dataset.relLinkBound) return;
   bodyEl.addEventListener('click', (e) => {
     const a = e.target.closest('a[href]');
@@ -7901,7 +7901,7 @@ function bindPreviewRelativeLinks(bodyEl) {
     if (isAbsoluteUrl) return;
     const cleanHref = href.replace(/#.*$/, '');
     e.preventDefault();
-    openPreviewByPath(cleanHref, isAbsolutePath ? undefined : currentPreviewPath, openFileInEditor);
+    openPreviewByPath(cleanHref, isAbsolutePath ? undefined : baseOf(), openFileInEditor);
   });
   bodyEl.dataset.relLinkBound = '1';
 }
@@ -7924,6 +7924,22 @@ function renderSourcePreview(filePath, content) {
   return `<pre class="preview-source"><code class="hljs">${escapeHtml(content)}</code></pre>`;
 }
 
+// Every kind but html, which needs a frame.
+function renderPreviewContent(bodyEl, filePath, content, kind) {
+  if (kind === 'text') {
+    bodyEl.innerHTML = renderSourcePreview(filePath, content);
+  } else if (kind === 'image') {
+    const img = document.createElement('img');
+    img.className = 'preview-image';
+    img.src = `/api/preview/image?${new URLSearchParams({ path: filePath })}`;
+    img.alt = filePath.split(/[\\/]/).pop();
+    bodyEl.replaceChildren(img);
+  } else {
+    const { fm, body } = splitFrontmatter(content);
+    bodyEl.innerHTML = (fm ? renderFrontmatterBlock(fm) : '') + renderMarkdown(body);
+  }
+}
+
 function openPreviewModal(filePath, content, kind) {
   currentPreviewPath = filePath;
   const fileName = filePath.split(/[\\/]/).pop();
@@ -7932,20 +7948,8 @@ function openPreviewModal(filePath, content, kind) {
   const isHtml = kind === 'html';
   document.querySelector('#preview-modal .modal').classList.toggle('preview-html', isHtml);
   bindPreviewRelativeLinks(bodyEl);
-  if (isHtml) {
-    renderHtmlPreview(bodyEl, content);
-  } else if (kind === 'text') {
-    bodyEl.innerHTML = renderSourcePreview(filePath, content);
-  } else if (kind === 'image') {
-    const img = document.createElement('img');
-    img.className = 'preview-image';
-    img.src = `/api/preview/image?${new URLSearchParams({ path: filePath })}`;
-    img.alt = fileName;
-    bodyEl.replaceChildren(img);
-  } else {
-    const { fm, body } = splitFrontmatter(content);
-    bodyEl.innerHTML = (fm ? renderFrontmatterBlock(fm) : '') + renderMarkdown(body);
-  }
+  if (isHtml) renderHtmlPreview(bodyEl, content);
+  else renderPreviewContent(bodyEl, filePath, content, kind);
   document.getElementById('preview-modal-meta').textContent = filePath;
   document.getElementById('preview-modal').classList.add('visible');
   updatePreviewLinkBtn();
@@ -11886,12 +11890,19 @@ async function loadPaneView(sid, pane, view) {
     view.appendChild(frame);
     return;
   }
-  const [title, text] = !data
-    ? ['Preview unavailable', 'The server could not read this file.']
+  if (data?.kind) {
+    const doc = document.createElement('div');
+    doc.className = 'pane-doc rendered-md';
+    renderPreviewContent(doc, data.path, data.content, data.kind);
+    view.appendChild(doc);
+    return;
+  }
+  const [title, text, button] = !data
+    ? ['Preview unavailable', 'The server could not read this file.', 'Try in preview']
     : data.exists === false
-      ? ['File not found', pane.target]
-      : ['Not an HTML file', 'A file pane frames HTML. Open it in the preview window instead.'];
-  view.insertAdjacentHTML('beforeend', paneCardHtml(title, text, 'Open in preview'));
+      ? ['File not found', pane.target, 'Try in preview']
+      : ['Nothing to preview', 'cck cannot render this file.', 'Open in editor'];
+  view.insertAdjacentHTML('beforeend', paneCardHtml(title, text, button));
 }
 
 function unmountPane(sid, paneId) {
@@ -11946,7 +11957,7 @@ function openPaneExternally(id) {
   const pane = paneById(id);
   if (!pane) return;
   if (pane.kind === 'url') hub.openExternal(pane.target);
-  else openPreviewByPath(pane.target, getSessionBaseDir(paneSessionId()));
+  else openPreviewByPath(pane.target, getSessionBaseDir(paneSessionId()), openFileInEditor);
 }
 
 function copyPaneTarget(id) {
@@ -12037,8 +12048,8 @@ function describePaneInput(value) {
   const t = paneTargetFrom(value);
   panePopDetect.classList.toggle('error', !!t?.error);
   panePopDetect.textContent = !t
-    ? 'http(s) → url pane · a path to an .html file → file pane'
-    : t.error || (t.kind === 'url' ? 'Kind: url · framed live' : 'Kind: file · rendered like the HTML preview');
+    ? 'http(s) → url pane · a file path → file pane'
+    : t.error || (t.kind === 'url' ? 'Kind: url · framed live' : 'Kind: file · rendered like the preview');
 }
 
 function openPanePop() {
@@ -12093,7 +12104,13 @@ document.addEventListener('click', (e) => {
 window.addEventListener('blur', closePaneMenu);
 paneViews.addEventListener('click', (e) => {
   if (e.target.closest('[data-pane-open]')) openPaneExternally();
+  const a = e.target.closest('.pane-doc a[href]');
+  if (a && /^https?:/i.test(a.getAttribute('href'))) {
+    e.preventDefault();
+    hub.openExternal(a.href);
+  }
 });
+bindPreviewRelativeLinks(paneViews, () => paneById()?.target);
 paneTabs.addEventListener('scroll', updatePaneFades, { passive: true });
 paneTabs.addEventListener(
   'wheel',
