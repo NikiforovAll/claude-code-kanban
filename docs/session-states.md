@@ -8,6 +8,8 @@ Change a signal, a window, the filter or a drawn state, and update this doc in t
 
 The server builds these fields on every session object (`buildSessionObject` and the agent pass in `/api/sessions`, `server.js`).
 
+"Written" below means the transcript's size or inode changed (`transcriptActivityMs`). A new mtime alone is not a write, because other processes set it without writing (#50).
+
 | Field | True when | Window |
 |---|---|---|
 | `hasMessages` | The transcript is larger than 1000 bytes. A session without messages is never active. | none |
