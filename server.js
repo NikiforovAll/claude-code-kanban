@@ -4,7 +4,7 @@
 const express = require('express');
 const path = require('node:path');
 const fs = require('node:fs').promises;
-const { existsSync, readdirSync, readFileSync, writeFileSync, statSync, unlinkSync, mkdirSync, renameSync, openSync, readSync, closeSync, realpathSync, opendirSync } = require('node:fs');
+const { existsSync, readdirSync, readFileSync, writeFileSync, statSync, unlinkSync, mkdirSync, renameSync, openSync, readSync, closeSync, realpathSync } = require('node:fs');
 const _readline = require('node:readline');
 const chokidar = require('chokidar');
 const os = require('node:os');
@@ -44,7 +44,7 @@ const {
 } = require('./lib/parsers');
 const { inlineHtmlAssets, MIME_BY_EXT } = require('./lib/inline-assets');
 const { buildDecision, decisionFileName, isDecisionFile, approvalsFrom, boardRefusal } = require('./lib/approvals');
-const { getClaudeDir, getArgValue, storageNamespace, isDefaultClaudeDir, encodeProjectDirName } = require('./lib/claude-dir');
+const { getClaudeDir, getArgValue, storageNamespace, isDefaultClaudeDir } = require('./lib/claude-dir');
 const { readTerminalConfig } = require('./lib/terminal');
 const { createTerminalClient } = require('./lib/terminal-client');
 const { readLiveSessions, isPidAlive, isSessionLive } = require('./lib/live-sessions');
@@ -54,6 +54,7 @@ const { createGroupStore, isGroupName, suggestGroupName } = require('./lib/dispa
 const { createDispatchedStore, scanTranscripts, pruneSessionDirs, pruneContextStatus, retentionMs } = require('./lib/retention');
 const { freshRateLimits } = require('./lib/rate-limits');
 const { createWorktreeStore } = require('./lib/worktrees');
+const { createScratchpadDirResolver } = require('./lib/scratchpad-dir');
 const { readGitBranch, sessionGitBranch } = require('./lib/git-branch');
 const { createLinkedDocStore, linkUrl } = require('./lib/linked-docs');
 const { createPaneStore, isOwnOrigin } = require('./lib/panes');
@@ -1127,40 +1128,10 @@ function getSessionDisplayName(_sessionId, meta) {
   return null;
 }
 
-// Derived by convention, not looked up: the harness creates the dir lazily, so a
-// stat here would report "missing" for every session that has not written a temp
-// file yet — and it would put IO on the session-list hot path. Pure string join.
-function getScratchpadDir(id, meta) {
-  if (!meta.jsonlPath) return null;
-  const byProject = path.join(SCRATCHPAD_ROOT, path.basename(path.dirname(meta.jsonlPath)), id, 'scratchpad');
-
-  // A session launched with `claude -w` starts in the main checkout and enters the
-  // worktree afterwards, so the harness keys its scratchpad on the repo while the
-  // transcript ends up filed under the worktree. Neither the project nor any `cwd`
-  // in the log records that, so the two candidates are told apart by which one the
-  // harness actually created. Probed only for worktree sessions, and only until one
-  // of them exists — before that there is nothing to disambiguate and `byProject`,
-  // right for a session started inside the worktree, stands.
-  // A resume from inside the worktree keys a fresh, empty dir on the worktree, so an empty
-  // `byProject` does not beat a `byRepo` that holds the session's files.
-  const wt = worktrees.resolve(meta.project);
-  if (!wt) return byProject;
-  const byRepo = path.join(SCRATCHPAD_ROOT, encodeProjectDirName(wt.repo), id, 'scratchpad');
-  if (!existsSync(byRepo)) return byProject;
-  return isEmptyDir(byProject) ? byRepo : byProject;
-}
-
-function isEmptyDir(dir) {
-  let handle;
-  try {
-    handle = opendirSync(dir);
-    return handle.readSync() === null;
-  } catch {
-    return true;
-  } finally {
-    handle?.closeSync();
-  }
-}
+const getScratchpadDir = createScratchpadDirResolver({
+  root: SCRATCHPAD_ROOT,
+  resolveWorktree: worktrees.resolve,
+});
 
 function buildSessionObject(id, meta, overrides = {}) {
   const logStat = overrides._logStat || getSessionLogStat(meta);
