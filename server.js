@@ -54,6 +54,7 @@ const { freshRateLimits } = require('./lib/rate-limits');
 const { createWorktreeStore } = require('./lib/worktrees');
 const { readGitBranch, sessionGitBranch } = require('./lib/git-branch');
 const { createLinkedDocStore, linkUrl } = require('./lib/linked-docs');
+const { createPaneStore, isOwnOrigin } = require('./lib/panes');
 const { pickFolder } = require('./lib/folder-dialog');
 const { loadSessionCache, saveSessionCache } = require('./lib/session-cache');
 const { countTaskDir } = require('./lib/task-counts');
@@ -105,6 +106,7 @@ const DISPATCH_GROUPS_FILE = path.join(CCK_DIR, 'dispatch-groups.json');
 const DISPATCHED_FILE = path.join(CCK_DIR, 'dispatched.json');
 const WORKTREES_FILE = path.join(CCK_DIR, 'worktrees.json');
 const LINKED_DOCS_FILE = path.join(CCK_DIR, 'linked-docs.json');
+const PANES_FILE = path.join(CCK_DIR, 'panes.json');
 const SERVER_INFO_FILE = path.join(CCK_DIR, 'server.json');
 const TERMINAL_TOKENS_DIR = path.join(CCK_DIR, 'terminal-tokens');
 const SESSION_CACHE_FILE = path.join(CCK_DIR, 'session-cache.json');
@@ -3974,6 +3976,83 @@ app.get('/api/file/resolve', async (req, res) => {
 
 // #endregion
 
+// #region PANES
+// Tabs next to Board in a session view. Each write broadcasts the whole layout, so a tab
+// replaces its copy instead of applying a diff.
+const panes = createPaneStore({
+  load: () => {
+    try { return JSON.parse(readFileSync(PANES_FILE, 'utf8')); } catch { return null; }
+  },
+  save: (data) => writeJsonAtomic(PANES_FILE, data),
+});
+
+const broadcastPanes = (sessionId, layout) => broadcast({ type: 'pane:changed', sessionId, layout });
+
+let boardPort = null;
+const boardHosts = [...net.ALLOWED_HOSTS.split(','), net.EXPOSED ? net.BIND_HOST : '']
+  .map((h) => h.trim().toLowerCase())
+  .filter(Boolean);
+
+function paneRouteError(res, error, what) {
+  if (!error.status) console.error(`Error in ${what}:`, error);
+  res.status(error.status || 500).json({ error: error.message || `${what} failed` });
+}
+
+async function resolvePaneTarget(target) {
+  const url = linkUrl(target);
+  if (url) {
+    if (isOwnOrigin(url, { boardPort, boardHosts, hubUrl: process.env.HUB_URL })) {
+      throw previewError(400, 'A pane cannot show the board or the hub itself');
+    }
+    return { kind: 'url', target: url };
+  }
+  const abs = resolvePreviewPath(target);
+  if (!abs) throw previewError(400, 'target must be an http(s) URL or a file path');
+  const { kind } = await statFileTarget(abs);
+  if (kind !== 'html') throw previewError(400, 'A file pane must be an HTML file');
+  return { kind: 'file', target: abs };
+}
+
+app.get('/api/panes/:sessionId', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.json(panes.get(req.params.sessionId));
+});
+
+app.post('/api/panes/:sessionId', async (req, res) => {
+  try {
+    const { target, title } = req.body || {};
+    if (typeof target !== 'string' || !target) return res.status(400).json({ error: 'target is required' });
+    const resolved = await resolvePaneTarget(target);
+    const { sessionId } = req.params;
+    const { pane, added, layout } = panes.add(sessionId, { ...resolved, title: typeof title === 'string' ? title.trim() : '' });
+    if (added) broadcastPanes(sessionId, layout);
+    res.json({ pane, added, layout });
+  } catch (error) {
+    paneRouteError(res, error, 'POST /api/panes');
+  }
+});
+
+app.patch('/api/panes/:sessionId', (req, res) => {
+  try {
+    const { active, order } = req.body || {};
+    const { sessionId } = req.params;
+    const { changed, layout } = panes.update(sessionId, { active, order });
+    if (changed) broadcastPanes(sessionId, layout);
+    res.json({ layout });
+  } catch (error) {
+    paneRouteError(res, error, 'PATCH /api/panes');
+  }
+});
+
+app.delete('/api/panes/:sessionId/:paneId', (req, res) => {
+  const { sessionId, paneId } = req.params;
+  const layout = panes.remove(sessionId, paneId);
+  if (!layout) return res.status(404).json({ error: `No pane ${paneId} in session ${sessionId}` });
+  broadcastPanes(sessionId, layout);
+  res.json({ layout });
+});
+// #endregion
+
 // #region REVIEW
 // API: Send review comments on something the board shows (a file preview today) to a
 // session. The source is described, not interpreted, so a new kind of preview needs a
@@ -4350,17 +4429,18 @@ async function cleanupAgentActivity() {
   } catch { /* agent-activity dir may not exist */ }
 }
 
-// Dispatch markers, reviews, context status and worktrees: see docs/retention.md.
+// Dispatch markers, pane layouts, reviews, context status and worktrees: see docs/retention.md.
 async function runRetention() {
   try {
     const scan = await scanTranscripts(PROJECTS_DIR);
     const opts = { known: scan?.ids, maxAgeMs: retentionMs(CLAUDE_DIR) };
     const markers = dispatched.prune(opts);
+    const layouts = panes.prune(opts);
     const reviews = await pruneSessionDirs(REVIEW_DIR, opts);
     const contexts = await pruneContextStatus(CONTEXT_STATUS_DIR, opts);
     const wts = worktrees.prune(scan?.dirs);
-    if (markers || reviews || contexts || wts) {
-      console.log(`[retention] removed ${markers} dispatch markers, ${reviews} reviews, ${contexts} context status files, ${wts} worktrees`);
+    if (markers || layouts || reviews || contexts || wts) {
+      console.log(`[retention] removed ${markers} dispatch markers, ${layouts} pane layouts, ${reviews} reviews, ${contexts} context status files, ${wts} worktrees`);
     }
   } catch (e) {
     console.warn('[retention] failed:', e.message);
@@ -4419,6 +4499,7 @@ async function prewarmCaches() {
 }
 
   const onReady = (actualPort) => {
+    boardPort = Number(actualPort);
     terminal.setServerUrl(`http://127.0.0.1:${actualPort}`);
     // The port is configurable and falls back to a random one when taken, so the postman
     // monitor cannot assume it -- publish the live one where it can read it.

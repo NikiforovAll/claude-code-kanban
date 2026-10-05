@@ -6,7 +6,7 @@ State that cck writes under `<config dir>/.cck/` must not grow without a limit. 
 
 - **User-managed:** pins (`pins.json`) and linked docs (`linked-docs.json`). The user adds and removes them, and the hub's storage manager clears them. cck does not expire them.
 - **cck-generated, short-lived:** `agent-activity/`. The sweep in the `CLEANUP` region of `server.js` deletes entries older than 2 days every hour.
-- **cck-generated, per session:** dispatch markers (`dispatched.json`), reviews (`reviews/<session id>/<ts>.md`) and context status (`context-status/<session id>.json`, written by the plugin mod). They live as long as the session's transcript, so an idle session keeps its context, cost and prompt-cache row. The rest of this doc covers them.
+- **cck-generated, per session:** dispatch markers (`dispatched.json`), pane layouts (`panes.json`, keyed by session with an `updatedAt` per layout and at most 50 panes each), reviews (`reviews/<session id>/<ts>.md`) and context status (`context-status/<session id>.json`, written by the plugin mod). They live as long as the session's transcript, so an idle session keeps its context, cost and prompt-cache row. The rest of this doc covers them.
 - **cck-generated, per project:** worktrees (`worktrees.json`). See [Worktrees](#worktrees).
 - **Caches:** `session-cache.json` is rebuilt cold when it passes 8 MB (`lib/session-cache.js`).
 
@@ -39,7 +39,7 @@ The sweep drops an entry when, after the one-hour grace period, no project dir u
 
 - It uses async `fs.promises` calls, so the event loop keeps serving requests while it waits on the disk.
 - Its cost is one directory listing per project plus one pass over the entries cck stores. It never opens a transcript.
-- It writes `dispatched.json` only when an entry was dropped, and logs one `[retention]` line only when something was removed.
+- It writes `dispatched.json` and `panes.json` only when an entry was dropped, and logs one `[retention]` line only when something was removed.
 - Errors are caught per entry and per run; a failed run waits for the next one.
 
 ## Adding a store
