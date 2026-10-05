@@ -11932,7 +11932,7 @@ const PANE_FRAME_LIMIT = 3;
 const PANE_URL_SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-popups allow-downloads';
 const PANE_ICONS = {
   board:
-    '<svg class="kind" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="5" height="16" rx="1"/><rect x="10" y="4" width="5" height="10" rx="1"/><rect x="17" y="4" width="4" height="13" rx="1"/></svg>',
+    '<svg class="kind" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 5v14"/><path d="M12 5v8"/><path d="M18 5v11"/></svg>',
   url: '<svg class="kind" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/></svg>',
   file: '<svg class="kind" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>',
   warning:
