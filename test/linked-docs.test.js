@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { createLinkedDocStore, linkUrl, MAX_PER_SESSION } = require('../lib/linked-docs');
+const { createLinkedDocStore, linkUrl, MAX_LINKED_DOCS } = require('../lib/linked-docs');
 
 function fileStore() {
   const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'cck-links-')), 'linked-docs.json');
@@ -39,9 +39,10 @@ describe('linked docs store', () => {
 
   it('caps each session like the browser list', () => {
     const docs = fileStore().open();
-    for (let i = 0; i < MAX_PER_SESSION + 5; i++) docs.link('s1', `/repo/${i}.md`);
-    assert.equal(docs.get('s1').length, MAX_PER_SESSION);
-    assert.equal(docs.get('s1')[0], `/repo/${MAX_PER_SESSION + 4}.md`);
+    for (let i = 0; i <= MAX_LINKED_DOCS; i++) docs.link('s1', `/repo/${i}.md`);
+    assert.equal(docs.get('s1').length, MAX_LINKED_DOCS);
+    assert.equal(docs.get('s1')[0], `/repo/${MAX_LINKED_DOCS}.md`);
+    assert.equal(docs.get('s1').at(-1), '/repo/1.md');
   });
 
   it('clears a session when no path is given, and reports a no-op', () => {

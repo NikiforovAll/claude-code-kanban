@@ -142,7 +142,7 @@ claude-code-kanban link-doc --list --session <id> [--json]
 
 An argument that starts with `http://` or `https://` is linked as a URL. The server does not check that the page exists, and it stores the URL in a normal form: the scheme and host in lower case, with the rest as you typed it. Other schemes are refused. A file argument resolves against the current directory and must exist.
 
-The server keeps linked documents in `<config-dir>/.cck/linked-docs.json`, up to 20 per session. Each board tab adds them to its own list when it connects, so a link made with no tab open shows when one opens. In that case the command also prints `No browser tab is open; the board shows it when one opens.` Unlinking in the board removes the server copy too. See [Session log and details](/claude-code-kanban/guides/session-details/).
+The server keeps linked documents in `<config-dir>/.cck/linked-docs.json`, up to 200 per session. Each board tab adds them to its own list when it connects, so a link made with no tab open shows when one opens. In that case the command also prints `No browser tab is open; the board shows it when one opens.` Unlinking in the board removes the server copy too. See [Session log and details](/claude-code-kanban/guides/session-details/).
 
 ## session
 

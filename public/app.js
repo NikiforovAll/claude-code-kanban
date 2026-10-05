@@ -7774,14 +7774,20 @@ function addSessionPreviewPath(sessionId, filePath) {
   const key = canonicalPath(filePath);
   const paths = getSessionPreviewPaths(sessionId).filter((p) => canonicalPath(p) !== key);
   paths.unshift(filePath);
-  store.setItem(PREVIEW_STORAGE_PREFIX + sessionId, JSON.stringify(paths.slice(0, 20)));
+  saveSessionPreviewPaths(sessionId, paths);
 }
 
 function removeSessionPreviewPath(sessionId, filePath) {
   if (!sessionId) return;
   const key = canonicalPath(filePath);
-  const paths = getSessionPreviewPaths(sessionId).filter((p) => canonicalPath(p) !== key);
-  if (paths.length) store.setItem(PREVIEW_STORAGE_PREFIX + sessionId, JSON.stringify(paths));
+  saveSessionPreviewPaths(
+    sessionId,
+    getSessionPreviewPaths(sessionId).filter((p) => canonicalPath(p) !== key),
+  );
+}
+
+function saveSessionPreviewPaths(sessionId, paths) {
+  if (paths.length) store.setItem(PREVIEW_STORAGE_PREFIX + sessionId, JSON.stringify(paths.slice(0, MAX_LINKED_DOCS)));
   else store.removeItem(PREVIEW_STORAGE_PREFIX + sessionId);
 }
 
@@ -7811,7 +7817,7 @@ async function mergeServerLinkedDocs() {
     const known = new Set(local.map(canonicalPath));
     const missing = (paths || []).filter((p) => !known.has(canonicalPath(p)));
     if (!missing.length) continue;
-    store.setItem(PREVIEW_STORAGE_PREFIX + sessionId, JSON.stringify([...missing, ...local].slice(0, 20)));
+    saveSessionPreviewPaths(sessionId, [...missing, ...local]);
     afterLinkedDocsChanged(sessionId);
   }
 }
@@ -8219,11 +8225,35 @@ function openLinkedDoc(p, baseDir) {
   postAndToast(url, body(p), toast);
 }
 
+const LINKED_DOCS_COLLAPSED = 10;
+const linkedDocsExpanded = new Set();
+
+function showAllToggle(expandedSet, key, list, limit, btnAttrs) {
+  const expanded = expandedSet.has(key);
+  const shown = expanded ? list : list.slice(0, limit);
+  const moreHtml =
+    list.length > limit
+      ? `<button type="button" class="expand-toggle-btn list-more" ${btnAttrs}>${expanded ? 'Show less' : `Show all ${list.length}`}</button>`
+      : '';
+  return { shown, moreHtml };
+}
+
+function toggleSetMember(set, key) {
+  if (!set.delete(key)) set.add(key);
+}
+
 function renderLinkedDocsHtml(sessionId) {
   const paths = getSessionPreviewPaths(sessionId);
+  const { shown, moreHtml } = showAllToggle(
+    linkedDocsExpanded,
+    sessionId,
+    paths,
+    LINKED_DOCS_COLLAPSED,
+    'data-linked-docs-more',
+  );
   // Kicked off from the render rather than the three call sites, so a new surface that
   // shows linked docs cannot forget it. Returns at once once every path is cached.
-  const rows = paths.map((p) => ({ p, opener: linkedDocOpener(p) }));
+  const rows = shown.map((p) => ({ p, opener: linkedDocOpener(p) }));
   const filePaths = rows.filter((r) => r.opener !== 'url').map((r) => r.p);
   loadPreviewKinds(sessionId, filePaths);
   const baseDir = getSessionBaseDir(sessionId);
@@ -8248,7 +8278,7 @@ function renderLinkedDocsHtml(sessionId) {
     .join('');
   // Rendered even when empty — the add button has to stay reachable.
   const body = paths.length
-    ? `<ul class="linked-doc-list">${items}</ul>`
+    ? `<ul class="linked-doc-list">${items}</ul>${moreHtml}`
     : '<div class="linked-docs-empty">No linked documents yet</div>';
   return `<div class="linked-docs-section panel-section">
     <div class="panel-section-header">
@@ -8467,13 +8497,14 @@ function scratchRowsHtml(rows) {
 function scratchFilesInnerHtml(sessionId) {
   const list = scratchFilesSection.get(sessionId);
   if (!list.length) return '';
-  const expanded = scratchFilesExpanded.has(sessionId);
-  const shown = expanded ? list : list.slice(0, SCRATCH_FILES_COLLAPSED);
-  const more =
-    list.length > SCRATCH_FILES_COLLAPSED
-      ? `<button type="button" class="expand-toggle-btn scratch-files-more" onclick="toggleScratchFiles('${escAttrJs(sessionId)}')">${expanded ? 'Show less' : `Show all ${list.length}`}</button>`
-      : '';
-  return `${scratchRowsHtml(shown)}${more}`;
+  const { shown, moreHtml } = showAllToggle(
+    scratchFilesExpanded,
+    sessionId,
+    list,
+    SCRATCH_FILES_COLLAPSED,
+    `onclick="toggleScratchFiles('${escAttrJs(sessionId)}')"`,
+  );
+  return `${scratchRowsHtml(shown)}${moreHtml}`;
 }
 
 // Delegated at the document because the whole zen panel is re-rendered on every SSE tick,
@@ -8513,8 +8544,7 @@ function renderScratchFilesHtml(sessionId) {
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
 function toggleScratchFiles(sessionId) {
-  if (scratchFilesExpanded.has(sessionId)) scratchFilesExpanded.delete(sessionId);
-  else scratchFilesExpanded.add(sessionId);
+  toggleSetMember(scratchFilesExpanded, sessionId);
   scratchFilesSection.repaint(sessionId);
 }
 
@@ -8523,10 +8553,17 @@ function toggleScratchFiles(sessionId) {
 function bindLinkedDocsHandlers(container, sessionId) {
   if (!container) return;
   container.addEventListener('click', (e) => {
-    const hit = e.target.closest('.linked-doc-link, .linked-doc-copy, .linked-doc-remove, .linked-docs-add-btn');
+    const hit = e.target.closest(
+      '.linked-doc-link, .linked-doc-copy, .linked-doc-remove, .linked-docs-add-btn, [data-linked-docs-more]',
+    );
     if (!hit || hit.target === '_blank') return;
     e.preventDefault();
-    if (hit.classList.contains('linked-docs-add-btn')) {
+    if (hit.hasAttribute('data-linked-docs-more')) {
+      toggleSetMember(linkedDocsExpanded, sessionId);
+      const wrap = document.createElement('div');
+      wrap.innerHTML = renderLinkedDocsHtml(sessionId);
+      container.replaceChildren(...wrap.firstElementChild.childNodes);
+    } else if (hit.classList.contains('linked-docs-add-btn')) {
       startLinkedDocInput(container, sessionId);
     } else if (hit.classList.contains('linked-doc-copy')) {
       copyWithFeedback(hit.dataset.path, hit);
