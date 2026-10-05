@@ -3636,6 +3636,11 @@ body.booting .boot-splash {
   flex-direction: row;
 }
 
+.pane-view:has(> .pane-doc) {
+  gap: 16px;
+  padding: 16px;
+}
+
 .pane-view:has(> .review-panel) > :not(.review-panel) {
   width: auto;
   min-width: 0;
@@ -3656,11 +3661,30 @@ body.booting .boot-splash {
 .pane-doc {
   flex: 1;
   min-height: 0;
+  position: relative;
+  display: flex;
+  width: 100%;
+  max-width: var(--pane-doc-w, 860px);
+  margin: 0 auto;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+
+.pane-doc-body {
+  flex: 1;
+  min-width: 0;
   overflow-y: auto;
-  padding: 20px max(24px, calc((100% - 860px) / 2));
+  padding: 24px;
   font-size: 13px;
   line-height: 1.6;
   word-break: break-word;
+}
+
+/* The modal's corner grip; the pane fills the height, so it sets the width only. */
+.pane-doc > .modal-resize-handle {
+  cursor: ew-resize;
 }
 
 .pane-card {
@@ -4313,6 +4337,9 @@ body.booting .boot-splash {
 }
 .rendered-md li {
   margin: 0.2em 0;
+}
+.rendered-md a {
+  color: var(--accent);
 }
 .rendered-md pre {
   margin: 0.6em 0;

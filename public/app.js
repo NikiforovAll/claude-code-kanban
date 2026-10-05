@@ -2414,13 +2414,8 @@ function initModalResize() {
       modal.classList.add('user-sized');
     }
 
-    const handle = document.createElement('div');
-    handle.className = 'modal-resize-handle';
-    handle.title = 'Drag to resize · double-click to reset';
-    modal.appendChild(handle);
-
     let startW, startH, w, h;
-    _initDragResize(handle, {
+    const handle = createResizeGrip({
       onStart() {
         startW = modal.offsetWidth;
         startH = modal.offsetHeight;
@@ -2446,14 +2441,23 @@ function initModalResize() {
           store.setItem(hKey, `${h}px`);
         }
       },
+      onReset() {
+        modal.classList.remove('user-sized');
+        store.removeItem(wKey);
+        store.removeItem(hKey);
+      },
     });
-
-    handle.addEventListener('dblclick', () => {
-      modal.classList.remove('user-sized');
-      store.removeItem(wKey);
-      store.removeItem(hKey);
-    });
+    modal.appendChild(handle);
   });
+}
+
+function createResizeGrip({ onReset, ...drag }) {
+  const handle = document.createElement('div');
+  handle.className = 'modal-resize-handle';
+  handle.title = 'Drag to resize · double-click to reset';
+  _initDragResize(handle, drag);
+  handle.addEventListener('dblclick', onReset);
+  return handle;
 }
 
 const MODAL_ZOOM_KEY = 'modal-zoom';
@@ -2488,6 +2492,11 @@ function isZoomableModalOpen() {
 
 function isAnyModalOpen() {
   return document.querySelector('.modal-overlay.visible') !== null;
+}
+
+// An open modal owns the zoom keys even when it has nothing to scale.
+function isZoomableOnScreen() {
+  return isAnyModalOpen() ? isZoomableModalOpen() : isPaneDocOnScreen();
 }
 
 const ZOOM_KEYS = { '+': 0.1, '=': 0.1, NumpadAdd: 0.1, '-': -0.1, _: -0.1, NumpadSubtract: -0.1, 0: 0, Numpad0: 0 };
@@ -6884,11 +6893,11 @@ const MODAL_CLOSERS = {
 };
 
 document.addEventListener('keydown', (e) => {
-  // Scale the open modal's reading surface instead of letting the browser zoom
+  // Scale the open modal's reading surface, or the file pane's, instead of letting the browser zoom
   // the whole page. Sits above the text-field guard so it still works with the
   // caret in a field inside the modal.
   const zoom = zoomDelta(e);
-  if (zoom !== undefined && isZoomableModalOpen()) {
+  if (zoom !== undefined && isZoomableOnScreen()) {
     e.preventDefault();
     adjustModalZoom(zoom);
     return;
@@ -11928,11 +11937,14 @@ async function loadPaneView(sid, pane, view) {
   }
   if (data?.kind) {
     const doc = document.createElement('div');
-    doc.className = 'pane-doc rendered-md';
+    doc.className = 'pane-doc';
     doc.dataset.path = data.path;
-    renderPreviewContent(doc, data.path, data.content, data.kind);
+    const body = document.createElement('div');
+    body.className = 'pane-doc-body rendered-md modal-zoomable';
+    renderPreviewContent(body, data.path, data.content, data.kind);
+    doc.append(body, paneDocGrip(doc));
     view.appendChild(doc);
-    attachPaneReview(view, sid, fileReviewOpts(data.path, data.kind, doc, null));
+    attachPaneReview(view, sid, fileReviewOpts(data.path, data.kind, body, null));
     return;
   }
   const [title, text] = !data
@@ -11942,6 +11954,50 @@ async function loadPaneView(sid, pane, view) {
       : ['Nothing to preview', 'cck cannot render this file.'];
   const button = data && data.exists !== false ? 'Open in editor' : 'Try in preview';
   view.insertAdjacentHTML('beforeend', paneCardHtml(title, text, button));
+}
+
+// One reading width for every pane, kept apart from the modals': a modal's saved size
+// includes its padding and review panel.
+const PANE_DOC_W_KEY = 'pane-doc-width';
+
+function applyPaneDocWidth(w) {
+  if (w) document.documentElement.style.setProperty('--pane-doc-w', w);
+  else document.documentElement.style.removeProperty('--pane-doc-w');
+}
+applyPaneDocWidth(store.getItem(PANE_DOC_W_KEY));
+
+// The drag sizes only this sheet; the shared width lands once on release, so a
+// drag does not restyle the whole page on every move.
+function paneDocGrip(doc) {
+  let startW;
+  return createResizeGrip({
+    onStart() {
+      startW = doc.offsetWidth;
+    },
+    // The sheet is centered, so both edges move: double the delta to keep the grip under the cursor.
+    onMove(dx) {
+      doc.style.maxWidth = `${Math.max(MODAL_MIN_W, startW + dx * 2)}px`;
+    },
+    onEnd() {
+      const w = doc.style.maxWidth;
+      if (!w) return;
+      doc.style.maxWidth = '';
+      store.setItem(PANE_DOC_W_KEY, w);
+      applyPaneDocWidth(w);
+    },
+    onReset() {
+      store.removeItem(PANE_DOC_W_KEY);
+      applyPaneDocWidth(null);
+    },
+  });
+}
+
+function activePaneView() {
+  return wantsTerminal() ? null : paneViews.querySelector('.pane-view.on');
+}
+
+function isPaneDocOnScreen() {
+  return !!activePaneView()?.querySelector('.modal-zoomable');
 }
 
 function attachPaneReview(view, sessionId, opts) {
@@ -11955,7 +12011,7 @@ function attachPaneReview(view, sessionId, opts) {
 }
 
 function syncPaneReview() {
-  const view = wantsTerminal() ? null : paneViews.querySelector('.pane-view.on');
+  const view = activePaneView();
   setBaseReview((view && paneReviews.get(view)) || null);
 }
 
