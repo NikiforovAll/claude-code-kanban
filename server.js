@@ -4015,6 +4015,12 @@ const panesFileStamp = () => {
   }
 };
 let panesStamp;
+// File panes render the file once; this watch tells the boards when one changes. An editor
+// or an agent often saves several times in a row, so each path waits for a quiet 200 ms.
+const paneFileWatcher = chokidar.watch([], { ignoreInitial: true });
+const paneFileTimers = new Map();
+let paneFilesWatched = new Set();
+let paneFileWatchQueued = false;
 const panes = createPaneStore({
   load: () => {
     const stamp = panesFileStamp();
@@ -4028,24 +4034,25 @@ const panes = createPaneStore({
   },
   onChange: (sessionId, layout) => {
     broadcast({ type: 'pane:changed', sessionId, layout });
-    setImmediate(syncPaneFileWatch);
+    queuePaneFileWatch();
   },
 });
 
-// File panes render the file once; this watch tells the boards when one changes. An editor
-// or an agent often saves several times in a row, so each path waits for a quiet 200 ms.
-const paneFileWatcher = chokidar.watch([], { ignoreInitial: true });
-const paneFileTimers = new Map();
-let paneFilesWatched = new Set();
-function syncPaneFileWatch() {
-  const next = panes.fileTargets();
-  const added = [...next].filter((p) => !paneFilesWatched.has(p));
-  const gone = [...paneFilesWatched].filter((p) => !next.has(p));
-  if (added.length) paneFileWatcher.add(added);
-  if (gone.length) paneFileWatcher.unwatch(gone);
-  paneFilesWatched = next;
+// Deferred: the store's first load reports changes before `panes` is assigned, and a reload
+// reports each changed session, which one sync covers.
+function queuePaneFileWatch() {
+  if (paneFileWatchQueued) return;
+  paneFileWatchQueued = true;
+  setImmediate(() => {
+    paneFileWatchQueued = false;
+    const next = panes.fileTargets();
+    const added = [...next].filter((p) => !paneFilesWatched.has(p));
+    const gone = [...paneFilesWatched].filter((p) => !next.has(p));
+    if (added.length) paneFileWatcher.add(added);
+    if (gone.length) paneFileWatcher.unwatch(gone);
+    paneFilesWatched = next;
+  });
 }
-syncPaneFileWatch();
 paneFileWatcher.on('all', (event, filePath) => {
   if (event !== 'add' && event !== 'change' && event !== 'unlink') return;
   clearTimeout(paneFileTimers.get(filePath));
@@ -4520,6 +4527,7 @@ async function runRetention() {
     const opts = { known: scan?.ids, maxAgeMs: retentionMs(CLAUDE_DIR) };
     const markers = dispatched.prune(opts);
     const layouts = panes.prune(opts);
+    if (layouts) queuePaneFileWatch();
     const reviews = await pruneSessionDirs(REVIEW_DIR, opts);
     const contexts = await pruneContextStatus(CONTEXT_STATUS_DIR, opts);
     const wts = worktrees.prune(scan?.dirs);

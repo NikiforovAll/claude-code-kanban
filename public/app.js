@@ -5852,6 +5852,7 @@ const SHORTCUT_TABS = [
           { keys: ['Alt', '[ / ]'], combo: true, label: 'Change the tab in the focused side of a split' },
           { keys: ['|'], label: 'Split with the tab before it / unsplit (or drag a tab onto a side)' },
           { keys: ['{', '}'], label: 'Focus left / right side of a split' },
+          { keys: ['Alt', 'W'], combo: true, label: 'Close the focused tab' },
           { keys: ['T'], label: 'Toggle theme' },
           { keys: ['Shift', 'S'], combo: true, label: 'Storage manager' },
           { keys: ['Ctrl', 'Shift', 'Z'], combo: true, label: 'Zen mode (current session only)' },
@@ -7031,6 +7032,10 @@ document.addEventListener('keydown', (e) => {
     if (cyclePane(e.code === 'BracketRight' ? 1 : -1)) e.preventDefault();
     return;
   }
+  if (altOnly && e.code === 'KeyW' && closeFocusedPane()) {
+    e.preventDefault();
+    return;
+  }
   const plainShift = !e.ctrlKey && !e.altKey && !e.metaKey;
   if (plainShift && e.key === '|' && togglePaneSplit()) {
     e.preventDefault();
@@ -7655,7 +7660,6 @@ const REVIEW_BRIDGE_TAG = `<script>(${reviewBridge})(${reviewTextBefore}, ${revi
 // Frames from createPreviewFrame, which carry the bridge. A URL pane is another site and must
 // not drive the board.
 const bridgedFrames = new WeakSet();
-// A bridged frame's last scroll position, for reloadPaneView.
 const paneFrameScroll = new WeakMap();
 
 function bridgedFrameEls() {
@@ -7673,6 +7677,15 @@ const ZOOM_CLAIMS = ['ctrlKey', 'metaKey'].flatMap((mod) =>
     ),
   ),
 );
+
+// The sidebar and tab keys, so they work while a previewed page has focus. Matched by key where
+// the board matches by key, so they follow the keyboard layout. A page that handles one first
+// keeps it, and text fields keep every key.
+const PANE_CLAIMS = [
+  ...['\\', '[', ']'].map((key) => ({ key, code: '' })),
+  ...['|', '{', '}'].map((key) => ({ shiftKey: true, key, code: '' })),
+  ...['BracketLeft', 'BracketRight', 'KeyW'].map((code) => ({ altKey: true, key: 'Unidentified', code })),
+];
 
 function sendBridgeClaims(frames, claims) {
   for (const f of frames) f.contentWindow?.postMessage({ type: `${REVIEW_MSG}claims`, ...claims }, '*');
@@ -12134,6 +12147,7 @@ const paneFrames = new Map();
 const paneReviews = new WeakMap();
 // Off-screen views whose file changed; they reload when shown.
 const stalePaneViews = new WeakSet();
+const paneReloads = new Map();
 const paneViews = document.getElementById('pane-views');
 const paneSplitBox = document.getElementById('pane-split');
 const paneDivider = document.getElementById('pane-divider');
@@ -12252,7 +12266,7 @@ function renderPaneTabs(sid, layout, split) {
     return tab(
       p.id,
       '',
-      `${p.kind === 'url' ? PANE_ICONS.url : PANE_ICONS.file}<span class="pane-title">${escapeHtml(p.title)}</span><span class="state ${escapeHtml(frame)}" title="${escapeHtml(frameTip)}"></span><button class="pane-x" data-close="${escapeHtml(p.id)}" title="Close pane" aria-label="Close pane">×</button>`,
+      `${p.kind === 'url' ? PANE_ICONS.url : PANE_ICONS.file}<span class="pane-title">${escapeHtml(p.title)}</span><span class="state ${escapeHtml(frame)}" title="${escapeHtml(frameTip)}"></span><button class="pane-x" data-close="${escapeHtml(p.id)}" title="Close pane (Alt+W)" aria-label="Close pane">×</button>`,
       p.target,
     );
   };
@@ -12382,29 +12396,51 @@ function onPaneFileChanged(filePath) {
   for (const [key, view] of paneFrames) {
     const [sid, paneId] = key.split('/');
     const pane = paneLayout(sid).panes.find((p) => p.id === paneId);
-    if (!pane || pane.kind === 'url' || pane.target !== filePath) continue;
+    if (pane?.target !== filePath) continue;
     if (view.classList.contains('on')) reloadPaneView(sid, pane, view);
     else stalePaneViews.add(view);
   }
 }
 
-// Builds the new view off screen and swaps it in, so the old content stays up while the file
-// loads and the scroll position carries over.
+// Builds the new view hidden over the old one and swaps them once it has loaded and scrolled,
+// so a reload shows no blank frame and no jump. The newest reload of a view wins.
 async function reloadPaneView(sid, pane, view) {
   const key = view.dataset.key;
+  const token = {};
+  paneReloads.set(key, token);
+  const live = () => {
+    const ok = paneReloads.get(key) === token && paneFrames.get(key) === view;
+    if (!ok && paneReloads.get(key) === token) paneReloads.delete(key);
+    return ok;
+  };
   const frame = view.querySelector(':scope > .pane-frame');
-  const docBody = view.querySelector('.pane-doc-body');
   const fresh = document.createElement('div');
-  fresh.className = 'pane-view';
   fresh.dataset.key = key;
   await loadPaneView(sid, pane, fresh, frame && paneFrameScroll.get(frame));
-  if (paneFrames.get(key) !== view) return;
+  if (!live()) return;
   fresh.className = view.className;
-  const top = docBody?.scrollTop;
-  view.replaceWith(fresh);
-  paneFrames.set(key, fresh);
+  fresh.style.visibility = 'hidden';
+  view.after(fresh);
   const newBody = fresh.querySelector('.pane-doc-body');
-  if (newBody && top) newBody.scrollTop = top;
+  if (newBody) newBody.scrollTop = view.querySelector('.pane-doc-body')?.scrollTop || 0;
+  const newFrame = fresh.querySelector(':scope > .pane-frame');
+  if (newFrame) {
+    await new Promise((resolve) => {
+      newFrame.addEventListener('load', resolve, { once: true });
+      setTimeout(resolve, 3000);
+    });
+    // The page scrolls itself one frame after its load.
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  }
+  if (!live()) {
+    fresh.remove();
+    return;
+  }
+  paneReloads.delete(key);
+  fresh.className = view.className;
+  fresh.style.visibility = '';
+  view.remove();
+  paneFrames.set(key, fresh);
   syncPaneReview();
 }
 
@@ -12512,6 +12548,14 @@ function cyclePaneStrip(step) {
   return true;
 }
 
+function closeFocusedPane() {
+  const sid = paneSessionId();
+  const id = sid && !wantsTerminal() && getActivePaneId(sid);
+  if (!id || id === 'board') return false;
+  closePane(id);
+  return true;
+}
+
 async function closePane(paneId) {
   const sid = paneSessionId();
   if (!sid) return;
@@ -12544,7 +12588,13 @@ function paneById(id) {
 function reloadPane(id) {
   const pane = paneById(id);
   if (!pane) return;
-  unmountPane(paneSessionId(), pane.id);
+  const sid = paneSessionId();
+  const view = paneFrames.get(`${sid}/${pane.id}`);
+  if (pane.kind !== 'url' && view) {
+    reloadPaneView(sid, pane, view);
+    return;
+  }
+  unmountPane(sid, pane.id);
   paneRefused.delete(pane.target);
   syncPanes();
 }
@@ -13418,7 +13468,7 @@ function keyClaims() {
 }
 
 function bridgeClaims(claims) {
-  return { ...claims, keys: [...claims.keys, ...ZOOM_CLAIMS] };
+  return { ...claims, keys: [...claims.keys, ...ZOOM_CLAIMS, ...PANE_CLAIMS] };
 }
 
 function pushTerminalClaims() {
