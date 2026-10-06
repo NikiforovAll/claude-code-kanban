@@ -53,6 +53,7 @@ const collapsedProjectGroups = new Set();
 const SECTION_GROUPS = '__section_groups__';
 const SECTION_PROJECTS = '__section_projects__';
 const SECTION_SESSIONS = '__section_sessions__';
+const SECTION_OUTSIDE = '__section_outside__';
 // Project paths and session ids in Active-view sidebar order, kept across reloads so live
 // activity does not reshuffle the list. Each holds only what the loaded list still has.
 const PROJECT_ORDER_KEY = 'project-order';
@@ -372,6 +373,65 @@ async function fetchSessionsByIds(ids) {
 async function fetchSessionById(id) {
   return (await fetchSessionsByIds([id]))[0] || null;
 }
+
+// The id may be outside the list the filters asked for. renderSession bails on a session
+// missing from `sessions`, so pull that one row in before opening it; later polls
+// keep it, because fetchSessions pins currentSessionId.
+async function ensureSessionLoaded(id) {
+  const loaded = sessions.find((s) => s.id === id);
+  if (loaded) return loaded;
+  const session = await fetchSessionById(id);
+  if (!session) return null;
+  const raced = sessions.find((s) => s.id === id);
+  if (raced) return raced;
+  sessions.push(session);
+  return session;
+}
+
+// Matches SESSION_SEARCH_MIN in server.js, which answers [] below it.
+const SESSION_SEARCH_MIN = 3;
+const SESSION_SEARCH_DEBOUNCE_MS = 100;
+
+// Searches session ids and names in every transcript on the server, so a session outside the
+// sidebar filter is found too. `rows` answers the server rows not in `localRows`, and whether
+// the search for that query is still out; `onFound()` runs when the current query's rows arrive.
+// Only the current query is kept, and a short query drops it, so a later identical query fetches again.
+function sessionSearch(onFound) {
+  let current = null;
+  let found = null;
+  let timer = null;
+  const run = async (key) => {
+    let ids = [];
+    try {
+      const r = await fetch(`/api/sessions/search?q=${encodeURIComponent(key)}`);
+      if (r.ok) ids = await r.json();
+    } catch (_) {}
+    if (key !== current) return;
+    const rows = ids.length ? await fetchSessionsByIds(ids) : [];
+    if (key !== current) return;
+    found = rows;
+    onFound();
+  };
+  return {
+    rows(query, localRows) {
+      const key = query.length < SESSION_SEARCH_MIN ? null : query.toLowerCase();
+      // Set once per query: the sidebar re-renders on every live update, and resetting the
+      // timer each time would starve the search.
+      if (key !== current) {
+        clearTimeout(timer);
+        current = key;
+        found = null;
+        if (key) timer = setTimeout(() => run(key), SESSION_SEARCH_DEBOUNCE_MS);
+      }
+      if (!key) return { rows: [], pending: false };
+      if (!found) return { rows: [], pending: true };
+      const seen = new Set(localRows.map((s) => s.id));
+      return { rows: found.filter((s) => !seen.has(s.id)), pending: false };
+    },
+  };
+}
+
+const sidebarSearch = sessionSearch(renderSessions);
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
 function handleSearch(query) {
@@ -3406,15 +3466,8 @@ async function revealSession(id) {
   let session = sessions.find((s) => s.id === id);
   if (!session) {
     lastSessionsHash = '';
-    await fetchSessions();
-    session = sessions.find((s) => s.id === id);
-  }
-  if (!session) {
-    // The id is outside the list the filters asked for. renderSession bails on a session
-    // missing from `sessions`, so pull that one row in before opening it; later polls
-    // keep it, because fetchSessions pins currentSessionId.
-    session = await fetchSessionById(id);
-    if (session) sessions.push(session);
+    await fetchSessions(true, id);
+    session = await ensureSessionLoaded(id);
   }
   const uncollapsed = session ? uncollapseFor(session) : false;
   if (uncollapsed) persistCollapsedGroups();
@@ -3603,36 +3656,8 @@ function renderSessions() {
   const zenSession = zenMode && currentSessionId ? sessions.find((s) => s.id === currentSessionId) : null;
   const filteredSessions = zenMode ? (zenSession ? [zenSession] : []) : applyStableSessionOrder(getFilteredSessions());
 
-  if (filteredSessions.length === 0) {
-    let emptyMsg = 'No sessions found';
-    let emptyHint = 'Tasks appear when you use Claude Code';
+  const outside = sidebarSearch.rows(zenMode ? '' : searchQuery, filteredSessions);
 
-    if (zenMode) {
-      emptyMsg = 'Zen mode: no session open';
-      emptyHint = 'Press Ctrl+Shift+Z to leave zen mode, then open a session';
-    } else if (searchQuery) {
-      emptyMsg = `No results for "${searchQuery}"`;
-      emptyHint = 'Try a different search term or clear the search';
-    } else if (filterProject && sessionFilter === 'active') {
-      emptyMsg = 'No active sessions for this project filter';
-      emptyHint = 'Try "All Sessions" or clear the project filter';
-    } else if (filterProject) {
-      emptyMsg = 'No sessions for this project filter';
-      emptyHint = 'Clear the project filter to see all';
-    } else if (sessionFilter === 'active') {
-      emptyMsg = 'No active sessions';
-      emptyHint = 'Select "All Sessions" to see all';
-    }
-    sessionsList.innerHTML = `
-          <div style="padding: 24px 12px; text-align: center; color: var(--text-muted); font-size: 12px;">
-            <p>${emptyMsg}</p>
-            <p style="margin-top: 8px; font-size: 11px;">${emptyHint}</p>
-          </div>
-        `;
-    return;
-  }
-
-  // Helper to render a single session card
   const renderSessionCard = (session) => {
     if (session.placeholder) return renderPlaceholderCard(session);
     const total = session.taskCount;
@@ -3703,6 +3728,63 @@ function renderSessions() {
         `;
   };
 
+  // `ungroup` marks the label as the drop target for pulling an item out of a named group.
+  const sectionHtml = (key, text, ungroup, body, empty = false) => {
+    const collapsed = collapsedProjectGroups.has(key);
+    const escPath = escapeHtml(key);
+    const title = ungroup ? 'Click to collapse — drop here to remove from a group' : 'Click to collapse';
+    const emptyCls = empty ? ' sg-section-empty' : '';
+    return `<div class="sg-section-label sg-section-toggle${ungroup ? ' sg-ungroup-zone' : ''}${collapsed ? ' collapsed' : ''}${emptyCls}" data-group-path="${escPath}" title="${escapeHtml(title)}">${groupChevronSvg(10)}<span>${text}</span></div>
+      <div class="sg-section-body${collapsed ? ' collapsed' : ''}${emptyCls}" data-group-path="${escPath}">${body}</div>`;
+  };
+
+  const countHtml = (arr) => {
+    const active = arr.reduce((n, s) => n + (isSessionActive(s) ? 1 : 0), 0);
+    return `<span class="group-count" title="${active} active / ${arr.length} total">${active > 0 ? `<span class="group-count-active">${active}</span><span class="group-count-sep">/</span>` : ''}${arr.length}</span>`;
+  };
+
+  const outsideHtml = outside.rows.length
+    ? sectionHtml(
+        SECTION_OUTSIDE,
+        `Outside current filters ${countHtml(outside.rows)}`,
+        false,
+        collapsedProjectGroups.has(SECTION_OUTSIDE) ? '' : outside.rows.map(renderSessionCard).join(''),
+      )
+    : '';
+
+  if (filteredSessions.length === 0) {
+    let emptyMsg = 'No sessions found';
+    let emptyHint = 'Tasks appear when you use Claude Code';
+
+    if (zenMode) {
+      emptyMsg = 'Zen mode: no session open';
+      emptyHint = 'Press Ctrl+Shift+Z to leave zen mode, then open a session';
+    } else if (searchQuery) {
+      emptyMsg = `No results for "${escapeHtml(searchQuery)}"`;
+      emptyHint = outside.rows.length
+        ? 'Matches outside the current filters are below'
+        : outside.pending
+          ? 'Searching all sessions…'
+          : 'Try a different search term or clear the search';
+    } else if (filterProject && sessionFilter === 'active') {
+      emptyMsg = 'No active sessions for this project filter';
+      emptyHint = 'Try "All Sessions" or clear the project filter';
+    } else if (filterProject) {
+      emptyMsg = 'No sessions for this project filter';
+      emptyHint = 'Clear the project filter to see all';
+    } else if (sessionFilter === 'active') {
+      emptyMsg = 'No active sessions';
+      emptyHint = 'Select "All Sessions" to see all';
+    }
+    sessionsList.innerHTML = `
+          <div style="padding: 24px 12px; text-align: center; color: var(--text-muted); font-size: 12px;">
+            <p>${emptyMsg}</p>
+            <p style="margin-top: 8px; font-size: 11px;">${emptyHint}</p>
+          </div>
+        ${outsideHtml}`;
+    return;
+  }
+
   // Zen draws one card and its panel, so it returns before the grouping below — leaving it in
   // that chain would build the whole list only to discard it.
   if (zenMode) {
@@ -3725,20 +3807,6 @@ function renderSessions() {
   const groupPinned = store.getItem('groupPinnedSessions') !== 'false';
   const pinWeight = (s) => (isPlacedSticky(s.id) ? 2 : isInPinnedGroup(s) ? 1 : 0);
   const pinSort = (a, b) => pinWeight(b) - pinWeight(a);
-  const countHtml = (arr) => {
-    const active = arr.reduce((n, s) => n + (isSessionActive(s) ? 1 : 0), 0);
-    return `<span class="group-count" title="${active} active / ${arr.length} total">${active > 0 ? `<span class="group-count-active">${active}</span><span class="group-count-sep">/</span>` : ''}${arr.length}</span>`;
-  };
-  // `ungroup` marks the label as the drop target for pulling an item out of a named group.
-  const sectionHtml = (key, text, ungroup, body, empty = false) => {
-    const collapsed = collapsedProjectGroups.has(key);
-    const escPath = escapeHtml(key);
-    const title = ungroup ? 'Click to collapse — drop here to remove from a group' : 'Click to collapse';
-    const emptyCls = empty ? ' sg-section-empty' : '';
-    return `<div class="sg-section-label sg-section-toggle${ungroup ? ' sg-ungroup-zone' : ''}${collapsed ? ' collapsed' : ''}${emptyCls}" data-group-path="${escPath}" title="${escapeHtml(title)}">${groupChevronSvg(10)}<span>${text}</span></div>
-      <div class="sg-section-body${collapsed ? ' collapsed' : ''}${emptyCls}" data-group-path="${escPath}">${body}</div>`;
-  };
-
   const renderGroupSessions = (sessions, pinKey) => {
     if (!groupPinned || pinnedSessionIds.size === 0) return sessions.map(renderSessionCard).join('');
     const gIdlePinned = sessions.filter(isInPinnedGroup);
@@ -3958,13 +4026,13 @@ function renderSessions() {
     const noProjects = sortedGroups.length === 0 && ungrouped.length === 0;
     html += sectioned ? sectionHtml(SECTION_PROJECTS, 'Projects', true, projectsHtml, noProjects) : projectsHtml;
 
-    sessionsList.innerHTML = html;
+    sessionsList.innerHTML = html + outsideHtml;
   } else {
     const sectioned = sessionGroups.length > 0 || transientGroups.size > 0;
     const restHtml =
       sectioned && collapsedProjectGroups.has(SECTION_SESSIONS) ? '' : sgRest.map(renderSessionCard).join('');
     const tail = sectioned ? sectionHtml(SECTION_SESSIONS, 'Sessions', true, restHtml, sgRest.length === 0) : restHtml;
-    sessionsList.innerHTML = html + sgSectionHtml(true) + tail;
+    sessionsList.innerHTML = html + sgSectionHtml(true) + tail + outsideHtml;
   }
 
   const navItems = getNavigableItems();
@@ -11059,38 +11127,9 @@ let spRenderedQuery = null;
 // Per-open cache: spSource is frozen while the picker is up, so a fetched log stays valid.
 const spPeekCache = new Map();
 
-// A query also searches session ids and names in every transcript on the server, so a
-// session outside the sidebar filter is found too. Values: 'pending', then the rows.
-const spSearch = new Map();
-let spSearchTimer = null;
-
-function spSearchKey(query) {
-  return query.length >= 3 ? query.toLowerCase() : null;
-}
-
-function spScheduleSearch(key) {
-  clearTimeout(spSearchTimer);
-  spSearchTimer = setTimeout(async () => {
-    spSearch.set(key, 'pending');
-    let ids = [];
-    try {
-      const r = await fetch(`/api/sessions/search?q=${encodeURIComponent(key)}`);
-      if (r.ok) ids = await r.json();
-    } catch (_) {}
-    spSearch.set(key, ids.length ? await fetchSessionsByIds(ids) : []);
-    renderSessionPicker();
-  }, 100);
-}
-
-// The server rows not already matched in the sidebar list, and whether a search is still out.
-function spSearchRows(key, localRows) {
-  if (!key) return { rows: [], pending: false };
-  const found = spSearch.get(key);
-  if (!found) spScheduleSearch(key);
-  if (!Array.isArray(found)) return { rows: [], pending: true };
-  const seen = new Set(localRows.map((s) => s.id));
-  return { rows: found.filter((s) => !seen.has(s.id)), pending: false };
-}
+const spSearch = sessionSearch(() => {
+  if (document.getElementById('session-picker-modal').classList.contains('visible')) renderSessionPicker();
+});
 
 function openSessionPicker() {
   spFromTerminal = terminalPaneFocused();
@@ -11098,7 +11137,6 @@ function openSessionPicker() {
   input.value = '';
   spSource = getFilteredSessions().sort((a, b) => Date.parse(b.modifiedAt) - Date.parse(a.modifiedAt));
   spPeekCache.clear();
-  spSearch.clear();
   spRenderedQuery = null;
   document.getElementById('session-picker-modal').classList.add('visible');
   renderSessionPicker();
@@ -11221,15 +11259,14 @@ function renderSessionPicker() {
   // Search rows that arrive for the same query append below, so the cursor stays on its row.
   const selectedId = query === spRenderedQuery ? spRows[spIdx]?.id : null;
   spRenderedQuery = query;
-  const key = spSearchKey(query);
   const local = spSource.filter((s) => spMatches(s, query));
-  const found = spSearchRows(key, local);
+  const found = spSearch.rows(query, local);
   spRows = [...local, ...found.rows];
   if (!spRows.length) {
     spIdx = -1;
     const empty = found.pending
       ? 'Searching all sessions…'
-      : spSource.length || key
+      : spSource.length || query.length >= SESSION_SEARCH_MIN
         ? 'No session matches'
         : 'No sessions in the current sidebar filter';
     list.innerHTML = `<div class="sp-empty">${empty}</div>`;
@@ -13421,8 +13458,10 @@ function syncTerminal() {
 }
 
 // Only paths the user drives call this; restores, deep links and refreshes call fetchTasks, so they never take focus.
-function openSession(sessionId) {
+async function openSession(sessionId) {
   setSessionDismissed(sessionId, false);
+  // Awaited only when missing, so opening a loaded session stays synchronous up to fetchTasks.
+  if (!sessions.some((s) => s.id === sessionId)) await ensureSessionLoaded(sessionId);
   const alreadyOpen = sessionId === currentSessionId && viewMode === 'session' && termState.shown;
   if (!alreadyOpen) termState.openedByUser = sessionId;
   else if (termState.attached && promptAwaitsUser(sessionId)) focusTerminalPane();
