@@ -1932,6 +1932,7 @@ function showPinnedMsgDetail(pinIdx) {
   const pinBtn = document.getElementById('msg-detail-pin-btn');
   if (pinBtn) pinBtn.classList.add('active');
   document.getElementById('msg-detail-modal').classList.add('visible');
+  mountReplyReview(pin, body, pinModal);
 }
 
 function updateMsgDetailPinState() {
@@ -2102,6 +2103,7 @@ function _renderPinToDetail(pin) {
 }
 
 const SESSION_PIN_SVG = PIN_SVG.replace('width="14" height="14"', 'width="12" height="12"');
+const BOOKMARK_SVG = PIN_SVG.replace('width="14" height="14"', 'width="10" height="10"');
 const SESSION_STAR_SVG =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><path d="M12 2 L15 9 L22 9 L17 14 L19 22 L12 18 L5 22 L7 14 L2 9 L9 9 Z"/></svg>';
 const LINK_SVG_PATHS =
@@ -3660,7 +3662,7 @@ function renderSessions() {
                 ${renderWorkflowBadge(session)}
                 ${renderLoopBadge(session)}
                 ${hasScratchpad ? `<span class="scratchpad-badge${padEmoji ? ' has-emoji' : ''}" onclick="event.stopPropagation(); openSessionScratchpad('${sid}')" title="Open scratchpad">${padEmoji ? escapeHtml(padEmoji) : `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`}</span>` : ''}
-                ${bookmarksCount > 0 ? `<span class="bookmarks-badge" onclick="event.stopPropagation(); openSessionWithBookmarks('${sid}')" title="${bookmarksCount} bookmarked message${bookmarksCount > 1 ? 's' : ''}"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>${bookmarksCount}</span>` : ''}
+                ${bookmarksCount > 0 ? `<span class="bookmarks-badge" onclick="event.stopPropagation(); openSessionWithBookmarks('${sid}')" title="${bookmarksCount} bookmarked message${bookmarksCount > 1 ? 's' : ''}">${BOOKMARK_SVG}${bookmarksCount}</span>` : ''}
                 ${linkedDocsCount > 0 ? `<span class="linked-docs-badge" onclick="event.stopPropagation(); showSessionInfoModal('${sid}')" title="${linkedDocsCount} linked document${linkedDocsCount > 1 ? 's' : ''}">${linkSvg(10)}${linkedDocsCount}</span>` : ''}
                 ${session.hasPlan && !session.planSourceSessionId ? `<span class="plan-indicator" onclick="event.stopPropagation(); openPlanForSession('${sid}')" title="View plan">${ICON_PLAN}</span>` : ''}
                 ${session.planSourceSessionId ? `<span class="plan-indicator" title="Implements plan — click to reveal plan session" onclick="event.stopPropagation(); revealPlanSession('${escAttrJs(session.planSourceSessionId)}')">${ICON_PLAN}</span>` : ''}
@@ -3685,6 +3687,7 @@ function renderSessions() {
         ${renderScratchpadRow(zenSession)}
         ${renderLinkedDocsHtml(zenSession.id)}
         ${renderArtifactsHtml(zenSession.id)}
+        ${renderZenBookmarksHtml(zenSession.id)}
       </div>
       ${zenSession.hasWorkflow ? renderWorkflowLiveHtml(zenSession.id) : ''}`;
     bindLinkedDocsHandlers(sessionsList.querySelector('.linked-docs-section'), zenSession.id);
@@ -8552,6 +8555,54 @@ function artifactsInnerHtml(sessionId) {
 
 function renderArtifactsHtml(sessionId) {
   return `<div class="artifacts-section panel-section" data-artifacts-for="${escapeHtml(sessionId)}">${artifactsInnerHtml(sessionId)}</div>`;
+}
+
+const ZEN_BOOKMARKS_COLLAPSED = 3;
+const zenBookmarksExpanded = new Set();
+
+function zenBookmarkParts(p) {
+  if (p.type === 'tool_use') return { who: p.tool || 'Tool', text: p.description || p.detail || '' };
+  if (p.type === 'agent') return { who: p.agentType || 'Agent', text: stripTeammateWrapper(p.lastMessage || '') };
+  return { who: p.type === 'assistant' ? 'Claude' : 'You', text: p.text || '' };
+}
+
+// Zen shows the open session only, so its pins are currentPins and a row opens through
+// showPinnedMsgDetail by index.
+function renderZenBookmarksHtml(sessionId) {
+  if (sessionId !== currentSessionId || !currentPins.length) return '';
+  const { shown, moreHtml } = showAllToggle(
+    zenBookmarksExpanded,
+    sessionId,
+    currentPins,
+    ZEN_BOOKMARKS_COLLAPSED,
+    `onclick="toggleZenBookmarks('${escAttrJs(sessionId)}')"`,
+  );
+  const items = shown
+    .map((p, i) => {
+      const { who, text } = zenBookmarkParts(p);
+      const label = truncateAtWord(cleanMessageText(text), 200);
+      return `<li class="zen-bookmark-item">
+        <span class="zen-bookmark-who">${escapeHtml(who)}</span>
+        <button type="button" class="zen-bookmark-link" onclick="showPinnedMsgDetail(${i})" title="${escapeHtml(label)}">${escapeHtml(label || '(empty)')}</button>
+        <span class="scratch-file-time">${formatDate(p.timestamp)}</span>
+      </li>`;
+    })
+    .join('');
+  return `<div class="zen-bookmarks-section panel-section">
+    <div class="panel-section-header">
+      ${BOOKMARK_SVG}
+      <span>Bookmarks</span>
+      <span class="panel-section-count">${currentPins.length}</span>
+    </div>
+    <ul class="zen-bookmark-list">${items}</ul>${moreHtml}
+  </div>`;
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+function toggleZenBookmarks(sessionId) {
+  toggleSetMember(zenBookmarksExpanded, sessionId);
+  const section = document.querySelector('.zen-bookmarks-section');
+  if (section) section.outerHTML = renderZenBookmarksHtml(sessionId);
 }
 
 // No TTL: the server holds the scan until the transcript grows, so a repeat costs one

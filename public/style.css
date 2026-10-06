@@ -5495,6 +5495,7 @@ code.language-tree .hljs-title {
 
 .linked-doc-list,
 .scratch-file-list,
+.zen-bookmark-list,
 .artifact-list {
   list-style: none;
   padding: 0;
@@ -5506,6 +5507,7 @@ code.language-tree .hljs-title {
 
 .linked-doc-item,
 .scratch-file-item,
+.zen-bookmark-item,
 .artifact-item {
   display: flex;
   align-items: baseline;
@@ -5515,6 +5517,7 @@ code.language-tree .hljs-title {
 
 .linked-doc-link,
 .scratch-file-link,
+.zen-bookmark-link,
 .artifact-link {
   color: var(--accent-text);
   text-decoration: underline;
@@ -5572,6 +5575,12 @@ code.language-tree .hljs-title {
   font-size: 11px;
 }
 
+.zen-bookmark-who {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.zen-bookmark-link,
 .scratch-file-link {
   background: none;
   border: none;
