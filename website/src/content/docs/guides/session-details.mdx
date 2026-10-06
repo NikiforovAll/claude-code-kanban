@@ -98,19 +98,48 @@ To link from a terminal or an agent, use `doc link <file|url>`. `doc preview` op
 
 ## Panes
 
-A pane is a live page or a file that shows as a tab next to Board in the session view. Use panes for pages you keep open while Claude works: a dev server, a report, a design. A session keeps up to 50 panes. The server stores them, so every browser tab and every browser shows the same panes.
+A pane is a live page or a file that shows as a tab next to Board. Use it for something you keep open while Claude works, such as a dev server, a report or a design. A session keeps up to 50 panes. The server stores them, so every browser shows the same panes.
 
-- Click **+** at the end of the tab strip to add a pane. Type to search the linked documents of the session, or paste an `http://` or `https://` URL or a file path. A relative path resolves against the session working directory. Press <kbd>Enter</kbd> to add it. Adding a target that is already open goes to its tab.
+<Shot src="shots/13-panes.webp" alt="The session view with three tabs, Board, Kanagawa preview and Plan, and the Plan tab on screen: a Markdown plan with goals, a token table and steps" />
+
+- Click **+** at the end of the tab strip to add a pane. Type to search the session's linked documents, or paste a URL or a file path, then press <kbd>Enter</kbd>. A relative path starts from the session working directory. If the pane is already open, the board goes to its tab.
 - Click **Open in a pane** in the Preview dialog to move the file you are reading into a pane.
 - Press <kbd>[</kbd> or <kbd>]</kbd> to go to the previous or next tab.
-- Click × on a tab, or middle-click the tab, to close the pane.
-- Right-click a tab to copy its URL or path, open it in a new browser tab (a file opens in the Preview dialog), reload it or close it. The reload and open buttons at the right of the strip do the same for the pane on screen.
+- To close a pane, click × on its tab, middle-click the tab, or press <kbd>Alt+W</kbd>.
+- Right-click a tab to copy its URL or path, open it in a new browser tab, reload it or close it. A file opens in the Preview dialog instead of a browser tab. The buttons at the right of the strip reload or open the pane on screen.
 
-A URL pane frames the page live. A site whose headers refuse framing (`X-Frame-Options` or CSP `frame-ancestors`) shows an **Open in new tab** card instead. A pane cannot show the board or the hub. While a URL pane has focus, board and hub shortcuts such as <kbd>Ctrl+`</kbd> do not work, because the page runs on another origin. Click outside the page first. File panes do not have this limit.
+Claude adds panes with `pane add <url|file>`. The board does not switch to the new pane, so your view stays put. Any local server with a page works. `scratch ui <pad> --browser`, for example, prints a URL for the scratch viewer, which reloads itself when the pad changes.
 
-A file pane renders HTML, Markdown, text, source code and images like the Preview dialog. In an HTML pane, web links open in a new browser tab. Select text to comment on it, as in the preview. In every pane, <kbd>Ctrl++</kbd> and <kbd>Ctrl+-</kbd> change the text size. In a URL pane, click outside the page first. Drag the edge of the page to change the reading width, and double-click the edge to reset it. The width applies to every file pane. A file pane does not reload when the file changes: use **Reload**.
+#### File panes
 
-Claude adds panes with `pane add <url|file>`. The board does not switch to a new pane, so your view stays where it is. Any local server with a page works as a pane. For example, the scratch viewer: `scratch ui <pad> --browser` prints a URL that `pane add` takes, and the viewer reloads itself when the pad changes.
+A file pane shows HTML, Markdown, text, source code and images, like the Preview dialog. It reloads when the file changes and keeps its scroll position. A pane that is off screen reloads when you show it.
+
+- Select text to comment on it, as in the preview.
+- <kbd>Ctrl++</kbd> and <kbd>Ctrl+-</kbd> change the text size.
+- Drag the edge of the page to change the reading width. Double-click the edge to reset it. The width applies to every file pane.
+- In an HTML page, web links open in a new browser tab. The board keys for the sidebar, tabs and splits still work there.
+
+#### URL panes
+
+A URL pane shows the live page. Some sites refuse to load in a frame (`X-Frame-Options` or CSP `frame-ancestors`), and their pane shows an **Open in new tab** card instead. A pane cannot show the board or the hub.
+
+The page runs on another origin, so it keeps every key while it has focus. Click outside the page before you use a board or hub shortcut such as <kbd>Ctrl+`</kbd> or <kbd>Ctrl++</kbd>.
+
+### Split view
+
+Show two tabs side by side, for example the board next to a report Claude is writing.
+
+<Shot src="shots/13b-split-view.webp" alt="The session view split in two: the board with pending, in progress and completed tasks on the left, and an HTML pane with a Kanagawa theme preview on the right" />
+
+- Press <kbd>|</kbd> or click the split button at the right of the tab strip. The tab on screen and the tab before it show side by side. Press <kbd>|</kbd> again to end the split.
+- Drag a tab onto a side to show it there.
+- Drag the divider to resize the sides, or to an edge to end the split. Double-click it to reset.
+- <kbd>&#123;</kbd> and <kbd>&#125;</kbd> move focus to the left or right side. <kbd>Alt+[</kbd> and <kbd>Alt+]</kbd> change the tab in the focused side.
+- <kbd>[</kbd> and <kbd>]</kbd> treat a split as one tab.
+
+You can keep several splits. Click a tab outside a split to show it alone. The split comes back when you go to one of its tabs. Splits last until you close the browser tab, and the divider position is the same for all of them.
+
+With the board in a split, the session log opens inside the board's side, and the agent log starts collapsed. A narrow board side packs its three columns tighter. Below about 476 px, it scrolls sideways.
 
 ## Scratchpad
 
