@@ -4179,7 +4179,8 @@ function parseReviewBody(body) {
     selector: code(c?.selector, 500),
   }));
   if (items.some((c) => !c.comment)) throw previewError(400, 'every comment needs text');
-  return { kind: source.kind, label, path: source.kind === 'file' ? source.path : null, items };
+  const locate = oneLine(source.locate, 600) || null;
+  return { kind: source.kind, label, path: source.kind === 'file' ? source.path : null, locate, items };
 }
 
 function formatReviewMarkdown(src, items) {
@@ -4188,6 +4189,7 @@ function formatReviewMarkdown(src, items) {
     '',
     `Each comment is the user's instruction about the quoted text.${src.path ? ' A quote missing from the source means the source changed after the review: say so.' : ''}`,
   ];
+  if (src.locate) parts.push('', src.locate);
   items.forEach((c, i) => {
     const where = [c.line && `line ${c.line}`, c.heading && `under "${c.heading}"`].filter(Boolean).join(', ');
     parts.push('', `## ${i + 1}${where ? ` (${where})` : ''}`, '');

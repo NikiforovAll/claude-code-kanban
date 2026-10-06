@@ -2313,9 +2313,29 @@ function mountReplyReview(m, body, modal) {
     contentEl: body,
     panelEl: document.getElementById('msg-review-panel'),
     hostEl: modal,
-    source: { kind: 'reply', id: m.timestamp, label: `your reply at ${new Date(m.timestamp).toLocaleTimeString()}` },
+    source: {
+      kind: 'reply',
+      id: m.timestamp,
+      label: replyReviewLabel(m.timestamp),
+      locate: replyLocateHint(m.timestamp),
+    },
     onComment: () => setMsgDetailFollow(false),
   });
+}
+
+function replyReviewLabel(timestamp) {
+  const d = new Date(timestamp);
+  const day =
+    d.toDateString() === new Date().toDateString()
+      ? ''
+      : ` on ${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`;
+  return `your reply${day} at ${d.toLocaleTimeString()}`;
+}
+
+function replyLocateHint(timestamp) {
+  const transcript = sessions.find((s) => s.id === currentSessionId)?.jsonlPath;
+  if (!transcript) return undefined;
+  return `If that reply is not in your context, it is in ${transcript}, the assistant entry with timestamp ${timestamp}.`;
 }
 
 function closeMsgDetailModal() {
