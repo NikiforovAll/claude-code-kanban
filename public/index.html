@@ -306,6 +306,7 @@
         </div>
 
         <div id="pane-split" class="pane-split">
+        <div id="board-side" class="board-side">
         <div class="kanban" id="main-content">
           <div id="owner-filter-bar" class="owner-filter-bar">
             <select id="owner-filter" class="filter-dropdown" onchange="filterByOwner(this.value)" aria-label="Filter by team member">
@@ -339,6 +340,14 @@
             <div id="completed-tasks" class="column-tasks" role="list" data-status="completed" ondragover="onColumnDragOver(event)" ondragleave="onColumnDragLeave(event)" ondrop="onColumnDrop(event)"></div>
           </div>
         </div>
+        <div id="agent-footer" class="agent-footer">
+          <div class="agent-footer-header" onclick="toggleAgentFooter()">
+            <span id="agent-footer-label">Agents</span>
+            <button class="agent-footer-toggle" id="agent-footer-toggle" aria-label="Toggle agent panel">&#x25BE;</button>
+          </div>
+          <div class="agent-footer-content" id="agent-footer-content"></div>
+        </div>
+        </div>
         <div id="pane-divider" class="pane-divider" title="Drag to resize · drag to an edge to unsplit · double-click to reset"></div>
         <div id="pane-views" class="pane-views"></div>
         <div id="pane-drop" class="pane-drop"><div data-side="l"></div><div data-side="r"></div></div>
@@ -360,13 +369,6 @@
           </div>
           <div id="terminal-host" class="terminal-host"></div>
           <textarea id="terminal-key-proxy" class="terminal-key-proxy" tabindex="-1" aria-hidden="true"></textarea>
-        </div>
-        <div id="agent-footer" class="agent-footer">
-          <div class="agent-footer-header" onclick="toggleAgentFooter()">
-            <span id="agent-footer-label">Agents</span>
-            <button class="agent-footer-toggle" id="agent-footer-toggle" aria-label="Toggle agent panel">&#x25BE;</button>
-          </div>
-          <div class="agent-footer-content" id="agent-footer-content"></div>
         </div>
       </div>
     </main>

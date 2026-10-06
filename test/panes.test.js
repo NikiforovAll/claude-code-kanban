@@ -42,6 +42,15 @@ describe('pane store', () => {
     assert.deepEqual(panes.get('s9'), { rev: 0, panes: [], updatedAt: null });
   });
 
+  it('lists the file targets of every session, without URLs', () => {
+    const panes = memoryStore().open();
+    panes.add('s1', url(1));
+    panes.add('s1', { kind: 'markdown', target: 'C:\\repo\\a.md' });
+    panes.add('s2', { kind: 'html', target: 'C:\\repo\\b.html' });
+    panes.add('s2', { kind: 'html', target: 'C:\\repo\\a.md' });
+    assert.deepEqual([...panes.fileTargets()], ['C:\\repo\\a.md', 'C:\\repo\\b.html']);
+  });
+
   it('returns the existing pane for the same file, whatever its kind or spelling', () => {
     const panes = memoryStore().open();
     panes.add('s1', { kind: 'html', target: 'C:\\repo\\a.html' });

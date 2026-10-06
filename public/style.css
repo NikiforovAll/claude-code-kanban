@@ -3463,8 +3463,7 @@ code.language-tree .hljs-title {
   display: none;
 }
 
-.session-view.pane-mode .kanban,
-.session-view.pane-mode .agent-footer {
+.session-view.pane-mode .board-side {
   display: none;
 }
 
@@ -3720,8 +3719,46 @@ code.language-tree .hljs-title {
   min-height: 0;
 }
 
-.pane-split > .kanban {
+.board-side {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
   min-width: 0;
+  container: board / inline-size;
+}
+
+.board-side > .kanban {
+  min-height: 0;
+}
+
+/* 936px is where the full layout stops fitting: 3 × 280px columns, 2 × 24px gaps, 2 × 24px padding. */
+@container board (max-width: 936px) {
+  .kanban {
+    gap: 12px;
+    padding: 16px;
+  }
+
+  .kanban-column {
+    min-width: 140px;
+  }
+
+  .column-header {
+    gap: 6px;
+    padding-bottom: 12px;
+    margin-bottom: 12px;
+  }
+
+  .column-title {
+    font-size: 12px;
+    letter-spacing: 0.03em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .column-tasks {
+    padding-right: 0;
+  }
 }
 
 .session-view.terminal-mode .pane-split {
@@ -3742,8 +3779,8 @@ code.language-tree .hljs-title {
   display: contents;
 }
 
-.session-view.split-mode .pane-split > .kanban.side-l,
-.session-view.split-mode .pane-split > .kanban.side-r,
+.session-view.split-mode .pane-split > .board-side.side-l,
+.session-view.split-mode .pane-split > .board-side.side-r,
 .session-view.split-mode .pane-view {
   position: absolute;
   top: 0;

@@ -4026,7 +4026,36 @@ const panes = createPaneStore({
     writeJsonAtomic(PANES_FILE, data);
     panesStamp = panesFileStamp();
   },
-  onChange: (sessionId, layout) => broadcast({ type: 'pane:changed', sessionId, layout }),
+  onChange: (sessionId, layout) => {
+    broadcast({ type: 'pane:changed', sessionId, layout });
+    setImmediate(syncPaneFileWatch);
+  },
+});
+
+// File panes render the file once; this watch tells the boards when one changes. An editor
+// or an agent often saves several times in a row, so each path waits for a quiet 200 ms.
+const paneFileWatcher = chokidar.watch([], { ignoreInitial: true });
+const paneFileTimers = new Map();
+let paneFilesWatched = new Set();
+function syncPaneFileWatch() {
+  const next = panes.fileTargets();
+  const added = [...next].filter((p) => !paneFilesWatched.has(p));
+  const gone = [...paneFilesWatched].filter((p) => !next.has(p));
+  if (added.length) paneFileWatcher.add(added);
+  if (gone.length) paneFileWatcher.unwatch(gone);
+  paneFilesWatched = next;
+}
+syncPaneFileWatch();
+paneFileWatcher.on('all', (event, filePath) => {
+  if (event !== 'add' && event !== 'change' && event !== 'unlink') return;
+  clearTimeout(paneFileTimers.get(filePath));
+  paneFileTimers.set(
+    filePath,
+    setTimeout(() => {
+      paneFileTimers.delete(filePath);
+      broadcast({ type: 'pane:file-changed', path: filePath });
+    }, 200),
+  );
 });
 chokidar.watch(PANES_FILE, { ignoreInitial: true }).on('all', (event) => {
   if (event === 'add' || event === 'change') panes.reload();

@@ -3131,10 +3131,6 @@ function renderAgentFooter() {
   footer.classList.add('visible');
   label.textContent = `Agents Log (${visible.length})`;
 
-  const collapsed = store.getItem('agentFooterCollapsed') === 'true';
-  footer.classList.toggle('collapsed', collapsed);
-  document.getElementById('agent-footer-toggle').innerHTML = collapsed ? '&#x25B4;' : '&#x25BE;';
-
   const permHtml = permFresh
     ? `<button type="button" class="permission-badge" onclick="showWaitingDetail()">${currentWaiting.kind === 'question' ? '❓ Question pending' : currentWaiting.kind === 'plan' ? '📋 Plan pending' : `⏳ Awaiting: ${escapeHtml(currentWaiting.toolName || 'unknown')}`}</button>`
     : '';
@@ -3206,9 +3202,24 @@ function renderAgentFooter() {
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
 function toggleAgentFooter() {
   const footer = document.getElementById('agent-footer');
-  const collapsed = !footer.classList.contains('collapsed');
-  footer.classList.toggle('collapsed', collapsed);
-  store.setItem('agentFooterCollapsed', collapsed);
+  store.setItem(agentFooterCollapseKey(), !footer.classList.contains('collapsed'));
+  applyAgentFooterCollapsed();
+}
+
+function boardInSplit() {
+  const board = document.getElementById('board-side');
+  return board.classList.contains('side-l') || board.classList.contains('side-r');
+}
+
+// With the board in a split, the agents log keeps its own collapse preference and starts collapsed.
+function agentFooterCollapseKey() {
+  return boardInSplit() ? 'agentFooterCollapsedSplit' : 'agentFooterCollapsed';
+}
+
+function applyAgentFooterCollapsed() {
+  const saved = store.getItem(agentFooterCollapseKey());
+  const collapsed = saved === null ? boardInSplit() : saved === 'true';
+  document.getElementById('agent-footer').classList.toggle('collapsed', collapsed);
   document.getElementById('agent-footer-toggle').innerHTML = collapsed ? '&#x25B4;' : '&#x25BE;';
 }
 
@@ -7603,6 +7614,11 @@ function reviewBridge(textBefore, headingBefore, rangeAt, comboOf, fieldSelector
     e.preventDefault();
     send({ type: 'key', key: e.key, code: e.code, ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, meta: e.metaKey });
   });
+  let scrollTimer = 0;
+  addEventListener('scroll', () => {
+    clearTimeout(scrollTimer);
+    scrollTimer = setTimeout(() => send({ type: 'scroll', x: scrollX, y: scrollY }), 150);
+  });
   addEventListener('message', (e) => {
     if (e.source !== parent || typeof e.data?.type !== 'string' || !e.data.type.startsWith(P)) return;
     const type = e.data.type.slice(P.length);
@@ -7639,6 +7655,8 @@ const REVIEW_BRIDGE_TAG = `<script>(${reviewBridge})(${reviewTextBefore}, ${revi
 // Frames from createPreviewFrame, which carry the bridge. A URL pane is another site and must
 // not drive the board.
 const bridgedFrames = new WeakSet();
+// A bridged frame's last scroll position, for reloadPaneView.
+const paneFrameScroll = new WeakMap();
 
 function bridgedFrameEls() {
   return [...document.querySelectorAll('iframe[srcdoc]')].filter((f) => bridgedFrames.has(f));
@@ -7663,10 +7681,11 @@ function sendBridgeClaims(frames, claims) {
 window.addEventListener('message', (e) => {
   const type =
     typeof e.data?.type === 'string' && e.data.type.startsWith(REVIEW_MSG) && e.data.type.slice(REVIEW_MSG.length);
-  if (type !== 'link' && type !== 'key') return;
+  if (type !== 'link' && type !== 'key' && type !== 'scroll') return;
   const frame = bridgedFrameEls().find((f) => f.contentWindow === e.source);
   if (!frame) return;
-  if (type === 'key') replayKey(e.data, frame);
+  if (type === 'scroll') paneFrameScroll.set(frame, { x: e.data.x, y: e.data.y });
+  else if (type === 'key') replayKey(e.data, frame);
   else {
     const url = linkUrl(e.data.href);
     if (url) hub.openExternal(url);
@@ -8967,6 +8986,10 @@ function setupEventSource() {
 
       if (data.type === 'pane:changed') {
         applyPaneLayout(data.sessionId, data.layout);
+      }
+
+      if (data.type === 'pane:file-changed') {
+        onPaneFileChanged(data.path);
       }
 
       if (data.type === 'team-update') {
@@ -12109,12 +12132,14 @@ const PANE_ICONS = {
 // and the limit spans sessions, so a session switch cannot pile up frames.
 const paneFrames = new Map();
 const paneReviews = new WeakMap();
+// Off-screen views whose file changed; they reload when shown.
+const stalePaneViews = new WeakSet();
 const paneViews = document.getElementById('pane-views');
 const paneSplitBox = document.getElementById('pane-split');
 const paneDivider = document.getElementById('pane-divider');
 const paneDrop = document.getElementById('pane-drop');
 const paneSplitBtn = document.getElementById('pane-split-btn');
-const paneBoard = document.getElementById('main-content');
+const paneBoard = document.getElementById('board-side');
 const paneLog = document.getElementById('message-panel');
 const paneLogHome = { parent: paneLog.parentNode, next: paneLog.nextSibling };
 const paneTabs = document.getElementById('pane-tabs');
@@ -12126,6 +12151,7 @@ const panePopDocs = document.getElementById('pane-pop-docs');
 const panePopDetect = document.getElementById('pane-pop-detect');
 let paneTabsHtml = '';
 let paneDragId = null;
+applyAgentFooterCollapsed();
 
 function paneSessionId() {
   return viewMode === 'session' ? currentSessionId : null;
@@ -12167,7 +12193,9 @@ function syncPanes() {
     el.classList.toggle('on', side !== undefined);
     markPaneSide(el, side, el.dataset.key === focusKey);
   }
+  const boardWasSplit = boardInSplit();
   markPaneSide(paneBoard, boardSide, !!boardSide && !pane);
+  if (boardWasSplit !== !!boardSide) applyAgentFooterCollapsed();
   placeSessionLog(wantsTerminal() ? null : boardSide);
   // Off screen, a framed page keeps focus and takes keys the user aims at the board.
   const focused = document.activeElement;
@@ -12182,7 +12210,7 @@ function syncPanes() {
   renderPaneTabs(sid, layout, split);
 }
 
-// With the board in a split, the session log docks at the board's edge instead of the window's.
+// With the board in a split, the session log docks in the board's side instead of the window.
 function placeSessionLog(boardSide) {
   const parent = boardSide ? paneSplitBox : paneLogHome.parent;
   if (paneLog.parentNode !== parent) {
@@ -12261,6 +12289,7 @@ function mountPane(sid, pane) {
   if (existing) {
     paneFrames.delete(key);
     paneFrames.set(key, existing);
+    if (stalePaneViews.delete(existing)) reloadPaneView(sid, pane, existing);
     return key;
   }
   const view = document.createElement('div');
@@ -12277,7 +12306,7 @@ function mountPane(sid, pane) {
   return key;
 }
 
-async function loadPaneView(sid, pane, view) {
+async function loadPaneView(sid, pane, view, scroll) {
   if (paneOwnOrigin(pane)) {
     view.insertAdjacentHTML(
       'beforeend',
@@ -12318,7 +12347,11 @@ async function loadPaneView(sid, pane, view) {
     if (r.ok) data = await r.json();
   } catch {}
   if (data?.kind === 'html') {
-    const frame = createPreviewFrame('pane-frame modal-zoomable', data.content + REVIEW_BRIDGE_TAG);
+    // The frame's origin is opaque, so the page restores its own scroll on load.
+    const restore = scroll
+      ? `<script>addEventListener('load',()=>requestAnimationFrame(()=>scrollTo(${Number(scroll.x) || 0},${Number(scroll.y) || 0})))</script>`
+      : '';
+    const frame = createPreviewFrame('pane-frame modal-zoomable', data.content + REVIEW_BRIDGE_TAG + restore);
     frame.title = pane.title;
     view.appendChild(frame);
     attachPaneReview(view, sid, fileReviewOpts(data.path, data.kind, frame, frame));
@@ -12343,6 +12376,36 @@ async function loadPaneView(sid, pane, view) {
       : ['Nothing to preview', 'cck cannot render this file.'];
   const button = data && data.exists !== false ? 'Open in editor' : 'Try in preview';
   view.insertAdjacentHTML('beforeend', paneCardHtml(title, text, button));
+}
+
+function onPaneFileChanged(filePath) {
+  for (const [key, view] of paneFrames) {
+    const [sid, paneId] = key.split('/');
+    const pane = paneLayout(sid).panes.find((p) => p.id === paneId);
+    if (!pane || pane.kind === 'url' || pane.target !== filePath) continue;
+    if (view.classList.contains('on')) reloadPaneView(sid, pane, view);
+    else stalePaneViews.add(view);
+  }
+}
+
+// Builds the new view off screen and swaps it in, so the old content stays up while the file
+// loads and the scroll position carries over.
+async function reloadPaneView(sid, pane, view) {
+  const key = view.dataset.key;
+  const frame = view.querySelector(':scope > .pane-frame');
+  const docBody = view.querySelector('.pane-doc-body');
+  const fresh = document.createElement('div');
+  fresh.className = 'pane-view';
+  fresh.dataset.key = key;
+  await loadPaneView(sid, pane, fresh, frame && paneFrameScroll.get(frame));
+  if (paneFrames.get(key) !== view) return;
+  fresh.className = view.className;
+  const top = docBody?.scrollTop;
+  view.replaceWith(fresh);
+  paneFrames.set(key, fresh);
+  const newBody = fresh.querySelector('.pane-doc-body');
+  if (newBody && top) newBody.scrollTop = top;
+  syncPaneReview();
 }
 
 // One reading width for every pane, kept apart from the modals': a modal's saved size
