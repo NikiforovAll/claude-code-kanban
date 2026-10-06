@@ -7333,7 +7333,7 @@ select.form-input option:checked {
 
 /* #region NEW_SESSION */
 .modal.new-session-modal {
-  width: 520px;
+  width: 640px;
   max-width: calc(100vw - 32px);
   overflow: visible;
 }
@@ -7462,7 +7462,8 @@ select.form-input option:checked {
   accent-color: var(--accent);
 }
 
-.ns-inline .form-input:disabled {
+.ns-inline .form-input:disabled,
+.ns-check:has(input:disabled) {
   opacity: 0.5;
   cursor: not-allowed;
 }
@@ -7545,13 +7546,25 @@ select.form-input option:checked {
   border-top: 1px solid var(--border);
 }
 
-.ns-stay {
-  margin-right: auto;
+.ns-stay,
+.ns-edit {
   color: var(--text-tertiary);
 }
 
-.new-session-modal.ns-resume .ns-stay {
+.ns-edit {
+  margin-right: auto;
+}
+
+.new-session-modal.ns-resume .ns-stay,
+.new-session-modal.ns-resume .ns-edit {
   visibility: hidden;
+}
+
+.ns-footer .btn-primary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .ns-footer .btn-primary:disabled {

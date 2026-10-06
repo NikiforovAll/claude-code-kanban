@@ -5,7 +5,7 @@ const { mkdtempSync, readFileSync, realpathSync, rmSync } = require('node:fs');
 const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
-const { createTerminalService, shellArgs, readTerminalConfig, resolveShell, claudeArgsFor, parseNewSpec, findPickProcess, ptyEnv } = require('../lib/terminal');
+const { createTerminalService, shellArgs, claudeCommand, readTerminalConfig, resolveShell, claudeArgsFor, parseNewSpec, findPickProcess, ptyEnv } = require('../lib/terminal');
 
 let WebSocket = null;
 let ptyAvailable = false;
@@ -180,6 +180,92 @@ describe('new session options', () => {
     assert.equal(spec.taskList, SESSION);
     assert.deepEqual(claudeArgsFor('new', SESSION, spec), ['--session-id', SESSION]);
     assert.equal(parseNewSpec({ cwd: '/p' }).taskList, null);
+  });
+  it('takes edit only as true, and strips control characters from its prompt', () => {
+    assert.equal(parseNewSpec({ cwd: '/p', edit: true }).edit, true);
+    assert.equal(parseNewSpec({ cwd: '/p', edit: 'yes' }).edit, false);
+    assert.equal(parseNewSpec({ cwd: '/p', edit: true, prompt: 'a\x03b\x15c\n\td' }).prompt, 'abc\n\td');
+    assert.equal(parseNewSpec({ cwd: '/p', prompt: 'a\x03b' }).prompt, 'a\x03b');
+  });
+  it('builds the command line an edit terminal types', () => {
+    const args = claudeArgsFor('new', SESSION, parseNewSpec({ cwd: '/p', name: 'Fix login', model: 'opus' }));
+    assert.equal(claudeCommand('pwsh.exe', args), `claude --session-id ${SESSION} --name 'Fix login' --model opus`);
+    assert.equal(claudeCommand('cmd.exe', args), `claude --session-id ${SESSION} --name "Fix login" --model opus`);
+  });
+  it('puts the prompt first and quotes it for each shell family', () => {
+    const args = ['--session-id', SESSION, '-w'];
+    const text = "it's $HOME `x` ’q’ \"d\"\nnext";
+    assert.equal(claudeCommand('pwsh.exe', args, text), `claude 'it''s $HOME \`x\` ’’q’’ "d"\nnext' --session-id ${SESSION} -w`);
+    assert.equal(claudeCommand('/bin/zsh', args, text), `claude 'it'\\''s $HOME \`x\` ’q’ "d"\nnext' --session-id ${SESSION} -w`);
+  });
+});
+
+describe('edit before run', () => {
+  const A = 'aaaaaaaa-0000-0000-0000-000000000001';
+
+  function service(live = [], shell = 'bash') {
+    const pty = fakePty();
+    const t = createTerminalService({
+      config: { enabled: true, restore: false, shell, maxSessions: 30, scrollback: 100 },
+      net: { EXPOSED: false },
+      pty,
+      token: TOKEN,
+      claudeDir: os.tmpdir(),
+      which: (n) => n,
+      isLiveElsewhere: () => false,
+      resolveCwd: () => null,
+      isAllowedFolder: () => true,
+      liveSessions: () => live,
+      isPidAlive: () => true,
+      exitPollMs: 20,
+    });
+    return { t, pty };
+  }
+
+  it('starts a plain shell and types the command without Enter once the shell settles', async () => {
+    const { t, pty } = service();
+    const r = await t.startNew({ id: A, cwd: os.tmpdir(), name: 'Fix login', prompt: 'line one\nline two', edit: true });
+    assert.equal(r.id, A);
+    const [p] = pty.spawned;
+    assert.deepEqual(p.args, shellArgs('bash', null));
+    p.emit('prompt> ');
+    await until(() => p.written.length > 0);
+    await wait(150);
+    assert.deepEqual(p.written, [`\x1b[200~claude 'line one\rline two' --session-id ${A} --name 'Fix login'\x1b[201~`]);
+    assert.equal(t.list()[0].edit, true);
+    t.shutdown();
+  });
+
+  it('refuses a prompt when the shell is cmd, and takes the same session without one', async () => {
+    const { t, pty } = service([], 'cmd.exe');
+    const r = await t.startNew({ id: A, cwd: os.tmpdir(), prompt: 'hi', edit: true });
+    assert.equal(r.status, 400);
+    assert.match(r.error, /cmd/);
+    assert.equal(pty.spawned.length, 0);
+    assert.equal((await t.startNew({ id: A, cwd: os.tmpdir(), edit: true })).id, A);
+    t.shutdown();
+  });
+
+  it('refuses a paste until the typed command runs claude', async () => {
+    const live = [];
+    const { t, pty } = service(live);
+    await t.startNew({ id: A, cwd: os.tmpdir(), edit: true });
+    pty.spawned[0].emit('prompt> ');
+    await until(() => pty.spawned[0].written.length > 0);
+    assert.equal(t.paste(A, 'hi'), false);
+    live.push({ sessionId: A, pid: 4242, startedAt: Date.now() });
+    let pasted = false;
+    await until(() => (pasted = t.paste(A, 'hi')));
+    assert.equal(pasted, true);
+    t.shutdown();
+  });
+
+  it('leaves a normal new session as it was', async () => {
+    const { t, pty } = service();
+    await t.startNew({ id: A, cwd: os.tmpdir(), name: 'Fix login' });
+    assert.ok(pty.spawned[0].args.join(' ').includes(`--session-id ${A}`));
+    assert.equal(t.list()[0].edit, false);
+    t.shutdown();
   });
 });
 
@@ -415,8 +501,8 @@ function fakePty({ holdExit = false } = {}) {
     spawn(_file, args, opts) {
       let onExit = () => {};
       const p = {
-        pid: 100000 + spawned.length, args, env: opts?.env,
-        onData() {}, onExit(cb) { onExit = cb; }, write() {}, resize() {}, pause() {}, resume() {},
+        pid: 100000 + spawned.length, args, env: opts?.env, written: [], emit: () => {},
+        onData(cb) { p.emit = cb; }, onExit(cb) { onExit = cb; }, write(d) { p.written.push(d); }, resize() {}, pause() {}, resume() {},
         exit() { onExit({ exitCode: 0 }); },
         kill() { if (!holdExit) setImmediate(() => onExit({ exitCode: 0 })); },
       };

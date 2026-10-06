@@ -13808,6 +13808,7 @@ async function openTerminal(sessionId, mode, attempt = 0) {
         worktree: spec.worktree,
         model: spec.model,
         prompt: spec.prompt,
+        edit: spec.edit,
       }),
     },
   });
@@ -14097,12 +14098,14 @@ const newSpecs = new Map();
 const dispatchSpecs = new Map();
 const ns = { projects: [], picked: [], matches: [], idx: -1, folder: '', busy: false, resume: false };
 const NEW_SESSION_STAY_KEY = 'new-session-stay';
+const NEW_SESSION_EDIT_KEY = 'new-session-edit';
 
 const PLACEHOLDER_NAMES = { pick: 'Resume session', dispatch: 'Started session', new: 'New session' };
 const PLACEHOLDER_HINTS = {
   pick: 'pick a session to resume',
   dispatch: 'starting',
   new: 'waiting for your first message',
+  edit: 'press Enter in the terminal to start',
 };
 
 function placeholderSession(id, spec) {
@@ -14110,6 +14113,7 @@ function placeholderSession(id, spec) {
     id,
     placeholder: true,
     mode: spec.mode,
+    edit: !!spec.edit,
     name: spec.name || PLACEHOLDER_NAMES[spec.mode] || PLACEHOLDER_NAMES.new,
     dispatchGroup: spec.group || undefined,
     dispatched: spec.mode === 'dispatch' ? { parent: spec.parent || null } : undefined,
@@ -14189,7 +14193,7 @@ function renderPlaceholderCard(session) {
           <button onclick="fetchTasks('${escAttrJs(session.id)}')" data-session-id="${escapeHtml(session.id)}" class="session-item session-placeholder ${isActive ? 'active' : ''}" title="${escapeHtml(`${session.id} | ${session.project}`)}">
             <div class="session-name">${escapeHtml(session.name)}</div>
             ${projectHtml ? `<div class="session-secondary">${projectHtml}</div>` : ''}
-            <div class="session-waiting"><span class="pulse"></span>${PLACEHOLDER_HINTS[session.mode] || PLACEHOLDER_HINTS.new}</div>
+            <div class="session-waiting"><span class="pulse"></span>${PLACEHOLDER_HINTS[session.edit ? 'edit' : session.mode] || PLACEHOLDER_HINTS.new}</div>
           </button>
         `;
 }
@@ -14203,7 +14207,14 @@ async function restorePendingSessions() {
   try {
     for (const t of await terminals) {
       if ((t.mode !== 'new' && t.mode !== 'pick') || newSpecs.has(t.id) || dispatchSpecs.has(t.id)) continue;
-      newSpecs.set(t.id, { cwd: t.cwd, name: t.name, worktree: t.worktree, mode: t.mode, startedAt: t.startedAt });
+      newSpecs.set(t.id, {
+        cwd: t.cwd,
+        name: t.name,
+        worktree: t.worktree,
+        mode: t.mode,
+        edit: t.edit,
+        startedAt: t.startedAt,
+      });
     }
   } catch (_) {}
 }
@@ -14241,6 +14252,7 @@ function openNewSession(folder, resume = false) {
   document.getElementById('ns-wt').checked = false;
   document.getElementById('ns-model').value = '';
   document.getElementById('ns-stay').checked = store.getItem(NEW_SESSION_STAY_KEY) === 'true';
+  document.getElementById('ns-edit').checked = store.getItem(NEW_SESSION_EDIT_KEY) === 'true';
   setNewSessionError('');
   const current = viewMode === 'session' ? sessions.find((s) => s.id === currentSessionId)?.project : null;
   setNewSessionFolder(folder || current || '');
@@ -14340,12 +14352,15 @@ function folderListOpen() {
 function newSessionValues() {
   const wtOn = document.getElementById('ns-wt').checked;
   const wtName = document.getElementById('ns-wt-name').value.trim();
+  const edit = !ns.resume && document.getElementById('ns-edit').checked;
   return {
     cwd: ns.folder,
     name: document.getElementById('ns-name').value.trim() || null,
     worktree: wtOn ? wtName || true : false,
     model: document.getElementById('ns-model').value || null,
     prompt: document.getElementById('ns-prompt').value.trim() || null,
+    edit,
+    stay: !ns.resume && !edit && document.getElementById('ns-stay').checked,
   };
 }
 
@@ -14371,11 +14386,12 @@ function renderNewSessionForm() {
   const hint = document.getElementById('ns-wt-hint');
   hint.hidden = !wtOn;
   hint.textContent = `.claude/worktrees/${typeof v.worktree === 'string' ? v.worktree : '<name chosen by Claude>'}`;
+  document.getElementById('ns-stay').disabled = v.edit;
   const problem = newSessionProblem(v);
   setNewSessionError(problem);
   const start = document.getElementById('ns-start');
   start.disabled = !v.cwd || !!problem || ns.busy;
-  const verb = ns.resume ? 'Resume' : 'Start';
+  const verb = ns.resume ? 'Resume' : v.edit ? 'Open' : 'Start';
   start.textContent = v.cwd ? `${verb} in ${pathBasename(v.cwd)}` : verb;
 }
 
@@ -14424,7 +14440,7 @@ function startNewSession() {
   const id = crypto.randomUUID();
   newSpecs.set(id, { ...(ns.resume ? { cwd: v.cwd } : v), mode: ns.resume ? 'pick' : 'new', startedAt: Date.now() });
   setTerminalMode(id, true);
-  if (!ns.resume && document.getElementById('ns-stay').checked) return startNewSessionInBackground(id, v);
+  if (v.stay) return startNewSessionInBackground(id, v);
   sessions = mergePlaceholders(sessions.filter((s) => !s.placeholder));
   closeNewSession();
   fetchTasks(id).then(() => sessionsList.querySelector('.session-item.active')?.scrollIntoView({ block: 'nearest' }));
@@ -14528,6 +14544,10 @@ function initNewSession() {
   document
     .getElementById('ns-stay')
     .addEventListener('change', (e) => store.setItem(NEW_SESSION_STAY_KEY, String(e.target.checked)));
+  document.getElementById('ns-edit').addEventListener('change', (e) => {
+    store.setItem(NEW_SESSION_EDIT_KEY, String(e.target.checked));
+    renderNewSessionForm();
+  });
   for (const id of ['ns-name', 'ns-wt-name', 'ns-prompt', 'ns-model']) {
     document.getElementById(id).addEventListener('input', renderNewSessionForm);
   }
