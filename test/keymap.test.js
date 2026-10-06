@@ -9,9 +9,12 @@ const fn = (name) => new RegExp(`^function ${name}\\([^)]*\\) \\{[\\s\\S]*?^\\}`
 const tabs = /^const SHORTCUT_TABS = [\s\S]*?^\];/m.exec(src)[0];
 const MAC_KEYS = /^const MAC_KEYS = .*;$/m.exec(src)[0];
 
+// The hub's labels, as hub.keyLabel gives them after welcome. Empty: the hub has not answered.
+let hubLabels = {};
 // The page's own helpers, with the platform passed in the way the page's IS_MAC default does.
 const page = vm.runInNewContext(
-  `${MAC_KEYS}\n${fn('hubModDown')}\n${fn('helpKeys')}\n${tabs}\n({ hubModDown, helpKeys, SHORTCUT_TABS })`,
+  `${MAC_KEYS}\n${fn('hubModDown')}\n${fn('helpKeys')}\n${fn('buildHelpShortcuts')}\n${tabs}\n({ hubModDown, helpKeys, buildHelpShortcuts, SHORTCUT_TABS })`,
+  { IS_MAC: false, escapeHtml: String, hub: { keyLabel: (a) => hubLabels[[a].flat().join()] ?? null } },
 );
 const { hubModDown, SHORTCUT_TABS } = page;
 // Arrays from the vm context have another prototype, so copy them for deepEqual.
@@ -68,5 +71,31 @@ describe('help dialog keys', () => {
     for (const r of hub.flatMap((g) => g.rows).filter((r) => r.keys.includes('Alt'))) assert.equal(r.hubMod, true, r.label);
     assert.equal(row('Show / hide terminal').hubMod, undefined);
     assert.equal(row('Jump to memory').hubMod, undefined);
+  });
+
+  it('every hub row with a hub key names its hub actions, and the session keys none', () => {
+    const HUB_ACTIONS = ['hub.projectPicker', 'hub.configDirPicker', 'hub.appLauncher', 'hub.prevApp', 'hub.nextApp', 'hub.appByNumber'];
+    const hub = SHORTCUT_TABS.filter((t) => t.hub).flatMap((t) => t.groups).flatMap((g) => g.rows);
+    for (const r of hub.filter((r) => r.hubMod)) assert.ok([r.action].flat().every((a) => HUB_ACTIONS.includes(a)), r.label);
+    for (const label of ['New session', 'Resume session (claude -r)', 'Swap to previous session']) assert.equal(row(label).action, undefined);
+  });
+
+  it('a hub row shows the keys the hub reports, and hides when no key runs it', () => {
+    hubLabels = {
+      'hub.projectPicker': ['Ctrl', 'Alt', 'O'],
+      'hub.prevApp,hub.nextApp': ['Ctrl', 'Alt', 'J/K'],
+      'hub.configDirPicker': [],
+    };
+    try {
+      assert.deepEqual(helpKeys(row('Project picker'), MAC), ['Ctrl', 'Alt', 'O']);
+      assert.deepEqual(helpKeys(row('Previous / next hub app'), WIN), ['Ctrl', 'Alt', 'J/K']);
+      assert.deepEqual(helpKeys(row('App launcher'), WIN), ['Ctrl', 'Alt', 'A'], 'not reported: the default');
+      const html = page.buildHelpShortcuts(SHORTCUT_TABS.find((t) => t.hub).groups);
+      assert.match(html, /<kbd>O<\/kbd><\/dt><dd class="sc-l">Project picker/);
+      assert.doesNotMatch(html, /Config dir picker/);
+      assert.match(html, /App launcher/);
+    } finally {
+      hubLabels = {};
+    }
   });
 });

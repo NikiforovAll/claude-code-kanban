@@ -1,4 +1,4 @@
-// claude-hub-sdk 1.3.0 (sha256 4c9f3341a24d). Copied by npm run sdk:sync in claude-code-hub. Do not edit.
+// claude-hub-sdk 1.4.0 (sha256 7d559a8888ce). Copied by npm run sdk:sync in claude-code-hub. Do not edit.
 // Claude Code Hub SDK: the one rule that names a key press, shared by the hub page, client.js and
 // stub.js. The hub serves it to its page as /sdk/keys.js; mount() and sdk:sync put it in front of
 // client.js and stub.js, so an app still loads one file.
@@ -23,7 +23,17 @@ var ClaudeHubKeys = (() => {
     return [...mods, key].filter(Boolean).join('+');
   }
 
-  return { comboOf };
+  // The keys of a combo as a help row shows them: ['Ctrl', 'Alt', 'P'], or ['⌃', '⌥', 'P'] on macOS.
+  // The {n} of a numbered combo reads 1…9.
+  function keyParts(combo, mac) {
+    const mods = mac
+      ? { ctrl: '⌃', alt: '⌥', shift: '⇧', meta: '⌘' }
+      : { ctrl: 'Ctrl', alt: 'Alt', shift: 'Shift', meta: 'Win' };
+    const named = { '{n}': '1…9', ArrowLeft: '←', ArrowRight: '→', ArrowUp: '↑', ArrowDown: '↓' };
+    return combo.split('+').map((k) => mods[k] ?? named[k] ?? (k.length === 1 ? k.toUpperCase() : k));
+  }
+
+  return { comboOf, keyParts };
 })();
 
 if (typeof module === 'object' && module.exports) module.exports = ClaudeHubKeys;
@@ -38,7 +48,7 @@ if (typeof module === 'object' && module.exports) module.exports = ClaudeHubKeys
   const WELCOME_WAIT_MS = 2000;
 
   // keys.js comes first in the served file. Required as a module, client.js loads it itself.
-  const { comboOf } = typeof ClaudeHubKeys === 'object' ? ClaudeHubKeys : require('./keys');
+  const { comboOf, keyParts } = typeof ClaudeHubKeys === 'object' ? ClaudeHubKeys : require('./keys');
 
   function isVars(v) {
     return (
@@ -56,6 +66,15 @@ if (typeof module === 'object' && module.exports) module.exports = ClaudeHubKeys
   }
 
   const strings = (list) => new Set(Array.isArray(list) ? list.filter((s) => typeof s === 'string') : []);
+
+  const isMac = (win) => /^Mac/i.test(win.navigator?.userAgentData?.platform || win.navigator?.platform || '');
+
+  const comboMap = (keys) =>
+    new Map(
+      keys && typeof keys === 'object' && !Array.isArray(keys)
+        ? Object.entries(keys).filter(([, c]) => c === null || (typeof c === 'string' && c))
+        : [],
+    );
 
   function createClaudeHub(win) {
     const doc = win.document;
@@ -181,7 +200,11 @@ if (typeof module === 'object' && module.exports) module.exports = ClaudeHubKeys
 
       function onWelcome(m) {
         if (m.protocol !== 1 || welcome) return;
-        welcome = { actions: strings(m.actions), themes: Array.isArray(m.themes) ? m.themes : [] };
+        welcome = {
+          actions: strings(m.actions),
+          keys: comboMap(m.keys),
+          themes: Array.isArray(m.themes) ? m.themes : [],
+        };
         forward = strings(m.forward);
         setStatus('live');
         if (welcome.themes.length) for (const fn of themesFns) fn(pickerThemes());
@@ -360,6 +383,21 @@ if (typeof module === 'object' && module.exports) module.exports = ClaudeHubKeys
         forwards,
         // The combos forwards() matches, for a frame that tests keys with ClaudeHub.comboOf on its own.
         forwardCombos: () => (forward ? [...forward] : []),
+        // The keys of a hub action for a help row, in this system's names. A list of actions shares one
+        // row: ['Ctrl', 'Alt', '←/→']. [] when no key runs them; null before welcome, standalone, or
+        // for an action the hub did not list.
+        keyLabel(action) {
+          const ids = Array.isArray(action) ? action : [action];
+          if (!welcome || !ids.every((id) => welcome.keys.has(id))) return null;
+          const all = ids
+            .map((id) => welcome.keys.get(id))
+            .filter(Boolean)
+            .map((c) => keyParts(c, isMac(win)));
+          if (all.length < 2) return all[0] ?? [];
+          let n = 0;
+          while (n < all[0].length - 1 && all.every((p) => p.length - 1 > n && p[n] === all[0][n])) n++;
+          return [...all[0].slice(0, n), all.map((p) => p.slice(n).join('+')).join('/')];
+        },
         closeGuard(on) {
           post({ type: 'hub:closeGuard', on: !!on });
         },

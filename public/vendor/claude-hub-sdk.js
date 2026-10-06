@@ -1,4 +1,4 @@
-// claude-hub-sdk 1.3.0 (sha256 4c9f3341a24d). Copied by npm run sdk:sync in claude-code-hub. Do not edit.
+// claude-hub-sdk 1.4.0 (sha256 7d559a8888ce). Copied by npm run sdk:sync in claude-code-hub. Do not edit.
 // Claude Code Hub SDK: the one rule that names a key press, shared by the hub page, client.js and
 // stub.js. The hub serves it to its page as /sdk/keys.js; mount() and sdk:sync put it in front of
 // client.js and stub.js, so an app still loads one file.
@@ -23,7 +23,17 @@ var ClaudeHubKeys = (() => {
     return [...mods, key].filter(Boolean).join('+');
   }
 
-  return { comboOf };
+  // The keys of a combo as a help row shows them: ['Ctrl', 'Alt', 'P'], or ['⌃', '⌥', 'P'] on macOS.
+  // The {n} of a numbered combo reads 1…9.
+  function keyParts(combo, mac) {
+    const mods = mac
+      ? { ctrl: '⌃', alt: '⌥', shift: '⇧', meta: '⌘' }
+      : { ctrl: 'Ctrl', alt: 'Alt', shift: 'Shift', meta: 'Win' };
+    const named = { '{n}': '1…9', ArrowLeft: '←', ArrowRight: '→', ArrowUp: '↑', ArrowDown: '↓' };
+    return combo.split('+').map((k) => mods[k] ?? named[k] ?? (k.length === 1 ? k.toUpperCase() : k));
+  }
+
+  return { comboOf, keyParts };
 })();
 
 if (typeof module === 'object' && module.exports) module.exports = ClaudeHubKeys;
@@ -66,6 +76,7 @@ if (typeof module === 'object' && module.exports) module.exports = ClaudeHubKeys
         can: (action) => !!standaloneFn(action),
         forwards: () => false,
         forwardCombos: () => [],
+        keyLabel: () => null,
         closeGuard() {},
         openExternal(url) {
           win.open(url, '_blank', 'noopener');
