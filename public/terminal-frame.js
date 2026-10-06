@@ -11,12 +11,14 @@
   const modsOf = (e) =>
     [e.ctrlKey && 'ctrl', e.altKey && 'alt', e.shiftKey && 'shift', e.metaKey && 'meta'].filter(Boolean).join('+');
 
-  // A claim names a key by its physical code, or by its character when the layout moves it.
+  // A claim names a key by its physical code, or by its character when the layout moves it. A press
+  // that AltGr turns into a character (Polish AltGr+S is 'ś') is matched by its character only.
   function keySigs(e) {
     const mods = modsOf(e);
-    return [e.code && `${mods}|c:${e.code}`, typeof e.key === 'string' && `${mods}|k:${e.key.toLowerCase()}`].filter(
-      Boolean,
-    );
+    return [
+      e.code && !e.getModifierState?.('AltGraph') && `${mods}|c:${e.code}`,
+      typeof e.key === 'string' && `${mods}|k:${e.key.toLowerCase()}`,
+    ].filter(Boolean);
   }
 
   const claimSig = (c) => keySigs(c)[0];

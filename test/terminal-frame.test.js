@@ -59,6 +59,16 @@ describe('key claims', () => {
     assert.equal(claimed({ ctrlKey: true, key: 's', code: 'KeyS' }), false);
     assert.equal(claimed({ ctrlKey: true, altKey: true, key: 'x', code: 'KeyX' }), false);
   });
+
+  it('leaves an AltGr character to the terminal', () => {
+    const claims = new Set([
+      claimSig(press({ ctrlKey: true, altKey: true, key: 's', code: 'KeyS' })),
+      claimSig(press({ ctrlKey: true, altKey: true, key: 'p', code: '' })),
+    ]);
+    const altGr = (key, code) => press({ ctrlKey: true, altKey: true, key, code, getModifierState: (m) => m === 'AltGraph' });
+    assert.equal(isClaimed(claims, altGr('ś', 'KeyS')), false);
+    assert.equal(isClaimed(claims, altGr('p', 'KeyP')), true);
+  });
 });
 
 describe('terminalClaims', () => {

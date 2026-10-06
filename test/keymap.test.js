@@ -31,6 +31,11 @@ describe('session keys (new, resume, swap)', () => {
     assert.equal(hubModDown({ ...NONE, ctrlKey: true, altKey: true, metaKey: true }), false);
     assert.equal(hubModDown({ ...NONE, altKey: true }), false);
   });
+
+  it('are not an AltGr press, which types a character', () => {
+    const altGr = { ...NONE, ctrlKey: true, altKey: true, getModifierState: (m) => m === 'AltGraph' };
+    assert.equal(hubModDown(altGr), false);
+  });
 });
 
 describe('help dialog keys', () => {

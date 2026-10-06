@@ -7645,9 +7645,10 @@ function reviewBridge(textBefore, headingBefore, rangeAt, comboOf, fieldSelector
     const mods = [e.ctrlKey && 'ctrl', e.altKey && 'alt', e.shiftKey && 'shift', e.metaKey && 'meta']
       .filter(Boolean)
       .join('+');
-    return [e.code && `${mods}|c:${e.code}`, typeof e.key === 'string' && `${mods}|k:${e.key.toLowerCase()}`].filter(
-      Boolean,
-    );
+    return [
+      e.code && !e.getModifierState?.('AltGraph') && `${mods}|c:${e.code}`,
+      typeof e.key === 'string' && `${mods}|k:${e.key.toLowerCase()}`,
+    ].filter(Boolean);
   };
   let claims = new Set();
   let forward = new Set();
@@ -13209,8 +13210,9 @@ function terminalPaneFocused() {
 }
 
 // Kanban's own session keys (new, resume, swap) use the hub's modifier, so the hub leaves them alone.
+// AltGr reaches the page as Ctrl+Alt; when it types a character (Polish AltGr+S is 'ś'), the press is text.
 function hubModDown(e) {
-  return e.ctrlKey && e.altKey && !e.metaKey && !e.shiftKey;
+  return e.ctrlKey && e.altKey && !e.metaKey && !e.shiftKey && !e.getModifierState?.('AltGraph');
 }
 
 function inPageField(e) {

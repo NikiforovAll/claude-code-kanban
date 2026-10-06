@@ -1,4 +1,4 @@
-// claude-hub-sdk 1.3.0 (sha256 f5959e59714a). Copied by npm run sdk:sync in claude-code-hub. Do not edit.
+// claude-hub-sdk 1.3.0 (sha256 4c9f3341a24d). Copied by npm run sdk:sync in claude-code-hub. Do not edit.
 // Claude Code Hub SDK: the one rule that names a key press, shared by the hub page, client.js and
 // stub.js. The hub serves it to its page as /sdk/keys.js; mount() and sdk:sync put it in front of
 // client.js and stub.js, so an app still loads one file.
@@ -10,12 +10,14 @@ var ClaudeHubKeys = (() => {
   // Modifiers in ctrl, alt, shift, meta order, joined by '+' to the key. macOS composes
   // Option+<key> into a character (Option+1 is '¡', Option+P is 'π') and holding Control does not
   // undo it, so e.key alone cannot name these presses there. e.code is the physical key, which is
-  // wrong for non-US layouts, hence only as a fallback. Takes a real KeyboardEvent or a forwarded
-  // {key, code} payload; a payload without code degrades to key.
+  // wrong for non-US layouts, hence only as a fallback. No fallback under AltGraph: Chromium sets it
+  // when AltGr types a character, and that press is text. Takes a real KeyboardEvent or a forwarded
+  // {key, code} payload; a payload without code degrades to key. A payload needs no AltGraph: the
+  // SDK forwards only a press whose key already names a bound combo.
   // Self-contained on purpose: cck puts its source text into a sandboxed frame.
   function comboOf(e) {
     const lower = typeof e.key === 'string' ? e.key.toLowerCase() : '';
-    const m = /^(?:Key|Digit)([A-Z1-9])$/.exec(e.code || '');
+    const m = !e.getModifierState?.('AltGraph') && /^(?:Key|Digit)([A-Z1-9])$/.exec(e.code || '');
     const key = /^[a-z1-9]$/.test(lower) ? lower : m ? m[1].toLowerCase() : e.key;
     const mods = [e.ctrlKey && 'ctrl', e.altKey && 'alt', e.shiftKey && 'shift', e.metaKey && 'meta'];
     return [...mods, key].filter(Boolean).join('+');

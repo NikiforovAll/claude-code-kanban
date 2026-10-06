@@ -123,6 +123,14 @@ describe('hub key forwarding', () => {
     assert.equal(shim.press({ altKey: true, key: '¡', code: 'Digit1' }), true);
   });
 
+  it('keeps an AltGr character in the app and the terminal', async () => {
+    const shim = await loadShim();
+    shim.receive(welcome([]));
+    const altGr = { ctrlKey: true, altKey: true, key: 'ł', code: 'KeyP', getModifierState: (m) => m === 'AltGraph' };
+    assert.equal(shim.press(altGr), false);
+    assert.equal(shim.terminalKeeps(altGr), true);
+  });
+
   it('ignores a welcome from another origin or frame', async () => {
     const shim = await loadShim();
     shim.receive(welcome([]), { origin: 'http://evil.example' });
