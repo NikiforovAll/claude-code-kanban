@@ -2494,8 +2494,13 @@ function clampModalZoom(v) {
   return Math.min(MODAL_ZOOM_MAX, Math.max(MODAL_ZOOM_MIN, v));
 }
 
+function modalZoomLabel() {
+  return `${Math.round(modalZoom * 100)}%`;
+}
+
 function applyModalZoom() {
   document.documentElement.style.setProperty('--modal-zoom', String(modalZoom));
+  for (const el of document.querySelectorAll('.pane-zoom-val')) el.textContent = modalZoomLabel();
 }
 
 // delta 0 resets to 100%
@@ -2505,7 +2510,7 @@ function adjustModalZoom(delta) {
   modalZoom = next;
   store.setItem(MODAL_ZOOM_KEY, String(modalZoom));
   applyModalZoom();
-  showToast(`Text ${Math.round(modalZoom * 100)}%`);
+  showToast(`Text ${modalZoomLabel()}`);
 }
 
 // The markup decides what scales: `.modal-zoomable` marks a modal's reading
@@ -12216,9 +12221,14 @@ function togglePaneSplit() {
   return true;
 }
 
+function shownPaneSplit() {
+  const sid = paneSessionId();
+  return sid && !wantsTerminal() && getPaneSplit(sid);
+}
+
 function focusPaneSide(side) {
   const sid = paneSessionId();
-  const split = sid && !wantsTerminal() && getPaneSplit(sid);
+  const split = shownPaneSplit();
   if (!split) return false;
   if (getActivePaneId(sid) !== split[side]) {
     setActivePaneId(sid, split[side]);
@@ -12408,6 +12418,20 @@ function updatePaneFades() {
   paneTabs.classList.toggle('fade-r', scrollLeft + clientWidth < scrollWidth - 1);
 }
 
+// A URL pane's page is on another origin, so its key presses never reach the board: the zoom
+// keys zoom the whole window and the pane keys do nothing. The bar zooms without keys and
+// says when the page has the keyboard; a click on it gives the keys back.
+function paneUrlBarHtml() {
+  return `<div class="pane-url-bar"><button class="icon-btn pane-keys" title="The page has keyboard focus. Click to turn the board shortcuts back on">Board shortcuts off · click to turn on</button><button class="icon-btn" data-pane-zoom="-0.1" title="Smaller" aria-label="Smaller">−</button><button class="icon-btn pane-zoom-val" data-pane-zoom="0" title="Reset size">${modalZoomLabel()}</button><button class="icon-btn" data-pane-zoom="0.1" title="Larger" aria-label="Larger">+</button></div>`;
+}
+
+function markPaneFrameFocus() {
+  const el = document.activeElement;
+  const view = el?.classList.contains('pane-url-frame') ? el.parentElement : null;
+  for (const v of paneViews.querySelectorAll('.pane-view.frame-focus')) v.classList.remove('frame-focus');
+  view?.classList.add('frame-focus');
+}
+
 function paneCardHtml(title, text, button) {
   return `<div class="pane-card"><div class="pane-card-box">${PANE_ICONS.warning}<h3>${escapeHtml(title)}</h3><p>${escapeHtml(text)}</p><button class="btn btn-primary" data-pane-open>${escapeHtml(button)}</button></div></div>`;
 }
@@ -12457,12 +12481,13 @@ async function loadPaneView(sid, pane, view, scroll) {
   }
   if (pane.kind === 'url') {
     const frame = document.createElement('iframe');
-    frame.className = 'pane-frame modal-zoomable';
+    frame.className = 'pane-frame pane-url-frame modal-zoomable';
     frame.setAttribute('sandbox', PANE_URL_SANDBOX);
     frame.setAttribute('referrerpolicy', 'no-referrer');
     frame.title = pane.title;
     frame.src = pane.target;
     view.appendChild(frame);
+    view.insertAdjacentHTML('beforeend', paneUrlBarHtml());
     // Framed at once; a refusal found by the probe swaps the frame for the card.
     if ((await probePaneFraming(sid, pane)) === false) {
       frame.remove();
@@ -12952,8 +12977,42 @@ function focusSideOf(el) {
 // That blur is also the only sign that a click in a split moved into a pane's frame.
 window.addEventListener('blur', () => {
   closePaneMenu();
-  setTimeout(() => focusSideOf(document.activeElement?.closest?.('.pane-view.on')));
+  setTimeout(() => {
+    syncPaneFrameFocus();
+    watchPaneFrameFocus();
+  });
 });
+window.addEventListener('focus', () => {
+  clearInterval(paneFrameFocusPoll);
+  markPaneFrameFocus();
+});
+
+function syncPaneFrameFocus() {
+  focusSideOf(document.activeElement?.closest?.('.pane-view.on'));
+  markPaneFrameFocus();
+}
+
+function splitPaneFrameFocused() {
+  const el = document.activeElement;
+  return el?.tagName === 'IFRAME' && paneViews.contains(el) && !!shownPaneSplit();
+}
+
+// A click from one frame into another fires no event in this document, so while a split's frame
+// has focus the board checks which one it is: one pointer compare four times a second.
+let paneFrameFocusPoll = 0;
+function watchPaneFrameFocus() {
+  clearInterval(paneFrameFocusPoll);
+  if (!splitPaneFrameFocused()) return;
+  let last = document.activeElement;
+  paneFrameFocusPoll = setInterval(() => {
+    const el = document.activeElement;
+    if (!splitPaneFrameFocused()) clearInterval(paneFrameFocusPoll);
+    else if (el !== last) {
+      last = el;
+      syncPaneFrameFocus();
+    }
+  }, 250);
+}
 paneSplitBox.addEventListener(
   'pointerdown',
   (e) => focusSideOf(paneLog.contains(e.target) ? paneBoard : e.target.closest('.side-l, .side-r')),
@@ -13069,6 +13128,8 @@ function applySplitRatio() {
 
 paneViews.addEventListener('click', (e) => {
   if (e.target.closest('[data-pane-open]')) openPaneExternally();
+  const zoom = e.target.closest('[data-pane-zoom]');
+  if (zoom) adjustModalZoom(Number(zoom.dataset.paneZoom));
 });
 bindPreviewRelativeLinks(paneViews, (a) => a.closest('.pane-doc')?.dataset.path);
 paneTabs.addEventListener('scroll', updatePaneFades, { passive: true });

@@ -3909,6 +3909,49 @@ code.language-tree .hljs-title {
   background: #fff;
 }
 
+.pane-url-bar {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s;
+}
+
+.pane-view:hover > .pane-url-bar,
+.pane-view.frame-focus > .pane-url-bar {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.pane-url-bar .icon-btn {
+  width: auto;
+  min-width: 26px;
+  height: 24px;
+  padding: 0 6px;
+  border-color: transparent;
+  font: inherit;
+}
+
+.pane-url-bar .pane-keys {
+  display: none;
+  color: var(--accent);
+}
+
+.pane-view.frame-focus .pane-keys {
+  display: flex;
+}
+
 .pane-doc {
   flex: 1;
   min-height: 0;
