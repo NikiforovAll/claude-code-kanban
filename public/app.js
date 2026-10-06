@@ -5316,18 +5316,16 @@ function expandActiveGroups({ onlyNew = false } = {}) {
 }
 
 // Drops every collapse key that could hide this session: its project, a named group wrapping
-// the project or the session itself, the pinned sub-section only when the card renders inside
-// it (pinned, not sticky, idle — see renderGroupSessions), and — since which section holds it
-// depends on the view — every section header. Returns whether anything changed.
+// the project or the session itself and the project block it renders under there, the pinned sub-section only when the card renders inside
+// it (pinned, not sticky, idle — see renderGroupSessions), and the section header that holds it:
+// Groups for a grouped session, else Projects or Sessions, which depends on the view. Returns
+// whether anything changed.
 function uncollapseFor(session) {
   const group = sgGroupForSession(session);
   const keys = [
     sessionProjectKey(session) || '__ungrouped__',
     ...pinnedCollapseKeys(session),
-    group && sgKey(group.id),
-    SECTION_GROUPS,
-    SECTION_PROJECTS,
-    SECTION_SESSIONS,
+    ...(group ? [sgKey(group.id), sgHostOf(group, session), SECTION_GROUPS] : [SECTION_PROJECTS, SECTION_SESSIONS]),
   ];
   let changed = false;
   for (const key of keys) {
