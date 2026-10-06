@@ -5022,10 +5022,12 @@ function sgOpenMenu(x, y, kind, ref) {
   menu.id = 'sg-menu';
   menu.className = 'sg-menu';
   menu.setAttribute('role', 'menu');
-  menu.setAttribute('aria-label', `Move ${label} to group`);
+  const canFork = kind === 'session' && !!forkableSession(ref);
+  menu.setAttribute('aria-label', canFork ? 'Session actions' : `Move ${label} to group`);
   menu.dataset.sgKind = kind;
   menu.dataset.sgRef = ref;
   menu.innerHTML = `
+        ${canFork ? '<div class="sg-menu-label" aria-hidden="true">Session</div><button class="sg-menu-item" role="menuitem" data-sg-action="fork" title="claude --resume --fork-session">Fork</button>' : ''}
         <div class="sg-menu-label" aria-hidden="true">Move ${label} to group</div>
         ${rows}
         <button class="sg-menu-item" role="menuitem" data-sg-move="__new__">+ New group…</button>
@@ -5073,6 +5075,7 @@ document.addEventListener('click', (e) => {
   const { sgKind, sgRef } = menu.dataset;
   const move = item.dataset.sgMove;
   sgCloseMenu();
+  if (item.dataset.sgAction === 'fork') return forkSession(sgRef);
   if (move === '__none__') {
     sgDetach(sgKind, sgRef);
     persistSessionGroups();
@@ -13919,6 +13922,7 @@ async function openTerminal(sessionId, mode, attempt = 0) {
         model: spec.model,
         prompt: spec.prompt,
         edit: spec.edit,
+        forkOf: spec.forkOf,
       }),
     },
   });
@@ -14218,13 +14222,18 @@ const PLACEHOLDER_HINTS = {
   edit: 'press Enter in the terminal to start',
 };
 
+// The parent may be outside the loaded list, so its short id stands in for its name.
+function forkLabel(parentId) {
+  return `Fork of ${sessionDisplayName(sessions.find((s) => s.id === parentId) || { id: parentId })}`;
+}
+
 function placeholderSession(id, spec) {
   return {
     id,
     placeholder: true,
     mode: spec.mode,
     edit: !!spec.edit,
-    name: spec.name || PLACEHOLDER_NAMES[spec.mode] || PLACEHOLDER_NAMES.new,
+    name: spec.name || (spec.forkOf && forkLabel(spec.forkOf)) || PLACEHOLDER_NAMES[spec.mode] || PLACEHOLDER_NAMES.new,
     dispatchGroup: spec.group || undefined,
     dispatched: spec.mode === 'dispatch' ? { parent: spec.parent || null } : undefined,
     project: spec.cwd,
@@ -14323,6 +14332,7 @@ async function restorePendingSessions() {
         worktree: t.worktree,
         mode: t.mode,
         edit: t.edit,
+        forkOf: t.forkOf,
         startedAt: t.startedAt,
       });
     }
@@ -14551,9 +14561,27 @@ function startNewSession() {
   newSpecs.set(id, { ...(ns.resume ? { cwd: v.cwd } : v), mode: ns.resume ? 'pick' : 'new', startedAt: Date.now() });
   setTerminalMode(id, true);
   if (v.stay) return startNewSessionInBackground(id, v);
-  sessions = mergePlaceholders(sessions.filter((s) => !s.placeholder));
   closeNewSession();
+  openPlaceholder(id);
+}
+
+function openPlaceholder(id) {
+  sessions = mergePlaceholders(sessions.filter((s) => !s.placeholder));
   fetchTasks(id).then(() => sessionsList.querySelector('.session-item.active')?.scrollIntoView({ block: 'nearest' }));
+}
+
+function forkableSession(id) {
+  return terminalAvailable() ? sessions.find((s) => s.id === id && !s.placeholder) : undefined;
+}
+
+// The fork gets its own id up front, so it runs as a new session and needs no rekey.
+function forkSession(parentId) {
+  const parent = forkableSession(parentId);
+  if (!parent) return;
+  const id = crypto.randomUUID();
+  newSpecs.set(id, { cwd: parent.project, forkOf: parentId, mode: 'new', startedAt: Date.now() });
+  setTerminalMode(id, true);
+  openPlaceholder(id);
 }
 
 async function startNewSessionInBackground(id, v) {

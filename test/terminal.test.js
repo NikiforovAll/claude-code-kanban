@@ -165,6 +165,14 @@ describe('new session options', () => {
     assert.deepEqual(claudeArgsFor('new', SESSION, parseNewSpec({ cwd: '/p', worktree: true })), ['--session-id', SESSION, '-w']);
     assert.deepEqual(claudeArgsFor('new', SESSION, parseNewSpec({ cwd: '/p' })), ['--session-id', SESSION]);
   });
+  it('forks under its own id, which claude takes only with --fork-session', () => {
+    const PARENT = 'bbbbbbbb-0000-0000-0000-000000000002';
+    const spec = parseNewSpec({ forkOf: PARENT });
+    assert.equal(spec.cwd, null);
+    assert.deepEqual(claudeArgsFor('new', SESSION, spec), ['--resume', PARENT, '--fork-session', '--session-id', SESSION]);
+    assert.equal(parseNewSpec({ forkOf: 'x; rm -rf ~' }), 'session to fork');
+    assert.match(parseNewSpec({ forkOf: PARENT, worktree: true }), /^worktree/);
+  });
   it('names the field that fails its charset', () => {
     assert.equal(parseNewSpec({}), 'folder');
     assert.equal(parseNewSpec({ cwd: '/p', name: "x'; rm -rf ~" }), 'name');
@@ -203,7 +211,7 @@ describe('new session options', () => {
 describe('edit before run', () => {
   const A = 'aaaaaaaa-0000-0000-0000-000000000001';
 
-  function service(live = [], shell = 'bash') {
+  function service(live = [], shell = 'bash', resolveCwd = () => null) {
     const pty = fakePty();
     const t = createTerminalService({
       config: { enabled: true, restore: false, shell, maxSessions: 30, scrollback: 100 },
@@ -213,7 +221,7 @@ describe('edit before run', () => {
       claudeDir: os.tmpdir(),
       which: (n) => n,
       isLiveElsewhere: () => false,
-      resolveCwd: () => null,
+      resolveCwd,
       isAllowedFolder: () => true,
       liveSessions: () => live,
       isPidAlive: () => true,
@@ -257,6 +265,18 @@ describe('edit before run', () => {
     let pasted = false;
     await until(() => (pasted = t.paste(A, 'hi')));
     assert.equal(pasted, true);
+    t.shutdown();
+  });
+
+  it('starts a fork in its parent session folder, not the folder the caller names', async () => {
+    const PARENT = 'bbbbbbbb-0000-0000-0000-000000000002';
+    const { t, pty } = service([], 'bash', (id) => (id === PARENT ? os.tmpdir() : null));
+    const r = await t.startNew({ id: A, forkOf: PARENT, cwd: '/elsewhere' });
+    assert.equal(r.cwd, os.tmpdir());
+    assert.ok(pty.spawned[0].args.join(' ').includes(`--resume ${PARENT} --fork-session --session-id ${A}`));
+    assert.equal(t.list()[0].forkOf, PARENT);
+    const missing = await t.startNew({ id: SESSION, forkOf: 'cccccccc-0000-0000-0000-000000000003' });
+    assert.equal(missing.status, 404);
     t.shutdown();
   });
 
