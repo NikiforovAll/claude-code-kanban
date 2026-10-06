@@ -138,6 +138,7 @@
                 class="pf-input"
                 placeholder="Any project"
                 autocomplete="off"
+                data-bwignore data-1p-ignore data-lpignore="true"
                 spellcheck="false"
                 role="combobox"
                 aria-expanded="true"
@@ -169,6 +170,8 @@
               type="text"
               class="search-input"
               placeholder="Search tasks, sessions, projects..."
+              autocomplete="off"
+              data-bwignore data-1p-ignore data-lpignore="true"
               oninput="handleSearch(this.value)"
             />
             <button id="search-clear-btn" class="search-clear" onclick="clearSearch()" title="Clear search" aria-label="Clear search">
@@ -503,7 +506,7 @@
       </div>
       <div class="help-bar">
         <div class="help-tabs" id="help-tabs" role="tablist" aria-label="Shortcut groups"></div>
-        <input type="search" id="help-filter" class="form-input help-filter" placeholder="Filter shortcuts" aria-label="Filter shortcuts" autocomplete="off" spellcheck="false">
+        <input type="search" id="help-filter" class="form-input help-filter" placeholder="Filter shortcuts" aria-label="Filter shortcuts" autocomplete="off" data-bwignore data-1p-ignore data-lpignore="true" spellcheck="false">
       </div>
       <div class="modal-body">
         <dl class="shortcuts" id="help-shortcuts"></dl>
@@ -802,7 +805,7 @@
           <label class="ns-label" for="ns-folder">Folder</label>
           <div class="ns-field ns-folder-field">
             <div class="ns-inline">
-              <input type="text" id="ns-folder" class="form-input" placeholder="Type to find a project" autocomplete="off" spellcheck="false" role="combobox" aria-expanded="false" aria-controls="ns-folder-list">
+              <input type="text" id="ns-folder" class="form-input" placeholder="Type to find a project" autocomplete="off" data-bwignore data-1p-ignore data-lpignore="true" spellcheck="false" role="combobox" aria-expanded="false" aria-controls="ns-folder-list">
               <button type="button" id="ns-browse" class="btn btn-secondary ns-browse" onclick="browseNewSessionFolder()">Browse…</button>
             </div>
             <div id="ns-folder-list" class="ns-dropdown" role="listbox" hidden></div>
@@ -811,7 +814,7 @@
         <div class="ns-row ns-extra">
           <label class="ns-label" for="ns-name">Name</label>
           <div class="ns-field">
-            <input type="text" id="ns-name" class="form-input" placeholder="Optional" maxlength="80" autocomplete="off" spellcheck="false">
+            <input type="text" id="ns-name" class="form-input" placeholder="Optional" maxlength="80" autocomplete="off" data-bwignore data-1p-ignore data-lpignore="true" spellcheck="false">
           </div>
         </div>
         <div class="ns-row ns-extra">
@@ -828,7 +831,7 @@
           <div class="ns-field">
             <div class="ns-inline">
               <label class="ns-check"><input type="checkbox" id="ns-wt"> New worktree</label>
-              <input type="text" id="ns-wt-name" class="form-input" placeholder="Name (optional)" maxlength="64" autocomplete="off" spellcheck="false" disabled aria-label="Worktree name">
+              <input type="text" id="ns-wt-name" class="form-input" placeholder="Name (optional)" maxlength="64" autocomplete="off" data-bwignore data-1p-ignore data-lpignore="true" spellcheck="false" disabled aria-label="Worktree name">
             </div>
             <div id="ns-wt-hint" class="ns-hint" hidden></div>
           </div>
@@ -864,7 +867,7 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
         </button>
       </div>
-      <input id="pane-pop-input" class="form-input" placeholder="Search linked docs, or paste a URL or a file path" autocomplete="off" spellcheck="false">
+      <input id="pane-pop-input" class="form-input" placeholder="Search linked docs, or paste a URL or a file path" autocomplete="off" data-bwignore data-1p-ignore data-lpignore="true" spellcheck="false">
       <div id="pane-pop-detect" class="pane-pop-detect"></div>
       <div class="pane-pop-label">Linked docs</div>
       <div id="pane-pop-docs" class="pane-pop-docs"></div>
@@ -874,7 +877,7 @@
 
   <div id="session-picker-modal" class="modal-overlay top-aligned" onclick="closeSessionPicker()">
     <div class="modal session-picker" onclick="event.stopPropagation()">
-      <input type="text" id="session-picker-input" class="form-input sp-input" placeholder="Jump to session..." autocomplete="off" spellcheck="false">
+      <input type="text" id="session-picker-input" class="form-input sp-input" placeholder="Jump to session..." autocomplete="off" data-bwignore data-1p-ignore data-lpignore="true" spellcheck="false">
       <div class="sp-body">
         <div id="session-picker-list" class="sp-list"></div>
         <div id="session-picker-peek" class="sp-peek"></div>
@@ -885,7 +888,7 @@
 
   <div id="project-picker-modal" class="modal-overlay top-aligned" onclick="closeProjectPicker()">
     <div class="modal session-picker" onclick="event.stopPropagation()">
-      <input type="text" id="project-picker-input" class="form-input sp-input" placeholder="Filter by project..." autocomplete="off" spellcheck="false">
+      <input type="text" id="project-picker-input" class="form-input sp-input" placeholder="Filter by project..." autocomplete="off" data-bwignore data-1p-ignore data-lpignore="true" spellcheck="false">
       <div class="pp-chips">
         <button type="button" class="pf-recent" id="pp-recent-chip" aria-pressed="false" title="List only projects active in the last 24h" onclick="ppToggleRecentOnly()">Recent</button>
       </div>

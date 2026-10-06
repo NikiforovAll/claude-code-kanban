@@ -7143,7 +7143,8 @@ select.form-input option:checked {
 
 /* #region SESSION_PICKER */
 .modal.session-picker {
-  max-height: 70vh;
+  max-width: 920px;
+  max-height: 74vh;
   padding: 12px;
   display: flex;
   flex-direction: column;
@@ -7152,9 +7153,9 @@ select.form-input option:checked {
 }
 
 .sp-input {
-  padding: 9px 12px;
+  padding: 10px 12px;
   background: var(--bg-deep);
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .modal.session-picker.peeking {
@@ -7197,7 +7198,7 @@ select.form-input option:checked {
   gap: 8px;
   margin-bottom: 6px;
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: 11.5px;
   color: var(--text-muted);
   white-space: nowrap;
   overflow: hidden;
@@ -7215,13 +7216,13 @@ select.form-input option:checked {
   align-items: center;
   gap: 8px;
   width: 100%;
-  padding: 6px 8px;
+  padding: 7px 8px;
   background: none;
   border: 1px solid transparent;
   border-radius: 5px;
   color: var(--text-secondary);
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: 13px;
   text-align: left;
   cursor: pointer;
 }
@@ -7330,14 +7331,14 @@ select.form-input option:checked {
   border-radius: 3px;
   background: var(--bg-hover);
   color: var(--text-tertiary);
-  font-size: 11px;
+  font-size: 11.5px;
 }
 
 .sp-count,
 .sp-time {
   flex: none;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 11.5px;
   white-space: nowrap;
 }
 
