@@ -3761,6 +3761,36 @@ code.language-tree .hljs-title {
   right: 0;
 }
 
+.pane-split > .message-panel.log-l,
+.pane-split > .message-panel.log-r {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: auto;
+  height: auto;
+  z-index: 3;
+}
+
+.pane-split > .message-panel.log-l {
+  right: calc(100% - var(--pane-split) + 3px);
+  width: min(var(--message-panel-width, 540px), calc(var(--pane-split) - 3px));
+}
+
+.pane-split > .message-panel.log-r {
+  right: 0;
+  width: min(var(--message-panel-width, 540px), calc(100% - var(--pane-split) - 3px));
+}
+
+.pane-split > .message-panel.full-width.log-l {
+  left: 0;
+  width: auto;
+}
+
+.pane-split > .message-panel.full-width.log-r {
+  left: calc(var(--pane-split) + 3px);
+  width: auto;
+}
+
 .session-view.split-mode .pane-focus::after {
   content: '';
   position: absolute;

@@ -12115,6 +12115,8 @@ const paneDivider = document.getElementById('pane-divider');
 const paneDrop = document.getElementById('pane-drop');
 const paneSplitBtn = document.getElementById('pane-split-btn');
 const paneBoard = document.getElementById('main-content');
+const paneLog = document.getElementById('message-panel');
+const paneLogHome = { parent: paneLog.parentNode, next: paneLog.nextSibling };
 const paneTabs = document.getElementById('pane-tabs');
 const panePin = document.getElementById('pane-pin');
 const paneStrip = document.getElementById('pane-strip');
@@ -12166,6 +12168,7 @@ function syncPanes() {
     markPaneSide(el, side, el.dataset.key === focusKey);
   }
   markPaneSide(paneBoard, boardSide, !!boardSide && !pane);
+  placeSessionLog(wantsTerminal() ? null : boardSide);
   // Off screen, a framed page keeps focus and takes keys the user aims at the board.
   const focused = document.activeElement;
   if (paneViews.contains(focused) && (wantsTerminal() || !focused.closest('.pane-view.on'))) focused.blur();
@@ -12177,6 +12180,19 @@ function syncPanes() {
   paneSplitBtn.setAttribute('aria-pressed', String(!!split));
   paneSplitBtn.title = split ? 'Unsplit (|)' : 'Split with the tab before it (|)';
   renderPaneTabs(sid, layout, split);
+}
+
+// With the board in a split, the session log docks at the board's edge instead of the window's.
+function placeSessionLog(boardSide) {
+  const parent = boardSide ? paneSplitBox : paneLogHome.parent;
+  if (paneLog.parentNode !== parent) {
+    const content = document.getElementById('message-panel-content');
+    const top = content.scrollTop;
+    parent.insertBefore(paneLog, boardSide ? null : paneLogHome.next);
+    content.scrollTop = top;
+  }
+  paneLog.classList.toggle('log-l', boardSide === 'l');
+  paneLog.classList.toggle('log-r', boardSide === 'r');
 }
 
 function markPaneSide(el, side, focused) {
@@ -12709,7 +12725,11 @@ window.addEventListener('blur', () => {
   closePaneMenu();
   setTimeout(() => focusSideOf(document.activeElement?.closest?.('.pane-view.on')));
 });
-paneSplitBox.addEventListener('pointerdown', (e) => focusSideOf(e.target.closest('.side-l, .side-r')), true);
+paneSplitBox.addEventListener(
+  'pointerdown',
+  (e) => focusSideOf(paneLog.contains(e.target) ? paneBoard : e.target.closest('.side-l, .side-r')),
+  true,
+);
 
 function endPaneDrag() {
   if (!paneDragId) return;
