@@ -5,6 +5,7 @@
   "icon": "columns",
   "run": { "entry": "server.js", "defaultPort": 3541 },
   "publishes": ["session.changed"],
+  "keys": { "keeps": ["ctrl+alt+n", "ctrl+alt+r", "ctrl+alt+s"] },
   "provides": {
     "projects": { "path": "/api/projects" },
     "terminal": { "liveWork": "/api/terminals" }

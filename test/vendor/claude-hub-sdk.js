@@ -1,4 +1,31 @@
-// claude-hub-sdk 1.2.0 (sha256 62c7d9f477b2). Copied by npm run sdk:sync in claude-code-hub. Do not edit.
+// claude-hub-sdk 1.3.0 (sha256 f5959e59714a). Copied by npm run sdk:sync in claude-code-hub. Do not edit.
+// Claude Code Hub SDK: the one rule that names a key press, shared by the hub page, client.js and
+// stub.js. The hub serves it to its page as /sdk/keys.js; mount() and sdk:sync put it in front of
+// client.js and stub.js, so an app still loads one file.
+// var, not const: the hub page and an app page each load it as a classic script, and a second
+// const declaration in the same page would throw.
+var ClaudeHubKeys = (() => {
+  'use strict';
+
+  // Modifiers in ctrl, alt, shift, meta order, joined by '+' to the key. macOS composes
+  // Option+<key> into a character (Option+1 is '¡', Option+P is 'π') and holding Control does not
+  // undo it, so e.key alone cannot name these presses there. e.code is the physical key, which is
+  // wrong for non-US layouts, hence only as a fallback. Takes a real KeyboardEvent or a forwarded
+  // {key, code} payload; a payload without code degrades to key.
+  // Self-contained on purpose: cck puts its source text into a sandboxed frame.
+  function comboOf(e) {
+    const lower = typeof e.key === 'string' ? e.key.toLowerCase() : '';
+    const m = /^(?:Key|Digit)([A-Z1-9])$/.exec(e.code || '');
+    const key = /^[a-z1-9]$/.test(lower) ? lower : m ? m[1].toLowerCase() : e.key;
+    const mods = [e.ctrlKey && 'ctrl', e.altKey && 'alt', e.shiftKey && 'shift', e.metaKey && 'meta'];
+    return [...mods, key].filter(Boolean).join('+');
+  }
+
+  return { comboOf };
+})();
+
+if (typeof module === 'object' && module.exports) module.exports = ClaudeHubKeys;
+
 // Claude Code Hub SDK: the app side of the hub protocol v1.
 // A classic script. Load it as the first element in <body>, with no defer or async,
 // so the cached theme is on the page before the first paint (protocol section 6, rule 3).
@@ -8,14 +35,8 @@
   const VARS_KEY = 'claude-hub:vars';
   const WELCOME_WAIT_MS = 2000;
 
-  // The hub's comboOf(). macOS turns Option+<key> into another character, so e.code is the fallback.
-  function comboOf(e) {
-    const lower = typeof e.key === 'string' ? e.key.toLowerCase() : '';
-    const m = /^(?:Key|Digit)([A-Z1-9])$/.exec(e.code || '');
-    const key = /^[a-z1-9]$/.test(lower) ? lower : m ? m[1].toLowerCase() : e.key;
-    const mods = [e.ctrlKey && 'ctrl', e.altKey && 'alt', e.shiftKey && 'shift', e.metaKey && 'meta'];
-    return [...mods, key].filter(Boolean).join('+');
-  }
+  // keys.js comes first in the served file. Required as a module, client.js loads it itself.
+  const { comboOf } = typeof ClaudeHubKeys === 'object' ? ClaudeHubKeys : require('./keys');
 
   function isVars(v) {
     return (

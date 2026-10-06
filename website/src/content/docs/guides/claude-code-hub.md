@@ -42,7 +42,7 @@ Keys that you press in an iframe do not reach the hub. Claude Code Kanban sends 
 - <kbd>Alt+1</kbd> to <kbd>Alt+9</kbd> go to an app by its number. On macOS, the keys are <kbd>⌃⌥1</kbd> to <kbd>⌃⌥9</kbd>, because <kbd>Option</kbd> with a digit types a character there.
 - <kbd>Ctrl+Alt</kbd> plus a letter. The hub acts only on the letters it binds. <kbd>Ctrl+Alt+P</kbd> opens the project palette. <kbd>Ctrl+Alt+W</kbd> opens the config directory palette. <kbd>Ctrl+Alt+A</kbd> opens the app launcher.
 
-Claude Code Kanban keeps <kbd>Ctrl+Alt+N</kbd> (new session), <kbd>Ctrl+Alt+R</kbd> (resume session) and <kbd>Ctrl+Alt+S</kbd> (swap to the previous session). It does not send them to the hub, so the hub cannot use N, R or S.
+Claude Code Kanban keeps <kbd>Ctrl+Alt+N</kbd> (new session), <kbd>Ctrl+Alt+R</kbd> (resume session) and <kbd>Ctrl+Alt+S</kbd> (swap to the previous session). It lists them in `keys.keeps` in its `hub-app.json` and does not send them to the hub, so the hub does not bind N, R or S.
 
 ## Jump to other apps
 
