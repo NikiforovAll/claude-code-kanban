@@ -31,13 +31,14 @@ async function until(check, what, timeoutMs = 15000) {
 }
 
 // The restore test resumes a session, which would start the real claude, so a stub goes
-// first on PATH. Like claude, it outlives a closed console and Ctrl+C, so only a tree kill ends it.
+// first on PATH. On Windows, like claude, it outlives a closed console and Ctrl+C, so only a tree
+// kill ends it. On POSIX claude exits on the SIGHUP that pty.kill() sends, so the stub does too.
 function stubClaude() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cck-fake-claude-'));
   const js = path.join(dir, 'claude.js');
   fs.writeFileSync(js, [
     "require('node:fs').writeFileSync(require('node:path').join(__dirname, 'ran'), String(process.pid));",
-    "for (const s of ['SIGHUP', 'SIGINT', 'SIGTERM']) process.on(s, () => {});",
+    process.platform === 'win32' ? "for (const s of ['SIGHUP', 'SIGINT', 'SIGTERM']) process.on(s, () => {});" : '',
     'setTimeout(() => {}, 600000);',
   ].join('\n'));
   if (process.platform === 'win32') fs.writeFileSync(path.join(dir, 'claude.cmd'), `@"${process.execPath}" "${js}" %*\r\n`);
