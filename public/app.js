@@ -5837,7 +5837,10 @@ const SHORTCUT_TABS = [
         title: 'View',
         rows: [
           { keys: ['\\'], label: 'Toggle sidebar' },
-          { keys: ['[', ']'], label: 'Previous / next tab (Board and panes)' },
+          { keys: ['[', ']'], label: 'Previous / next tab (a split counts as one)' },
+          { keys: ['Alt', '[ / ]'], combo: true, label: 'Change the tab in the focused side of a split' },
+          { keys: ['|'], label: 'Split with the tab before it / unsplit (or drag a tab onto a side)' },
+          { keys: ['{', '}'], label: 'Focus left / right side of a split' },
           { keys: ['T'], label: 'Toggle theme' },
           { keys: ['Shift', 'S'], combo: true, label: 'Storage manager' },
           { keys: ['Ctrl', 'Shift', 'Z'], combo: true, label: 'Zen mode (current session only)' },
@@ -7008,7 +7011,21 @@ document.addEventListener('keydown', (e) => {
     toggleSidebar();
     return;
   }
-  if (matchKey(e, '[', ']') && cyclePane(e.key === ']' ? 1 : -1)) {
+  if (matchKey(e, '[', ']') && cyclePaneStrip(e.key === ']' ? 1 : -1)) {
+    e.preventDefault();
+    return;
+  }
+  const altOnly = e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey;
+  if (altOnly && (e.code === 'BracketLeft' || e.code === 'BracketRight')) {
+    if (cyclePane(e.code === 'BracketRight' ? 1 : -1)) e.preventDefault();
+    return;
+  }
+  const plainShift = !e.ctrlKey && !e.altKey && !e.metaKey;
+  if (plainShift && e.key === '|' && togglePaneSplit()) {
+    e.preventDefault();
+    return;
+  }
+  if (plainShift && (e.key === '{' || e.key === '}') && focusPaneSide(e.key === '{' ? 'l' : 'r')) {
     e.preventDefault();
     return;
   }
@@ -11914,14 +11931,31 @@ async function paneRequest(method, path, body) {
   }
 }
 
-// sessionStorage `cck.paneActive`: {[sessionId]: paneId} in recency order.
+// Per-session pane state in sessionStorage, {[sessionId]: value} in recency order.
+const PANE_STATE_CAP = 20;
+
+function loadPaneState(key) {
+  try {
+    const map = JSON.parse(sessionStorage.getItem(key));
+    if (map && typeof map === 'object') return map;
+  } catch {}
+  return {};
+}
+
+// Puts `sid` last, so the cap drops the least recent session. A null value removes it.
+function savePaneState(key, map, sid, value) {
+  delete map[sid];
+  if (value != null) map[sid] = value;
+  const capped = Object.fromEntries(Object.entries(map).slice(-PANE_STATE_CAP));
+  try {
+    sessionStorage.setItem(key, JSON.stringify(capped));
+  } catch {}
+  return capped;
+}
+
+// `cck.paneActive`: {[sessionId]: paneId}.
 const PANE_ACTIVE_KEY = 'cck.paneActive';
-const PANE_ACTIVE_CAP = 20;
-let paneActive = {};
-try {
-  const map = JSON.parse(sessionStorage.getItem(PANE_ACTIVE_KEY));
-  if (map && typeof map === 'object') paneActive = map;
-} catch {}
+let paneActive = loadPaneState(PANE_ACTIVE_KEY);
 
 function getActivePaneId(sid) {
   return paneActive[sid] || 'board';
@@ -11929,12 +11963,136 @@ function getActivePaneId(sid) {
 
 function setActivePaneId(sid, id) {
   if (getActivePaneId(sid) === id) return;
-  delete paneActive[sid];
-  if (id !== 'board') paneActive[sid] = id;
-  paneActive = Object.fromEntries(Object.entries(paneActive).slice(-PANE_ACTIVE_CAP));
-  try {
-    sessionStorage.setItem(PANE_ACTIVE_KEY, JSON.stringify(paneActive));
-  } catch {}
+  paneActive = savePaneState(PANE_ACTIVE_KEY, paneActive, sid, id === 'board' ? null : id);
+  notePairFocus(sid, id);
+}
+
+// `cck.panePairs`: {[sessionId]: [{l, r, f}]}; sides are pane ids or 'board', `f` the side focused
+// last. A tab is in one pair at most, and the pair that holds the active tab is the split on
+// screen. Clicks never change a pair; only the split keys and drags do.
+const PANE_PAIRS_KEY = 'cck.panePairs';
+const PANE_SPLIT_RATIO_KEY = 'pane-split-ratio';
+let panePairs = loadPaneState(PANE_PAIRS_KEY);
+const clampSplitRatio = (r) => Math.min(0.85, Math.max(0.15, r));
+let paneSplitRatio = clampSplitRatio(Number.parseFloat(store.getItem(PANE_SPLIT_RATIO_KEY)) || 0.5);
+
+const paneTabIds = (sid) => ['board', ...paneLayout(sid).panes.map((p) => p.id)];
+const splitSideOf = (split, id) => (split.l === id ? 'l' : split.r === id ? 'r' : null);
+const otherSide = (side) => (side === 'l' ? 'r' : 'l');
+
+// Pairs whose tabs are gone, or taken by an earlier pair, drop out.
+function getPanePairs(sid) {
+  if (!panePairs[sid]) return [];
+  const ids = new Set(paneTabIds(sid));
+  const taken = new Set();
+  return panePairs[sid].filter((p) => {
+    const ok = p.l !== p.r && ids.has(p.l) && ids.has(p.r) && !taken.has(p.l) && !taken.has(p.r);
+    if (ok) taken.add(p.l).add(p.r);
+    return ok;
+  });
+}
+
+function setPanePairs(sid, pairs) {
+  panePairs = savePaneState(PANE_PAIRS_KEY, panePairs, sid, pairs.length ? pairs : null);
+}
+
+const withoutTabs = (pairs, ...ids) => pairs.filter((p) => !ids.some((id) => splitSideOf(p, id)));
+const pairOf = (sid, id) => getPanePairs(sid).find((p) => splitSideOf(p, id)) || null;
+
+function getPaneSplit(sid) {
+  return pairOf(sid, getActivePaneId(sid));
+}
+
+function notePairFocus(sid, id) {
+  const pairs = getPanePairs(sid);
+  const pair = pairs.find((p) => splitSideOf(p, id));
+  const side = pair && splitSideOf(pair, id);
+  if (!side || pair.f === side) return;
+  pair.f = side;
+  setPanePairs(sid, pairs);
+}
+
+// Tabs that are not in a pair, plus `id`.
+function freePaneTabs(sid, id, pairs) {
+  return paneTabIds(sid).filter((t) => t === id || !pairs.some((p) => splitSideOf(p, t)));
+}
+
+// The free tab before it, else the one after it.
+function neighborPair(sid, id, pairs) {
+  const free = freePaneTabs(sid, id, pairs);
+  const i = free.indexOf(id);
+  if (i < 0 || free.length < 2) return null;
+  return i > 0 ? { l: free[i - 1], r: id } : { l: id, r: free[1] };
+}
+
+// The strip in order, as {ids, pair}: a lone tab, or a pair at the place of its first tab.
+function paneStripItems(sid) {
+  const pairs = getPanePairs(sid);
+  const items = [];
+  for (const id of paneTabIds(sid)) {
+    const pair = pairs.find((p) => splitSideOf(p, id)) || null;
+    if (!pair) items.push({ ids: [id], pair });
+    else if (!items.some((it) => it.pair === pair)) items.push({ ids: [pair.l, pair.r], pair });
+  }
+  return items;
+}
+
+function unpairPanes(sid, pair, keep) {
+  setPanePairs(sid, withoutTabs(getPanePairs(sid), pair.l));
+  if (keep) setActivePaneId(sid, keep);
+  syncPanes();
+}
+
+// Returns false when the panes are not on screen, so the key keeps its other meaning.
+function togglePaneSplit() {
+  const sid = paneSessionId();
+  if (!sid || wantsTerminal()) return false;
+  const active = getActivePaneId(sid);
+  const split = getPaneSplit(sid);
+  if (split) {
+    unpairPanes(sid, split, active);
+    return true;
+  }
+  const pairs = getPanePairs(sid);
+  const pair = neighborPair(sid, active, pairs);
+  if (!pair) {
+    showToast(paneLayout(sid).panes.length ? 'No free tab to split with' : 'Add a pane to split the board with');
+    return true;
+  }
+  setPanePairs(sid, [...pairs, { ...pair, f: splitSideOf(pair, active) }]);
+  syncPanes();
+  return true;
+}
+
+function focusPaneSide(side) {
+  const sid = paneSessionId();
+  const split = sid && !wantsTerminal() && getPaneSplit(sid);
+  if (!split) return false;
+  if (getActivePaneId(sid) !== split[side]) {
+    setActivePaneId(sid, split[side]);
+    syncPanes();
+  }
+  return true;
+}
+
+function dropPaneOnSide(id, side) {
+  const sid = paneSessionId();
+  if (!sid) return;
+  const split = getPaneSplit(sid);
+  const other = otherSide(side);
+  const pairs = getPanePairs(sid);
+  const shownId = getActivePaneId(sid);
+  let partner;
+  if (split) partner = split[other] === id ? split[side] : split[other];
+  else if (shownId !== id) partner = shownId;
+  else {
+    const pair = neighborPair(sid, id, pairs);
+    partner = pair && (pair.l === id ? pair.r : pair.l);
+  }
+  if (!partner) return;
+  setPanePairs(sid, [...withoutTabs(pairs, id, partner), { [side]: id, [other]: partner, f: side }]);
+  setActivePaneId(sid, id);
+  syncPanes();
 }
 
 const PANE_FRAME_LIMIT = 3;
@@ -11952,6 +12110,11 @@ const PANE_ICONS = {
 const paneFrames = new Map();
 const paneReviews = new WeakMap();
 const paneViews = document.getElementById('pane-views');
+const paneSplitBox = document.getElementById('pane-split');
+const paneDivider = document.getElementById('pane-divider');
+const paneDrop = document.getElementById('pane-drop');
+const paneSplitBtn = document.getElementById('pane-split-btn');
+const paneBoard = document.getElementById('main-content');
 const paneTabs = document.getElementById('pane-tabs');
 const panePin = document.getElementById('pane-pin');
 const paneStrip = document.getElementById('pane-strip');
@@ -11960,6 +12123,7 @@ const panePopInput = document.getElementById('pane-pop-input');
 const panePopDocs = document.getElementById('pane-pop-docs');
 const panePopDetect = document.getElementById('pane-pop-detect');
 let paneTabsHtml = '';
+let paneDragId = null;
 
 function paneSessionId() {
   return viewMode === 'session' ? currentSessionId : null;
@@ -11978,42 +12142,83 @@ function syncPanes() {
   }
   const layout = sid ? paneLayout(sid) : null;
   const pane = sid ? activePane(sid) : null;
+  const split = sid ? getPaneSplit(sid) : null;
   sessionView.classList.toggle('has-panes', !!layout);
-  sessionView.classList.toggle('pane-mode', !!pane);
+  const boardSide = split ? splitSideOf(split, 'board') : null;
+  sessionView.classList.toggle('pane-mode', split ? !boardSide : !!pane);
+  sessionView.classList.toggle('split-mode', !!split);
   if (!layout || wantsTerminal()) closePanePop();
-  const key = pane ? mountPane(sid, pane) : null;
-  for (const el of paneViews.children) el.classList.toggle('on', el.dataset.key === key);
+  // key → side ('' unsplit). The focused side mounts last, so the frame limit evicts it last.
+  const sides = new Map();
+  if (split) {
+    const focusSide = splitSideOf(split, pane?.id || 'board');
+    for (const side of [otherSide(focusSide), focusSide]) {
+      if (side !== boardSide) sides.set(mountPane(sid, paneById(split[side])), side);
+    }
+    applySplitRatio();
+  } else if (pane) {
+    sides.set(mountPane(sid, pane), '');
+  }
+  const focusKey = pane ? `${sid}/${pane.id}` : null;
+  for (const el of paneViews.children) {
+    const side = sides.get(el.dataset.key);
+    el.classList.toggle('on', side !== undefined);
+    markPaneSide(el, side, el.dataset.key === focusKey);
+  }
+  markPaneSide(paneBoard, boardSide, !!boardSide && !pane);
   // Off screen, a framed page keeps focus and takes keys the user aims at the board.
   const focused = document.activeElement;
   if (paneViews.contains(focused) && (wantsTerminal() || !focused.closest('.pane-view.on'))) focused.blur();
   syncPaneReview();
   if (!layout) return;
   for (const b of document.querySelectorAll('.pane-tool')) b.disabled = !pane;
-  renderPaneTabs(sid, layout);
+  paneSplitBtn.disabled = !layout.panes.length;
+  paneSplitBtn.classList.toggle('on', !!split);
+  paneSplitBtn.setAttribute('aria-pressed', String(!!split));
+  paneSplitBtn.title = split ? 'Unsplit (|)' : 'Split with the tab before it (|)';
+  renderPaneTabs(sid, layout, split);
 }
 
-function renderPaneTabs(sid, layout) {
+function markPaneSide(el, side, focused) {
+  el.classList.toggle('side-l', side === 'l');
+  el.classList.toggle('side-r', side === 'r');
+  el.classList.toggle('pane-focus', focused);
+}
+
+function renderPaneTabs(sid, layout, split) {
+  // A rebuild mid-drag removes the dragged tab, and then no dragend fires.
+  if (paneDragId) return;
   const active = getActivePaneId(sid);
+  const state = (id) => (active === id ? ' on' : split && splitSideOf(split, id) ? ' shown' : '');
   const tab = (id, cls, inner, tip) =>
-    `<div class="pane-tab ${escapeHtml(cls)}${active === id ? ' on' : ''}" role="tab" data-pane="${escapeHtml(id)}" title="${escapeHtml(tip)}">${inner}</div>`;
-  const board = tab(
-    'board',
-    'pinned',
-    `${PANE_ICONS.board}<span class="pane-title">Board</span><span class="pin-meta">${currentTasks.length}</span>`,
-    'Board',
-  );
-  const panes = layout.panes.map((p) => {
-    const state = !paneFrameable(p) ? 'blocked' : paneFrames.has(`${sid}/${p.id}`) ? 'loaded' : '';
-    const stateTip = state === 'blocked' ? 'Site refuses framing' : state ? 'Loaded' : 'Unloaded (loads on open)';
+    `<div class="pane-tab ${escapeHtml(cls)}${state(id)}" role="tab" draggable="true" data-pane="${escapeHtml(id)}" title="${escapeHtml(tip)}">${inner}</div>`;
+  const byId = new Map(layout.panes.map((p) => [p.id, p]));
+  const tabHtml = (id) => {
+    if (id === 'board') {
+      return tab(
+        'board',
+        'pinned',
+        `${PANE_ICONS.board}<span class="pane-title">Board</span><span class="pin-meta">${currentTasks.length}</span>`,
+        'Board',
+      );
+    }
+    const p = byId.get(id);
+    const frame = !paneFrameable(p) ? 'blocked' : paneFrames.has(`${sid}/${p.id}`) ? 'loaded' : '';
+    const frameTip = frame === 'blocked' ? 'Site refuses framing' : frame ? 'Loaded' : 'Unloaded (loads on open)';
     return tab(
       p.id,
       '',
-      `${p.kind === 'url' ? PANE_ICONS.url : PANE_ICONS.file}<span class="pane-title">${escapeHtml(p.title)}</span><span class="state ${escapeHtml(state)}" title="${escapeHtml(stateTip)}"></span><button class="pane-x" data-close="${escapeHtml(p.id)}" title="Close pane" aria-label="Close pane">×</button>`,
+      `${p.kind === 'url' ? PANE_ICONS.url : PANE_ICONS.file}<span class="pane-title">${escapeHtml(p.title)}</span><span class="state ${escapeHtml(frame)}" title="${escapeHtml(frameTip)}"></span><button class="pane-x" data-close="${escapeHtml(p.id)}" title="Close pane" aria-label="Close pane">×</button>`,
       p.target,
     );
-  });
-  const pin = board + (panes.length ? '<span class="pane-sep"></span>' : '');
-  const html = panes.join('');
+  };
+  const itemHtml = ({ ids, pair }) =>
+    pair
+      ? `<div class="pane-pair${pair === split ? ' on' : ''}">${ids.map(tabHtml).join('<span class="pane-pair-sep"></span>')}</div>`
+      : tabHtml(ids[0]);
+  const [pinned, ...rest] = paneStripItems(sid).map(itemHtml);
+  const pin = pinned + (rest.length ? '<span class="pane-sep"></span>' : '');
+  const html = rest.join('');
   // syncPanes runs on every task refresh and search keystroke; skip the rebuild and the reflows.
   if (pin + html === paneTabsHtml) return;
   paneTabsHtml = pin + html;
@@ -12161,7 +12366,7 @@ function paneDocGrip(doc) {
 }
 
 function activePaneView() {
-  return wantsTerminal() ? null : paneViews.querySelector('.pane-view.on');
+  return wantsTerminal() ? null : paneViews.querySelector('.pane-view.on.pane-focus');
 }
 
 function isPaneDocOnScreen() {
@@ -12197,20 +12402,47 @@ function selectPane(id) {
   syncPanes();
 }
 
-// Returns false when the tabs are not on screen, so the key keeps its other meaning.
+// Flips the focused side of the split through the free tabs. Returns false with no split on
+// screen, so the key keeps its other meaning.
 function cyclePane(step) {
   const sid = paneSessionId();
+  const split = sid && !wantsTerminal() && getPaneSplit(sid);
+  if (!split) return false;
+  const active = getActivePaneId(sid);
+  const pairs = getPanePairs(sid);
+  const ids = freePaneTabs(sid, active, pairs);
+  if (ids.length < 2) return true;
+  const next = ids[(ids.indexOf(active) + step + ids.length) % ids.length];
+  const side = splitSideOf(split, active);
+  setPanePairs(
+    sid,
+    pairs.map((p) => (p === split ? { ...p, [side]: next } : p)),
+  );
+  selectPane(next);
+  return true;
+}
+
+function cyclePaneStrip(step) {
+  const sid = paneSessionId();
   if (!sid || wantsTerminal()) return false;
-  const ids = ['board', ...paneLayout(sid).panes.map((p) => p.id)];
-  const i = ids.indexOf(getActivePaneId(sid));
-  selectPane(ids[(i + step + ids.length) % ids.length]);
+  const active = getActivePaneId(sid);
+  const items = paneStripItems(sid);
+  const i = items.findIndex((it) => it.ids.includes(active));
+  const { ids, pair } = items[(i + step + items.length) % items.length];
+  selectPane(pair ? pair[pair.f || 'l'] : ids[0]);
   return true;
 }
 
 async function closePane(paneId) {
   const sid = paneSessionId();
   if (!sid) return;
-  if (getActivePaneId(sid) === paneId) {
+  const split = getPaneSplit(sid);
+  const side = split && splitSideOf(split, paneId);
+  // The layout keeps the pane until the server answers, so its pair goes now.
+  setPanePairs(sid, withoutTabs(getPanePairs(sid), paneId));
+  if (side) {
+    setActivePaneId(sid, split[otherSide(side)]);
+  } else if (getActivePaneId(sid) === paneId) {
     const panes = paneLayout(sid).panes;
     const i = panes.findIndex((p) => p.id === paneId);
     setActivePaneId(sid, (panes[i + 1] || panes[i - 1])?.id || 'board');
@@ -12466,8 +12698,126 @@ document.addEventListener('click', (e) => {
   if (act) PANE_MENU_ACTIONS[act](menu.dataset.pane);
   if (act || !menu.contains(e.target)) closePaneMenu();
 });
+function focusSideOf(el) {
+  if (el?.classList.contains('side-l')) focusPaneSide('l');
+  else if (el?.classList.contains('side-r')) focusPaneSide('r');
+}
+
 // A click inside a pane's frame never reaches this document, but it takes focus from the window.
-window.addEventListener('blur', closePaneMenu);
+// That blur is also the only sign that a click in a split moved into a pane's frame.
+window.addEventListener('blur', () => {
+  closePaneMenu();
+  setTimeout(() => focusSideOf(document.activeElement?.closest?.('.pane-view.on')));
+});
+paneSplitBox.addEventListener('pointerdown', (e) => focusSideOf(e.target.closest('.side-l, .side-r')), true);
+
+function endPaneDrag() {
+  if (!paneDragId) return;
+  paneDragId = null;
+  paneSplitBox.classList.remove('dropping');
+  paneStrip.classList.remove('drop-hot');
+  for (const el of paneDrop.children) el.classList.remove('hot');
+  paneStrip.querySelector('.pane-tab.dragging')?.classList.remove('dragging');
+  syncPanes();
+}
+
+function draggedPair() {
+  const sid = paneSessionId();
+  return (sid && paneDragId && pairOf(sid, paneDragId)) || null;
+}
+
+paneStrip.addEventListener('dragstart', (e) => {
+  const tab = e.target.closest('.pane-tab');
+  if (!tab || !paneSessionId() || wantsTerminal()) return;
+  paneDragId = tab.dataset.pane;
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', paneDragId);
+  tab.classList.add('dragging');
+  paneSplitBox.classList.add('dropping');
+});
+paneStrip.addEventListener('dragend', endPaneDrag);
+paneStrip.addEventListener('dragover', (e) => {
+  if (!draggedPair()) return;
+  e.preventDefault();
+  paneStrip.classList.add('drop-hot');
+});
+paneStrip.addEventListener('dragleave', (e) => {
+  if (!paneStrip.contains(e.relatedTarget)) paneStrip.classList.remove('drop-hot');
+});
+paneStrip.addEventListener('drop', (e) => {
+  const pair = draggedPair();
+  if (!pair) return;
+  e.preventDefault();
+  const sid = paneSessionId();
+  const shown = !!splitSideOf(pair, getActivePaneId(sid));
+  const keep = shown ? pair[otherSide(splitSideOf(pair, paneDragId))] : null;
+  endPaneDrag();
+  unpairPanes(sid, pair, keep);
+});
+paneDrop.addEventListener('dragover', (e) => {
+  if (!paneDragId) return;
+  e.preventDefault();
+  const half = e.target.closest('[data-side]');
+  for (const el of paneDrop.children) el.classList.toggle('hot', el === half);
+});
+paneDrop.addEventListener('dragleave', (e) => {
+  if (!paneDrop.contains(e.relatedTarget)) for (const el of paneDrop.children) el.classList.remove('hot');
+});
+paneDrop.addEventListener('drop', (e) => {
+  e.preventDefault();
+  const id = paneDragId;
+  const side = e.target.closest('[data-side]')?.dataset.side;
+  endPaneDrag();
+  if (id && side) dropPaneOnSide(id, side);
+});
+
+// syncPanes calls this on every refresh; an unchanged value is not written again.
+function applySplitRatio() {
+  const value = `${paneSplitRatio * 100}%`;
+  if (paneSplitBox.style.getPropertyValue('--pane-split') !== value)
+    paneSplitBox.style.setProperty('--pane-split', value);
+}
+
+{
+  let start;
+  let width;
+  let collapse = null;
+  _initDragResize(paneDivider, {
+    onStart() {
+      start = paneSplitRatio;
+      width = paneSplitBox.clientWidth;
+      paneSplitBox.classList.add('resizing');
+    },
+    onMove(dx) {
+      const raw = start + dx / width;
+      collapse = raw < 0.1 ? 'l' : raw > 0.9 ? 'r' : null;
+      paneSplitBox.classList.toggle('collapse-l', collapse === 'l');
+      paneSplitBox.classList.toggle('collapse-r', collapse === 'r');
+      paneSplitRatio = clampSplitRatio(raw);
+      applySplitRatio();
+    },
+    onEnd() {
+      paneSplitBox.classList.remove('resizing', 'collapse-l', 'collapse-r');
+      const hidden = collapse;
+      collapse = null;
+      const sid = paneSessionId();
+      const split = hidden && sid && getPaneSplit(sid);
+      if (!split) {
+        store.setItem(PANE_SPLIT_RATIO_KEY, String(paneSplitRatio));
+        return;
+      }
+      paneSplitRatio = start;
+      applySplitRatio();
+      unpairPanes(sid, split, split[otherSide(hidden)]);
+    },
+  });
+  paneDivider.addEventListener('dblclick', () => {
+    paneSplitRatio = 0.5;
+    store.removeItem(PANE_SPLIT_RATIO_KEY);
+    applySplitRatio();
+  });
+}
+
 paneViews.addEventListener('click', (e) => {
   if (e.target.closest('[data-pane-open]')) openPaneExternally();
 });
@@ -12485,6 +12835,7 @@ paneTabs.addEventListener(
 );
 new ResizeObserver(updatePaneFades).observe(paneTabs);
 document.getElementById('pane-add').addEventListener('click', openPanePop);
+paneSplitBtn.addEventListener('click', togglePaneSplit);
 document.getElementById('pane-reload').addEventListener('click', () => reloadPane());
 document.getElementById('pane-open').addEventListener('click', () => openPaneExternally());
 panePopDocs.addEventListener('click', (e) => {
