@@ -64,10 +64,11 @@ When you show the terminal for a session, Claude Code Kanban resumes that sessio
 If the session already runs in another terminal, a prompt asks what to do, because two processes on one session write to the same transcript:
 
 - **Resume anyway** resumes it here too.
-- **Fork** starts a new session from its history.
 - **Shell only** opens a shell with no Claude Code process.
 
-When Claude Code exits, the terminal stays open as a shell. When the shell exits or you end the terminal, a prompt offers **Resume**, **Fork** and **Shell**. For a new session that has no first message yet, the prompt offers **Start again** and **Shell**.
+To start a new session from a session's history, right-click its card in the sidebar and choose **Fork**. The fork gets its own card and terminal.
+
+When Claude Code exits, the terminal stays open as a shell. When the shell exits or you end the terminal, a prompt offers **Resume** and **Shell**. For a new session that has no first message yet, the prompt offers **Start again** and **Shell**.
 
 If the connection drops, the page tries to connect again five times, from 0.5 to 8 seconds apart. After that it shows a **Reconnect** button.
 
@@ -133,7 +134,7 @@ Terminals run in the server, so a page reload keeps them. A server restart ends 
 "terminal": { "restore": false }
 ```
 
-The server keeps the list of open terminals in `<config-dir>/.cck/terminals.json`. As soon as it listens, it runs `claude --resume` for each one, two seconds apart, without waiting for a page to open. A session shows as running, and a click attaches to it. The server skips a session that runs in another terminal or has no transcript. A terminal you end leaves the list. A terminal whose Claude Code exited, so only the shell runs, also leaves it; when you resume that session again in the same terminal, it comes back. Fork and shell terminals are not restored, nor is a resume picker until you pick a session in it. A resumed session waits at its prompt and does not continue a turn that the restart cut off.
+The server keeps the list of open terminals in `<config-dir>/.cck/terminals.json`. As soon as it listens, it runs `claude --resume` for each one, two seconds apart, without waiting for a page to open. A session shows as running, and a click attaches to it. The server skips a session that runs in another terminal or has no transcript. A terminal you end leaves the list. A terminal whose Claude Code exited, so only the shell runs, also leaves it; when you resume that session again in the same terminal, it comes back. Shell terminals are not restored, nor is a resume picker until you pick a session in it. A resumed session waits at its prompt and does not continue a turn that the restart cut off.
 
 ## Choose the shell
 

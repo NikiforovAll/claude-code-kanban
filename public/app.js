@@ -14014,7 +14014,6 @@ function onTerminalMessage(sessionId, msg, tail = '') {
       'Resuming it here too makes both processes write to the same transcript.',
       [
         ['resume', 'Resume anyway'],
-        ['fork', 'Fork'],
         ['shell', 'Shell only'],
       ],
     );
@@ -14039,7 +14038,6 @@ function onTerminalMessage(sessionId, msg, tail = '') {
           ]
         : [
             ['resume', 'Resume'],
-            ['fork', 'Fork'],
             ['shell', 'Shell'],
           ],
       clean ? '' : tail,
