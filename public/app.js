@@ -5387,6 +5387,8 @@ function setFocusZone(zone, target) {
 
   focusZone = zone;
   if (zone === 'sidebar') {
+    const active = document.activeElement;
+    if (active && document.getElementById('main-content').contains(active)) active.blur();
     expandSidebar();
     const items = getNavigableItems();
     if (items.length > 0) {
@@ -5418,6 +5420,7 @@ function setFocusZone(zone, target) {
       if (card) card.classList.add('selected');
     } else {
       navigateVertical(1);
+      if (!selectedTaskId) document.querySelector('.column-add')?.focus();
     }
     if (selectedTaskId && detailPanel.classList.contains('visible')) {
       showTaskDetail(selectedTaskId, selectedSessionId);
@@ -7062,10 +7065,7 @@ document.addEventListener('keydown', (e) => {
       else leaveTerminalPane();
       return;
     }
-    if (focusZone === 'sidebar') {
-      const hasCards = document.querySelector('.task-card');
-      if (!hasCards) return;
-    }
+    if (focusZone === 'sidebar' && !document.querySelector('.task-card, .column-add')) return;
     setFocusZone(focusZone === 'board' ? 'sidebar' : 'board');
     return;
   }
@@ -7100,12 +7100,6 @@ document.addEventListener('keydown', (e) => {
     const menuKey = e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey);
     if (menuKey && sgOpenMenuForKbSelection()) {
       e.preventDefault();
-      return;
-    }
-    if (e.key === 'Escape') {
-      // Plain unfocus — drop the keyboard cursor without jumping into the board
-      clearKbSelection();
-      focusZone = 'board';
       return;
     }
   }
@@ -7156,7 +7150,11 @@ document.addEventListener('keydown', (e) => {
     if (detailPanel.classList.contains('visible')) closeDetailPanel();
     else if (agentLogMode) exitAgentLogMode();
     else if (messagePanelOpen) toggleMessagePanel();
-    else {
+    else if (focusZone === 'sidebar') {
+      // Plain unfocus — drop the keyboard cursor without jumping into the board
+      clearKbSelection();
+      focusZone = 'board';
+    } else {
       // Nothing open — plain unfocus: drop the task-card selection highlight
       clearTaskSelection();
       selectedTaskId = null;
