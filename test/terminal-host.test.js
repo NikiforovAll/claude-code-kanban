@@ -1,6 +1,7 @@
 const { describe, it, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { fork } = require('node:child_process');
+const fs = require('node:fs');
 const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
@@ -29,13 +30,40 @@ async function until(check, what, timeoutMs = 15000) {
   }
 }
 
+// The restore test resumes a session, which would start the real claude, so a stub goes
+// first on PATH. Like claude, it outlives a closed console and Ctrl+C, so only a tree kill ends it.
+function stubClaude() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cck-fake-claude-'));
+  const js = path.join(dir, 'claude.js');
+  fs.writeFileSync(js, [
+    "require('node:fs').writeFileSync(require('node:path').join(__dirname, 'ran'), String(process.pid));",
+    "for (const s of ['SIGHUP', 'SIGINT', 'SIGTERM']) process.on(s, () => {});",
+    'setTimeout(() => {}, 600000);',
+  ].join('\n'));
+  if (process.platform === 'win32') fs.writeFileSync(path.join(dir, 'claude.cmd'), `@"${process.execPath}" "${js}" %*\r\n`);
+  else fs.writeFileSync(path.join(dir, 'claude'), `#!/bin/sh\nexec "${process.execPath}" "${js}" "$@"\n`, { mode: 0o755 });
+  process.env.PATH = `${dir}${path.delimiter}${process.env.PATH}`;
+  return dir;
+}
+
+function alive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 describe('terminal host process', { skip: !ptyAvailable }, () => {
   const events = { changes: 0, exits: [], saved: null, asks: [] };
   let terminal;
   let server;
   let port;
+  let stubDir;
 
   before(async () => {
+    stubDir = stubClaude();
     terminal = createTerminalClient({
       config: { enabled: true, restore: true, shell: SHELL, maxSessions: 30, scrollback: 100, noFlicker: true },
       net: { EXPOSED: false, upgradeVerdict: () => null },
@@ -58,9 +86,12 @@ describe('terminal host process', { skip: !ptyAvailable }, () => {
     assert.equal(await terminal.started, null);
   });
 
-  after(() => {
+  after(async () => {
     terminal.shutdown();
     server.close();
+    const stubPid = Number(fs.readFileSync(path.join(stubDir, 'ran'), 'utf8'));
+    await until(() => !alive(stubPid), 'the restored claude to be gone', 10000);
+    fs.rmSync(stubDir, { recursive: true, force: true });
   });
 
   it('asks cck for the folder and refuses what cck refuses', async () => {
@@ -99,5 +130,6 @@ describe('terminal host process', { skip: !ptyAvailable }, () => {
     terminal.restore();
     await until(() => terminal.isRunning(KNOWN), 'restored terminal');
     assert.ok(events.asks.includes(KNOWN));
+    await until(() => fs.existsSync(path.join(stubDir, 'ran')), 'the stub, not the real claude, to start');
   });
 });
