@@ -89,7 +89,7 @@ Lead sends shutdown_request via SendMessage
 | Communication | Returns result to parent | SendMessage / `<teammate-message>` protocol |
 | Idle state | N/A | Normal — waiting for work |
 | Termination detection | turn.complete stop line | JSONL `teammate_terminated` protocol message |
-| Stale timeout | Applied (force-stopped after 15min) | **Exempt** — idle is normal state |
+| Stale timeout | Applied (force-stopped after 30 min) | **Exempt** — idle is normal state |
 
 ### SendMessage does NOT spawn a process
 
@@ -143,7 +143,7 @@ Clicking opens the agent's session log in the message panel via `viewAgentLog(ag
 - Each card shows: status dot (green=active, yellow=idle, gray=stopped), agent type, duration, truncated last message (60 chars + ellipsis)
 - Clicking a card opens a modal with full details (status, ID, duration, timestamps, markdown-rendered last message)
 - ESC closes modal
-- Collapse state persisted in `localStorage` key `agentFooterCollapsed`
+- Collapse state persisted in `localStorage` key `agentFooterCollapsed`, or `agentFooterCollapsedSplit` while the board is in a split
 - Display cap: `AGENT_LOG_MAX = 8` most recent agents
 
 ### Ghost filtering
@@ -154,7 +154,7 @@ Shutdown handshake creates duplicate agent instances per worker. Three rounds:
 |-------|----------|-------------|
 | Real worker | Runs task, stops with meaningful message | Kept |
 | Shutdown recap | Same type, starts after original stops, has recap message | Temporal dedup |
-| Shutdown approval | Same type, starts after recap, often no SubagentStop | Temporal dedup |
+| Shutdown approval | Same type, starts after recap, often no stop line | Temporal dedup |
 
 **Temporal dedup algorithm:** For same-type agents sorted by `startedAt`:
 - If agent overlapped with previous (started before previous stopped) → keep (parallel real agents)
@@ -169,9 +169,9 @@ Listens for `type: "agent-update"` events. If `sessionId` matches current sessio
 
 On Windows, chokidar's `add` events for new files are unreliable when multiple files are created in rapid succession (e.g., parallel agent spawning). The `change` event (file update) fires reliably.
 
-**Symptom:** Only 1 of N parallel agents appears in the footer; the rest appear when any agent finishes (the `SubagentStop` rewrite triggers a `change` event which causes a re-fetch that discovers all agents).
+**Symptom:** Only 1 of N parallel agents appears in the footer; the rest appear when any agent finishes (the appended stop line triggers a `change` event which causes a re-fetch that discovers all agents).
 
-**Fix:** `agentPollInterval` — a 3-second polling interval that re-fetches agents while any are active/idle. Runs alongside the 1-second `agentDurationInterval` (which only re-renders elapsed time from cached data). The poll stops when all agents are stopped or invisible. `fetchAgents()` uses `lastAgentsHash` to bail when data is unchanged, so the poll adds minimal overhead.
+**Fix:** `agentPollInterval` — a 3-second polling interval that re-fetches agents while any are active/idle. Runs alongside `agentDurationInterval`, which only re-renders elapsed time from cached data: every second while any agent is active or idle, else every 10 seconds. The poll stops when all agents are stopped or invisible. `fetchAgents()` uses `lastAgentsHash` to bail when data is unchanged, so the poll adds minimal overhead.
 
 ### Agent ID resolution for team members
 
@@ -186,10 +186,9 @@ Team member prompts are wrapped in `<teammate-message teammate_id="..." summary=
 | Constant | Value | Location | Purpose |
 |----------|-------|----------|---------|
 | `AGENT_FILE_CAP` | 20 | server.js | Max agent files per session on disk |
-| `AGENT_LOG_MAX` | 8 | index.html | Max agents shown in footer |
-| `AGENT_STALE_MS` | 900000 | server.js | Stale timeout (15 min); team members exempt |
+| `AGENT_LOG_MAX` | 8 | public/app.js | Max agents shown in footer |
+| `AGENT_STALE_MS` | 1800000 | server.js | Stale timeout (30 min); team members exempt |
 | `AGENT_TTL_MS` | 3600000 | server.js | Agent freshness for session-level status checks; does NOT filter agents from detail endpoint |
-| `AGENT_COOLDOWN_MS` | 180000 | index.html | Cooldown period constant (3 min) |
 
 ## Known limitations
 
