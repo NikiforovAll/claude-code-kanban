@@ -2958,23 +2958,26 @@ function renderToolParamsHtml(params) {
     // small writes render as before.
     const fullContent = params.contentFull || params.content;
     const isTruncated = !!params.contentFull || params.content.length > CONTENT_TRUNCATE_MAX;
-    const truncContent = isTruncated
-      ? `${params.content.slice(0, CONTENT_TRUNCATE_MAX)}${params.content.length > CONTENT_TRUNCATE_MAX ? '\n... (truncated)' : ''}`
-      : params.content;
+    const marker = '\n... (truncated)';
+    let code = params.content.slice(0, CONTENT_TRUNCATE_MAX);
+    if (code.endsWith(marker)) code = code.slice(0, -marker.length);
+    const lang = langOfPath(params.file_path);
+    const truncHtml = (highlightCode(code, lang) ?? escapeHtml(code)) + (isTruncated ? escapeHtml(marker) : '');
     let writeMoreBtn = '',
       fullBlock = '';
     if (isTruncated) {
-      const toggle = makeExpandToggle(escapeHtml(truncContent), escapeHtml(fullContent), {
+      const toggle = makeExpandToggle(truncHtml, escapeHtml(fullContent), {
         fontSize: '0.75rem',
         maxHeight: '500px',
         tinted: true,
+        highlightLang: lang,
       });
       writeMoreBtn = ` ${toggle.btn}`;
       fullBlock = toggle.full;
     }
     html += `<div style="margin-top:8px;padding-top:6px;border-top:1px solid var(--border)">
           <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:2px">content${writeMoreBtn}</div>
-          <pre class="${TINTED_PRE_CLASS}" style="max-height:300px;overflow:auto">${escapeHtml(truncContent)}</pre>
+          <pre class="${TINTED_PRE_CLASS}" style="max-height:300px;overflow:auto">${truncHtml}</pre>
           ${fullBlock}
         </div>`;
   }
@@ -3036,6 +3039,12 @@ let _expandIdCounter = 0;
 function _applyExpandToggle(btn, fullEl) {
   const truncEl = btn.parentElement.nextElementSibling;
   const expand = fullEl.style.display === 'none';
+  // The full text is highlighted on first expand, so opening a message with a large Write stays fast.
+  if (expand && fullEl.dataset.hlLang) {
+    const html = highlightCode(fullEl.textContent, fullEl.dataset.hlLang);
+    if (html) fullEl.innerHTML = html;
+    delete fullEl.dataset.hlLang;
+  }
   fullEl.style.display = expand ? 'block' : 'none';
   if (truncEl) truncEl.style.display = expand ? 'none' : 'block';
   btn.textContent = expand ? 'Show less' : 'Show more';
@@ -3056,7 +3065,8 @@ function makeExpandToggle(_truncatedHtml, fullHtml, opts = {}) {
   const cls = opts.tinted ? TINTED_PRE_CLASS : 'msg-detail-pre';
   const btn = `<button data-expand-id="${id}" onclick="_toggleExpand(this)" class="expand-toggle-btn" style="font-size:${fontSize}">Show more</button>`;
   const mhStyle = maxHeight ? `max-height:${maxHeight};` : '';
-  const full = `<pre id="${id}" class="${cls}" style="${mhStyle}overflow:auto;display:none">${fullHtml}</pre>`;
+  const hl = opts.highlightLang ? ` data-hl-lang="${escapeHtml(opts.highlightLang)}"` : '';
+  const full = `<pre id="${id}" class="${cls}"${hl} style="${mhStyle}overflow:auto;display:none">${fullHtml}</pre>`;
   return { btn, full };
 }
 
@@ -8191,13 +8201,24 @@ function bindPreviewRelativeLinks(bodyEl, baseOf = () => currentPreviewPath) {
 // backtracking on the main thread, and .jsonl/.log files in a scratchpad reach megabytes.
 const HLJS_MAX_CHARS = 256 * 1024;
 
+function langOfPath(path) {
+  return typeof path === 'string' ? (path.split('.').pop() || '').toLowerCase() : '';
+}
+
+function highlightCode(text, lang) {
+  if (typeof hljs === 'undefined' || text.length > HLJS_MAX_CHARS || !hljs.getLanguage(lang)) return null;
+  try {
+    return hljs.highlight(text, { language: lang, ignoreIllegals: true }).value;
+  } catch (_) {
+    return null;
+  }
+}
+
 function renderSourcePreview(filePath, content) {
-  const ext = (filePath.split('.').pop() || '').toLowerCase();
-  if (typeof hljs !== 'undefined' && content.length <= HLJS_MAX_CHARS && hljs.getLanguage(ext)) {
-    try {
-      const value = hljs.highlight(content, { language: ext, ignoreIllegals: true }).value;
-      return `<pre class="preview-source"><code class="hljs language-${escapeHtml(ext)}">${value}</code></pre>`;
-    } catch (_) {}
+  const ext = langOfPath(filePath);
+  const value = highlightCode(content, ext);
+  if (value != null) {
+    return `<pre class="preview-source"><code class="hljs language-${escapeHtml(ext)}">${value}</code></pre>`;
   }
   return `<pre class="preview-source"><code class="hljs">${escapeHtml(content)}</code></pre>`;
 }
