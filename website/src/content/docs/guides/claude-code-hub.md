@@ -69,4 +69,4 @@ Standalone, Claude Code Kanban sends `X-Frame-Options: DENY` and `Content-Securi
 
 ## Help modal
 
-The shortcuts help (<kbd>?</kbd>) has a Hub group with the jump and app keys. Standalone, the modal hides this group, because those keys do nothing there. See [Keyboard shortcuts](/claude-code-kanban/reference/keyboard-shortcuts/).
+The shortcuts help (<kbd>?</kbd>) has a Hub group with the jump and app keys. See [Keyboard shortcuts](/claude-code-kanban/reference/keyboard-shortcuts/).
