@@ -14287,14 +14287,16 @@ function endTerminalSession() {
 }
 
 // Detaching first means no exit message reaches the pane, so no Resume prompt shows before the board.
-function closeTerminalSession(id = termState.sessionId) {
+// Terminal mode must go too: left on, opening the session again reconnects in 'auto' and resumes claude.
+async function closeTerminalSession(id = termState.sessionId) {
   if (id === termState.sessionId) {
     if (terminalPaneFocused()) leaveTerminalPane();
     detachTerminal();
   }
   setTerminalMode(id, false);
   syncTerminal();
-  return endTerminal(id);
+  await terminalFetch(`/api/terminals/${encodeURIComponent(id)}`, 'DELETE').catch(() => {});
+  dropPlaceholder(id);
 }
 
 function openTerminalManager() {
@@ -14394,7 +14396,7 @@ async function renderTerminalManager() {
   body.querySelectorAll('[data-end]').forEach((b) => {
     b.onclick = async () => {
       b.disabled = true;
-      await endTerminal(b.dataset.end);
+      await closeTerminalSession(b.dataset.end);
       renderTerminalManager();
     };
   });
@@ -14414,15 +14416,10 @@ async function terminalFetch(url, method, body) {
   return res.status === 401 && (await refreshTerminalToken()) ? send() : res;
 }
 
-async function endTerminal(id) {
-  await terminalFetch(`/api/terminals/${encodeURIComponent(id)}`, 'DELETE').catch(() => {});
-  dropPlaceholder(id);
-}
-
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
 async function endAllTerminals() {
   const buttons = document.querySelectorAll('#terminal-manager-body [data-end]');
-  await Promise.all([...buttons].map((b) => endTerminal(b.dataset.end)));
+  await Promise.all([...buttons].map((b) => closeTerminalSession(b.dataset.end)));
   renderTerminalManager();
 }
 

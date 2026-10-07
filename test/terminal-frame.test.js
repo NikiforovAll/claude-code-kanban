@@ -8,9 +8,9 @@ const { createTerminalFrame, claimSig, isClaimed, parentOriginOf, tailOf } = req
 const BOARD = 'http://localhost:3541';
 const app = readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
 
-function appFunction(name) {
-  const src = new RegExp(`^function ${name}\\([^)]*\\) \\{[\\s\\S]*?^\\}`, 'm').exec(app)[0];
-  const context = vm.createContext({});
+function appFunction(name, globals = {}) {
+  const src = new RegExp(`^(?:async )?function ${name}\\([^)]*\\) \\{[\\s\\S]*?^\\}`, 'm').exec(app)[0];
+  const context = vm.createContext(globals);
   vm.runInContext(src, context);
   return context[name];
 }
@@ -260,5 +260,34 @@ describe('createTerminalFrame', () => {
     w.send({ type: 'cck-term:open', socketId: 7, hello: {}, reset: false });
     assert.deepEqual(w.posted.at(-1).message, { type: 'cck-term:opening', socketId: 7 });
     assert.equal(sockets.length, 1);
+  });
+});
+
+describe('ending a terminal from the board', () => {
+  function closeWith(termSessionId) {
+    const calls = [];
+    const close = appFunction('closeTerminalSession', {
+      termState: { sessionId: termSessionId },
+      terminalPaneFocused: () => false,
+      leaveTerminalPane: () => {},
+      detachTerminal: () => calls.push('detach'),
+      setTerminalMode: (id, on) => calls.push(`mode ${id} ${on}`),
+      syncTerminal: () => calls.push('sync'),
+      terminalFetch: async (url, method) => calls.push(`${method} ${url}`),
+      dropPlaceholder: () => {},
+    });
+    return { close, calls };
+  }
+
+  it('turns terminal mode off, so opening the session again does not resume it', async () => {
+    const { close, calls } = closeWith('a');
+    await close('b');
+    assert.deepEqual(calls, ['mode b false', 'sync', 'DELETE /api/terminals/b']);
+  });
+
+  it('detaches the pane first when it shows that session', async () => {
+    const { close, calls } = closeWith('a');
+    await close('a');
+    assert.deepEqual(calls, ['detach', 'mode a false', 'sync', 'DELETE /api/terminals/a']);
   });
 });
