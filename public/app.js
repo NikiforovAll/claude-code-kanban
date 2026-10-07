@@ -3469,14 +3469,6 @@ function showAgentModal(agentId) {
   const dismissBtn = document.getElementById('agent-modal-dismiss-btn');
   dismissBtn.style.display = agent.status === 'active' || agent.status === 'idle' ? '' : 'none';
   modal.classList.add('visible');
-  const keyHandler = (e) => {
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      closeAgentModal();
-      document.removeEventListener('keydown', keyHandler);
-    }
-  };
-  document.addEventListener('keydown', keyHandler);
 }
 
 function closeAgentModal() {
@@ -5590,42 +5582,6 @@ sessionsList.addEventListener('click', (e) => {
   if (focusZone === 'sidebar' || (!taskInUse && !terminalPaneFocused())) setFocusZone('sidebar', el);
 });
 
-// biome-ignore lint/correctness/noUnusedVariables: used in HTML
-function getAvailableTasksOptions(currentTaskId = null) {
-  const pending = currentTasks.filter((t) => t.status === 'pending' && t.id !== currentTaskId);
-  const inProgress = currentTasks.filter((t) => t.status === 'in_progress' && t.id !== currentTaskId);
-  const completed = currentTasks.filter((t) => t.status === 'completed' && t.id !== currentTaskId);
-
-  // Build options grouped by status
-  let options = '';
-
-  if (pending.length > 0) {
-    options += '<optgroup label="Pending">';
-    pending.forEach((t, _idx) => {
-      options += `<option value="${escapeHtml(t.id)}">#${t.id} - ${escapeHtml(t.subject)}</option>`;
-    });
-    options += '</optgroup>';
-  }
-
-  if (inProgress.length > 0) {
-    options += '<optgroup label="In Progress">';
-    inProgress.forEach((t, _idx) => {
-      options += `<option value="${escapeHtml(t.id)}">#${t.id} - ${escapeHtml(t.subject)}</option>`;
-    });
-    options += '</optgroup>';
-  }
-
-  if (completed.length > 0) {
-    options += '<optgroup label="Completed">';
-    completed.forEach((t, _idx) => {
-      options += `<option value="${escapeHtml(t.id)}">#${t.id} - ${escapeHtml(t.subject)}</option>`;
-    });
-    options += '</optgroup>';
-  }
-
-  return options;
-}
-
 //#endregion
 
 //#region TASK_DETAIL
@@ -5845,47 +5801,6 @@ function closeDetailPanel() {
   document.getElementById('delete-task-btn').style.display = 'none';
   // Keep the task selected AND highlighted after closing (no dim-off).
   taskHighlightDimmed = false;
-}
-
-// biome-ignore lint/correctness/noUnusedVariables: used in HTML
-function showBlockedTaskModal(task) {
-  const messageDiv = document.getElementById('blocked-task-message');
-
-  const blockedByList = task.blockedBy
-    .map((id) => {
-      const blockingTask = currentTasks.find((t) => t.id === id);
-      if (blockingTask) {
-        return `<li><strong>#${blockingTask.id}</strong> - ${escapeHtml(blockingTask.subject)}</li>`;
-      }
-      return `<li><strong>#${id}</strong></li>`;
-    })
-    .join('');
-
-  messageDiv.innerHTML = `
-        <p style="margin-bottom: 12px;">Task <strong>#${task.id}</strong> - ${escapeHtml(task.subject)} is currently blocked by:</p>
-        <ul style="margin: 0 0 16px 20px; padding: 0;">${blockedByList}</ul>
-        <p style="margin: 0; color: var(--text-secondary); font-size: 13px;">
-          Please resolve these dependencies before moving this task to <strong>In Progress</strong>.
-        </p>
-      `;
-
-  const modal = document.getElementById('blocked-task-modal');
-  modal.classList.add('visible');
-
-  // Handle ESC key
-  const keyHandler = (e) => {
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      closeBlockedTaskModal();
-      document.removeEventListener('keydown', keyHandler);
-    }
-  };
-  document.addEventListener('keydown', keyHandler);
-}
-
-function closeBlockedTaskModal() {
-  const modal = document.getElementById('blocked-task-modal');
-  modal.classList.remove('visible');
 }
 
 //#endregion
@@ -11086,7 +11001,6 @@ function showInfoModal(session, teamConfig, tasks, planContent, parentInfo) {
   // Bind to the section, not bodyEl: bodyEl outlives the modal, so listeners on it
   // would stack up once per open and fire the click handler N times.
   bindLinkedDocsHandlers(bodyEl.querySelector('.linked-docs-section'), session.id);
-  const alreadyVisible = modal.classList.contains('visible');
   _infoModalSessionId = session.id;
   updateStickyBtnState();
   updateDismissBtnState();
@@ -11098,21 +11012,6 @@ function showInfoModal(session, teamConfig, tasks, planContent, parentInfo) {
   if (mkBtn) mkBtn.style.display = proj && hub.can('project.plugins') ? '' : 'none';
   if (memBtn) memBtn.style.display = proj && hub.can('project.memory') ? '' : 'none';
   modal.classList.add('visible');
-
-  if (alreadyVisible) return; // re-render during deferred hydration — key handler already attached
-
-  const keyHandler = (e) => {
-    if (e.key === 'Escape') {
-      // An inline editor inside the modal owns Escape first — it reverts itself.
-      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
-      if (document.getElementById('plan-modal').classList.contains('visible')) return;
-      if (document.getElementById('tool-stats-modal').classList.contains('visible')) return;
-      e.preventDefault();
-      closeTeamModal();
-      document.removeEventListener('keydown', keyHandler);
-    }
-  };
-  document.addEventListener('keydown', keyHandler);
 }
 
 function closeTeamModal() {
