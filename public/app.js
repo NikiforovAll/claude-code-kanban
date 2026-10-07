@@ -5959,14 +5959,20 @@ const SHORTCUT_TABS = [
         ],
       },
       {
-        title: 'View',
+        title: 'Tabs',
         rows: [
-          { keys: ['\\'], label: 'Toggle sidebar' },
           { keys: ['[', ']'], label: 'Previous / next tab (a split counts as one)' },
           { keys: ['Alt', '[ / ]'], combo: true, label: 'Change the tab in the focused side of a split' },
           { keys: ['|'], label: 'Split with the tab before it / unsplit (or drag a tab onto a side)' },
           { keys: ['{', '}'], label: 'Focus left / right side of a split' },
           { keys: ['Alt', 'W'], combo: true, label: 'Close the focused tab' },
+          { keys: ['Shift', 'F10'], combo: true, label: 'Focused tab menu (or Menu key)' },
+        ],
+      },
+      {
+        title: 'View',
+        rows: [
+          { keys: ['\\'], label: 'Toggle sidebar' },
           { keys: ['T'], label: 'Toggle theme' },
           { keys: ['Shift', 'S'], combo: true, label: 'Storage manager' },
           { keys: ['Ctrl', 'Shift', 'Z'], combo: true, label: 'Zen mode (current session only)' },
@@ -5974,13 +5980,6 @@ const SHORTCUT_TABS = [
           { keys: ['Ctrl', '−'], combo: true, label: 'Smaller modal text' },
           { keys: ['Ctrl', '0'], combo: true, label: 'Reset modal text size' },
           { keys: ['?'], label: 'Show this help' },
-        ],
-      },
-      {
-        title: 'Copy',
-        rows: [
-          { keys: ['Shift', 'C'], combo: true, label: 'Session id' },
-          { keys: ['Ctrl', 'Shift', 'C'], combo: true, label: 'Session name (SendMessage address)' },
         ],
       },
     ],
@@ -6011,6 +6010,8 @@ const SHORTCUT_TABS = [
           { keys: ['Ctrl', 'Alt', 'N'], combo: true, hubMod: true, label: 'New session' },
           { keys: ['Ctrl', 'Alt', 'R'], combo: true, hubMod: true, label: 'Resume session (claude -r)' },
           { keys: ['Ctrl', 'Alt', 'S'], combo: true, hubMod: true, label: 'Swap to previous session' },
+          { keys: ['Shift', 'C'], combo: true, label: 'Copy session id' },
+          { keys: ['Ctrl', 'Shift', 'C'], combo: true, label: 'Copy session name (SendMessage address)' },
         ],
       },
     ],
@@ -7195,6 +7196,10 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
     return;
   }
+  if (isMenuKey(e) && ((focusZone === 'sidebar' && sgOpenMenuForKbSelection()) || openFocusedPaneMenu())) {
+    e.preventDefault();
+    return;
+  }
   const plainShift = !e.ctrlKey && !e.altKey && !e.metaKey;
   if (plainShift && e.key === '|' && togglePaneSplit()) {
     e.preventDefault();
@@ -7287,11 +7292,6 @@ document.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
       activateSelectedSession();
-      return;
-    }
-    const menuKey = e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey);
-    if (menuKey && sgOpenMenuForKbSelection()) {
-      e.preventDefault();
       return;
     }
   }
@@ -12793,9 +12793,25 @@ function cyclePaneStrip(step) {
   return true;
 }
 
-function closeFocusedPane() {
+function isMenuKey(e) {
+  return e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey);
+}
+
+function focusedPaneId() {
   const sid = paneSessionId();
-  const id = sid && !wantsTerminal() && getActivePaneId(sid);
+  return sid && !wantsTerminal() && getActivePaneId(sid);
+}
+
+function openFocusedPaneMenu() {
+  const id = focusedPaneId();
+  const tab = id && paneStrip.querySelector(`.pane-tab[data-pane="${CSS.escape(id)}"]`);
+  if (!tab?.offsetParent) return false;
+  const rect = tab.getBoundingClientRect();
+  return openPaneMenu(rect.left + 16, rect.bottom, id);
+}
+
+function closeFocusedPane() {
+  const id = focusedPaneId();
   if (!id || id === 'board') return false;
   closePane(id);
   return true;
@@ -12963,10 +12979,10 @@ function openPaneMenu(x, y, id) {
         paneMenuItem('deleteCompleted', 'Delete completed tasks') +
         paneMenuItem('deleteAll', 'Delete all tasks'),
     );
-    return;
+    return true;
   }
   const pane = paneById(id);
-  if (!pane) return;
+  if (!pane) return false;
   const url = pane.kind === 'url';
   const message = pane.kind === 'message';
   const label = paneLabel(pane);
@@ -12982,6 +12998,7 @@ function openPaneMenu(x, y, id) {
       paneMenuItem('reload', 'Reload') +
       paneMenuItem('close', 'Close pane'),
   );
+  return true;
 }
 
 function showPaneMenu(x, y, id, ariaLabel, html) {
