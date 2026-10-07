@@ -95,7 +95,7 @@ All under `<config-dir>/.cck/`:
 
 | Path | Writer | Purpose |
 |---|---|---|
-| `config.json` | you | cck settings; the `approvals` section holds the opt-out and tuning |
+| `config.json` | you | cck settings; the `approvals` section holds the opt-out and tuning, and `boardEvents` the doorbell's off switch |
 | `agent-activity/<sid>/_waiting.json` | mod | the pending ask (kind, id, tool, input, the settings rule that asked); `{"status":"cleared"}` once it is over |
 | `agent-activity/<sid>/_decision-<id>.json` | board server | your answer; read by the mod |
 

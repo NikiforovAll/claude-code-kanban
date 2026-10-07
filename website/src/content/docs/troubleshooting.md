@@ -113,9 +113,14 @@ PORT=8080 claude-code-kanban
 
 **Symptom.** You drag a card to another column, and Claude does not react.
 
-**Cause.** The server queues each move, but a session gets the queue only after you arm the doorbell monitor. Moves made before that are discarded. Adding a task by hand sends no notice at all.
+**Cause.** One of these:
 
-**Fix.** Run `/claude-code-kanban:follow` in the session first, then move the card. See [Claude Code plugin skills](/claude-code-kanban/guides/plugin-skills/).
+- `boardEvents.enabled` is `false` in `<config-dir>/.cck/config.json`.
+- The session does not run the plugin, or runs a plugin version before 3.0.0.
+- The session is busy. It gets the move when its current turn ends.
+- You made the move before the session started listening. Those moves are discarded. Adding a task by hand sends no notice at all.
+
+**Fix.** Check the config, update the plugin with `claude-code-kanban --install`, and start the session again. See [Steer a session from the board](/claude-code-kanban/guides/plugin-skills/#steer-a-session-from-the-board).
 
 ## Prompt buttons are missing
 

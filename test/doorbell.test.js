@@ -99,32 +99,48 @@ describe('session event doorbell', () => {
 
 describe('task.moved line format', () => {
   const moved = (task, prev = 'pending') => loadDoorbell().formatTaskMoved('T-1', prev, task);
+  const START = 'Start this task now, and set it to completed with TaskUpdate when the work is done.';
 
-  it('carries the subject quoted and the description last', () => {
+  it('carries the subject quoted, what the move means, and the description last', () => {
     assert.equal(
       moved({ status: 'in_progress', subject: 'Fix hover', description: 'Repro with pnpm test' }),
-      '[kanban board] The user moved task T-1 "Fix hover" from pending to in_progress. Description: Repro with pnpm test',
+      `[kanban board] The user moved task T-1 "Fix hover" from pending to in_progress. ${START} Description: Repro with pnpm test`,
     );
   });
 
   it('omits description when the card has none', () => {
     assert.equal(
       moved({ status: 'in_progress', subject: 'Fix hover' }),
-      '[kanban board] The user moved task T-1 "Fix hover" from pending to in_progress.',
+      `[kanban board] The user moved task T-1 "Fix hover" from pending to in_progress. ${START}`,
     );
     assert.equal(moved({ status: 'in_progress', subject: 'Fix hover', description: '' }).includes('Description:'), false);
   });
 
+  it('says what each move means, and nothing for a move with no meaning', () => {
+    assert.match(moved({ status: 'pending', subject: 'x' }, 'in_progress'), /to pending\. Stop working on it and park it\.$/);
+    assert.match(moved({ status: 'completed', subject: 'x' }), /to completed\. The user considers it done/);
+    assert.match(moved({ status: 'cancelled', subject: 'x' }), /to cancelled\. Abandon it\./);
+    assert.match(moved({ status: 'pending', subject: 'x' }, 'completed'), /from completed to pending\.$/);
+  });
+
   it('escapes quotes and backslashes in the subject so the field cannot be closed early', () => {
-    const line = moved({ status: 'in_progress', subject: 'Say "hi" C:\\tmp' });
-    assert.equal(line, '[kanban board] The user moved task T-1 "Say \\"hi\\" C:\\\\tmp" from pending to in_progress.');
+    const line = moved({ status: 'completed', subject: 'Say "hi" C:\\tmp' });
+    assert.match(line, /^\[kanban board\] The user moved task T-1 "Say \\"hi\\" C:\\\\tmp" from pending to completed\./);
     // exactly one unescaped quote pair delimits the subject
     assert.equal(line.replace(/\\./g, '').match(/"/g).length, 2);
   });
 
   it('leaves out the previous status when there is none rather than emitting undefined', () => {
     const line = loadDoorbell().formatTaskMoved('T-1', undefined, { status: 'in_progress', subject: 'x' });
-    assert.equal(line, '[kanban board] The user moved task T-1 "x" to in_progress.');
+    assert.equal(line, `[kanban board] The user moved task T-1 "x" to in_progress. ${START}`);
+  });
+
+  it('is on unless the config says enabled: false', () => {
+    const { boardEventsOn } = loadDoorbell();
+    assert.equal(boardEventsOn(null), true);
+    assert.equal(boardEventsOn({}), true);
+    assert.equal(boardEventsOn({ boardEvents: { enabled: 'no' } }), true);
+    assert.equal(boardEventsOn({ boardEvents: { enabled: false } }), false);
   });
 
   it('keeps the machine-readable head intact when a long description is truncated', () => {
@@ -135,7 +151,7 @@ describe('task.moved line format', () => {
     assert.equal(line.length, 1500);
     assert.match(
       line,
-      /^\[kanban board\] The user moved task T-1 "Fix hover" from pending to in_progress\. Description: x+$/,
+      /^\[kanban board\] The user moved task T-1 "Fix hover" from pending to in_progress\. Start this task now, .+ Description: x+$/,
     );
   });
 
@@ -175,7 +191,7 @@ describe('task.moved line format', () => {
     assert.equal((await poll('s1')).events.length, 1);
   });
 
-  it('reports a listener only while a postman is waiting, and mints no bucket asking', async () => {
+  it('reports a listener only while a doorbell is waiting, and mints no bucket asking', async () => {
     const { sessionEventBuckets, hasSessionListener, enqueueSessionEvent, poll } = loadDoorbell();
     assert.equal(hasSessionListener('s4'), false);
     assert.equal(sessionEventBuckets.size, 0);

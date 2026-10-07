@@ -8068,7 +8068,7 @@ async function sendReview() {
         'Review copied. Paste it into the session.',
         'info',
         { label: 'Copy again', onClick: copy },
-        'Run /claude-code-kanban:follow there to send reviews directly.',
+        'Sessions get reviews directly when the cck plugin runs there and board events are on.',
       );
     }
     clearReviewDrafts(key);

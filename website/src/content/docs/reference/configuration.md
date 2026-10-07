@@ -86,6 +86,24 @@ You can answer permission prompts, questions and plans from the board. This is o
 
 Each config dir has its own file. See [Answer prompts from the board](/claude-code-kanban/guides/waiting-prompts/).
 
+## Board events config
+
+Your card moves and review comments reach the session as prompts. This is on by default. To turn it off, add a `boardEvents` block to the same `<config-dir>/.cck/config.json`:
+
+```json
+{
+  "boardEvents": {
+    "enabled": false
+  }
+}
+```
+
+| Field | Default | What it does |
+|---|---|---|
+| `enabled` | `true` | Only an explicit `false` turns board events off. The server then queues no line for a move or a review, and a review falls back to the terminal or the clipboard. |
+
+The server reads the file again when it changes, so no restart is needed. See [Steer a session from the board](/claude-code-kanban/guides/plugin-skills/#steer-a-session-from-the-board).
+
 ## Network and security
 
 The server binds to `127.0.0.1` and also listens on `::1` on the same port. It has no authentication. Anyone who can reach the port can read your sessions.
@@ -130,9 +148,9 @@ The server, the plugin and the installer keep their state in `<config-dir>/.cck/
 | `context-status/<sessionId>.json` | Plugin mod (`context.ts`) | Context use, cost and model for each session |
 | `pins.json` | Server | Copy of the browser's session pins, so the CLI can read them |
 | `dispatch-groups.json` | Server | Groups made with `dispatch start --group` |
-| `server.json` | Server | `{port, pid}` of the running server. The CLI and the postman monitor use it to find the port. |
+| `server.json` | Server | `{port, pid}` of the running server. The CLI and the plugin use it to find the port. |
 | `terminal-tokens/<port>.json` | Server | Terminal token of the board on `<port>` (file mode 600), used by `dispatch start`. Written only when the terminal is available. One file per board, so two boards on one config dir each keep their own. |
-| `config.json` | You | Optional [UI approvals config](#ui-approvals-config) |
+| `config.json` | You | Optional [UI approvals config](#ui-approvals-config) and [board events config](#board-events-config) |
 | `plugin/` | Installer | Copy of the Claude Code plugin |
 
 The server removes `server.json` and its `terminal-tokens/<port>.json` when it exits, if they still belong to it. At start it also removes token files left by servers that are no longer running.

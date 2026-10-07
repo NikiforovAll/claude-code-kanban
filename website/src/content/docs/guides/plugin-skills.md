@@ -1,21 +1,18 @@
 ---
 title: Claude Code plugin skills
-description: Use the kanban, follow and dispatch skills to drive the board from Claude Code and let the board drive Claude Code.
+description: Use the kanban and dispatch skills to drive the board from Claude Code, and steer a session with card moves on the board.
 ---
 
-The Claude Code Kanban plugin adds three skills to Claude Code. `claude-code-kanban --install` installs the plugin, together with its hooks. See [Getting started](/claude-code-kanban/getting-started/).
+The Claude Code Kanban plugin adds two skills to Claude Code, and it sends your board moves to the session. `claude-code-kanban --install` installs the plugin, together with its hooks. See [Getting started](/claude-code-kanban/getting-started/).
 
 In Claude Code the skills have the plugin name as a prefix:
 
 | Skill | Who can start it | What it does |
 |---|---|---|
 | `/claude-code-kanban:kanban` | You or Claude | Runs the board's CLI: links docs, adds panes, opens and pins sessions. |
-| `/claude-code-kanban:follow` | You only | Makes card moves on the board into instructions for this session. |
 | `/claude-code-kanban:dispatch` | You or Claude | Starts other sessions in the board's terminal. |
 
-The `follow` skill starts the `kanban-doorbell` monitor. A monitor is a background process that Claude Code runs for the rest of the session. It prints a line when a task of this session moves on the board, or when you send it review comments, and Claude Code gives each line to Claude.
-
-The skills need the board server. If the server is not running, a CLI command fails with `Cannot reach cck server for <dir> on port <n>`. Start the server with `claude-code-kanban`, then try again. The monitor prints nothing while the server is down. It tries again every 15 seconds and connects when the server starts.
+The skills need the board server. If the server is not running, a CLI command fails with `Cannot reach cck server for <dir> on port <n>`. Start the server with `claude-code-kanban`, then try again.
 
 ## kanban
 
@@ -39,32 +36,26 @@ Example prompts:
 /claude-code-kanban:kanban show the active sessions from the last 12 hours
 ```
 
-## follow
+## Steer a session from the board
+
+The plugin listens to the board in every session. When you drag one of the session's task cards to a new column, the session gets a prompt like this:
 
 ```text
-/claude-code-kanban:follow
+[kanban board] The user moved task <id> "<subject>" from <from> to <to>. <what the move means> Description: <description>
 ```
 
-This skill lets you steer a session from the board. Claude does not start it by itself. When you type it, the skill starts the `kanban-doorbell` monitor, which runs for the rest of the session. Claude confirms in one line and runs no command.
-
-When you drag one of the session's task cards to a new column, the session gets a line like this:
-
-```text
-[kanban board] The user moved task <id> "<subject>" from <from> to <to>. Description: <description>
-```
-
-The line has no `Description:` part when the card has no description. Claude treats the move as an instruction from you. The subject and description of the card tell Claude what to do.
+The line has no `Description:` part when the card has no description. The line itself tells Claude what the move means, so no skill is needed:
 
 | Move | What Claude does |
 |---|---|
-| To `in_progress` | Starts the task now. |
-| From `in_progress` to `pending` or `todo` | Stops work on the task and parks it. |
+| To `in_progress` | Starts the task now, and sets it to `completed` with `TaskUpdate` when the work is done. The card then moves to Completed. |
+| From `in_progress` to `pending` | Stops work on the task and parks it. |
 | To `completed` | Stops. You consider the task done. |
 | To `cancelled` | Abandons the task. It undoes nothing unless you ask. |
 
-If you move a card two times, only the newest line for that task counts. If a move conflicts with the current work, the board wins. When Claude finishes a task that you moved to In Progress, it sets the task to `completed` with `TaskUpdate`, and the card moves to Completed.
+An idle session starts a turn at once. A busy session gets the prompt when its current turn ends, so a move to Pending does not stop a turn in progress. Moves you make in quick succession arrive as one prompt.
 
-When you send [review comments](/claude-code-kanban/guides/review-comments/) on a file or the plan, the session gets a line like this, and Claude reads the review file and does what the comments ask:
+When you send [review comments](/claude-code-kanban/guides/review-comments/) on a file or the plan, the session gets a prompt like this, and Claude reads the review file and does what the comments ask:
 
 ```text
 [kanban board] The user left <n> review comments on <source>. Address them: <review file>
@@ -72,17 +63,12 @@ When you send [review comments](/claude-code-kanban/guides/review-comments/) on 
 
 Know these limits:
 
-- The monitor discards moves made before you run the skill. A session that never ran the skill never hears the board.
-- Only moves and review comments send a line. A task you add by hand in the Pending column does not.
+- The session discards moves made before it started listening, for example before a resume.
+- Only your moves and review comments send a prompt. A task you add by hand in the Pending column does not, and neither does Claude's own `TaskUpdate`.
 - The queue is in memory and can lose lines. It keeps 50 lines per session at most, and the server cuts each line at 1500 characters. The task file stays the source of truth, so a lost line only means Claude sees the change on its next turn.
+- While the server is down, the session hears nothing. It tries again every 10 seconds and connects when the server starts.
 
-Example prompts:
-
-```text
-/claude-code-kanban:follow
-```
-
-Then add tasks to the session and drag a card from Pending to In Progress on the board. Claude starts that task. Drag it back to Pending to make Claude stop.
+To turn this off, set `boardEvents.enabled` to `false` in `<config-dir>/.cck/config.json`. See [Configuration](/claude-code-kanban/reference/configuration/#board-events-config).
 
 ## dispatch
 

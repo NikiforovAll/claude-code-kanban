@@ -82,7 +82,7 @@ Run `claude` in any project. You do not configure anything per project. Claude C
 - **Embedded terminal.** Run a real Claude Code process for any session next to its board (<kbd>Ctrl</kbd>+<kbd>&#96;</kbd>). <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>R</kbd> resumes a past session and <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>S</kbd> swaps to the previous one. The terminal is off by default when the board runs alone. Start it with `--enable-terminal` and open the `#t=<token>` link the server prints. [Embedded terminal](https://nikiforovall.blog/claude-code-kanban/guides/embedded-terminal/)
 - **New session.** <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>N</kbd> opens a dialog to pick a folder, a name, a model, an optional git worktree and a first prompt. Needs the terminal.
 - **Dispatch.** Hand a written task to a new session with `claude-code-kanban dispatch start`, or ask Claude to do it with the `dispatch` skill. Args after `--` go to `claude` as they are, and the started session reports back with `SendMessage`. Needs the terminal. [Dispatch tasks to other sessions](https://nikiforovall.blog/claude-code-kanban/guides/dispatch/)
-- **Steer with card moves.** Run `/claude-code-kanban:follow` in a session, then drag its cards. Claude starts, parks or stops the task. [Claude Code plugin skills](https://nikiforovall.blog/claude-code-kanban/guides/plugin-skills/)
+- **Steer with card moves.** Drag a session's cards. Claude starts, parks or stops the task. Turn it off with `boardEvents.enabled: false` in `.cck/config.json`. [Claude Code plugin skills](https://nikiforovall.blog/claude-code-kanban/guides/plugin-skills/)
 - **Review comments.** Select text in a previewed file or the plan, add comments and send them to the session in one step. [Review comments](https://nikiforovall.blog/claude-code-kanban/guides/review-comments/)
 
 <picture>
@@ -126,6 +126,7 @@ EDITOR="code -w" claude-code-kanban        # Command for Open in editor (default
 
 - The server listens on `127.0.0.1` only and has no authentication. To reach it from another machine, use `--host` and `--allowed-hosts`, and do it only on a network you trust.
 - UI approvals are on by default. Turn them off or tune them in `<config-dir>/.cck/config.json`.
+- Board events (card moves and reviews sent to the session as prompts) are on by default. Turn them off with `"boardEvents": {"enabled": false}` in the same file.
 - Terminal settings, such as the shell, font size and scrollback, go in the `CCK_TERMINAL` JSON variable.
 
 See [Configuration](https://nikiforovall.blog/claude-code-kanban/reference/configuration/) for every setting, and [Troubleshooting](https://nikiforovall.blog/claude-code-kanban/troubleshooting/) for common problems.

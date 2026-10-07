@@ -150,7 +150,7 @@ function writePins(pins) {
   writeJsonAtomic(PINS_FILE, pins);
 }
 
-// Port discovery for out-of-process helpers (the postman monitor, the CLI).
+// Port discovery for out-of-process helpers (the plugin's doorbell mod, the CLI).
 // The pid rides along so a reader can tell a live server from a file left behind by
 // a crashed one.
 function writeServerInfo(port) {
@@ -179,7 +179,7 @@ function ownerPid(file) {
   try { return JSON.parse(readFileSync(file, 'utf8')).pid ?? null; } catch (_) { return null; }
 }
 
-// A beacon that outlives its server sends the postman monitor and the CLI to a closed
+// A beacon that outlives its server sends the doorbell mod and the CLI to a closed
 // port. The hub spawns every sub-app on
 // an ephemeral port, so a stale beacon never comes back on its own — drop ours on
 // the way out. Only when the file is still ours: a newer server on the same config
@@ -255,9 +255,14 @@ function persistAgent(dir, agent) {
 const CCK_CONFIG_FILE = path.join(CCK_DIR, 'config.json');
 const LEGACY_APPROVALS_FILE = path.join(CCK_DIR, 'approvals.json');
 const cckConfigCache = new Map();
+const readCckConfig = () => JSON.parse(readFileSync(CCK_CONFIG_FILE, 'utf8'));
 function approvalsConfig() {
   return cachedByMtime(cckConfigCache, 'approvals', CCK_CONFIG_FILE,
-    () => approvalsFrom(JSON.parse(readFileSync(CCK_CONFIG_FILE, 'utf8'))), approvalsFrom(null));
+    () => approvalsFrom(readCckConfig()), approvalsFrom(null));
+}
+function boardEventsEnabled() {
+  return cachedByMtime(cckConfigCache, 'boardEvents', CCK_CONFIG_FILE,
+    () => boardEventsOn(readCckConfig()), boardEventsOn(null));
 }
 
 // approvals.json predates config.json (and was opt-in). Fold it into
@@ -3519,6 +3524,7 @@ app.get('/api/tasks/all', async (_req, res) => {
 });
 
 const {
+  boardEventsOn,
   enqueueSessionEvent,
   formatReviewSubmitted,
   formatTaskMoved,
@@ -3590,9 +3596,9 @@ app.put('/api/tasks/:sessionId/:taskId', async (req, res) => {
     // Ring the session only for a move. The direction has to ride in the line because
     // the write above destroyed the old status -- nothing downstream can recover it, and
     // which way a task moved is what decides whether to start work or stop it.
-    if (task.status !== prevStatus) {
+    if (task.status !== prevStatus && boardEventsEnabled()) {
       // The route param is a task *directory*, which for a shared list or team board is
-      // not a session id -- and the postman polls with its own session id, so an unresolved
+      // not a session id -- and the doorbell polls with its own session id, so an unresolved
       // name would queue the line where nobody drains it.
       const line = formatTaskMoved(taskId, prevStatus, task);
       for (const sid of resolveSessionsForTaskDir(sessionId)) enqueueSessionEvent(sid, line);
@@ -4238,7 +4244,7 @@ app.post('/api/sessions/:sessionId/review', async (req, res) => {
     await fs.writeFile(file, markdown);
 
     let delivered = null;
-    if (hasSessionListener(sessionId)) {
+    if (boardEventsEnabled() && hasSessionListener(sessionId)) {
       enqueueSessionEvent(sessionId, formatReviewSubmitted(src.items.length, src.label, file));
       delivered = 'doorbell';
     } else if (
@@ -4610,8 +4616,8 @@ async function prewarmCaches() {
   const onReady = (actualPort) => {
     boardPort = Number(actualPort);
     terminal.setServerUrl(`http://127.0.0.1:${actualPort}`);
-    // The port is configurable and falls back to a random one when taken, so the postman
-    // monitor cannot assume it -- publish the live one where it can read it.
+    // The port is configurable and falls back to a random one when taken, so the doorbell
+    // mod cannot assume it -- publish the live one where it can read it.
     writeServerInfo(actualPort);
     writeTerminalToken(actualPort);
     console.log(`Claude Task Kanban running at http://localhost:${actualPort}`);

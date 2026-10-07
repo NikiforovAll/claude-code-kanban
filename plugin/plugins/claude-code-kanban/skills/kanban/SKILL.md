@@ -38,8 +38,6 @@ To show the user a page, a prototype or a collage of screenshots, write it as HT
 
 Read its transcript. `session view <id>` and `session search <text> --json` print the path.
 
-To have card moves arrive in this session as instructions, the user types `/claude-code-kanban:follow`.
-
 ## Troubleshooting
 
 - **"Cannot reach cck server…"** → the error names the config dir and the port it tried. Ask the user to start the server with `claude-code-kanban`. If it runs elsewhere, set `PORT=<n>` or `CCK_URL=<url>` when invoking the CLI.
