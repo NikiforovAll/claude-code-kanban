@@ -9997,10 +9997,7 @@ function renderMarkdown(text) {
 }
 
 function isLightTheme() {
-  const saved = store.getItem('theme');
-  return (
-    document.body.classList.contains('light') || (!saved && window.matchMedia('(prefers-color-scheme: light)').matches)
-  );
+  return document.body.classList.contains('light');
 }
 
 function getMermaidTheme() {
@@ -10591,50 +10588,34 @@ function updateThemeColor(isLight) {
 //#endregion
 
 //#region THEME
-function toggleTheme() {
-  const isCurrentlyLight = document.body.classList.contains('light');
-  if (isCurrentlyLight) {
-    document.body.classList.remove('light');
-    document.body.classList.add('dark-forced');
-    store.setItem('theme', 'dark');
-  } else {
-    document.body.classList.add('light');
-    document.body.classList.remove('dark-forced');
-    store.setItem('theme', 'light');
-  }
-  updateThemeIcon();
-  updateThemeColor(!isCurrentlyLight);
-  syncHljsTheme();
-  reinitMermaidTheme();
-}
-
-function syncHljsTheme() {
-  const light = isLightTheme();
+function applyTheme(light) {
+  document.body.classList.toggle('light', light);
+  document.body.classList.toggle('dark-forced', !light);
+  document.getElementById('theme-icon-dark').style.display = light ? 'none' : 'block';
+  document.getElementById('theme-icon-light').style.display = light ? 'block' : 'none';
+  updateThemeColor(light);
   const dark$ = document.getElementById('hljs-theme-dark');
   const light$ = document.getElementById('hljs-theme-light');
   if (dark$) dark$.disabled = light;
   if (light$) light$.disabled = !light;
+  reinitMermaidTheme();
 }
 
-function updateThemeIcon() {
-  const light = isLightTheme();
-  document.getElementById('theme-icon-dark').style.display = light ? 'none' : 'block';
-  document.getElementById('theme-icon-light').style.display = light ? 'block' : 'none';
+function toggleTheme() {
+  const light = !isLightTheme();
+  store.setItem('theme', light ? 'light' : 'dark');
+  applyTheme(light);
 }
 
 function loadTheme() {
   const saved = store.getItem('theme');
-  if (saved === 'light') {
-    document.body.classList.add('light');
-    document.body.classList.remove('dark-forced');
-  } else if (saved === 'dark') {
-    document.body.classList.remove('light');
-    document.body.classList.add('dark-forced');
-  }
-  // If no saved preference, system prefers-color-scheme CSS handles it
-  updateThemeIcon();
-  updateThemeColor(document.body.classList.contains('light'));
-  syncHljsTheme();
+  const system = window.matchMedia('(prefers-color-scheme: light)');
+  applyTheme(saved ? saved === 'light' : system.matches);
+  // The prefers-color-scheme CSS only covers the first paint; the class decides after that, so it
+  // follows the system until the user picks a theme.
+  system.addEventListener('change', (e) => {
+    if (!store.getItem('theme')) applyTheme(e.matches);
+  });
   buildThemeMenu();
   const colorTheme = store.getItem('color-theme');
   if (colorTheme) document.body.dataset.colorTheme = colorTheme;
