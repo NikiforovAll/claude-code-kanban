@@ -3013,20 +3013,22 @@ function toolOutputHtml(text) {
   return sanitizeOutputHtml(text);
 }
 
+// Strings and comments share one pass, so the apostrophe in "# don't" does not open a string.
 function highlightBash(escaped) {
   return escaped
-    .replace(/^(\s*)(#.*)$/gm, '$1<span style="color:#6a9955">$2</span>')
-    .replace(/(&#x27;[\s\S]*?&#x27;|&quot;[\s\S]*?&quot;)/g, '<span style="color:#ce9178">$1</span>')
+    .replace(/(&#39;[\s\S]*?&#39;|&quot;[\s\S]*?&quot;)|^(\s*)(#.*)$/gm, (_, str, indent, comment) =>
+      str ? `<span class="hljs-string">${str}</span>` : `${indent}<span class="hljs-comment">${comment}</span>`,
+    )
     .replace(
       /\b(if|then|else|elif|fi|for|do|done|while|until|case|esac|function|return|in|select)\b/g,
-      '<span style="color:#c586c0">$1</span>',
+      '<span class="hljs-keyword">$1</span>',
     )
     .replace(
       /\b(echo|cd|ls|cat|grep|awk|sed|rm|cp|mv|mkdir|chmod|chown|export|source|exit|test|read|printf|set|unset|eval|exec|trap|wait|kill|sudo|apt|npm|npx|git|docker|curl|wget|pip|python|node|make|dotnet)\b/g,
-      '<span style="color:#569cd6">$1</span>',
+      '<span class="hljs-built_in">$1</span>',
     )
-    .replace(/(\$\{[^}]*\}|\$[A-Za-z_][A-Za-z0-9_]*)/g, '<span style="color:#9cdcfe">$1</span>')
-    .replace(/((?:^|\s)(?:&amp;&amp;|\|\||[|;])(?:\s|$))/g, '<span style="color:#d4d4d4;font-weight:bold">$1</span>');
+    .replace(/(\$\{[^}]*\}|\$[A-Za-z_][A-Za-z0-9_]*)/g, '<span class="hljs-variable">$1</span>')
+    .replace(/((?:^|\s)(?:&amp;&amp;|\|\||[|;])(?:\s|$))/g, '<span style="font-weight:bold">$1</span>');
 }
 
 const TINTED_PRE_CLASS = 'msg-detail-pre msg-detail-pre-tinted';
