@@ -158,7 +158,7 @@ function resetMessageScrollState() {
   msgUserScrolledUp = false;
   msgHasMore = false;
   msgLoadingMore = false;
-  currentMessages = [];
+  setCurrentMessages([]);
   lastMessagesHash = '';
   const btn = document.getElementById('msg-jump-latest');
   if (btn) btn.style.display = 'none';
@@ -760,7 +760,7 @@ async function fetchProjectView(projectPath) {
   viewMode = 'project';
   currentProjectPath = projectPath;
   currentSessionId = null;
-  currentMessages = [];
+  setCurrentMessages([]);
   lastMessagesHash = '';
   if (messagePanelOpen) toggleMessagePanel();
   document.getElementById('message-toggle')?.style.setProperty('display', 'none');
@@ -969,7 +969,7 @@ async function viewAgentLog(agentId) {
     if (!agentLogMode || agentLogMode.agentId !== resolvedId) return;
     try {
       const data = JSON.parse(e.data);
-      currentMessages = data.messages;
+      setCurrentMessages(data.messages);
       if (messagePanelOpen) renderMessages(data.messages);
       maybeFollowLatest();
     } catch (_) {}
@@ -1002,7 +1002,7 @@ async function fetchAgentMessages() {
     if (!res.ok || !agentLogMode || agentLogMode.agentId !== agentId) return;
     const data = await res.json();
     if (!agentLogMode || agentLogMode.agentId !== agentId) return;
-    currentMessages = data.messages;
+    setCurrentMessages(data.messages);
     if (messagePanelOpen) renderMessages(data.messages);
     maybeFollowLatest();
   } catch (e) {
@@ -1049,18 +1049,16 @@ async function fetchMessages(sessionId) {
       if (hash === lastMessagesHash) return;
       lastMessagesHash = hash;
       msgHasMore = data.hasMore !== false;
-      currentMessages = data.messages;
+      setCurrentMessages(data.messages);
       if (messagePanelOpen) renderMessages(data.messages);
     } else {
       if (data.messages.length && currentMessages.length) {
         const lastKnown = currentMessages[currentMessages.length - 1].timestamp;
         const newMsgs = data.messages.filter((m) => m.timestamp > lastKnown);
         if (newMsgs.length) {
-          currentMessages = [...currentMessages, ...newMsgs];
-          if (currentMessages.length > MSG_MAX_LOADED) {
-            currentMessages = currentMessages.slice(-MSG_MAX_LOADED);
-            msgHasMore = true;
-          }
+          const merged = [...currentMessages, ...newMsgs];
+          if (merged.length > MSG_MAX_LOADED) msgHasMore = true;
+          setCurrentMessages(merged.slice(-MSG_MAX_LOADED));
           if (messagePanelOpen) renderMessages(currentMessages);
         }
       }
@@ -1087,10 +1085,7 @@ async function loadOlderMessages() {
     if (data.messages.length) {
       loader.remove();
       const prevHeight = container.scrollHeight;
-      currentMessages = [...data.messages, ...currentMessages];
-      if (currentMessages.length > MSG_MAX_LOADED) {
-        currentMessages = currentMessages.slice(0, MSG_MAX_LOADED);
-      }
+      setCurrentMessages([...data.messages, ...currentMessages].slice(0, MSG_MAX_LOADED));
       renderMessages(currentMessages);
       container.scrollTop = container.scrollHeight - prevHeight;
     }
@@ -2328,6 +2323,21 @@ function msgDetailContent(m) {
   return userExtras || '<em>No content</em>';
 }
 
+// The detail modal holds an index, so a list that shifts under it must move the index too.
+function setCurrentMessages(msgs) {
+  const shown = currentMessages[currentMsgDetailIdx];
+  currentMessages = msgs;
+  if (!shown) return;
+  const id = getPinId(shown);
+  const same = msgs[currentMsgDetailIdx];
+  const idx = same && getPinId(same) === id ? currentMsgDetailIdx : msgs.findIndex((m) => getPinId(m) === id);
+  currentMsgDetailIdx = idx >= 0 ? idx : null;
+  setMsgDetailMeta(shown, idx >= 0 && msgPosition(idx));
+  syncMsgDetailPaneBtn();
+}
+
+const msgPosition = (idx) => `${idx + 1} of ${currentMessages.length}`;
+
 function showMsgDetail(idx) {
   currentMsgDetailIdx = idx;
   document.getElementById('msg-detail-waiting-footer').innerHTML = '';
@@ -2335,7 +2345,7 @@ function showMsgDetail(idx) {
   const m = currentMessages[idx];
   if (!m) return;
   highlightSelectedMsg();
-  renderMsgDetail(m, `${idx + 1} of ${currentMessages.length}`);
+  renderMsgDetail(m, msgPosition(idx));
 }
 
 // A message outside the loaded log has no index, so it shows like a pinned message, with follow off.
@@ -2348,6 +2358,12 @@ function showUnloadedMsgDetail(m) {
 }
 
 const msgDetailMeta = (m) => [m.model, formatDate(m.timestamp)].filter(Boolean);
+
+function setMsgDetailMeta(m, position) {
+  const meta = msgDetailMeta(m);
+  if (position) meta.push(position);
+  document.getElementById('msg-detail-meta').textContent = meta.join(' · ');
+}
 
 function renderMsgDetail(m, position) {
   const body = document.getElementById('msg-detail-body');
@@ -2362,9 +2378,7 @@ function renderMsgDetail(m, position) {
   autoSizeModal(modal, body);
   setMsgDetailFollow(msgDetailFollowLatest);
 
-  const meta = msgDetailMeta(m);
-  if (position) meta.push(position);
-  document.getElementById('msg-detail-meta').textContent = meta.join(' · ');
+  setMsgDetailMeta(m, position);
   currentPinDetailId = null;
   updateMsgDetailPinState();
   syncMsgDetailPaneBtn();
