@@ -8,6 +8,7 @@ const {
   scanTranscripts,
   pruneSessionDirs,
   pruneContextStatus,
+  pruneTaskMaps,
   retentionMs,
   GRACE_MS,
   MAX_DISPATCHED,
@@ -178,6 +179,39 @@ describe('pruneContextStatus', () => {
 
   it('returns 0 when the folder does not exist', async () => {
     assert.equal(await pruneContextStatus(path.join(tempDir(), 'missing'), { known: null, maxAgeMs: MONTH }), 0);
+  });
+});
+
+describe('pruneTaskMaps', () => {
+  const entry = (ageMs, now) => ({ project: '/p', updatedAt: new Date(now - ageMs).toISOString() });
+  const read = (file) => JSON.parse(fs.readFileSync(file, 'utf8'));
+
+  it('drops gone and old sessions, deletes a file left empty, keeps the rest', async () => {
+    const dir = tempDir();
+    const now = Date.now();
+    const mixed = path.join(dir, 'list-a.json');
+    const empty = path.join(dir, 'list-b.json');
+    const untouched = path.join(dir, 'list-c.json');
+    fs.writeFileSync(
+      mixed,
+      JSON.stringify({ gone: entry(GRACE_MS + 1000, now), young: entry(1000, now), live: entry(DAY_MS, now) }),
+    );
+    fs.writeFileSync(empty, JSON.stringify({ old: entry(MONTH + 1000, now) }));
+    fs.writeFileSync(untouched, JSON.stringify({ live: entry(DAY_MS, now) }));
+    const before = fs.statSync(untouched).mtimeMs;
+    const removed = await pruneTaskMaps(dir, { known: new Set(['live', 'old']), maxAgeMs: MONTH, now });
+    assert.equal(removed, 2);
+    assert.deepEqual(Object.keys(read(mixed)), ['young', 'live']);
+    assert.equal(fs.existsSync(empty), false);
+    assert.equal(fs.statSync(untouched).mtimeMs, before);
+  });
+
+  it('skips a file it cannot parse and returns 0 when the folder does not exist', async () => {
+    const dir = tempDir();
+    fs.writeFileSync(path.join(dir, 'bad.json'), '{');
+    assert.equal(await pruneTaskMaps(dir, { known: new Set(), maxAgeMs: MONTH }), 0);
+    assert.ok(fs.existsSync(path.join(dir, 'bad.json')));
+    assert.equal(await pruneTaskMaps(path.join(dir, 'missing'), { known: null, maxAgeMs: MONTH }), 0);
   });
 });
 

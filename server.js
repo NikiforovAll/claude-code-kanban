@@ -52,7 +52,7 @@ const { readLiveSessions, isPidAlive, isSessionLive } = require('./lib/live-sess
 const { createProcStats } = require('./lib/proc-stats');
 const { createDispatchRegistry } = require('./lib/dispatch');
 const { createGroupStore, isGroupName, suggestGroupName } = require('./lib/dispatch-groups');
-const { createDispatchedStore, scanTranscripts, pruneSessionDirs, pruneContextStatus, retentionMs } = require('./lib/retention');
+const { createDispatchedStore, scanTranscripts, pruneSessionDirs, pruneContextStatus, pruneTaskMaps, retentionMs } = require('./lib/retention');
 const { freshRateLimits } = require('./lib/rate-limits');
 const { createWorktreeStore } = require('./lib/worktrees');
 const { createScratchpadDirResolver } = require('./lib/scratchpad-dir');
@@ -4519,8 +4519,10 @@ async function cleanupAgentActivity() {
     const now = Date.now();
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
+      const dirPath = path.join(AGENT_ACTIVITY_DIR, entry.name);
+      // Map files are rewritten in place, so the dir mtime does not track their use.
+      if (dirPath === TASK_MAPS_DIR) continue;
       try {
-        const dirPath = path.join(AGENT_ACTIVITY_DIR, entry.name);
         const contents = await fs.readdir(dirPath);
         const stat = await fs.stat(dirPath);
         const age = now - stat.mtimeMs;
@@ -4554,8 +4556,9 @@ async function runRetention() {
     const reviews = await pruneSessionDirs(REVIEW_DIR, opts);
     const contexts = await pruneContextStatus(CONTEXT_STATUS_DIR, opts);
     const wts = worktrees.prune(scan?.dirs);
-    if (markers || layouts || reviews || contexts || wts) {
-      console.log(`[retention] removed ${markers} dispatch markers, ${layouts} pane layouts, ${reviews} reviews, ${contexts} context status files, ${wts} worktrees`);
+    const taskMaps = await pruneTaskMaps(TASK_MAPS_DIR, opts);
+    if (markers || layouts || reviews || contexts || wts || taskMaps) {
+      console.log(`[retention] removed ${markers} dispatch markers, ${layouts} pane layouts, ${reviews} reviews, ${contexts} context status files, ${wts} worktrees, ${taskMaps} task-list mappings`);
     }
   } catch (e) {
     console.warn('[retention] failed:', e.message);
