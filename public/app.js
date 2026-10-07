@@ -11505,6 +11505,7 @@ function refreshOpenPlan() {
         _pendingPlanPath = data.path || null;
         document.getElementById('plan-modal-body').innerHTML = renderMarkdown(_pendingPlanContent);
         mountPlanReview();
+        syncPlanPaneBtn();
       }
     })
     .catch(() => {});
@@ -11847,6 +11848,7 @@ function openPlanModal() {
     controls.innerHTML = planApprovalControlsHtml('plan-modal-reject-feedback');
     document.querySelector('#plan-modal .modal-footer').prepend(controls);
   }
+  syncPlanPaneBtn();
   document.getElementById('plan-modal').classList.add('visible');
   mountPlanReview();
   const keyHandler = (e) => {
@@ -13076,12 +13078,27 @@ async function postPane(sid, body) {
   return sid === paneSessionId();
 }
 
+function openFileInPane(filePath, closeModal) {
+  if (!filePath || !paneSessionId()) return;
+  closeModal();
+  addPane(filePath);
+}
+
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
 function openPreviewInPane() {
-  const filePath = currentPreviewPath;
-  if (!filePath || !paneSessionId()) return;
-  closePreviewModal();
-  addPane(filePath);
+  openFileInPane(currentPreviewPath, closePreviewModal);
+}
+
+// The plan modal also opens other sessions' plans, and a pane goes to the session on screen.
+const planPaneAllowed = () => !!_pendingPlanPath && !!_planSessionId && _planSessionId === paneSessionId();
+
+function syncPlanPaneBtn() {
+  document.getElementById('plan-pane-btn').style.display = planPaneAllowed() ? '' : 'none';
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+function openPlanInPane() {
+  if (planPaneAllowed()) openFileInPane(_pendingPlanPath, closePlanModal);
 }
 
 function msgDetailPaneSource() {
