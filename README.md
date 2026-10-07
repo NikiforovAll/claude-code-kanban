@@ -98,7 +98,7 @@ Run `claude` in any project. You do not configure anything per project. Claude C
 ### Organize
 
 - **Session groups.** Drag sessions and projects from different folders into one named group in the sidebar. [Session groups](https://nikiforovall.blog/claude-code-kanban/guides/session-groups/)
-- **Filters, search and pins.** Filter by project and activity, search across sessions and tasks, pin a session or make it sticky. <kbd>Shift</kbd>+<kbd>P</kbd> opens the session picker.
+- **Filters, search and pins.** Filter by project and activity, search across sessions and tasks, pin a session or make it sticky. <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> opens the session picker, and <kbd>Shift</kbd>+<kbd>P</kbd> the project picker.
 - **Scratchpad and linked documents.** Keep a note per session, project or group (<kbd>N</kbd>), and link files or web URLs to a session to open them in one click.
 - **Themes.** 17 color themes, each in light and dark. <kbd>T</kbd> switches the mode.
 - **Keyboard first.** Arrow keys move through tasks, and <kbd>Tab</kbd> moves between the sidebar and the board. Press <kbd>?</kbd> for the full list. [Keyboard shortcuts](https://nikiforovall.blog/claude-code-kanban/reference/keyboard-shortcuts/)

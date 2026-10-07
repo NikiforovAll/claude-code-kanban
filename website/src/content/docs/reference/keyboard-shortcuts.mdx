@@ -8,7 +8,7 @@ import Lightbox from '../../../kit/Lightbox.astro';
 
 Press <kbd>?</kbd> (or <kbd>Shift+/</kbd>) to open the **Keyboard Shortcuts** help. Press <kbd>?</kbd> or <kbd>Esc</kbd> to close it. The help does not open while the cursor is in a text field, a text area or a select.
 
-<Shot themed="12-shortcuts" alt="The Keyboard Shortcuts help with the Navigate, Session, Board, View, Copy, Hub, Terminal and Sessions groups" />
+<Shot themed="12-shortcuts" alt="The Keyboard Shortcuts help with the Navigate, Board, Tabs, View, Session, Sessions, Terminal and Hub groups" />
 
 Plain letter keys work only when you press no modifier. For example, <kbd>I</kbd> opens session info, and <kbd>Ctrl+I</kbd> does nothing in Claude Code Kanban. Letter keys do nothing while you type in a field.
 
@@ -33,9 +33,11 @@ These keys act on the session under the sidebar cursor, or on the open session.
 | --- | --- |
 | <kbd>P</kbd> | Open the session plan |
 | <kbd>Ctrl+Shift+P</kbd> | Open or close the session picker. It works when the terminal has focus. |
+| <kbd>Shift+P</kbd> | Open the project picker of this board |
 | <kbd>I</kbd> | Open session info |
 | <kbd>.</kbd> | Pin or unpin the session |
 | <kbd>&gt;</kbd> | Make the session sticky, or remove sticky |
+| <kbd>Shift+F10</kbd> | In the sidebar, open the menu of the item under the cursor, to move it to a group. The <kbd>Menu</kbd> key also works. |
 | <kbd>Ctrl+D</kbd> | Dismiss the session |
 | <kbd>Shift+L</kbd> | Show or hide the session log |
 | <kbd>Shift+M</kbd> | Open the last message in follow mode. If a waiting prompt is fresh, open that prompt. If the message detail is open, close it. |
@@ -59,6 +61,7 @@ These keys work in the message detail window. See [Session log and details](/cla
 | <kbd>Enter</kbd> or <kbd>Space</kbd> | Open or close the task detail panel for the selected card |
 | <kbd>D</kbd> | Delete the selected task, after you confirm |
 | <kbd>N</kbd> | Open or close the scratchpad. In the sidebar, open the scratchpad of the item under the cursor. |
+| <kbd>Ctrl+E</kbd> | In a session scratchpad, set the session's emoji |
 | <kbd>R</kbd> | Refresh sessions, the open session's tasks and the rate limits. A "Data refreshed" message shows when it is done. |
 | <kbd>Esc</kbd> | Close the next open item, in this order |
 
@@ -71,16 +74,22 @@ These keys work in the message detail window. See [Session log and details](/cla
 
 In the sidebar, <kbd>Esc</kbd> removes the keyboard cursor.
 
-## View
+## Tabs
 
 | Keys | Action |
 | --- | --- |
-| <kbd>&#92;</kbd> | Show or hide the sidebar |
 | <kbd>[</kbd> or <kbd>]</kbd> | Go to the previous or next tab of the session view: Board, then the session's panes. A split counts as one tab. It does nothing while the terminal is on. |
 | <kbd>&#124;</kbd> | Split the tab on screen with the tab before it, or end the split. See [Split view](/claude-code-kanban/guides/session-details/#split-view). |
 | <kbd>&#123;</kbd> or <kbd>&#125;</kbd> | Move focus to the left or right side of a split |
 | <kbd>Alt+[</kbd> or <kbd>Alt+]</kbd> | Change the tab in the side of a split that has focus |
 | <kbd>Alt+W</kbd> | Close the pane that has focus. It does nothing on Board. |
+| <kbd>Shift+F10</kbd> | Open the menu of the pane that has focus. The <kbd>Menu</kbd> key also works. In the sidebar, the item under the cursor gets its menu instead. |
+
+## View
+
+| Keys | Action |
+| --- | --- |
+| <kbd>&#92;</kbd> | Show or hide the sidebar |
 | <kbd>T</kbd> | Switch between light and dark theme |
 | <kbd>Shift+S</kbd> | Open the storage manager |
 | <kbd>Ctrl+Shift+Z</kbd> | Turn zen mode on or off (current session only). It works when the terminal has focus. In a text field it stays redo. <kbd>Shift+Z</kbd> also works outside the terminal. |
@@ -90,15 +99,6 @@ In the sidebar, <kbd>Esc</kbd> removes the keyboard cursor.
 | <kbd>?</kbd> | Show the help |
 
 The text size keys work only when a window with readable content is open, such as a message, a plan or a preview, or when a pane is on screen. They scale HTML pages too. They also accept <kbd>Ctrl+=</kbd>, <kbd>Ctrl+_</kbd> and the numeric keypad keys, and they work with the cursor in a field. On macOS, <kbd>Cmd</kbd> also works. With no such window open, the browser zooms the page as usual. When the terminal has focus, they change the terminal text size instead (see [Terminal](#terminal)).
-
-## Copy
-
-| Keys | Action |
-| --- | --- |
-| <kbd>Shift+C</kbd> | Copy the session id |
-| <kbd>Ctrl+Shift+C</kbd> | Copy `SendMessage(<name>)`, where the name is the address other sessions use with SendMessage (running sessions only) |
-
-If no session is selected, a "No session selected" message shows.
 
 ## Hub
 
@@ -147,8 +147,12 @@ Inside the terminal:
 | <kbd>Ctrl+Alt+N</kbd> | Start a new session |
 | <kbd>Ctrl+Alt+R</kbd> | Resume a session with the `claude --resume` picker |
 | <kbd>Ctrl+Alt+S</kbd> | Swap to the previous session |
+| <kbd>Shift+C</kbd> | Copy the session id |
+| <kbd>Ctrl+Shift+C</kbd> | Copy `SendMessage(<name>)`, where the name is the address other sessions use with SendMessage (running sessions only) |
 
-On macOS these three are <kbd>⌃⌥N</kbd>, <kbd>⌃⌥R</kbd> and <kbd>⌃⌥S</kbd>.
+If no session is selected, the copy keys show a "No session selected" message.
+
+On macOS the three <kbd>Ctrl+Alt</kbd> keys are <kbd>⌃⌥N</kbd>, <kbd>⌃⌥R</kbd> and <kbd>⌃⌥S</kbd>.
 
 <kbd>Ctrl+Alt+N</kbd> and <kbd>Ctrl+Alt+R</kbd> work only when the terminal is available. <kbd>Ctrl+Alt+S</kbd> switches between the last two sessions you opened. If the terminal has focus, it keeps focus after the swap. Inside Claude Code Hub, Claude Code Kanban keeps these three keys and does not send them to the hub.
 
@@ -193,6 +197,6 @@ When a window is open, most shortcuts stop. These keys go through:
 - <kbd>Shift+M</kbd> closes the message detail.
 - The [message detail keys](#message-detail) work in the message detail.
 
-The terminal keys, the Sessions keys, <kbd>Ctrl+Shift+P</kbd>, <kbd>Ctrl+Shift+Z</kbd> and the text size keys also work while a window is open. Inside Claude Code Hub, <kbd>Ctrl+Alt+←</kbd>, <kbd>Ctrl+Alt+→</kbd>, <kbd>Alt+1</kbd> to <kbd>Alt+9</kbd> (<kbd>⌃⌥1</kbd> to <kbd>⌃⌥9</kbd> on macOS), <kbd>Ctrl+Alt+P</kbd> and <kbd>Ctrl+Alt+W</kbd> also work.
+The terminal keys, the Sessions keys, <kbd>Ctrl+Shift+P</kbd>, <kbd>Ctrl+Shift+Z</kbd> and the text size keys also work while a window is open. Inside Claude Code Hub, <kbd>Ctrl+Alt+←</kbd>, <kbd>Ctrl+Alt+→</kbd>, <kbd>Alt+1</kbd> to <kbd>Alt+9</kbd> (<kbd>⌃⌥1</kbd> to <kbd>⌃⌥9</kbd> on macOS), <kbd>Ctrl+Alt+P</kbd>, <kbd>Ctrl+Alt+W</kbd> and <kbd>Ctrl+Alt+A</kbd> also work.
 
 <Lightbox />
