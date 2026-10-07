@@ -4,7 +4,7 @@
 const express = require('express');
 const path = require('node:path');
 const fs = require('node:fs').promises;
-const { existsSync, readdirSync, readFileSync, writeFileSync, statSync, unlinkSync, mkdirSync, renameSync, openSync, readSync, closeSync, realpathSync } = require('node:fs');
+const { existsSync, readdirSync, readFileSync, writeFileSync, statSync, unlinkSync, rmSync, mkdirSync, renameSync, openSync, readSync, closeSync, realpathSync } = require('node:fs');
 const _readline = require('node:readline');
 const chokidar = require('chokidar');
 const os = require('node:os');
@@ -136,11 +136,21 @@ function readPins() {
 }
 
 function writeJsonAtomic(file, obj, mode) {
+  mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
   try {
-    mkdirSync(path.dirname(file), { recursive: true });
-    const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
     writeFileSync(tmp, JSON.stringify(obj, null, 2), { encoding: 'utf8', mode });
     renameSync(tmp, file);
+  } catch (e) {
+    rmSync(tmp, { force: true });
+    throw e;
+  }
+}
+
+// For state that is also held in memory: a failed save is logged and the server goes on.
+function writeJsonAtomicOrLog(file, obj, mode) {
+  try {
+    writeJsonAtomic(file, obj, mode);
   } catch (e) {
     console.error(`Failed to write ${path.basename(file)}:`, e.message);
   }
@@ -154,7 +164,7 @@ function writePins(pins) {
 // The pid rides along so a reader can tell a live server from a file left behind by
 // a crashed one.
 function writeServerInfo(port) {
-  writeJsonAtomic(SERVER_INFO_FILE, { port, pid: process.pid });
+  writeJsonAtomicOrLog(SERVER_INFO_FILE, { port, pid: process.pid });
 }
 
 // For `dispatch start`: a local process as the same user can already run claude itself,
@@ -172,7 +182,7 @@ function writeTerminalToken(port) {
     if (pid !== null && !isPidAlive(pid)) try { unlinkSync(file); } catch (_) { /* already gone */ }
   }
   terminalTokenFile = path.join(TERMINAL_TOKENS_DIR, `${port}.json`);
-  writeJsonAtomic(terminalTokenFile, { pid: process.pid, token: terminal.token }, 0o600);
+  writeJsonAtomicOrLog(terminalTokenFile,{ pid: process.pid, token: terminal.token }, 0o600);
 }
 
 function ownerPid(file) {
@@ -273,7 +283,7 @@ function migrateLegacyApprovalsConfig() {
     const legacy = JSON.parse(readFileSync(LEGACY_APPROVALS_FILE, 'utf8'));
     let cfg = {};
     try { cfg = JSON.parse(readFileSync(CCK_CONFIG_FILE, 'utf8')) || {}; } catch { /* absent */ }
-    if (!cfg.approvals) writeJsonAtomic(CCK_CONFIG_FILE, { ...cfg, approvals: legacy });
+    if (!cfg.approvals) writeJsonAtomicOrLog(CCK_CONFIG_FILE, { ...cfg, approvals: legacy });
     unlinkSync(LEGACY_APPROVALS_FILE);
     cckConfigCache.clear();
   } catch (e) {
@@ -361,7 +371,7 @@ const worktrees = createWorktreeStore({
   load: () => {
     try { return JSON.parse(readFileSync(WORKTREES_FILE, 'utf8')); } catch { return null; }
   },
-  save: (data) => writeJsonAtomic(WORKTREES_FILE, data),
+  save: (data) => writeJsonAtomicOrLog(WORKTREES_FILE, data),
 });
 
 function getSessionLogStat(meta) {
@@ -3314,7 +3324,7 @@ const terminal = createTerminalClient({
   load: () => {
     try { return JSON.parse(readFileSync(TERMINALS_FILE, 'utf8')); } catch { return null; }
   },
-  save: (data) => writeJsonAtomic(TERMINALS_FILE, data),
+  save: (data) => writeJsonAtomicOrLog(TERMINALS_FILE, data),
   // The project, not the last cwd: `claude --resume` finds a session under the
   // project dir it started in, and cwd drifts into subdirectories.
   resolveCwd: resolveSessionFolder,
@@ -3405,7 +3415,7 @@ const dispatched = createDispatchedStore({
   load: () => {
     try { return JSON.parse(readFileSync(DISPATCHED_FILE, 'utf8')); } catch { return null; }
   },
-  save: (data) => writeJsonAtomic(DISPATCHED_FILE, data),
+  save: (data) => writeJsonAtomicOrLog(DISPATCHED_FILE, data),
 });
 
 const dispatches = createDispatchRegistry();
@@ -3414,7 +3424,7 @@ const dispatchGroups = createGroupStore({
   load: () => {
     try { return JSON.parse(readFileSync(DISPATCH_GROUPS_FILE, 'utf8')); } catch { return null; }
   },
-  save: (data) => writeJsonAtomic(DISPATCH_GROUPS_FILE, data),
+  save: (data) => writeJsonAtomicOrLog(DISPATCH_GROUPS_FILE, data),
   isAlive: (id) => terminal.isRunning(id) || isSessionLive(loadLiveSessions(), id),
   pinnedIds: () => new Set(Object.keys(readPins())),
 });
@@ -3423,7 +3433,7 @@ const linkedDocs = createLinkedDocStore({
   load: () => {
     try { return JSON.parse(readFileSync(LINKED_DOCS_FILE, 'utf8')); } catch { return null; }
   },
-  save: (data) => writeJsonAtomic(LINKED_DOCS_FILE, data),
+  save: (data) => writeJsonAtomicOrLog(LINKED_DOCS_FILE, data),
 });
 
 // The board places a session from these alone, so it never has to move it later.
@@ -4035,7 +4045,7 @@ const panes = createPaneStore({
     try { return JSON.parse(readFileSync(PANES_FILE, 'utf8')); } catch { return null; }
   },
   save: (data) => {
-    writeJsonAtomic(PANES_FILE, data);
+    writeJsonAtomicOrLog(PANES_FILE, data);
     panesStamp = panesFileStamp();
   },
   onChange: (sessionId, layout) => {
@@ -4585,7 +4595,7 @@ const PREWARM_SLICE_MS = 10;
 // first list is sent, or after the fallback when no client asks.
 const PREWARM_FALLBACK_MS = 5000;
 const SESSION_CACHE_SAVE_MS = 30000;
-const persistSessionCache = () => saveSessionCache((data) => writeJsonAtomic(SESSION_CACHE_FILE, data));
+const persistSessionCache = () => saveSessionCache((data) => writeJsonAtomicOrLog(SESSION_CACHE_FILE, data));
 let prewarmStarted = false;
 function startPrewarm() {
   if (prewarmStarted) return;
