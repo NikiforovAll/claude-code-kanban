@@ -3869,6 +3869,7 @@ function resolvePreviewPath(rawPath, base) {
 app.post('/api/preview', async (req, res) => {
   try {
     const { path: filePath, sessionId, base } = req.body || {};
+    if (sessionId && !isSafeId(sessionId)) return res.status(400).json({ error: 'Invalid session ID' });
     const abs = resolvePreviewPath(filePath, base);
     if (!abs) return res.status(400).json({ error: 'path is required' });
     // Validate here so the CLI still gets 400/404, but broadcast the path only —
@@ -3890,7 +3891,8 @@ app.post('/api/preview', async (req, res) => {
 app.post('/api/document/link', async (req, res) => {
   try {
     const { path: filePath, sessionId, unlink, open } = req.body || {};
-    if (typeof sessionId !== 'string' || !sessionId) return res.status(400).json({ error: 'sessionId is required' });
+    if (!sessionId) return res.status(400).json({ error: 'sessionId is required' });
+    if (!isSafeId(sessionId)) return res.status(400).json({ error: 'Invalid session ID' });
     const url = linkUrl(filePath);
     const abs = url || resolvePreviewPath(filePath);
     if (!abs) return res.status(400).json({ error: 'path is required' });
