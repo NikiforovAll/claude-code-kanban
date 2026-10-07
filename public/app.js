@@ -13219,16 +13219,11 @@ paneSplitBox.addEventListener(
 function endPaneDrag() {
   if (!paneDragId) return;
   paneDragId = null;
+  markPaneDrop(null);
   paneSplitBox.classList.remove('dropping');
-  paneStrip.classList.remove('drop-hot');
   for (const el of paneDrop.children) el.classList.remove('hot');
   paneStrip.querySelector('.pane-tab.dragging')?.classList.remove('dragging');
   syncPanes();
-}
-
-function draggedPair() {
-  const sid = paneSessionId();
-  return (sid && paneDragId && pairOf(sid, paneDragId)) || null;
 }
 
 paneStrip.addEventListener('dragstart', (e) => {
@@ -13240,24 +13235,64 @@ paneStrip.addEventListener('dragstart', (e) => {
   tab.classList.add('dragging');
   paneSplitBox.classList.add('dropping');
 });
+
+// A split shows as one strip item, so a drop moves the dragged tab's whole item; the first item
+// holds the board and stays put. Elsewhere on the strip, a split tab's drop ends its split.
+function paneDropAction(e) {
+  const sid = paneSessionId();
+  const tab = e.target.closest?.('.pane-tab');
+  if (!sid || !paneDragId) return null;
+  if (tab) {
+    const [fixed, ...movable] = paneStripItems(sid);
+    const itemOf = (id) => movable.find((it) => it.ids.includes(id));
+    const from = itemOf(paneDragId);
+    const to = itemOf(tab.dataset.pane);
+    if (from && to && from !== to) {
+      const el = to.pair ? tab.closest('.pane-pair') : tab;
+      const box = el.getBoundingClientRect();
+      return { kind: 'move', sid, el, fixed, movable, from, to, after: e.clientX > box.left + box.width / 2 };
+    }
+  }
+  const pair = pairOf(sid, paneDragId);
+  return pair ? { kind: 'unpair', sid, pair } : null;
+}
+
+function markPaneDrop(action) {
+  paneStrip.classList.toggle('drop-hot', action?.kind === 'unpair');
+  for (const el of paneStrip.querySelectorAll('.pane-tab, .pane-pair')) {
+    el.classList.toggle('drop-before', el === action?.el && !action.after);
+    el.classList.toggle('drop-after', el === action?.el && action.after);
+  }
+}
+
+async function movePaneItem({ sid, fixed, movable, from, to, after }) {
+  const items = movable.filter((it) => it !== from);
+  items.splice(items.indexOf(to) + (after ? 1 : 0), 0, from);
+  const order = [fixed, ...items].flatMap((it) => it.ids).filter((id) => id !== 'board');
+  const res = await paneRequest('PATCH', `/api/panes/${encodeURIComponent(sid)}`, { order });
+  if (res.error) showToast(res.error, 'error');
+  else applyPaneLayout(sid, res.layout);
+}
+
 paneStrip.addEventListener('dragend', endPaneDrag);
 paneStrip.addEventListener('dragover', (e) => {
-  if (!draggedPair()) return;
-  e.preventDefault();
-  paneStrip.classList.add('drop-hot');
+  const action = paneDropAction(e);
+  markPaneDrop(action);
+  if (action) e.preventDefault();
 });
 paneStrip.addEventListener('dragleave', (e) => {
-  if (!paneStrip.contains(e.relatedTarget)) paneStrip.classList.remove('drop-hot');
+  if (!paneStrip.contains(e.relatedTarget)) markPaneDrop(null);
 });
 paneStrip.addEventListener('drop', (e) => {
-  const pair = draggedPair();
-  if (!pair) return;
+  const action = paneDropAction(e);
+  if (!action) return;
   e.preventDefault();
-  const sid = paneSessionId();
-  const shown = !!splitSideOf(pair, getActivePaneId(sid));
+  const { sid, pair } = action;
+  const shown = pair && !!splitSideOf(pair, getActivePaneId(sid));
   const keep = shown ? pair[otherSide(splitSideOf(pair, paneDragId))] : null;
   endPaneDrag();
-  unpairPanes(sid, pair, keep);
+  if (action.kind === 'move') movePaneItem(action);
+  else unpairPanes(sid, pair, keep);
 });
 paneDrop.addEventListener('dragover', (e) => {
   if (!paneDragId) return;
