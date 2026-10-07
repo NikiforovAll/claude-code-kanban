@@ -2811,12 +2811,12 @@ function renderAnswerPayloadHtml(answerPayload) {
 
 //#region FINDINGS
 const FINDING_VERDICT_COLORS = {
-  CONFIRMED: 'var(--danger, #ef5350)',
-  PLAUSIBLE: 'var(--warning, #f0b429)',
+  CONFIRMED: 'var(--danger)',
+  PLAUSIBLE: 'var(--warning)',
 };
 const FINDING_OUTCOME_COLORS = {
-  fixed: 'var(--success, #3ecf8e)',
-  no_change_needed: 'var(--info, #60a5fa)',
+  fixed: 'var(--success)',
+  no_change_needed: 'var(--info)',
   skipped: 'var(--text-muted)',
 };
 function findingBadge(label, color) {
@@ -2909,7 +2909,7 @@ function renderToolParamsHtml(params) {
       blocks.push({ k, display, full });
     } else {
       badges.push(
-        `<span style="display:inline-flex;align-items:center;gap:3px;padding:1px 6px;border-radius:3px;background:var(--bg-secondary);font-size:0.75rem"><span style="color:var(--text-muted)">${escapeHtml(k)}:</span> ${escapeHtml(display)}</span>`,
+        `<span style="display:inline-flex;align-items:center;gap:3px;padding:1px 6px;border-radius:3px;background:var(--bg-hover);font-size:0.75rem"><span style="color:var(--text-muted)">${escapeHtml(k)}:</span> ${escapeHtml(display)}</span>`,
       );
     }
   }
@@ -8336,7 +8336,7 @@ function updatePreviewLinkBtn() {
   btn.style.display = '';
   const linked = isPreviewLinkedToCurrentSession();
   btn.title = linked ? 'Unlink from current session' : 'Link to current session';
-  btn.style.color = linked ? 'var(--accent, #5b9a6b)' : '';
+  btn.style.color = linked ? 'var(--accent)' : '';
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML

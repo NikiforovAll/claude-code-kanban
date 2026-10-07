@@ -25,7 +25,7 @@
   --warning-dim: rgba(240, 180, 41, 0.18);
   --danger: #ef5350;
   --danger-dim: rgba(239, 83, 80, 0.18);
-  --team: #60a5fa;
+  --info: #60a5fa;
   --plan: #86a886;
   --plan-dim: rgba(134, 168, 134, 0.18);
   --ansi-red: #e06c66;
@@ -2720,7 +2720,7 @@ code.language-tree .hljs-title {
 }
 
 .wf-phase-mark.done {
-  color: var(--ok, #3fb950);
+  color: var(--success);
 }
 
 .wf-phase-title {
@@ -2777,7 +2777,7 @@ code.language-tree .hljs-title {
 }
 
 .wf-agent-status.done {
-  color: var(--ok, #3fb950);
+  color: var(--success);
 }
 
 .wf-agent-status.running {
@@ -4784,7 +4784,7 @@ code.language-tree .hljs-title {
   font-size: 11px;
 }
 .msg-item.msg-teammate {
-  border-left: 3px solid var(--team);
+  border-left: 3px solid var(--info);
 }
 .msg-item.msg-protocol {
   border-left: 3px solid var(--border);
@@ -4795,8 +4795,8 @@ code.language-tree .hljs-title {
   opacity: 0.75;
 }
 .msg-item.msg-waiting {
-  border-left: 3px solid var(--warning, #f5a623);
-  background: color-mix(in srgb, var(--warning, #f5a623) 8%, transparent);
+  border-left: 3px solid var(--warning);
+  background: color-mix(in srgb, var(--warning) 8%, transparent);
   animation: msg-waiting-pulse 2s ease-in-out infinite;
   cursor: pointer;
 }
@@ -4829,8 +4829,8 @@ code.language-tree .hljs-title {
   padding: 1px 6px;
   margin-right: 6px;
   border-radius: 3px;
-  background: color-mix(in srgb, var(--warning, #f5a623) 22%, transparent);
-  color: var(--warning, #f5a623);
+  background: color-mix(in srgb, var(--warning) 22%, transparent);
+  color: var(--warning);
   font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
@@ -4849,10 +4849,10 @@ code.language-tree .hljs-title {
 @keyframes msg-waiting-pulse {
   0%,
   100% {
-    background: color-mix(in srgb, var(--warning, #f5a623) 8%, transparent);
+    background: color-mix(in srgb, var(--warning) 8%, transparent);
   }
   50% {
-    background: color-mix(in srgb, var(--warning, #f5a623) 16%, transparent);
+    background: color-mix(in srgb, var(--warning) 16%, transparent);
   }
 }
 .msg-waiting-footer {
@@ -4925,21 +4925,21 @@ code.language-tree .hljs-title {
    buttons need the descendant selector to out-rank `.msg-waiting-actions button` */
 .waiting-btn-allow,
 .msg-waiting-actions .msg-waiting-allow {
-  color: var(--success, #2ea043);
-  border-color: color-mix(in srgb, var(--success, #2ea043) 35%, transparent);
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 35%, transparent);
 }
 .waiting-btn-allow:hover:not(:disabled),
 .msg-waiting-actions .msg-waiting-allow:hover {
-  background: color-mix(in srgb, var(--success, #2ea043) 10%, transparent);
+  background: color-mix(in srgb, var(--success) 10%, transparent);
 }
 .waiting-btn-deny,
 .msg-waiting-actions .msg-waiting-deny {
-  color: var(--danger, #f85149);
-  border-color: color-mix(in srgb, var(--danger, #f85149) 35%, transparent);
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 35%, transparent);
 }
 .waiting-btn-deny:hover,
 .msg-waiting-actions .msg-waiting-deny:hover {
-  background: color-mix(in srgb, var(--danger, #f85149) 10%, transparent);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
 }
 .waiting-btn-allow:disabled {
   opacity: 0.4;
@@ -4994,7 +4994,7 @@ code.language-tree .hljs-title {
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: 4px;
-  background: var(--bg-primary);
+  background: var(--bg-deep);
 }
 .waiting-question-text pre.mermaid,
 .waiting-option-desc pre.mermaid {
@@ -5059,7 +5059,7 @@ code.language-tree .hljs-title {
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: 4px;
-  background: var(--bg-primary);
+  background: var(--bg-deep);
   font-size: 11px;
   font-weight: 400;
   overflow-x: auto;
@@ -5814,7 +5814,7 @@ code.language-tree .hljs-title {
 }
 
 .wf-live-phase.done::before {
-  background: var(--ok, #3fb950);
+  background: var(--success);
 }
 
 .wf-live-phase.done {
@@ -6121,6 +6121,7 @@ body.light {
   --gold: #a8842f;
   --success: #1a8a5a;
   --success-dim: rgba(26, 138, 90, 0.15);
+  --info: #2563eb;
   --warning: #b07d0a;
   --warning-dim: rgba(176, 125, 10, 0.15);
   --danger: #c0392b;
@@ -6578,7 +6579,7 @@ body.light .msg-assistant .msg-text {
 }
 
 .preview-fm .fm-k {
-  color: var(--accent, #7aa2f7);
+  color: var(--accent);
   font-weight: 600;
 }
 
@@ -7796,7 +7797,7 @@ select.form-input option:checked {
 .impact-bar-fill {
   height: 100%;
   border-radius: 3px;
-  background: var(--accent, #6366f1);
+  background: var(--accent);
   min-width: 2px;
 }
 
@@ -8205,6 +8206,7 @@ select.form-input option:checked {
     --gold: #a8842f;
     --success: #1a8a5a;
     --success-dim: rgba(26, 138, 90, 0.15);
+    --info: #2563eb;
     --warning: #b07d0a;
     --warning-dim: rgba(176, 125, 10, 0.15);
     --danger: #c0392b;
