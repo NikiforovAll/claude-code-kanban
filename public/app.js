@@ -6063,9 +6063,9 @@ const SHORTCUT_TABS = [
       {
         title: 'Hub',
         rows: [
-          { keys: ['M'], label: 'Jump to marketplace' },
-          { keys: ['$'], label: 'Jump to cost' },
-          { keys: ['Ctrl', 'M'], combo: true, label: 'Jump to memory' },
+          { keys: ['M'], opens: 'project.plugins', label: 'Jump to marketplace' },
+          { keys: ['$'], opens: 'session.cost', label: 'Jump to cost' },
+          { keys: ['Ctrl', 'M'], opens: 'project.memory', combo: true, label: 'Jump to memory' },
           {
             keys: ['Ctrl', 'Alt', '←/→'],
             action: ['hub.prevApp', 'hub.nextApp'],
@@ -6147,8 +6147,14 @@ function buildHelpShortcuts(groups) {
 let helpTab = 0;
 const helpFilter = document.getElementById('help-filter');
 
-// Hub keys do nothing outside Claude Code Hub, so the standalone board drops that tab.
-const helpTabs = () => SHORTCUT_TABS.filter((t) => hub.inHub || !t.hub);
+// Hub keys do nothing outside Claude Code Hub, except the app links that the --*-url flags set.
+const hubRowWorks = (r) => (r.opens ? hub.can(r.opens) : hub.inHub);
+const helpTabs = () =>
+  SHORTCUT_TABS.map((t) =>
+    t.hub
+      ? { ...t, groups: t.groups.map((g) => ({ ...g, rows: g.rows.filter(hubRowWorks) })).filter((g) => g.rows.length) }
+      : t,
+  ).filter((t) => t.groups.length);
 
 // The matching rows of every tab, in their groups.
 function filteredShortcutGroups(query) {
