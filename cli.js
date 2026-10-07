@@ -492,7 +492,7 @@ function reportCliError(e) {
 }
 
 async function runPreviewCli(args) {
-  const filePathArg = args.find(a => !a.startsWith('--'));
+  const [filePathArg] = positionals(args, ['--session']);
   if (!filePathArg) {
     printLeafHelp(COMMANDS.doc.verbs.preview);
     return 1;
