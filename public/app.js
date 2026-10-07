@@ -7005,6 +7005,10 @@ function matchKey(e, ...keys) {
   return keys.some((k) => e.key === k || e.code === k);
 }
 
+function shiftOnly(e, code) {
+  return e.code === code && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey;
+}
+
 function dismissSessionFromList(sid) {
   const prevIdx = selectedSessionIdx;
   if (!setSessionDismissed(sid, true)) return;
@@ -7154,11 +7158,7 @@ document.addEventListener('keydown', (e) => {
     } else if (e.key === '?' && document.getElementById('help-modal').classList.contains('visible')) {
       e.preventDefault();
       closeHelpModal();
-    } else if (
-      e.code === 'KeyM' &&
-      e.shiftKey &&
-      document.getElementById('msg-detail-modal').classList.contains('visible')
-    ) {
+    } else if (shiftOnly(e, 'KeyM') && document.getElementById('msg-detail-modal').classList.contains('visible')) {
       e.preventDefault();
       closeMsgDetailModal();
     } else if (document.getElementById('msg-detail-modal').classList.contains('visible')) {
@@ -7234,17 +7234,17 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
     return;
   }
-  if (e.code === 'KeyL' && e.shiftKey) {
+  if (shiftOnly(e, 'KeyL')) {
     e.preventDefault();
     toggleMessagePanel();
     return;
   }
-  if (e.code === 'KeyP' && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+  if (shiftOnly(e, 'KeyP')) {
     e.preventDefault();
     openProjectPicker();
     return;
   }
-  if (e.code === 'KeyM' && e.shiftKey) {
+  if (shiftOnly(e, 'KeyM')) {
     e.preventDefault();
     const msgDetailModal = document.getElementById('msg-detail-modal');
     if (msgDetailModal.classList.contains('visible')) {
@@ -7258,12 +7258,12 @@ document.addEventListener('keydown', (e) => {
     }
     return;
   }
-  if (e.code === 'KeyS' && e.shiftKey) {
+  if (shiftOnly(e, 'KeyS')) {
     e.preventDefault();
     showStorageManager();
     return;
   }
-  if (e.code === 'KeyZ' && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+  if (shiftOnly(e, 'KeyZ')) {
     e.preventDefault();
     toggleZenMode();
     return;
@@ -7383,17 +7383,17 @@ document.addEventListener('keydown', (e) => {
   const cursorEl = focusZone === 'sidebar' ? sessionsList.querySelector('.kb-selected') : null;
   const contextSid =
     focusZone === 'sidebar' ? cursorEl?.dataset.sessionId || currentSessionId : selectedSessionId || currentSessionId;
-  if (matchKey(e, 'KeyP') && !e.shiftKey) {
+  if (matchKey(e, 'KeyP')) {
     e.preventDefault();
     if (contextSid) openPlanForSession(contextSid);
     return;
   }
-  if (matchKey(e, 'KeyI') && !e.shiftKey) {
+  if (matchKey(e, 'KeyI')) {
     e.preventDefault();
     if (contextSid) showSessionInfoModal(contextSid);
     return;
   }
-  if (matchKey(e, 'KeyN') && !e.shiftKey) {
+  if (matchKey(e, 'KeyN')) {
     e.preventDefault();
     const cursorKey = _scratchpadKeyOf(cursorEl);
     if (cursorKey) showScratchpad(cursorKey);
@@ -7411,13 +7411,13 @@ document.addEventListener('keydown', (e) => {
     openMarketplace(mSession?.project);
     return;
   }
-  if (e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey && e.key === 'm') {
+  if (ClaudeHub.comboOf(e) === 'ctrl+m') {
     e.preventDefault();
     const mSession = contextSid ? sessions.find((s) => s.id === contextSid) : null;
     openMemory(mSession?.project);
     return;
   }
-  if (e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey && e.key === 'd') {
+  if (ClaudeHub.comboOf(e) === 'ctrl+d') {
     e.preventDefault();
     if (!contextSid) return;
     dismissSession(contextSid);
