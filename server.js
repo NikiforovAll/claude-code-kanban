@@ -637,8 +637,8 @@ app.param('name', (_req, res, next, val) => {
   next();
 });
 
-// Parse JSON bodies
-app.use(express.json());
+// Parse JSON bodies. A review of 50 comments at the field caps is about 450 kB.
+app.use(express.json({ limit: '1mb' }));
 // #endregion
 
 // #region STATIC
@@ -4337,6 +4337,13 @@ app.get('/api/rate-limits', (_req, res) => {
 
 app.use('/api', (_req, res) => {
   res.status(404).json({ error: 'Not found' });
+});
+
+app.use((err, req, res, next) => {
+  if (res.headersSent || !req.path.startsWith('/api/')) return next(err);
+  const status = err.status || 500;
+  if (status >= 500) console.error(`Error in ${req.method} ${req.path}:`, err);
+  res.status(status).json({ error: status >= 500 ? 'Internal error' : err.message });
 });
 
 // Watch for file changes (chokidar handles non-existent paths)
