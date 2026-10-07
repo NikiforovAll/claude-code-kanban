@@ -104,9 +104,10 @@ A pane is a live page or a file that shows as a tab next to Board. Use it for so
 
 - Click **+** at the end of the tab strip to add a pane. Type to search the session's linked documents, or paste a URL or a file path, then press <kbd>Enter</kbd>. A relative path starts from the session working directory. If the pane is already open, the board goes to its tab.
 - Click **Open in a pane** in the Preview dialog to move the file you are reading into a pane.
+- Click **Open in a pane** in the message dialog to keep a session log message in a pane. The pane shows that message, also after older messages leave the Session Log panel. Right-click its tab and select **Open in message dialog** to open it in the dialog again.
 - Press <kbd>[</kbd> or <kbd>]</kbd> to go to the previous or next tab.
 - To close a pane, click × on its tab, middle-click the tab, or press <kbd>Alt+W</kbd>.
-- Right-click a tab to copy its URL or path, open it in a new browser tab, reload it or close it. A file opens in the Preview dialog instead of a browser tab. The buttons at the right of the strip reload or open the pane on screen.
+- Right-click a tab to copy its URL or path, open it in a new browser tab, rename it, reload it or close it. To rename, type the new title and press <kbd>Enter</kbd>, or press <kbd>Esc</kbd> to cancel. An empty title gives the pane its default title back. A file opens in the Preview dialog instead of a browser tab. The buttons at the right of the strip reload or open the pane on screen.
 
 Claude adds panes with `pane add <url|file>`. The board does not switch to the new pane, so your view stays put. Any local server with a page works. `scratch ui <pad> --browser`, for example, prints a URL for the scratch viewer, which reloads itself when the pad changes.
 

@@ -3590,6 +3590,18 @@ code.language-tree .hljs-title {
   text-overflow: ellipsis;
 }
 
+.pane-tab .pane-title-input {
+  flex: 1;
+  min-width: 80px;
+  padding: 0 4px;
+  font: inherit;
+  color: var(--text-primary);
+  background: var(--bg-deep);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  outline: none;
+}
+
 .pane-tab .pin-meta {
   color: var(--text-muted);
   font-size: 10px;
@@ -3974,6 +3986,12 @@ code.language-tree .hljs-title {
   font-size: 13px;
   line-height: 1.6;
   word-break: break-word;
+}
+
+.pane-msg-meta {
+  margin-bottom: 12px;
+  font-size: 11px;
+  color: var(--text-muted);
 }
 
 /* The modal's corner grip; the pane fills the height, so it sets the width only. */

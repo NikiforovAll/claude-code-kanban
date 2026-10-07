@@ -51,6 +51,18 @@ describe('pane store', () => {
     assert.deepEqual([...panes.fileTargets()], ['C:\\repo\\a.md', 'C:\\repo\\b.html']);
   });
 
+  it('keeps a message pane by its id, apart from files, and refuses a long id', () => {
+    const panes = memoryStore().open();
+    const target = 'assistant|2026-10-07T10:00:00.000Z|Done.';
+    const a = panes.add('s1', { kind: 'message', target, title: 'Claude 10:00' });
+    assert.equal(a.pane.title, 'Claude 10:00');
+    assert.equal(panes.add('s1', { kind: 'message', target }).added, false);
+    assert.equal(panes.add('s1', { kind: 'message', target: `${target}!` }).pane.id, 'p2');
+    assert.equal(panes.add('s1', { kind: 'message', target: 'user|t|x' }).pane.title, 'Message');
+    assert.deepEqual([...panes.fileTargets()], []);
+    assert.throws(() => panes.add('s1', { kind: 'message', target: 'x'.repeat(301) }), { code: 'bad_target' });
+  });
+
   it('returns the existing pane for the same file, whatever its kind or spelling', () => {
     const panes = memoryStore().open();
     panes.add('s1', { kind: 'html', target: 'C:\\repo\\a.html' });
@@ -68,6 +80,16 @@ describe('pane store', () => {
     assert.equal(panes.add('s2', { ...url(1), title: 'x'.repeat(500) }).pane.title.length, MAX_TITLE);
     assert.equal(panes.add('s2', { ...url(2), title: ' a\nb\x1b ' }).pane.title, 'a b');
     assert.equal(panes.add('s2', { ...url(3), title: '\n' }).pane.title, 'localhost:8003');
+  });
+
+  it('renames a pane, gives an empty title the default back, and reports a no-op as unchanged', () => {
+    const panes = memoryStore().open();
+    panes.add('s1', url(1));
+    assert.equal(panes.rename('s1', 'p1', ' Dev\nserver ').panes[0].title, 'Dev server');
+    assert.equal(panes.rename('s1', 'p1', 'Dev server').rev, 2);
+    assert.equal(panes.rename('s1', 'p1', '').panes[0].title, 'localhost:8001');
+    assert.equal(panes.rename('s1', 'p9', 'x'), null);
+    assert.equal(panes.rename('s9', 'p1', 'x'), null);
   });
 
   it('reorders, and reports a no-op as unchanged', () => {

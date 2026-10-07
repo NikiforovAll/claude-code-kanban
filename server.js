@@ -4103,9 +4103,11 @@ app.get('/api/panes/:sessionId', (req, res) => {
 
 app.post('/api/panes/:sessionId', async (req, res) => {
   try {
-    const { target, base, title } = req.body || {};
+    const { target, base, title, kind } = req.body || {};
     if (typeof target !== 'string' || !target) throw previewError(400, 'target is required', 'bad_target');
-    res.json(panes.add(req.params.sessionId, { ...(await resolvePaneTarget(target, base)), title }));
+    // A message target is a session log message id, which the board resolves when it shows the pane.
+    const resolved = kind === 'message' ? { kind, target } : await resolvePaneTarget(target, base);
+    res.json(panes.add(req.params.sessionId, { ...resolved, title }));
   } catch (error) {
     paneRouteError(res, error, 'POST /api/panes');
   }
@@ -4137,6 +4139,19 @@ app.get('/api/panes/:sessionId/:paneId/framing', async (req, res) => {
     res.json({ frameable: await probeFraming(pane.target, ancestors) });
   } catch (error) {
     paneRouteError(res, error, 'GET /api/panes/framing');
+  }
+});
+
+app.patch('/api/panes/:sessionId/:paneId', (req, res) => {
+  try {
+    const { sessionId, paneId } = req.params;
+    const title = req.body?.title;
+    if (typeof title !== 'string') throw previewError(400, 'title must be a string', 'bad_title');
+    const layout = panes.rename(sessionId, paneId, title);
+    if (!layout) throw previewError(404, `No pane ${paneId} in session ${sessionId}`, 'no_pane');
+    res.json({ layout });
+  } catch (error) {
+    paneRouteError(res, error, 'PATCH /api/panes/:paneId');
   }
 });
 

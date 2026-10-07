@@ -1020,8 +1020,8 @@ function openLiveLatestMessage() {
 
 const MSG_PAGE_LIMIT = 15;
 
-async function fetchSessionMessagesPage(sessionId, { before } = {}) {
-  const qs = new URLSearchParams({ limit: MSG_PAGE_LIMIT });
+async function fetchSessionMessagesPage(sessionId, { before, limit = MSG_PAGE_LIMIT } = {}) {
+  const qs = new URLSearchParams({ limit });
   if (before) qs.set('before', before);
   const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/messages?${qs}`);
   return res.ok ? res.json() : null;
@@ -1991,6 +1991,7 @@ function showPinnedMsgDetail(pinIdx) {
   autoSizeModal(pinModal, body);
   const pinBtn = document.getElementById('msg-detail-pin-btn');
   if (pinBtn) pinBtn.classList.add('active');
+  syncMsgDetailPaneBtn();
   document.getElementById('msg-detail-modal').classList.add('visible');
   mountReplyReview(pin, body, pinModal);
 }
@@ -2236,33 +2237,27 @@ function highlightSelectedMsg() {
   if (el) el.classList.add('selected');
 }
 
-function showMsgDetail(idx) {
-  currentMsgDetailIdx = idx;
-  document.getElementById('msg-detail-waiting-footer').innerHTML = '';
-  msgHighlightDimmed = false;
-  const m = currentMessages[idx];
-  if (!m) return;
-  highlightSelectedMsg();
-  const body = document.getElementById('msg-detail-body');
+function msgDetailTitle(m) {
+  if (m.type === 'tool_use') return m.tool;
+  if (m.type === 'teammate') return m.teammateId || 'Teammate';
+  return m.type === 'assistant' ? 'Claude' : m.agentMessage ? m.systemLabel : m.systemLabel ? 'System' : 'User';
+}
+
+// The message dialog and a message pane render a message the same way.
+function msgDetailContent(m) {
   if (m.type === 'tool_use') {
-    document.getElementById('msg-detail-title').textContent = m.tool;
     const fullText = m.fullDetail || m.detail || '';
     const descHtml =
       m.description && m.description !== fullText
         ? `<div style="margin-bottom:8px;color:var(--text-secondary);font-size:0.85rem">${escapeHtml(m.description)}</div>`
         : '';
     let agentExtraHtml = '';
-    const agentBtn = document.getElementById('msg-detail-agent-btn');
     if (m.tool === 'Agent' && m.agentId) {
       const agentRespText = m.agentLastMessage ? stripAnsi(m.agentLastMessage.trim()) : null;
       const agentPromptText = m.agentPrompt || null;
       const respHtml = agentRespText ? renderMarkdown(agentRespText) : null;
       const promptHtml = agentPromptText ? renderMarkdown(agentPromptText) : null;
       agentExtraHtml += renderAgentTabs(promptHtml, respHtml, agentPromptText, agentRespText);
-      agentBtn.style.display = '';
-      agentBtn.dataset.agentId = m.agentId;
-    } else {
-      agentBtn.style.display = 'none';
     }
     const sendProto = m.tool === 'SendMessage' && m.params?.protocol;
     const isFindings = m.tool === 'ReportFindings';
@@ -2296,7 +2291,7 @@ function showMsgDetail(idx) {
     }
     const answersHtml = m.answerPayload ? renderAnswerPayloadHtml(m.answerPayload) : '';
     const toolResultImagesHtml = renderToolResultImagesHtml(m.toolResultImageCount, m.toolUseId);
-    body.innerHTML =
+    return (
       mainHtml +
       toolParamsHtml +
       answersHtml +
@@ -2304,53 +2299,75 @@ function showMsgDetail(idx) {
       findingsHtml +
       (hasAgentTabs ? '' : toolResultHtml) +
       toolResultImagesHtml +
-      agentExtraHtml;
-  } else if (m.type === 'teammate') {
-    document.getElementById('msg-detail-title').textContent = m.teammateId || 'Teammate';
-    document.getElementById('msg-detail-agent-btn').style.display = 'none';
+      agentExtraHtml
+    );
+  }
+  if (m.type === 'teammate') {
     if (m.isProtocol) {
-      body.innerHTML = m.protocolData
+      return m.protocolData
         ? renderProtocolDetail(m.protocolData)
         : `<div class="teammate-idle-detail"><span class="protocol-label">${escapeHtml(m.protocolLabel || m.protocolType)}</span></div>`;
-    } else {
-      const text = stripAnsi(m.fullText || m.text || '');
-      body.innerHTML = renderMarkdown(text);
     }
-  } else {
-    const rawText = stripAnsi(m.fullText || m.text || '');
-    const cmd = m.type === 'user' ? parseCommandMessage(rawText) : null;
-    document.getElementById('msg-detail-title').textContent =
-      m.type === 'assistant' ? 'Claude' : m.agentMessage ? m.systemLabel : m.systemLabel ? 'System' : 'User';
-    document.getElementById('msg-detail-agent-btn').style.display = 'none';
-    const userExtras = m.type === 'user' ? renderUserAttachments(m) : '';
-    if (m.compactSummary) {
-      body.innerHTML = renderMarkdown(m.compactSummary) + userExtras;
-    } else if (cmd) {
-      const args = parseCommandArgs(rawText) || null;
-      const cleanBody = rawText
-        .replace(/<command-[^>]+>[\s\S]*?<\/command-[^>]+>/g, '')
-        .replace(/<local-command-[^>]+>[\s\S]*?<\/local-command-[^>]+>/g, '')
-        .trim();
-      let cmdHtml = `<code>${escapeHtml(cmd)}${args ? ` ${escapeHtml(args)}` : ''}</code>`;
-      if (cleanBody) cmdHtml += `<div style="margin-top:10px">${renderMarkdown(cleanBody)}</div>`;
-      body.innerHTML = cmdHtml + userExtras;
-    } else if (rawText) {
-      body.innerHTML = renderMarkdown(rawText) + userExtras;
-    } else {
-      body.innerHTML = userExtras || '<em>No content</em>';
-    }
+    return renderMarkdown(stripAnsi(m.fullText || m.text || ''));
   }
+  const rawText = stripAnsi(m.fullText || m.text || '');
+  const cmd = m.type === 'user' ? parseCommandMessage(rawText) : null;
+  const userExtras = m.type === 'user' ? renderUserAttachments(m) : '';
+  if (m.compactSummary) return renderMarkdown(m.compactSummary) + userExtras;
+  if (cmd) {
+    const args = parseCommandArgs(rawText) || null;
+    const cleanBody = rawText
+      .replace(/<command-[^>]+>[\s\S]*?<\/command-[^>]+>/g, '')
+      .replace(/<local-command-[^>]+>[\s\S]*?<\/local-command-[^>]+>/g, '')
+      .trim();
+    let cmdHtml = `<code>${escapeHtml(cmd)}${args ? ` ${escapeHtml(args)}` : ''}</code>`;
+    if (cleanBody) cmdHtml += `<div style="margin-top:10px">${renderMarkdown(cleanBody)}</div>`;
+    return cmdHtml + userExtras;
+  }
+  if (rawText) return renderMarkdown(rawText) + userExtras;
+  return userExtras || '<em>No content</em>';
+}
+
+function showMsgDetail(idx) {
+  currentMsgDetailIdx = idx;
+  document.getElementById('msg-detail-waiting-footer').innerHTML = '';
+  msgHighlightDimmed = false;
+  const m = currentMessages[idx];
+  if (!m) return;
+  highlightSelectedMsg();
+  renderMsgDetail(m, `${idx + 1} of ${currentMessages.length}`);
+}
+
+// A message outside the loaded log has no index, so it shows like a pinned message, with follow off.
+function showUnloadedMsgDetail(m) {
+  currentMsgDetailIdx = null;
+  document.getElementById('msg-detail-waiting-footer').innerHTML = '';
+  highlightSelectedMsg();
+  msgDetailFollowLatest = false;
+  renderMsgDetail(m);
+}
+
+const msgDetailMeta = (m) => [m.model, formatDate(m.timestamp)].filter(Boolean);
+
+function renderMsgDetail(m, position) {
+  const body = document.getElementById('msg-detail-body');
+  document.getElementById('msg-detail-title').textContent = msgDetailTitle(m);
+  body.innerHTML = msgDetailContent(m);
+  const agentBtn = document.getElementById('msg-detail-agent-btn');
+  const agentId = m.type === 'tool_use' && m.tool === 'Agent' ? m.agentId : null;
+  agentBtn.style.display = agentId ? '' : 'none';
+  if (agentId) agentBtn.dataset.agentId = agentId;
   const overlay = document.getElementById('msg-detail-modal');
   const modal = overlay.querySelector('.modal');
   autoSizeModal(modal, body);
   setMsgDetailFollow(msgDetailFollowLatest);
 
-  const meta = [formatDate(m.timestamp)];
-  if (m.model) meta.unshift(m.model);
-  meta.push(`${idx + 1} of ${currentMessages.length}`);
+  const meta = msgDetailMeta(m);
+  if (position) meta.push(position);
   document.getElementById('msg-detail-meta').textContent = meta.join(' · ');
   currentPinDetailId = null;
   updateMsgDetailPinState();
+  syncMsgDetailPaneBtn();
   overlay.classList.add('visible');
   mountReplyReview(m, body, modal);
 }
@@ -6804,6 +6821,7 @@ function _storagePreviewPin(sessionId, pinId) {
     document.getElementById('msg-detail-pin-btn').style.display = 'none';
     currentMsgDetailIdx = null;
     currentPinDetailId = null;
+    syncMsgDetailPaneBtn();
     _renderPinToDetail(pin);
     document.getElementById('msg-detail-modal').classList.add('visible');
   } catch (e) {
@@ -9707,6 +9725,7 @@ function showWaitingDetail() {
   document.getElementById('msg-detail-meta').textContent = meta.join(' · ');
   currentPinDetailId = null;
   updateMsgDetailPinState();
+  syncMsgDetailPaneBtn();
   overlay.classList.add('visible');
 }
 
@@ -12302,6 +12321,8 @@ const PANE_ICONS = {
     '<svg class="kind" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 5v14"/><path d="M12 5v8"/><path d="M18 5v11"/></svg>',
   url: '<svg class="kind" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/></svg>',
   file: '<svg class="kind" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>',
+  message:
+    '<svg class="kind" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
   warning:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12" y2="17"/></svg>',
 };
@@ -12407,9 +12428,11 @@ function markPaneSide(el, side, focused) {
   el.classList.toggle('pane-focus', focused);
 }
 
+const paneLabel = (p) => (p.kind === 'message' ? p.title : p.target);
+
 function renderPaneTabs(sid, layout, split) {
-  // A rebuild mid-drag removes the dragged tab, and then no dragend fires.
-  if (paneDragId) return;
+  // A rebuild mid-drag removes the dragged tab, and then no dragend fires. Mid-rename it drops the input.
+  if (paneDragId || paneRenameId) return;
   const active = getActivePaneId(sid);
   const state = (id) => (active === id ? ' on' : split && splitSideOf(split, id) ? ' shown' : '');
   const tab = (id, cls, inner, tip) =>
@@ -12430,8 +12453,8 @@ function renderPaneTabs(sid, layout, split) {
     return tab(
       p.id,
       '',
-      `${p.kind === 'url' ? PANE_ICONS.url : PANE_ICONS.file}<span class="pane-title">${escapeHtml(p.title)}</span><span class="state ${escapeHtml(frame)}" title="${escapeHtml(frameTip)}"></span><button class="pane-x" data-close="${escapeHtml(p.id)}" title="Close pane (Alt+W)" aria-label="Close pane">×</button>`,
-      p.target,
+      `${PANE_ICONS[p.kind] || PANE_ICONS.file}<span class="pane-title">${escapeHtml(p.title)}</span><span class="state ${escapeHtml(frame)}" title="${escapeHtml(frameTip)}"></span><button class="pane-x" data-close="${escapeHtml(p.id)}" title="Close pane (Alt+W)" aria-label="Close pane">×</button>`,
+      paneLabel(p),
     );
   };
   const itemHtml = ({ ids, pair }) =>
@@ -12471,7 +12494,8 @@ function markPaneFrameFocus() {
 }
 
 function paneCardHtml(title, text, button) {
-  return `<div class="pane-card"><div class="pane-card-box">${PANE_ICONS.warning}<h3>${escapeHtml(title)}</h3><p>${escapeHtml(text)}</p><button class="btn btn-primary" data-pane-open>${escapeHtml(button)}</button></div></div>`;
+  const btn = button ? `<button class="btn btn-primary" data-pane-open>${escapeHtml(button)}</button>` : '';
+  return `<div class="pane-card"><div class="pane-card-box">${PANE_ICONS.warning}<h3>${escapeHtml(title)}</h3><p>${escapeHtml(text)}</p>${btn}</div></div>`;
 }
 
 // Returns the key of the view to show.
@@ -12534,6 +12558,10 @@ async function loadPaneView(sid, pane, view, scroll) {
     }
     return;
   }
+  if (pane.kind === 'message') {
+    await loadMessagePaneView(sid, pane, view);
+    return;
+  }
   let data = null;
   try {
     const r = await fetch(`/api/preview?${new URLSearchParams({ path: pane.target })}`);
@@ -12551,14 +12579,9 @@ async function loadPaneView(sid, pane, view, scroll) {
     return;
   }
   if (data?.kind) {
-    const doc = document.createElement('div');
-    doc.className = 'pane-doc';
-    doc.dataset.path = data.path;
-    const body = document.createElement('div');
-    body.className = 'pane-doc-body rendered-md modal-zoomable';
+    const body = appendPaneDoc(view);
+    body.parentElement.dataset.path = data.path;
     renderPreviewContent(body, data.path, data.content, data.kind);
-    doc.append(body, paneDocGrip(doc));
-    view.appendChild(doc);
     attachPaneReview(view, sid, fileReviewOpts(data.path, data.kind, body, null));
     return;
   }
@@ -12569,6 +12592,49 @@ async function loadPaneView(sid, pane, view, scroll) {
       : ['Nothing to preview', 'cck cannot render this file.'];
   const button = data && data.exists !== false ? 'Open in editor' : 'Try in preview';
   view.insertAdjacentHTML('beforeend', paneCardHtml(title, text, button));
+}
+
+// The target is the message's pin id, `type|timestamp|text`. The log holds only the latest pages,
+// so a message not loaded comes from the page that ends at its timestamp.
+async function findPaneMessage(sid, target) {
+  const own = (list) => list.find((m) => getPinId(m) === target);
+  if (sid === currentSessionId && !agentLogMode) {
+    const loaded = own(currentMessages);
+    if (loaded) return loaded;
+  }
+  const ts = Date.parse(target.split('|')[1]);
+  if (Number.isFinite(ts)) {
+    try {
+      // Parallel tool calls share one timestamp, so the page is wider than one message.
+      const page = await fetchSessionMessagesPage(sid, { before: new Date(ts + 1).toISOString(), limit: 50 });
+      const found = page && own(page.messages);
+      if (found) return found;
+    } catch {}
+  }
+  return sid === currentSessionId ? own(currentPins) || null : null;
+}
+
+function appendPaneDoc(view) {
+  const doc = document.createElement('div');
+  doc.className = 'pane-doc';
+  const body = document.createElement('div');
+  body.className = 'pane-doc-body rendered-md modal-zoomable';
+  doc.append(body, paneDocGrip(doc));
+  view.appendChild(doc);
+  return body;
+}
+
+async function loadMessagePaneView(sid, pane, view) {
+  const m = await findPaneMessage(sid, pane.target);
+  if (!m) {
+    view.insertAdjacentHTML(
+      'beforeend',
+      paneCardHtml('Message not found', 'The session log no longer has this message.'),
+    );
+    return;
+  }
+  const meta = [msgDetailTitle(m), ...msgDetailMeta(m)].join(' · ');
+  appendPaneDoc(view).innerHTML = `<div class="pane-msg-meta">${escapeHtml(meta)}</div>${msgDetailContent(m)}`;
 }
 
 function onPaneFileChanged(filePath) {
@@ -12781,7 +12847,24 @@ function reloadPane(id) {
 function openPaneExternally(id) {
   const pane = paneById(id);
   if (!pane) return;
+  if (pane.kind === 'message') {
+    openPaneMessageDetail(pane);
+    return;
+  }
   openLinkedDoc(pane.target, getSessionBaseDir(paneSessionId()));
+}
+
+async function openPaneMessageDetail(pane) {
+  const sid = paneSessionId();
+  const m = await findPaneMessage(sid, pane.target);
+  if (sid !== paneSessionId()) return;
+  if (!m) {
+    showToast('Message not found');
+    return;
+  }
+  const idx = currentMessages.indexOf(m);
+  if (idx >= 0) showMsgDetail(idx);
+  else showUnloadedMsgDetail(m);
 }
 
 function copyPaneTarget(id) {
@@ -12830,6 +12913,42 @@ async function deleteBoardTasks(onlyCompleted) {
   await refreshCurrentView();
 }
 
+let paneRenameId = null;
+
+function beginPaneRename(id) {
+  const pane = paneById(id);
+  const tab = paneStrip.querySelector(`.pane-tab[data-pane="${CSS.escape(id)}"]`);
+  const title = tab?.querySelector('.pane-title');
+  if (!pane || !title) return;
+  paneRenameId = id;
+  tab.draggable = false;
+  const input = document.createElement('input');
+  input.className = 'pane-title-input';
+  input.value = pane.title;
+  input.setAttribute('aria-label', 'Pane title');
+  title.replaceWith(input);
+  input.focus();
+  input.select();
+}
+
+async function endPaneRename(input, save) {
+  const id = paneRenameId;
+  if (!id) return;
+  paneRenameId = null;
+  paneTabsHtml = '';
+  const sid = paneSessionId();
+  const pane = paneById(id);
+  const title = input.value.trim();
+  if (save && sid && pane && title !== pane.title) {
+    const res = await paneRequest('PATCH', `/api/panes/${encodeURIComponent(sid)}/${encodeURIComponent(id)}`, {
+      title,
+    });
+    if (res.error) showToast(res.error, 'error');
+    else applyPaneLayout(sid, res.layout);
+  }
+  syncPanes();
+}
+
 const paneMenuItem = (act, label) =>
   `<button class="pane-menu-item" role="menuitem" data-pane-act="${escapeHtml(act)}">${label}</button>`;
 
@@ -12849,14 +12968,17 @@ function openPaneMenu(x, y, id) {
   const pane = paneById(id);
   if (!pane) return;
   const url = pane.kind === 'url';
+  const message = pane.kind === 'message';
+  const label = paneLabel(pane);
   showPaneMenu(
     x,
     y,
     pane.id,
     'Pane actions',
-    `<div class="pane-menu-label" title="${escapeHtml(pane.target)}">${escapeHtml(pane.target)}</div>` +
-      paneMenuItem('copy', url ? 'Copy URL' : 'Copy path') +
-      paneMenuItem('open', url ? 'Open in new tab' : 'Open in preview') +
+    `<div class="pane-menu-label" title="${escapeHtml(label)}">${escapeHtml(label)}</div>` +
+      (message ? '' : paneMenuItem('copy', url ? 'Copy URL' : 'Copy path')) +
+      paneMenuItem('open', url ? 'Open in new tab' : message ? 'Open in message dialog' : 'Open in preview') +
+      paneMenuItem('rename', 'Rename') +
       paneMenuItem('reload', 'Reload') +
       paneMenuItem('close', 'Close pane'),
   );
@@ -12880,6 +13002,7 @@ function showPaneMenu(x, y, id, ariaLabel, html) {
 const PANE_MENU_ACTIONS = {
   copy: copyPaneTarget,
   open: openPaneExternally,
+  rename: beginPaneRename,
   reload: reloadPane,
   close: closePane,
   deleteCompleted: () => deleteBoardTasks(true),
@@ -12905,19 +13028,21 @@ async function addPane(raw) {
     showToast(t.error);
     return;
   }
-  const res = await paneRequest('POST', `/api/panes/${encodeURIComponent(sid)}`, {
-    target: t.target,
-    base: getSessionBaseDir(sid) || undefined,
-  });
+  if (!(await postPane(sid, { target: t.target, base: getSessionBaseDir(sid) || undefined }))) return;
+  closePanePop();
+  syncPanes();
+}
+
+// Shows the added pane. True when its session is still on screen.
+async function postPane(sid, body) {
+  const res = await paneRequest('POST', `/api/panes/${encodeURIComponent(sid)}`, body);
   if (!res.pane) {
     showToast(res.error, 'error');
-    return;
+    return false;
   }
   setActivePaneId(sid, res.pane.id);
   applyPaneLayout(sid, res.layout);
-  if (sid !== paneSessionId()) return;
-  closePanePop();
-  syncPanes();
+  return sid === paneSessionId();
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
@@ -12926,6 +13051,28 @@ function openPreviewInPane() {
   if (!filePath || !paneSessionId()) return;
   closePreviewModal();
   addPane(filePath);
+}
+
+function msgDetailPaneSource() {
+  if (agentLogMode || !paneSessionId()) return null;
+  if (currentMsgDetailIdx != null) return currentMessages[currentMsgDetailIdx] || null;
+  const pin = currentPinDetailId && currentPins.find((p) => p.id === currentPinDetailId);
+  return pin && pin.type !== 'agent' ? pin : null;
+}
+
+function syncMsgDetailPaneBtn() {
+  document.getElementById('msg-detail-pane-btn').style.display = msgDetailPaneSource()?.timestamp ? '' : 'none';
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+async function openMsgInPane() {
+  const m = msgDetailPaneSource();
+  if (!m?.timestamp) return;
+  const sid = paneSessionId();
+  const d = new Date(m.timestamp);
+  const title = `${msgDetailTitle(m) || 'Message'} ${d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`;
+  closeMsgDetailModal();
+  if (await postPane(sid, { kind: 'message', target: getPinId(m), title })) syncPanes();
 }
 
 let panePopMatches = [];
@@ -12980,7 +13127,19 @@ function closePanePop() {
   panePop.classList.remove('visible');
 }
 
+paneStrip.addEventListener('keydown', (e) => {
+  const input = e.target.closest?.('.pane-title-input');
+  if (input && (e.key === 'Enter' || e.key === 'Escape')) {
+    e.preventDefault();
+    endPaneRename(input, e.key === 'Enter');
+  }
+});
+paneStrip.addEventListener('focusout', (e) => {
+  const input = e.target.closest?.('.pane-title-input');
+  if (input) endPaneRename(input, true);
+});
 paneStrip.addEventListener('click', (e) => {
+  if (e.target.closest('.pane-title-input')) return;
   const close = e.target.closest('[data-close]');
   if (close) {
     closePane(close.dataset.close);
