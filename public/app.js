@@ -2670,6 +2670,16 @@ function sendMessageAddress(peerName) {
   return `SendMessage(${peerName})`;
 }
 
+async function copyText(text, what, okMsg = `Copied ${what}`) {
+  const ok = await navigator.clipboard.writeText(text).then(
+    () => true,
+    () => false,
+  );
+  if (!ok) showToast(`Failed to copy ${what}`, 'error');
+  else if (okMsg) showToast(okMsg, 'success');
+  return ok;
+}
+
 async function copyWithFeedback(text, btn) {
   if (btn.dataset.copying) return;
   try {
@@ -2683,6 +2693,7 @@ async function copyWithFeedback(text, btn) {
     }, 1500);
   } catch (e) {
     console.error('Failed to copy:', e);
+    showToast('Failed to copy', 'error');
   }
 }
 
@@ -3119,7 +3130,7 @@ async function _toggleToolResultExpand(btn) {
     } catch (_e) {
       btn.textContent = 'Show more';
       btn.disabled = false;
-      showToast('Failed to load full output');
+      showToast('Failed to load full output', 'error');
       return;
     }
     btn.disabled = false;
@@ -3157,9 +3168,9 @@ async function postAndToast(url, body, label) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    showToast(r.ok ? `Opened ${label}` : `Failed to open ${label}`);
+    showToast(`${r.ok ? 'Opened' : 'Failed to open'} ${label}`, r.ok ? 'success' : 'error');
   } catch (_e) {
-    showToast(`Failed to open ${label}`);
+    showToast(`Failed to open ${label}`, 'error');
   }
 }
 
@@ -6961,7 +6972,7 @@ async function cleanupOrphanedStorage() {
   try {
     known = await _fetchKnownSessions();
   } catch {
-    showToast('Could not list sessions — nothing was cleaned');
+    showToast('Failed to list sessions — nothing was cleaned', 'error');
     return;
   }
   const orphaned = _findOrphanedKeys(known);
@@ -7426,10 +7437,7 @@ document.addEventListener('keydown', (e) => {
       showToast('No live session name: the session is not running');
       return;
     }
-    navigator.clipboard
-      .writeText(text)
-      .then(() => showToast(`Copied ${label}: ${e.ctrlKey ? text : text.slice(0, 8)}`, 'success'))
-      .catch(() => showToast(`Failed to copy ${label}`));
+    copyText(text, label, `Copied ${label}: ${e.ctrlKey ? text : text.slice(0, 8)}`);
     return;
   }
   if (matchKey(e, 'KeyR')) {
@@ -8076,14 +8084,19 @@ async function sendReview() {
     else if (data.delivered === 'terminal') showToast('Pasted into the terminal: press Enter there to send', 'info');
     else {
       const { markdown } = data;
-      const copy = () => navigator.clipboard.writeText(markdown).catch(() => {});
+      const copy = async () => {
+        const copied = await navigator.clipboard.writeText(markdown).then(
+          () => true,
+          () => false,
+        );
+        showToast(
+          copied ? 'Copied the review. Paste it into the session.' : 'Failed to copy the review',
+          'info',
+          { label: 'Copy again', onClick: copy },
+          'Sessions get reviews directly when the cck plugin runs there and board events are on.',
+        );
+      };
       await copy();
-      showToast(
-        'Review copied. Paste it into the session.',
-        'info',
-        { label: 'Copy again', onClick: copy },
-        'Sessions get reviews directly when the cck plugin runs there and board events are on.',
-      );
     }
     clearReviewDrafts(key);
     if (activeReview?.key === key) onSent?.();
@@ -8395,12 +8408,12 @@ async function openPreviewByPath(filePath, base, onUnsupported) {
     if (base) qs.set('base', base);
     const r = await fetch(`/api/preview?${qs}`);
     if (!r.ok) {
-      showToast('Preview file unavailable');
+      showToast('Preview file unavailable', 'error');
       return;
     }
     const data = await r.json();
     if (data.exists === false) {
-      showToast('File not found');
+      showToast('File not found', 'error');
       return;
     }
     if (data.kind === null) {
@@ -8410,7 +8423,7 @@ async function openPreviewByPath(filePath, base, onUnsupported) {
     }
     openPreviewModal(data.path, data.content, data.kind);
   } catch {
-    showToast('Failed to load preview');
+    showToast('Failed to load preview', 'error');
   }
 }
 
@@ -10436,7 +10449,7 @@ document.addEventListener('click', (e) => {
   if (breadcrumb) {
     e.stopPropagation();
     const path = breadcrumb.dataset.fullPath;
-    if (path) navigator.clipboard.writeText(path).catch(() => {});
+    if (path) copyText(path, 'project path');
     return;
   }
 
@@ -12883,10 +12896,7 @@ async function openPaneMessageDetail(pane) {
 function copyPaneTarget(id) {
   const pane = paneById(id);
   if (!pane) return;
-  navigator.clipboard.writeText(pane.target).then(
-    () => showToast(pane.kind === 'url' ? 'URL copied' : 'Path copied', 'success'),
-    () => showToast('Copy failed', 'error'),
-  );
+  copyText(pane.target, pane.kind === 'url' ? 'URL' : 'path');
 }
 
 function closePaneMenu() {
@@ -13039,7 +13049,7 @@ async function addPane(raw) {
   const t = sid && paneTargetFrom(raw);
   if (!t) return;
   if (t.error) {
-    showToast(t.error);
+    showToast(t.error, 'error');
     return;
   }
   if (!(await postPane(sid, { target: t.target, base: getSessionBaseDir(sid) || undefined }))) return;
@@ -15159,12 +15169,7 @@ function pluginWarning(plugin) {
   btn.title = `${problem} (${plugin.configDir}).\n${fix}`;
   btn.setAttribute('aria-label', problem);
   if (plugin.state !== 'disabled') {
-    btn.addEventListener('click', () =>
-      navigator.clipboard
-        .writeText(plugin.installCommand)
-        .then(() => showToast('Install command copied', 'success'))
-        .catch(() => showToast('Could not copy the command', 'error')),
-    );
+    btn.addEventListener('click', () => copyText(plugin.installCommand, 'install command'));
   }
   return btn;
 }
