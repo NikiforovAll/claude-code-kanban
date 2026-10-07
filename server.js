@@ -147,6 +147,28 @@ function writeJsonAtomic(file, obj, mode) {
   }
 }
 
+// Claude Code reads task files while the board writes them, so it must never see half a file.
+// On Windows a rename over a file another handle has open fails with EPERM or EBUSY until it closes.
+let taskWriteSeq = 0;
+async function writeTaskFile(file, task) {
+  const tmp = `${file}.${process.pid}.${++taskWriteSeq}.tmp`;
+  try {
+    await fs.writeFile(tmp, JSON.stringify(task, null, 2));
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await fs.rename(tmp, file);
+        break;
+      } catch (e) {
+        if (attempt >= 10 || (e.code !== 'EPERM' && e.code !== 'EBUSY')) throw e;
+        await new Promise((r) => setTimeout(r, attempt * 10));
+      }
+    }
+  } catch (e) {
+    await fs.rm(tmp, { force: true });
+    throw e;
+  }
+}
+
 // For state that is also held in memory: a failed save is logged and the server goes on.
 function writeJsonAtomicOrLog(file, obj, mode) {
   try {
@@ -3573,7 +3595,7 @@ app.post('/api/tasks/:sessionId', async (req, res) => {
 
     // No doorbell here, unlike a move: the user typed this task, so telling their session
     // about it would only repeat what they just said. Dragging it to In Progress rings.
-    await fs.writeFile(path.join(sessionDir, `${id}.json`), JSON.stringify(task, null, 2));
+    await writeTaskFile(path.join(sessionDir, `${id}.json`), task);
     res.json({ success: true, task });
   } catch (error) {
     console.error('Error creating task:', error);
@@ -3601,7 +3623,7 @@ app.put('/api/tasks/:sessionId/:taskId', async (req, res) => {
     if (description !== undefined) task.description = description;
     if (req.body.status !== undefined) task.status = req.body.status;
 
-    await fs.writeFile(taskPath, JSON.stringify(task, null, 2));
+    await writeTaskFile(taskPath, task);
 
     // Ring the session only for a move. The direction has to ride in the line because
     // the write above destroyed the old status -- nothing downstream can recover it, and
@@ -3651,7 +3673,7 @@ async function deleteTasks(dir, shouldDelete) {
         task.blockedBy = strip(task.blockedBy);
         task.blocks = strip(task.blocks);
         if (JSON.stringify(task) === before) return null;
-        return fs.writeFile(path.join(dir, file), JSON.stringify(task, null, 2));
+        return writeTaskFile(path.join(dir, file), task);
       }),
   );
   // Delete the task file
