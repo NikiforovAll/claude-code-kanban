@@ -32,6 +32,9 @@
 </head>
 <body class="booting">
 <script src="/vendor/claude-hub-sdk.js"></script>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="icon-pane" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M9 4v5"/></symbol>
+  </svg>
   <div id="offline-overlay" class="offline-overlay">
     <div class="offline-card">
       <div class="clawd-sleep" aria-hidden="true">
@@ -432,7 +435,7 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><rect x="4" y="10" width="16" height="10" rx="2"/><circle cx="9" cy="15" r="1"/><circle cx="15" cy="15" r="1"/><path d="M12 2v4"/><path d="M2 14h2"/><path d="M20 14h2"/></svg>
           </button>
           <button id="msg-detail-pane-btn" class="icon-btn" aria-label="Open in a pane" title="Open in a pane" style="display:none" onclick="openMsgInPane()">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M9 4v5"/></svg>
+            <svg fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><use href="#icon-pane"/></svg>
           </button>
           <button id="msg-detail-pin-btn" class="icon-btn" aria-label="Pin message" title="Pin message" onclick="togglePinFromModal()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
@@ -469,7 +472,7 @@
         <h3 class="modal-title" id="preview-modal-title">Preview</h3>
         <div style="display:flex;gap:4px;align-items:center;">
           <button id="preview-pane-btn" class="icon-btn" aria-label="Open in a pane" title="Open in a pane" onclick="openPreviewInPane()">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M9 4v5"/></svg>
+            <svg fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><use href="#icon-pane"/></svg>
           </button>
           <button id="preview-link-btn" class="icon-btn" aria-label="Link to current session" title="Link to current session" onclick="togglePreviewSessionLink()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
@@ -597,7 +600,7 @@
         <h3 id="plan-modal-title" class="modal-title">Plan</h3>
         <div style="display:flex;align-items:center;gap:4px;">
           <button id="plan-pane-btn" class="icon-btn" aria-label="Open in a pane" title="Open in a pane" style="display:none" onclick="openPlanInPane()">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M9 4v5"/></svg>
+            <svg fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><use href="#icon-pane"/></svg>
           </button>
           <button class="icon-btn" aria-label="Open in editor" title="Open in editor" onclick="openPlanInEditor()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
