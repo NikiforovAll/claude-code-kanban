@@ -29,7 +29,7 @@ When the dir is not `~/.claude`, the installer runs the `claude` CLI with `CLAUD
 
 | Variable | Flag | What it does |
 |---|---|---|
-| `PORT` | | Port for the server. Default `3541`. If the port is busy, the server listens on a random port. |
+| `PORT` | `--port <n>` | Port for the server. Default `3541`. If the port is busy, the server listens on a random port. |
 | `HOST` | `--host <addr>` | Address the server binds to. Default `127.0.0.1`. See [Network and security](#network-and-security). |
 | `ALLOWED_HOSTS` | `--allowed-hosts=<list>` | Comma-separated extra `Host` header values the server accepts. |
 | `EDITOR` | | Command for "Open in editor". Default `code`. A value with arguments, such as `code -w`, works. |
@@ -43,7 +43,7 @@ When the dir is not `~/.claude`, the installer runs the `claude` CLI with `CLAUD
 | `CLAUDE_HUB` | | Set by [Claude Code Hub](/claude-code-kanban/guides/claude-code-hub/). Turns on hub integration. |
 | `HUB_URL` | | Set by Claude Code Hub. The hub origin that may frame the app and send it messages. |
 
-Flags win over environment variables. The server reads the port only from `PORT`. See [Port](/claude-code-kanban/reference/cli/#port).
+Flags win over environment variables.
 
 ## Terminal config
 

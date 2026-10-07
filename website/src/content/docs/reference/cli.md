@@ -34,6 +34,7 @@ Claude Task Kanban running at http://localhost:3541
 
 | Flag | Environment variable | What it does |
 | --- | --- | --- |
+| `--port <n>` | `PORT` | Port to listen on. Default `3541`. See [Port](#port). |
 | `--open` | | Opens the board in your browser after the server starts. |
 | `--dir <path>` | `CLAUDE_CONFIG_DIR`, then `CLAUDE_DIR` | Claude config dir to read. Default `~/.claude`. A leading `~` expands to your home dir. |
 | `--enable-terminal` | `CCK_TERMINAL='{"enabled":true}'` | Turns on the [embedded terminal](/claude-code-kanban/guides/embedded-terminal/). It is off by default when Claude Code Kanban runs alone. |
@@ -48,17 +49,15 @@ A flag wins over its environment variable.
 
 ### Port
 
-Set the port with the `PORT` environment variable. The default is 3541.
+Set the port with `--port <n>` or the `PORT` environment variable. The default is 3541.
 
 ```bash
-PORT=8080 claude-code-kanban
+claude-code-kanban --port 8080
 ```
 
 If the port is busy, the server prints `Port 3541 in use, trying random port...` and listens on a random free port.
 
-:::caution
-The top-level help lists a `--port <n>` flag. The server does not read it. Use `PORT=<n>`.
-:::
+Subcommands do not read `--port`. See [How commands find the server](#how-commands-find-the-server).
 
 ### Network access
 
