@@ -145,9 +145,18 @@ The server, the plugin and the installer keep their state in `<config-dir>/.cck/
 | Path | Written by | Contents |
 |---|---|---|
 | `agent-activity/<sessionId>/<agentId>.jsonl` | Plugin mod (`activity.ts`) | Subagent start, idle and stop events |
+| `agent-activity/<sessionId>/_*` | Plugin mod, server | Markers for a waiting prompt and a finished turn, the board's answers to prompts, and team member name-to-id maps |
+| `agent-activity/_task-maps/<task list id>.json` | Plugin mod | Sessions that share a task list through `CLAUDE_CODE_TASK_LIST_ID` |
 | `context-status/<sessionId>.json` | Plugin mod (`context.ts`) | Context use, cost and model for each session |
 | `pins.json` | Server | Copy of the browser's session pins, so the CLI can read them |
+| `linked-docs.json` | Server | Docs linked with `doc link`, so a link sent while no board is open is not lost |
+| `dispatched.json` | Server | Sessions started with `dispatch start` |
 | `dispatch-groups.json` | Server | Groups made with `dispatch start --group` |
+| `panes.json` | Server | Pane layout of each session |
+| `reviews/<sessionId>/<time>.md` | Server | Review comments sent to a session |
+| `worktrees.json` | Server | Worktree paths and the repo each belongs to, so a worktree's sessions stay with their repo after the worktree is deleted |
+| `terminals.json` | Server | Terminals to resume on the next start. See [Restore terminals on start](/claude-code-kanban/guides/embedded-terminal/#restore-terminals-on-start). |
+| `session-cache.json` | Server | Session list cache, so the first list after a restart is fast. Safe to delete. |
 | `server.json` | Server | `{port, pid}` of the running server. The CLI and the plugin use it to find the port. |
 | `terminal-tokens/<port>.json` | Server | Terminal token of the board on `<port>` (file mode 600), used by `dispatch start`. Written only when the terminal is available. One file per board, so two boards on one config dir each keep their own. |
 | `config.json` | You | Optional [UI approvals config](#ui-approvals-config) and [board events config](#board-events-config) |
@@ -155,13 +164,15 @@ The server, the plugin and the installer keep their state in `<config-dir>/.cck/
 
 The server removes `server.json` and its `terminal-tokens/<port>.json` when it exits, if they still belong to it. At start it also removes token files left by servers that are no longer running.
 
+The server deletes old entries every hour. Session data such as dispatch markers, pane layouts, reviews and context status goes when the session's transcript goes, or after Claude Code's `cleanupPeriodDays` (default 30). `agent-activity/` entries go after 2 days. `pins.json` and `linked-docs.json` change only when you pin, unpin, link or unlink.
+
 ## Browser-only data
 
 Some data stays in the browser's `localStorage` and never reaches the server:
 
 - Session groups
 - Pinned messages
-- Linked documents
+- Linked documents added on the board (links made with `doc link` are also in `linked-docs.json`)
 - Scratchpad notes
 
 Each config dir other than `~/.claude` gets its own key prefix, so two config dirs on the same port do not share this data. Another browser or profile does not see it.
