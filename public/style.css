@@ -3129,6 +3129,49 @@ code.language-tree .hljs-title {
   }
 }
 
+.plan-card {
+  margin-bottom: 16px;
+  padding: 10px 14px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  transition: all 0.15s ease;
+}
+.plan-card:hover {
+  border-color: var(--accent);
+  background: var(--bg-hover);
+}
+.plan-card-icon {
+  font-size: 14px;
+}
+.plan-card-text {
+  flex: 1;
+  min-width: 0;
+}
+.plan-card-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.plan-card-title {
+  font-size: 13px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.plan-card-chevron {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
 /* #endregion */
 
 /* #region OWNER_FILTER */

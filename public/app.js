@@ -10877,13 +10877,13 @@ function showInfoModal(session, teamConfig, tasks, planContent, parentInfo) {
     _pendingPlanContent = planContent;
     const titleMatch = planContent.match(/^#\s+(.+)$/m);
     const planTitle = titleMatch ? titleMatch[1].trim() : null;
-    html += `<div data-plan-card="1" onclick="openPlanModal()" style="margin-bottom: 16px; padding: 10px 14px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; display: flex; align-items: center; gap: 10px; transition: all 0.15s ease;" onmouseover="this.style.borderColor='var(--accent)';this.style.background='var(--bg-hover)'" onmouseout="this.style.borderColor='var(--border)';this.style.background='var(--bg-elevated)'">
-          <span style="font-size: 14px;">📋</span>
-          <div style="flex: 1; min-width: 0;">
-            <div style="font-size: 11px; font-weight: 500; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Plan</div>
-            ${planTitle ? `<div style="font-size: 13px; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(planTitle)}</div>` : ''}
+    html += `<div class="plan-card" data-plan-card="1" onclick="openPlanModal()">
+          <span class="plan-card-icon">📋</span>
+          <div class="plan-card-text">
+            <div class="plan-card-label">Plan</div>
+            ${planTitle ? `<div class="plan-card-title">${escapeHtml(planTitle)}</div>` : ''}
           </div>
-          <svg viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2" style="width: 16px; height: 16px; flex-shrink: 0;"><path d="M9 18l6-6-6-6"/></svg>
+          <svg viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2" class="plan-card-chevron"><path d="M9 18l6-6-6-6"/></svg>
         </div>`;
   }
 
