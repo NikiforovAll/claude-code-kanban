@@ -367,6 +367,17 @@ describe('ptyEnv', () => {
       else process.env.CLAUDE_CODE_TASK_LIST_ID = saved;
     }
   });
+
+  it("drops the parent session's effort level", () => {
+    const saved = process.env.CLAUDE_EFFORT;
+    process.env.CLAUDE_EFFORT = 'max';
+    try {
+      assert.equal(ptyEnv({ claudeDir: '/c', isDefaultDir: true }).CLAUDE_EFFORT, undefined);
+    } finally {
+      if (saved === undefined) delete process.env.CLAUDE_EFFORT;
+      else process.env.CLAUDE_EFFORT = saved;
+    }
+  });
 });
 
 describe('readTerminalConfig', () => {
