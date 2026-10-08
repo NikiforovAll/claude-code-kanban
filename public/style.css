@@ -862,7 +862,8 @@ body.booting .session-skeleton {
   display: flex;
 }
 
-.session-skeleton span {
+.session-skeleton span,
+.msg-log-loading-row span {
   height: 9px;
   width: 70%;
   border-radius: 4px;
@@ -937,6 +938,7 @@ body.booting .boot-splash {
 
 @media (prefers-reduced-motion: reduce) {
   .session-skeleton span,
+  .msg-log-loading-row span,
   .clawd-jump {
     animation: none;
   }
@@ -5868,11 +5870,7 @@ body.show-resizing iframe {
   gap: 7px;
 }
 .msg-log-loading-row span {
-  height: 9px;
   width: 75%;
-  border-radius: 4px;
-  background: var(--border);
-  animation: breathe 1.4s ease-in-out infinite;
 }
 .msg-log-loading-row span + span {
   width: 45%;
@@ -5884,11 +5882,6 @@ body.show-resizing iframe {
   color: var(--text-muted);
   font-size: 12px;
   text-align: center;
-}
-@media (prefers-reduced-motion: reduce) {
-  .msg-log-loading-row span {
-    animation: none;
-  }
 }
 
 /* #endregion */

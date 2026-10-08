@@ -4661,7 +4661,7 @@ const transientGroups = new Map();
 function sgTransientGroup(name) {
   let group = transientGroups.get(name);
   if (!group) {
-    group = { id: `t_${name}`, name, transient: true };
+    group = { id: `t_${name}`, name, transient: true, members: [] };
     transientGroups.set(name, group);
   }
   return group;
@@ -4703,9 +4703,8 @@ function sgDetach(type, ref) {
 
 // Where a session renders inside a group: the project block it was moved under, its own
 // project's block, or - when the user lifted it out - the group's own loose list.
-// A transient dispatch group has no members: its sessions render under their own project's block.
 function sgHostOf(group, session) {
-  if (!group || group.transient || !session) return null;
+  if (!group || !session) return null;
   const m = group.members.find((x) => x.type === 'session' && x.ref === session.id);
   const isMemberProject = (path) => !!path && group.members.some((x) => x.type === 'project' && x.ref === path);
   if (m?.under && isMemberProject(m.under)) return m.under;
@@ -8246,10 +8245,10 @@ function renderFrontmatterBlock(fm) {
 // allow-same-origin puts it on an opaque origin, so it cannot touch this app's
 // storage, DOM or API. srcdoc has no base URL, so the server has already embedded
 // the document's local assets (lib/inline-assets.js); remote refs load normally.
-function createPreviewFrame(className, srcdoc) {
+function createPreviewFrame(className, srcdoc, sandbox = 'allow-scripts allow-popups') {
   const frame = document.createElement('iframe');
   frame.className = className;
-  frame.setAttribute('sandbox', 'allow-scripts allow-popups');
+  frame.setAttribute('sandbox', sandbox);
   frame.setAttribute('referrerpolicy', 'no-referrer');
   frame.srcdoc = srcdoc;
   bridgedFrames.add(frame);
@@ -14491,23 +14490,23 @@ function rememberTerminalIds(list) {
   for (const t of list) if (t.terminalId) terminalIds.set(t.id, t.terminalId);
 }
 
-function shownTerminalId() {
-  return wantsTerminal() ? (terminalIds.get(currentSessionId) ?? null) : null;
+function resetShowPosts() {
+  showState.posts = [];
+  showState.marked.clear();
+  showState.rendered = null;
 }
 
 // Runs on every view change, so it returns at once unless the shown terminal changed.
 function syncShowCard() {
   const pty = wantsTerminal() ? currentSessionId : null;
-  if (pty && !terminalIds.has(pty) && showState.lookup !== pty) {
+  if (pty && runningTerminals.has(pty) && !terminalIds.has(pty) && showState.lookup !== pty) {
     showState.lookup = pty;
-    loadTerminals()
-      .then(syncShowCard)
-      .catch(() => {});
+    loadTerminals().catch(() => {});
   }
-  const tid = shownTerminalId();
+  const tid = pty ? (terminalIds.get(pty) ?? null) : null;
   if (tid === showState.terminalId) return;
-  Object.assign(showState, { terminalId: tid, sessionId: null, posts: [], idx: 0, rendered: null });
-  showState.marked.clear();
+  Object.assign(showState, { terminalId: tid, sessionId: null, idx: 0 });
+  resetShowPosts();
   renderShow();
   if (tid) loadShowPosts(tid, { newest: true });
 }
@@ -14533,11 +14532,7 @@ async function onShowPosted(d) {
     return;
   }
   if (d.terminalId !== showState.terminalId) return;
-  if (d.sessionId !== showState.sessionId) {
-    showState.posts = [];
-    showState.marked.clear();
-    showState.rendered = null;
-  }
+  if (d.sessionId !== showState.sessionId) resetShowPosts();
   if (!(await loadShowPosts(d.terminalId))) return;
   const i = showState.posts.findIndex((p) => p.id === d.id);
   if (i < 0) return renderShow();
@@ -14553,8 +14548,7 @@ async function onShowPosted(d) {
 
 function onShowCleared(d) {
   if (d.terminalId !== showState.terminalId) return;
-  showState.posts = [];
-  showState.marked.clear();
+  resetShowPosts();
   renderShow();
 }
 
@@ -14592,6 +14586,7 @@ function renderShow({ flash = false } = {}) {
     showState.rendered = null;
     showState.frame = null;
     showHostObserver?.disconnect();
+    showHostObserver = null;
     card.replaceChildren();
     return;
   }
@@ -14615,8 +14610,10 @@ function renderShow({ flash = false } = {}) {
     void card.offsetWidth;
     card.classList.add('flash');
   }
-  showHostObserver ??= new ResizeObserver(() => layoutShow());
-  showHostObserver.observe(document.getElementById('terminal-host'));
+  if (!showHostObserver) {
+    showHostObserver = new ResizeObserver(() => layoutShow());
+    showHostObserver.observe(document.getElementById('terminal-host'));
+  }
   layoutShow();
 }
 
@@ -14662,14 +14659,8 @@ async function renderShowBody(p, samePost) {
 // No allow-popups: it opens window.open as a way out. The CSP blocks fetch and remote sub-resources,
 // but not navigation or WebRTC; the real guard is that only the terminal's own agent can post.
 function createShowFrame(title, srcdoc) {
-  const frame = document.createElement('iframe');
-  frame.className = 'show-frame';
+  const frame = createPreviewFrame('show-frame', srcdoc, 'allow-scripts');
   frame.title = title;
-  frame.setAttribute('sandbox', 'allow-scripts');
-  frame.setAttribute('referrerpolicy', 'no-referrer');
-  frame.srcdoc = srcdoc;
-  bridgedFrames.add(frame);
-  frame.addEventListener('load', () => sendBridgeClaims([frame], bridgeClaims(keyClaims())));
   showState.frame = frame;
   return frame;
 }
@@ -14792,8 +14783,7 @@ function showCommand(cmd) {
     showState.collapsed = false;
   } else if (cmd === 'close') showClosed.add(tid);
   else if (cmd === 'clear') {
-    showState.posts = [];
-    showState.marked.clear();
+    resetShowPosts();
     terminalFetch(apiPath`/api/terminals/${tid}/show`, 'DELETE')
       .then((res) => {
         if (!res.ok && res.status !== 404) showToast(`Could not clear the posts (HTTP ${res.status})`, 'error');

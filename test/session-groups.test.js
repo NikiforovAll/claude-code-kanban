@@ -14,8 +14,11 @@ const { sgHostOf } = vm.runInNewContext(`${fn('sgHostOf')}\n({ sgHostOf })`, {
 describe('sgHostOf', () => {
   const session = { id: 's1', project: 'C:/repo/.claude/worktrees/w' };
 
-  it('gives no host in a transient dispatch group, which has no members', () => {
-    assert.equal(sgHostOf({ id: 't_run', name: 'run', transient: true }, session), null);
+  it('gives no host in a transient dispatch group', () => {
+    const { sgTransientGroup } = vm.runInNewContext(`${fn('sgTransientGroup')}\n({ sgTransientGroup })`, {
+      transientGroups: new Map(),
+    });
+    assert.equal(sgHostOf(sgTransientGroup('run'), session), null);
   });
 
   it('gives the project block a user group holds the session under', () => {
