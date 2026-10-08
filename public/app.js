@@ -2819,13 +2819,13 @@ function renderAnswerPayloadHtml(answerPayload) {
         })
         .join('');
       return `<div style="margin-top:6px">
-      <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:2px">${escapeHtml(q)}</div>
+      <div class="tool-detail-label">${escapeHtml(q)}</div>
       <ul style="margin:2px 0 0 16px;padding:0">${items}</ul>
     </div>`;
     })
     .join('');
-  return `<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border)">
-    <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:4px">Answers</div>
+  return `<div class="tool-detail-section-wide">
+    <div class="tool-detail-heading">Answers</div>
     ${rows}
   </div>`;
 }
@@ -2945,19 +2945,19 @@ function renderToolParamsHtml(params) {
     html += `<div style="margin-top:6px;font-size:0.75rem"><span style="color:var(--text-muted)">${escapeHtml(k)}:</span> <span style="word-break:break-all">${escapeHtml(display)}</span>${suffix}</div>`;
   }
   for (const { k, pretty } of jsonBlocks) {
-    html += `<div style="margin-top:8px;padding-top:6px;border-top:1px solid var(--border)">
-          <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:2px">${escapeHtml(k)}</div>
-          <pre class="${TINTED_PRE_CLASS}" style="max-height:300px;overflow:auto;font-size:0.75rem">${escapeHtml(pretty)}</pre>
+    html += `<div class="tool-detail-section">
+          <div class="tool-detail-label">${escapeHtml(k)}</div>
+          <pre class="${TINTED_PRE_CLASS} tool-detail-pre-scroll" style="font-size:0.75rem">${escapeHtml(pretty)}</pre>
         </div>`;
   }
   if (params.old_string || params.new_string) {
-    html += `<div style="margin-top:8px;padding-top:6px;border-top:1px solid var(--border)">`;
+    html += `<div class="tool-detail-section">`;
     if (params.old_string) {
-      html += `<div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:2px">old_string</div>
+      html += `<div class="tool-detail-label">old_string</div>
             <pre class="${TINTED_PRE_CLASS} msg-detail-pre-old">${escapeHtml(params.old_string)}</pre>`;
     }
     if (params.new_string) {
-      html += `<div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:2px;margin-top:6px">new_string</div>
+      html += `<div class="tool-detail-label" style="margin-top:6px">new_string</div>
             <pre class="${TINTED_PRE_CLASS} msg-detail-pre-new">${escapeHtml(params.new_string)}</pre>`;
     }
     html += `</div>`;
@@ -2985,15 +2985,15 @@ function renderToolParamsHtml(params) {
       writeMoreBtn = ` ${toggle.btn}`;
       fullBlock = toggle.full;
     }
-    html += `<div style="margin-top:8px;padding-top:6px;border-top:1px solid var(--border)">
-          <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:2px">content${writeMoreBtn}</div>
-          <pre class="${TINTED_PRE_CLASS}" style="max-height:300px;overflow:auto">${truncHtml}</pre>
+    html += `<div class="tool-detail-section">
+          <div class="tool-detail-label">content${writeMoreBtn}</div>
+          <pre class="${TINTED_PRE_CLASS} tool-detail-pre-scroll">${truncHtml}</pre>
           ${fullBlock}
         </div>`;
   }
   if (params.plan) {
-    html += `<div style="margin-top:8px;padding-top:6px;border-top:1px solid var(--border)">
-          <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:4px">Plan</div>
+    html += `<div class="tool-detail-section">
+          <div class="tool-detail-label" style="margin-bottom:4px">Plan</div>
           <div class="markdown-body">${renderMarkdown(params.plan)}</div>
         </div>`;
   }
@@ -3115,8 +3115,8 @@ function renderToolResultHtml(toolResult, isTruncated, fullResult, toolUseId) {
   } else if (isTruncated) {
     truncLabel = '<span style="color:var(--text-muted);font-size:0.8rem;margin-left:6px">(truncated)</span>';
   }
-  return `<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border)">
-        <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:4px">Output${truncLabel}</div>
+  return `<div class="tool-detail-section-wide">
+        <div class="tool-detail-heading">Output${truncLabel}</div>
         <pre class="msg-detail-pre" style="overflow:auto">${escaped}</pre>
         ${fullBlock}
       </div>`;

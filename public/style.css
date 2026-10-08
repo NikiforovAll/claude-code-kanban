@@ -4784,6 +4784,30 @@ code.language-tree .hljs-title {
 .msg-detail-pre-new {
   border-left: 3px solid var(--success);
 }
+.tool-detail-section {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+.tool-detail-section-wide {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.tool-detail-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-bottom: 2px;
+}
+.tool-detail-heading {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+.tool-detail-pre-scroll {
+  max-height: 300px;
+  overflow: auto;
+}
 .expand-toggle-btn {
   background: none;
   border: none;
