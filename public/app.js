@@ -9255,7 +9255,12 @@ function setupEventSource() {
   connect();
 }
 
-const CONTEXT_COLORS = { green: '#5b9a6b', yellow: '#b8a63e', orange: '#c07840', red: '#b85555' };
+const CONTEXT_COLORS = {
+  green: 'var(--success)',
+  yellow: 'var(--warning)',
+  orange: 'color-mix(in srgb, var(--warning), var(--danger))',
+  red: 'var(--danger)',
+};
 const COST_THRESHOLDS = { green: 0.5, yellow: 2, orange: 5 };
 const MODEL_THRESHOLDS = [
   { match: /sonnet/i, yellow: 120000, orange: 200000, red: 300000 },
@@ -10079,28 +10084,13 @@ async function copyAgentTabActive(groupId, btn) {
   copyAgentTab(key, btn);
 }
 
-const ownerColors = [
-  { bg: 'rgba(37, 99, 235, 0.14)', color: '#1d5bbf' }, // blue
-  { bg: 'rgba(168, 85, 247, 0.14)', color: '#7c3aed' }, // purple
-  { bg: 'rgba(14, 165, 133, 0.14)', color: '#0d7d65' }, // teal
-  { bg: 'rgba(220, 80, 30, 0.14)', color: '#c04a1a' }, // red-orange
-  { bg: 'rgba(202, 138, 4, 0.14)', color: '#92700c' }, // amber
-  { bg: 'rgba(219, 39, 119, 0.14)', color: '#b5246a' }, // pink
-  { bg: 'rgba(22, 163, 74, 0.14)', color: '#15803d' }, // green
-  { bg: 'rgba(99, 102, 241, 0.14)', color: '#4f46e5' }, // indigo
-];
-const namedColorMap = {
-  red: { bg: 'rgba(239, 68, 68, 0.14)', color: '#dc2626' },
-  blue: { bg: 'rgba(37, 99, 235, 0.14)', color: '#1d5bbf' },
-  green: { bg: 'rgba(22, 163, 74, 0.14)', color: '#15803d' },
-  purple: { bg: 'rgba(168, 85, 247, 0.14)', color: '#7c3aed' },
-  orange: { bg: 'rgba(234, 88, 12, 0.14)', color: '#c2410c' },
-  pink: { bg: 'rgba(219, 39, 119, 0.14)', color: '#b5246a' },
-  yellow: { bg: 'rgba(202, 138, 4, 0.14)', color: '#92700c' },
-  teal: { bg: 'rgba(14, 165, 133, 0.14)', color: '#0d7d65' },
-  indigo: { bg: 'rgba(99, 102, 241, 0.14)', color: '#4f46e5' },
-  cyan: { bg: 'rgba(6, 182, 212, 0.14)', color: '#0891b2' },
-};
+const ownerColor = (hue) => ({
+  bg: `color-mix(in srgb, var(--owner-${hue}) 13%, transparent)`,
+  color: `var(--owner-${hue})`,
+});
+const OWNER_HUES = ['blue', 'purple', 'teal', 'orange', 'yellow', 'pink', 'green', 'indigo'];
+const ownerColors = OWNER_HUES.map(ownerColor);
+const namedColorMap = Object.fromEntries([...OWNER_HUES, 'red', 'cyan'].map((h) => [h, ownerColor(h)]));
 const ownerColorCache = {};
 const teamColorMap = {};
 function isInternalTask(task) {
