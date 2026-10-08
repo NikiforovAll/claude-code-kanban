@@ -74,7 +74,7 @@ Adding a command:
 
 1. Add an entry to `COMMANDS` in `cli.js` with `summary`, `usage`, `flags`, optional `notes` and `examples`, and `run(args)`. Missing arguments print the leaf help and return 1; a bad value goes through `usageError`.
 2. The `run` function receives `process.argv.slice(3)` (or `slice(4)` for nested verbs) and returns an exit code.
-3. Add a server endpoint in `server.js` that broadcasts an SSE event (`{ type: '<noun>:<verb>', ... }`). A read-only command reuses a GET route and needs no event.
+3. Add a server endpoint in `server.js` that broadcasts an SSE event (`{ type: '<noun>:<verb>', ... }`). A read-only command reuses a GET route and needs no event. Every new SSE event uses `<noun>:<verb>`; the older `<noun>-update` events keep their names, because a renamed event is lost on a board page loaded before the change.
 4. Handle the event in `public/app.js` SSE dispatcher.
 
 Test locally: start the server (`npm start`), then run `node server.js <command>` from another terminal.
