@@ -4687,6 +4687,17 @@ code.language-tree .hljs-title {
   display: block;
   overflow-x: auto;
 }
+/* The bodies around these tables set `word-break: break-word`, which lets a cell break
+   between any two letters, so the table layout shrinks short columns to one letter. */
+.rendered-md th,
+.rendered-md td,
+.waiting-question-text th,
+.waiting-question-text td,
+.waiting-option-desc th,
+.waiting-option-desc td {
+  word-break: normal;
+  overflow-wrap: break-word;
+}
 .rendered-md th,
 .rendered-md td {
   border: 1px solid var(--border);
