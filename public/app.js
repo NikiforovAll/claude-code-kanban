@@ -7511,6 +7511,7 @@ function stopReview() {
   activeReview = null;
   reviewHighlight?.clear();
   reviewHotHighlight?.clear();
+  syncReviewSendClaims();
 }
 
 // The three helpers below are also handed to `reviewBridge` as source text, so each must use
@@ -7787,8 +7788,10 @@ const PANE_CLAIMS = [
   ...['\\', '[', ']'].map((key) => ({ key, code: '' })),
   ...['|', '{', '}'].map((key) => ({ shiftKey: true, key, code: '' })),
   ...['BracketLeft', 'BracketRight', 'KeyW'].map((code) => ({ altKey: true, key: 'Unidentified', code })),
-  ...['ctrlKey', 'metaKey'].map((mod) => ({ [mod]: true, key: 'Enter', code: '' })),
 ];
+
+// Claimed only while comments wait, so a previewed page keeps Ctrl+Enter otherwise.
+const REVIEW_SEND_CLAIMS = ['ctrlKey', 'metaKey'].map((mod) => ({ [mod]: true, key: 'Enter', code: '' }));
 
 function sendBridgeClaims(frames, claims) {
   for (const f of frames) f.contentWindow?.postMessage({ type: `${REVIEW_MSG}claims`, ...claims }, '*');
@@ -7873,7 +7876,9 @@ function onReviewOfferKey(e) {
 function isReviewSendKey(e) {
   if (e.key !== 'Enter' || !(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return false;
   if (reviewPopMode === 'editor' || !reviewItems().length) return false;
-  return !e.target.closest?.('input, textarea, select, [contenteditable]');
+  // A pane's review stays live under a modal, where Ctrl+Enter belongs to the modal.
+  if (activeReview.opts === reviewBase && document.querySelector('.modal-overlay.visible')) return false;
+  return !e.target.closest?.(TEXT_FIELD_SELECTOR);
 }
 
 function openReviewEditor(picked) {
@@ -7979,7 +7984,17 @@ function onReviewPanelHover(e) {
   setReviewHot((card && reviewItems()[Number(card.dataset.i)]) || null);
 }
 
+let reviewSendClaimed = false;
+
+function syncReviewSendClaims() {
+  const want = reviewItems().length > 0;
+  if (want === reviewSendClaimed) return;
+  reviewSendClaimed = want;
+  pushTerminalClaims();
+}
+
 function renderReviewPanel() {
+  syncReviewSendClaims();
   if (!activeReview) return;
   const { panelEl, hostEl } = activeReview;
   const items = reviewItems();
@@ -13763,7 +13778,8 @@ function keyClaims() {
 }
 
 function bridgeClaims(claims) {
-  return { ...claims, keys: [...claims.keys, ...ZOOM_CLAIMS, ...PANE_CLAIMS] };
+  const review = reviewItems().length ? REVIEW_SEND_CLAIMS : [];
+  return { ...claims, keys: [...claims.keys, ...ZOOM_CLAIMS, ...PANE_CLAIMS, ...review] };
 }
 
 function pushTerminalClaims() {
