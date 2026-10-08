@@ -36,7 +36,7 @@ Comments you have not sent stay with the file and the session. Close the dialog 
 
 Click **Send**. The board writes the comments to a Markdown file in `<config-dir>/.cck/reviews/<session id>/`. Then it gives them to the session in the first way that works:
 
-1. If the session [listens to the board](/claude-code-kanban/guides/plugin-skills/#steer-a-session-from-the-board), Claude gets a prompt that points at the review file.
+1. If the session [listens to the board](/claude-code-kanban/guides/plugin-skills/#steer-a-session-from-the-board), Claude gets a prompt that points at the review file. If Claude is busy, the prompt waits until the turn ends. The board keeps the review until the session has it, so a board restart, a `/clear` or a closed session does not lose it: a resumed session gets it.
 2. Else, if the session runs in the [embedded terminal](/claude-code-kanban/guides/embedded-terminal/) and does not wait on a prompt, the board pastes a request that points at the review file into the terminal.
 3. Else, the board copies the review to the clipboard and shows a toast. Paste the review into the session yourself. Click **Copy again** if the clipboard lost it.
 

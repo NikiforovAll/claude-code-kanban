@@ -8000,7 +8000,7 @@ async function sendReview() {
     });
     const data = await res.json();
     if (!res.ok) return showToast(data.error || 'Review failed', 'error');
-    if (data.delivered === 'doorbell') showToast('Sent to session', 'success');
+    if (data.delivered === 'doorbell') showToast('Queued for the session', 'success');
     else if (data.delivered === 'terminal') showToast('Pasted into the terminal: press Enter there to send', 'info');
     else {
       const { markdown } = data;

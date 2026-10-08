@@ -57,7 +57,7 @@ describe('session event doorbell', () => {
     for (let i = 0; i < 500; i++) enqueueSessionEvent('s3', `cck:1 task.moved T-${i} a>b`);
     const { queue } = sessionEventBuckets.get('s3');
     assert.equal(queue.length, 50);
-    assert.match(queue[49], /T-499/);
+    assert.match(queue[49].text, /T-499/);
   });
 
   it('bounds a line built from a caller-supplied task id', async () => {
@@ -94,6 +94,101 @@ describe('session event doorbell', () => {
     const pending = poll('s8', 60, { first: '1' });
     enqueueSessionEvent('s8', 'cck:1 task.moved NEW a>b');
     assert.deepEqual((await pending).events, ['cck:1 task.moved NEW a>b']);
+  });
+});
+
+describe('acked delivery', () => {
+  const ackPoll = (poll, sessionId, { board = '', got = 0, ack = 0, ...rest } = {}, wait = 0) =>
+    poll(sessionId, wait, { board, got: String(got), ack: String(ack), ...rest });
+
+  it('keeps a line until its ack, and answers only lines past got', async () => {
+    const { enqueueSessionEvent, sessionEventBuckets, poll } = loadDoorbell();
+    enqueueSessionEvent('a1', 'review', { marker: 'm1' });
+    const r1 = await ackPoll(poll, 'a1');
+    assert.deepEqual(r1.events, ['review']);
+    const [seq] = r1.seqs;
+    assert.equal(typeof r1.board, 'string');
+    assert.deepEqual((await ackPoll(poll, 'a1', { board: r1.board, got: seq })).events, []);
+    assert.equal(sessionEventBuckets.get('a1').queue.length, 1);
+    assert.deepEqual((await ackPoll(poll, 'a1', { board: r1.board })).events, ['review'], 'a restarted mod gets it again');
+    await ackPoll(poll, 'a1', { board: r1.board, got: seq, ack: seq });
+    assert.equal(sessionEventBuckets.size, 0);
+  });
+
+  it('calls onDelivered for an acked review, and for one a mod without acks drained', async () => {
+    const { enqueueSessionEvent, configureSessionEvents, poll } = loadDoorbell();
+    const done = [];
+    configureSessionEvents({ onDelivered: (e) => done.push(e.marker) });
+    enqueueSessionEvent('a2', 'move');
+    enqueueSessionEvent('a2', 'review', { marker: 'm2' });
+    const r = await ackPoll(poll, 'a2');
+    await ackPoll(poll, 'a2', { board: r.board, got: r.seqs[1], ack: r.seqs[1] });
+    enqueueSessionEvent('a3', 'review', { marker: 'm3' });
+    await poll('a3');
+    assert.deepEqual(done, ['m2', 'm3']);
+  });
+
+  it('ignores got and ack counted against another board run', async () => {
+    const { enqueueSessionEvent, poll } = loadDoorbell();
+    enqueueSessionEvent('a4', 'review', { marker: 'm4' });
+    assert.deepEqual((await ackPoll(poll, 'a4', { board: 'old-run', got: 99, ack: 99 })).events, ['review']);
+  });
+
+  it('wakes a waiting poll with only the new line', async () => {
+    const { enqueueSessionEvent, poll } = loadDoorbell();
+    enqueueSessionEvent('a5', 'one', { marker: 'm5' });
+    const r = await ackPoll(poll, 'a5');
+    const pending = ackPoll(poll, 'a5', { board: r.board, got: r.seqs[0] }, 60);
+    enqueueSessionEvent('a5', 'two', { marker: 'm6' });
+    assert.deepEqual((await pending).events, ['two']);
+  });
+
+  it('keeps reviews and drops moves on a first attach', async () => {
+    const { enqueueSessionEvent, poll } = loadDoorbell();
+    enqueueSessionEvent('a6', 'old move');
+    enqueueSessionEvent('a6', 'review', { marker: 'm7' });
+    assert.deepEqual((await ackPoll(poll, 'a6', { first: '1' })).events, ['review']);
+  });
+
+  it('moves reviews to the new id after /clear and routes later ones there', async () => {
+    const { enqueueSessionEvent, hasDoorbell, poll } = loadDoorbell();
+    await ackPoll(poll, 'old');
+    enqueueSessionEvent('old', 'move');
+    enqueueSessionEvent('old', 'review one', { marker: 'm8' });
+    assert.deepEqual((await ackPoll(poll, 'new', { first: '1', prev: 'old' })).events, ['review one']);
+    assert.equal(hasDoorbell('old'), true);
+    enqueueSessionEvent('old', 'review two', { marker: 'm9' });
+    const r = await ackPoll(poll, 'new');
+    assert.deepEqual(r.events, ['review one', 'review two']);
+    await ackPoll(poll, 'old', { first: '1' });
+    enqueueSessionEvent('old', 'resumed');
+    assert.deepEqual((await ackPoll(poll, 'old')).events, ['resumed'], 'a poll on the old id ends the redirect');
+  });
+
+  it('restores pending reviews once per board run, without doubles', async () => {
+    const { configureSessionEvents, enqueueSessionEvent, poll } = loadDoorbell();
+    let calls = 0;
+    configureSessionEvents({
+      restore: async () => {
+        calls++;
+        return [{ text: 'saved review', marker: 'm10' }, { text: 'queued review', marker: 'm11' }];
+      },
+    });
+    enqueueSessionEvent('a7', 'queued review', { marker: 'm11' });
+    assert.deepEqual((await ackPoll(poll, 'a7', { first: '1' })).events, ['queued review', 'saved review']);
+    await ackPoll(poll, 'a7');
+    assert.equal(calls, 1);
+  });
+
+  it('keeps the lines of a poll whose request closed', async () => {
+    const { enqueueSessionEvent, handleSessionEvents, sessionEventBuckets } = loadDoorbell();
+    let onClose;
+    const req = { params: { sessionId: 'a8' }, query: { wait: 60 }, on: (_e, fn) => (onClose = fn), removeListener() {} };
+    const res = { writableEnded: false, json: () => (res.writableEnded = true) };
+    await handleSessionEvents(req, res);
+    onClose();
+    enqueueSessionEvent('a8', 'review', { marker: 'm12' });
+    assert.equal(sessionEventBuckets.get('a8').queue.length, 1);
   });
 });
 
@@ -191,15 +286,13 @@ describe('task.moved line format', () => {
     assert.equal((await poll('s1')).events.length, 1);
   });
 
-  it('reports a listener only while a doorbell is waiting, and mints no bucket asking', async () => {
-    const { sessionEventBuckets, hasSessionListener, enqueueSessionEvent, poll } = loadDoorbell();
-    assert.equal(hasSessionListener('s4'), false);
+  it('knows a doorbell once it has polled, between polls too, and mints no bucket asking', async () => {
+    const { sessionEventBuckets, hasDoorbell, poll } = loadDoorbell();
+    assert.equal(hasDoorbell('s4'), false);
     assert.equal(sessionEventBuckets.size, 0);
-    const pending = poll('s4', 60);
-    assert.equal(hasSessionListener('s4'), true);
-    enqueueSessionEvent('s4', 'cck:1 review.submitted comments=1 file=x');
-    await pending;
-    assert.equal(hasSessionListener('s4'), false);
+    await poll('s4');
+    assert.equal(hasDoorbell('s4'), true);
+    assert.equal(sessionEventBuckets.size, 0);
   });
 
   it('keeps a review file path with spaces whole at the end of the line', () => {

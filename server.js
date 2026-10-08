@@ -3524,7 +3524,8 @@ const {
   formatReviewSubmitted,
   formatTaskMoved,
   handleSessionEvents,
-  hasSessionListener,
+  hasDoorbell,
+  configureSessionEvents,
 } = require('./lib/session-events');
 app.get('/api/sessions/:sessionId/events', handleSessionEvents);
 
@@ -4159,6 +4160,23 @@ app.delete('/api/panes/:sessionId/:paneId', (req, res) => {
 // carries one line, and the file is what each route points at.
 const REVIEW_DIR = path.join(CCK_DIR, 'reviews');
 const REVIEW_KIND_RE = /^[a-z]{1,20}$/;
+
+// `<ts>.pending` holds the doorbell line of a review the mod has not acked yet.
+configureSessionEvents({
+  onDelivered: (entry) => fs.unlink(entry.marker).catch(() => {}),
+  restore: async (sessionId) => {
+    if (!isUUID(sessionId)) return [];
+    const dir = path.join(REVIEW_DIR, sessionId);
+    const names = (await fs.readdir(dir).catch(() => [])).filter((n) => n.endsWith('.pending')).sort();
+    const lines = [];
+    for (const name of names) {
+      const marker = path.join(dir, name);
+      const text = await fs.readFile(marker, 'utf8').catch(() => '');
+      if (text) lines.push({ text, marker });
+    }
+    return lines;
+  },
+});
 const REVIEW_MAX_COMMENTS = 50;
 const REVIEW_MAX_CHARS = 4000;
 
@@ -4227,8 +4245,11 @@ app.post('/api/sessions/:sessionId/review', async (req, res) => {
     await fs.writeFile(file, markdown);
 
     let delivered = null;
-    if (boardEventsEnabled() && hasSessionListener(sessionId)) {
-      enqueueSessionEvent(sessionId, formatReviewSubmitted(src.items.length, src.label, file));
+    if (boardEventsEnabled() && hasDoorbell(sessionId)) {
+      const line = formatReviewSubmitted(src.items.length, src.label, file);
+      const marker = file.replace(/\.md$/, '.pending');
+      await fs.writeFile(marker, line);
+      enqueueSessionEvent(sessionId, line, { marker });
       delivered = 'doorbell';
     } else if (
       terminal.authorized(req.get('x-terminal-token')) &&
