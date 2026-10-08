@@ -12693,18 +12693,19 @@ function paneById(id) {
   return id == null ? activePane(sid) : paneLayout(sid).panes.find((p) => p.id === id) || null;
 }
 
-function reloadPane(id) {
+async function reloadPane(id) {
   const pane = paneById(id);
   if (!pane) return;
   const sid = paneSessionId();
   const view = paneFrames.get(`${sid}/${pane.id}`);
   if (pane.kind !== 'url' && view) {
-    reloadPaneView(sid, pane, view);
-    return;
+    await reloadPaneView(sid, pane, view);
+  } else {
+    unmountPane(sid, pane.id);
+    paneRefused.delete(pane.target);
+    syncPanes();
   }
-  unmountPane(sid, pane.id);
-  paneRefused.delete(pane.target);
-  syncPanes();
+  showToast('Pane reloaded', 'success');
 }
 
 function openPaneExternally(id) {
