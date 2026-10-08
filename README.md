@@ -111,7 +111,7 @@ With no subcommand, `claude-code-kanban` starts the server. Subcommands talk to 
 - `task list` and `project list` to read tasks and projects.
 - `doc link|unlink|list|preview` to link a file or URL to a session, or show it in the preview.
 - `pane add|rm|list` to add live panes to a session's view.
-- `dispatch start|list` to start sessions with a task in the board's terminal.
+- `dispatch start|list|end` to start sessions with a task in the board's terminal, and end them.
 - `skills get <name>` to print the guide for a skill bundled with this version.
 
 Run `claude-code-kanban --help` or see the [CLI reference](https://nikiforovall.blog/claude-code-kanban/reference/cli/).

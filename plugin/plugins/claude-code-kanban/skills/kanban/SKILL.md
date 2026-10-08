@@ -19,7 +19,7 @@ This session id is `${CLAUDE_SESSION_ID}`. `--session` defaults to it through `$
 | `session` | `list` · `search <text>` · `open <id>` focuses it · `view <id>` stats and transcript path · `plan <id>` · `agents <id>` · `pin <id>` |
 | `task` | `list` for a session, a project or the whole board |
 | `project` | `list` |
-| `dispatch` | `start`, `list` — run `/claude-code-kanban:dispatch` instead |
+| `dispatch` | `start`, `list`, `end` — run `/claude-code-kanban:dispatch` instead |
 
 ## Run a command
 

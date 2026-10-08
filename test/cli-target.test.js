@@ -8,11 +8,15 @@ const path = require('node:path');
 
 const SERVER = path.join(__dirname, '..', 'server.js');
 
-function tempConfigDir(beacon) {
+function tempConfigDir(beacon, token) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cck-cli-'));
   if (beacon) {
     fs.mkdirSync(path.join(dir, '.cck'));
     fs.writeFileSync(path.join(dir, '.cck', 'server.json'), JSON.stringify(beacon));
+  }
+  if (token) {
+    fs.mkdirSync(path.join(dir, '.cck', 'terminal-tokens'));
+    fs.writeFileSync(path.join(dir, '.cck', 'terminal-tokens', `${beacon.port}.json`), JSON.stringify({ pid: process.pid, token }));
   }
   return dir;
 }
@@ -130,15 +134,59 @@ describe('CLI server resolution', () => {
     });
     await new Promise((r) => srv.listen(0, '127.0.0.1', r));
     try {
-      const port = srv.address().port;
-      const dir = tempConfigDir({ port, pid: process.pid });
-      fs.mkdirSync(path.join(dir, '.cck', 'terminal-tokens'));
-      fs.writeFileSync(path.join(dir, '.cck', 'terminal-tokens', `${port}.json`), JSON.stringify({ pid: process.pid, token: 't' }));
+      const dir = tempConfigDir({ port: srv.address().port, pid: process.pid }, 't');
       const argv = ['dispatch', 'start', '--spec', 'x', '--cwd', dir, '--name', 'a', '--', '--permission-mode', 'auto', '--worktree'];
       assert.equal((await runCli(argv, { CLAUDE_CONFIG_DIR: dir })).code, 0);
       assert.deepEqual(body.claudeArgs, ['--permission-mode', 'auto', '--worktree']);
       assert.equal(body.name, 'a');
       assert.equal(body.worktree, false);
+    } finally {
+      srv.close();
+    }
+  });
+
+  it('dispatch end ends one of this session\'s dispatches, by id prefix or name', async () => {
+    const parent = '11111111-1111-4111-8111-111111111111';
+    const running = [
+      { session: 'aaaa1111-0000-4000-8000-000000000001', name: 'api-worker', startedAt: 1 },
+      { session: 'aaaa2222-0000-4000-8000-000000000002', name: 'ui-worker', startedAt: 2 },
+    ];
+    const seen = [];
+    const srv = http.createServer((req, res) => {
+      seen.push(`${req.method} ${req.url} ${req.headers['x-terminal-token'] || ''}`.trim());
+      if (req.method === 'DELETE') return res.writeHead(204).end();
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ running }));
+    });
+    await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    try {
+      const dir = tempConfigDir({ port: srv.address().port, pid: process.pid }, 't');
+      const env ={ CLAUDE_CONFIG_DIR: dir, CLAUDE_CODE_SESSION_ID: parent };
+      const list = `GET /api/dispatch?parent=${parent}`;
+
+      const byName = await runCli(['dispatch', 'end', '--name', 'api-worker'], env);
+      assert.equal(byName.code, 0);
+      assert.match(byName.stdout, /Ended session aaaa1111-/);
+      assert.deepEqual(seen.splice(0), [list, `DELETE /api/terminals/${running[0].session} t`]);
+
+      assert.equal((await runCli(['dispatch', 'end', 'aaaa2222'], env)).code, 0);
+      assert.deepEqual(seen.splice(0), [list, `DELETE /api/terminals/${running[1].session} t`]);
+
+      const ambiguous = await runCli(['dispatch', 'end', 'aaaa'], env);
+      assert.equal(ambiguous.code, 1);
+      assert.match(ambiguous.stderr, /"aaaa" matches 2 dispatches:\n {2}aaaa2222-.+ui-worker\n {2}aaaa1111-.+api-worker/);
+      const unknown = await runCli(['dispatch', 'end', '--name', 'nope'], env);
+      assert.equal(unknown.code, 1);
+      assert.match(unknown.stderr, /No running dispatch matches "nope"/);
+      assert.deepEqual(seen.splice(0), [list, list]);
+
+      const none = await runCli(['dispatch', 'end'], env);
+      assert.equal(none.code, 1);
+      assert.match(none.stdout, /Usage: claude-code-kanban dispatch end/);
+      const both = await runCli(['dispatch', 'end', 'aaaa1111', '--name', 'api-worker'], env);
+      assert.equal(both.code, 1);
+      assert.match(both.stderr, /Give one of <session id or prefix> or --name/);
+      assert.deepEqual(seen, []);
     } finally {
       srv.close();
     }

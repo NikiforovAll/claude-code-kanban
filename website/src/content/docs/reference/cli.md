@@ -323,6 +323,14 @@ Lists the sessions that the current session started and that still run in the bo
 
 The list lives in the server's memory. A session leaves it when its terminal ends, and a server restart clears it.
 
+### dispatch end
+
+```bash
+claude-code-kanban dispatch end (<session id or prefix> | --name <n>) [--json]
+```
+
+Ends the terminal of one session from `dispatch list`, matched by its id, an id prefix or its `--name`. It finds the session in the same list as `dispatch list` without `--all`, so inside Claude Code it ends only sessions the current session started. When no session or more than one session matches, it prints the matches and exits with 1. It reads the terminal token the same way as `dispatch start`. The worktree stays.
+
 ## skills get
 
 ```bash
@@ -338,7 +346,7 @@ Prints a guide that ships with this version. The only guide now is `dispatch`, w
 | `CCK_URL` | Full base URL that subcommands connect to. Wins over `PORT` and `server.json`. |
 | `PORT` | The server port, and the port that subcommands connect to. |
 | `CLAUDE_CONFIG_DIR`, `CLAUDE_DIR` | Config dir, when `--dir` is not given. |
-| `CLAUDE_CODE_SESSION_ID` | Set by Claude Code. Default for `--session` in `doc` and `pane`, after `PREVIEW_SESSION` (see [doc](#doc)). `dispatch start` records it as the parent. `dispatch list` uses it to find your dispatches. |
+| `CLAUDE_CODE_SESSION_ID` | Set by Claude Code. Default for `--session` in `doc` and `pane`, after `PREVIEW_SESSION` (see [doc](#doc)). `dispatch start` records it as the parent. `dispatch list` and `dispatch end` use it to find your dispatches. |
 | `PREVIEW_SESSION` | First default for `--session` in `doc` and `pane`. |
 
 For server and terminal settings, see [Configuration](/claude-code-kanban/reference/configuration/).

@@ -224,7 +224,7 @@ const COMMANDS = {
     },
   },
   dispatch: {
-    summary: 'Start a Claude Code session for a task in cck\'s terminal',
+    summary: 'Start, list and end Claude Code sessions for tasks in cck\'s terminal',
     verbs: {
       start: {
         summary: 'Start claude in cck\'s terminal with a task; prints the session id',
@@ -256,6 +256,18 @@ const COMMANDS = {
           '--json': 'Output JSON',
         },
         run: runDispatchListCli,
+      },
+      end: {
+        summary: 'End the terminal of a session this session started',
+        usage: 'claude-code-kanban dispatch end (<session id or prefix> | --name <n>) [--json]',
+        flags: {
+          '<session id or prefix>': 'A session from `dispatch list`',
+          '--name <n>': 'The session\'s --name from dispatch start',
+          '--json': 'Output JSON',
+        },
+        notes: 'Needs the terminal token, like dispatch start. The worktree stays.',
+        examples: ['claude-code-kanban dispatch end --name api-worker'],
+        run: runDispatchEndCli,
       },
     },
   },
@@ -1067,20 +1079,26 @@ function textArg(args, name) {
   return file ? fs.readFileSync(cliPath(file), 'utf8') : getArgValue(args, name);
 }
 
-async function runDispatchStartCli(argv) {
-  const sep = argv.indexOf('--');
-  const args = sep === -1 ? argv : argv.slice(0, sep);
-  const claudeArgs = sep === -1 ? [] : argv.slice(sep + 1);
+function readTerminalToken() {
   const port = cliTargetPort();
   if (port === null) {
     console.error(unreachable());
-    return 1;
+    return null;
   }
   const token = port && readCckJson(`terminal-tokens/${port}.json`)?.token;
   if (!token) {
     console.error(`No terminal token for ${displayPath(getClaudeDir())} at ${cliBaseUrl()}. The cck server must be running with the terminal enabled.`);
-    return 1;
+    return null;
   }
+  return token;
+}
+
+async function runDispatchStartCli(argv) {
+  const sep = argv.indexOf('--');
+  const args = sep === -1 ? argv : argv.slice(0, sep);
+  const claudeArgs = sep === -1 ? [] : argv.slice(sep + 1);
+  const token = readTerminalToken();
+  if (!token) return 1;
   let spec;
   try { spec = textArg(args, 'spec'); } catch (e) { console.error(e.message); return 1; }
   if (!spec) {
@@ -1120,14 +1138,50 @@ async function runDispatchStartCli(argv) {
   } catch (e) { reportCliError(e); return 1; }
 }
 
-async function runDispatchListCli(args) {
+async function fetchDispatches(all) {
   const q = new URLSearchParams();
-  if (!args.includes('--all') && process.env.CLAUDE_CODE_SESSION_ID) q.set('parent', process.env.CLAUDE_CODE_SESSION_ID);
+  if (!all && process.env.CLAUDE_CODE_SESSION_ID) q.set('parent', process.env.CLAUDE_CODE_SESSION_ID);
+  return (await cliGetJson(`/api/dispatch?${q}`, 'Dispatch list')).running.sort((a, b) => b.startedAt - a.startedAt);
+}
+
+const dispatchLine = (r) => `${r.session}${r.name ? `  ${r.name}` : ''}${r.group ? `  [${r.group}]` : ''}`;
+
+async function runDispatchListCli(args) {
   try {
-    const rows = (await cliGetJson(`/api/dispatch?${q}`, 'Dispatch list')).running.sort((a, b) => b.startedAt - a.startedAt);
+    const rows = await fetchDispatches(args.includes('--all'));
     if (args.includes('--json')) console.log(JSON.stringify(rows, null, 2));
     else if (!rows.length) console.log('No dispatches.');
-    else for (const r of rows) console.log(`${r.session}${r.name ? `  ${r.name}` : ''}${r.group ? `  [${r.group}]` : ''}`);
+    else for (const r of rows) console.log(dispatchLine(r));
+    return 0;
+  } catch (e) { reportCliError(e); return 1; }
+}
+
+async function runDispatchEndCli(args) {
+  const entry = COMMANDS.dispatch.verbs.end;
+  const name = getArgValue(args, 'name');
+  const id = positionals(args, ['--name'])[0];
+  if (!id && !name) {
+    printLeafHelp(entry);
+    return 1;
+  }
+  if (id && name) return usageError(entry, 'Give one of <session id or prefix> or --name.');
+  const token = readTerminalToken();
+  if (!token) return 1;
+  try {
+    const matches = (await fetchDispatches(false)).filter(r => name ? r.name === name : r.session.startsWith(id));
+    if (!matches.length) {
+      console.error(`No running dispatch matches "${name || id}". Run "claude-code-kanban dispatch list".`);
+      return 1;
+    }
+    if (matches.length > 1) {
+      console.error(`"${name || id}" matches ${matches.length} dispatches:`);
+      for (const r of matches) console.error(`  ${dispatchLine(r)}`);
+      return 1;
+    }
+    const { session } = matches[0];
+    if (!await cliSendJson('DELETE', `/api/terminals/${session}`, undefined, 'Dispatch end', { 'x-terminal-token': token })) return 1;
+    if (args.includes('--json')) console.log(JSON.stringify({ session }, null, 2));
+    else console.log(`Ended session ${session}`);
     return 0;
   } catch (e) { reportCliError(e); return 1; }
 }
