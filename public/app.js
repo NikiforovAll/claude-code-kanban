@@ -12998,12 +12998,12 @@ async function addPane(raw) {
   syncPanes();
 }
 
-// Shows the added pane. True when its session is still on screen.
+// Shows the added pane. True when its session is still on screen, null when the add failed.
 async function postPane(sid, body) {
   const res = await paneRequest('POST', `/api/panes/${encodeURIComponent(sid)}`, body);
   if (!res.pane) {
     showToast(res.error, 'error');
-    return false;
+    return null;
   }
   setActivePaneId(sid, res.pane.id);
   applyPaneLayout(sid, res.layout);
@@ -13021,16 +13021,26 @@ function openPreviewInPane() {
   openFileInPane(currentPreviewPath, closePreviewModal);
 }
 
-// The plan modal also opens other sessions' plans, and a pane goes to the session on screen.
-const planPaneAllowed = () => !!_pendingPlanPath && !!_planSessionId && _planSessionId === paneSessionId();
+// The plan modal also opens other sessions' plans; the pane goes to the plan's session, wherever it is.
+const planPaneAllowed = () => !!_pendingPlanPath && !!_planSessionId;
 
 function syncPlanPaneBtn() {
   document.getElementById('plan-pane-btn').style.display = planPaneAllowed() ? '' : 'none';
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
-function openPlanInPane() {
-  if (planPaneAllowed()) openFileInPane(_pendingPlanPath, closePlanModal);
+async function openPlanInPane() {
+  if (!planPaneAllowed()) return;
+  const sid = _planSessionId;
+  const target = _pendingPlanPath;
+  closePlanModal();
+  if (sid === paneSessionId()) return addPane(target);
+  if ((await postPane(sid, { target, base: getSessionBaseDir(sid) || undefined })) !== false) return;
+  const s = sessions.find((x) => x.id === sid);
+  showToast(`Plan added to ${s ? sessionDisplayName(s) : 'its session'}`, 'success', {
+    label: 'Open',
+    onClick: () => openSession(sid),
+  });
 }
 
 function msgDetailPaneSource() {
