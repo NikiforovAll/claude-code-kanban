@@ -5863,11 +5863,11 @@ async function deleteTask(taskId, sessionId) {
       await refreshCurrentView();
     } else {
       const error = await res.json().catch(() => ({}));
-      alert(`Failed to delete task: ${error.error || 'Unknown error'}`);
+      showToast(`Failed to delete task: ${error.error || 'Unknown error'}`, 'error');
     }
   } catch (error) {
     console.error('Failed to delete task:', error);
-    alert('Failed to delete task');
+    showToast('Failed to delete task', 'error');
   }
 }
 
@@ -10381,10 +10381,15 @@ document.addEventListener('click', (e) => {
     }
     if (sgHeader.dataset.transientGroup && e.target.closest('.sg-delete')) {
       const name = sgHeader.dataset.transientGroup;
-      if (confirm(`Delete group “${name}”? Its sessions go back to Projects.`)) {
+      confirmModal({
+        title: 'Delete Group',
+        message: `Delete group “${name}”? Its sessions go back to Projects.`,
+        okLabel: 'Delete',
+      }).then((ok) => {
+        if (!ok) return;
         sgDeleteTransient(name);
         renderSessions();
-      }
+      });
       return;
     }
     const groupId = sgHeader.dataset.groupId;
@@ -10395,10 +10400,15 @@ document.addEventListener('click', (e) => {
         return;
       }
       if (e.target.closest('.sg-delete')) {
-        if (confirm(`Delete group “${group.name}”? Its sessions and projects go back to Projects.`)) {
+        confirmModal({
+          title: 'Delete Group',
+          message: `Delete group “${group.name}”? Its sessions and projects go back to Projects.`,
+          okLabel: 'Delete',
+        }).then((ok) => {
+          if (!ok) return;
           sgDeleteGroup(groupId);
           renderSessions();
-        }
+        });
         return;
       }
     } else if (!sgHeader.dataset.transientGroup) return;
