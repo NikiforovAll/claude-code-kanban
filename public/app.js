@@ -5906,7 +5906,7 @@ const SHORTCUT_TABS = [
           { keys: ['Alt', '[ / ]'], combo: true, label: 'Change the tab in the focused side of a split' },
           { keys: ['|'], label: 'Split with the tab before it / unsplit (or drag a tab onto a side)' },
           { keys: ['{', '}'], label: 'Focus left / right side of a split' },
-          { keys: ['Alt', 'W'], combo: true, label: 'Close the focused tab' },
+          { keys: ['Alt', 'W'], combo: true, label: 'Close the focused pane' },
           { keys: ['Shift', 'F10'], combo: true, label: 'Focused tab menu (or Menu key)' },
         ],
       },
@@ -5937,7 +5937,7 @@ const SHORTCUT_TABS = [
           { keys: ['I'], label: 'Session info' },
           { keys: ['.'], label: 'Pin / unpin' },
           { keys: ['>'], label: 'Toggle sticky' },
-          { keys: ['Shift', 'F10'], combo: true, label: 'Move to group (or Menu key)' },
+          { keys: ['Shift', 'F10'], combo: true, label: 'Session menu: move to group, fork (or Menu key)' },
           { keys: ['Ctrl', 'D'], combo: true, label: 'Dismiss session (pinned: to Pinned group)' },
           { keys: ['Shift', 'L'], combo: true, label: 'Toggle session log' },
           { keys: ['Shift', 'M'], combo: true, label: 'Open last message' },
@@ -5965,7 +5965,7 @@ const SHORTCUT_TABS = [
         rows: [
           { keys: ['Ctrl', '`'], combo: true, label: 'Show / hide terminal' },
           { keys: ['Alt', '`'], combo: true, label: 'Focus terminal / page' },
-          { keys: ['Alt', 'Shift', '`'], combo: true, label: 'End and close terminal' },
+          { keys: ['Alt', 'Shift', '`'], combo: true, label: 'End terminal' },
           { keys: ['Ctrl', 'Shift', '`'], combo: true, label: 'All terminals' },
           { keys: ['Ctrl', '+/−/0'], combo: true, label: 'Terminal text size' },
         ],
@@ -6967,10 +6967,10 @@ async function confirmDismissBlockers(sid) {
   const has = [sticky && 'a sticky pin', terminal && 'a running terminal'].filter(Boolean).join(' and ');
   const [title, verb, okLabel] =
     sticky && terminal
-      ? ['Unpin and Close Terminal', 'Unpin, close the terminal', 'Unpin, close and dismiss']
+      ? ['Unpin and End Terminal', 'Unpin, end the terminal', 'Unpin, end and dismiss']
       : sticky
         ? ['Remove Sticky Pin', 'Remove the pin', 'Unpin and dismiss']
-        : ['Close Terminal', 'Close the terminal', 'Close and dismiss'];
+        : ['End Terminal', 'End the terminal', 'End and dismiss'];
   const ok = await confirmModal({ title, message: `"${name}" has ${has}. ${verb} and dismiss the session?`, okLabel });
   if (!ok) return false;
   if (sticky) unpinSession(sid);

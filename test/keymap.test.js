@@ -62,7 +62,7 @@ describe('help dialog keys', () => {
   it('macOS: Kanban\'s own keys, with symbols', () => {
     assert.deepEqual(helpKeys(row('Jump to memory'), MAC), ['⌃', 'M']);
     assert.deepEqual(helpKeys(row('Show / hide terminal'), MAC), ['⌃', '`']);
-    assert.deepEqual(helpKeys(row('End and close terminal'), MAC), ['⌥', '⇧', '`']);
+    assert.deepEqual(helpKeys(row('End terminal'), MAC), ['⌥', '⇧', '`']);
   });
 
   it('every hub row is flagged, and none of the others', () => {
