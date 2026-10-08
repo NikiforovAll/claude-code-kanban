@@ -5076,10 +5076,13 @@ function initSessionGroupsDnd() {
 // Non-drag path: right-click or long-press a session / project header.
 let sgLongPressTimer = null;
 
-function sgCloseMenu() {
+function sgCloseMenu(restore) {
   document.removeEventListener('keydown', sgMenuKeydown, true);
   const menu = document.getElementById('sg-menu');
-  if (menu) menu.remove();
+  if (menu) {
+    menu.remove();
+    takeMenuFocus(restore);
+  }
 }
 
 // Run in the capture phase: the global handler would otherwise read these keys as sidebar shortcuts.
@@ -5093,11 +5096,25 @@ function menuKeydown(e, items, close) {
   else if (matchKey(e, 'ArrowUp')) next = i < 0 ? items.length - 1 : (i - 1 + items.length) % items.length;
   else if (e.key === 'Home') next = 0;
   else if (e.key === 'End') next = items.length - 1;
-  else if (e.key === 'Escape' || e.key === 'Tab') close();
+  else if (e.key === 'Escape' || e.key === 'Tab') close(true);
   if (next !== null) items[next]?.focus();
 }
 
+let menuReturnFocus = null;
+
+// Only when nothing else has taken focus: it is on body, or still inside what is closing.
+function restoreFocusTo(el, closing) {
+  const now = document.activeElement;
+  if (el?.isConnected && (!now || now === document.body || closing?.contains(now))) el.focus();
+}
+
+function takeMenuFocus(restore) {
+  if (restore) restoreFocusTo(menuReturnFocus);
+  menuReturnFocus = null;
+}
+
 function placeMenu(menu, x, y) {
+  menuReturnFocus = document.activeElement;
   document.body.appendChild(menu);
   const rect = menu.getBoundingClientRect();
   menu.style.left = `${Math.min(x, window.innerWidth - rect.width - 8)}px`;
@@ -5181,7 +5198,7 @@ function sgOnTouchStart(e) {
 document.addEventListener('click', (e) => {
   const item = e.target.closest('.sg-menu-item');
   if (!item) {
-    if (!e.target.closest('.sg-menu')) sgCloseMenu();
+    if (!e.target.closest('.sg-menu')) sgCloseMenu(true);
     return;
   }
   e.stopPropagation();
@@ -5827,6 +5844,7 @@ function confirmModal({ title, message, okLabel }) {
   document.getElementById('confirm-modal-message').textContent = message;
   const buttons = [document.getElementById('confirm-cancel-btn'), document.getElementById('confirm-ok-btn')];
   buttons[1].textContent = okLabel;
+  const returnFocus = document.activeElement;
   modal.classList.add('visible');
   buttons[1].focus();
 
@@ -5845,6 +5863,7 @@ function confirmModal({ title, message, okLabel }) {
       modal.classList.remove('visible');
       document.removeEventListener('keydown', onKey);
       closeConfirmModal = null;
+      if (!ok) restoreFocusTo(returnFocus, modal);
       resolve(ok);
     };
   });
@@ -12827,9 +12846,13 @@ function copyPaneTarget(id) {
   copyText(pane.target, pane.kind === 'url' ? 'URL' : 'path');
 }
 
-function closePaneMenu() {
+function closePaneMenu(restore) {
   document.removeEventListener('keydown', paneMenuKeydown, true);
-  document.getElementById('pane-menu')?.remove();
+  const menu = document.getElementById('pane-menu');
+  if (menu) {
+    menu.remove();
+    takeMenuFocus(restore);
+  }
 }
 
 function paneMenuKeydown(e) {
@@ -13130,7 +13153,8 @@ document.addEventListener('click', (e) => {
   if (!menu) return;
   const act = e.target.closest('.pane-menu-item')?.dataset.paneAct;
   if (act) PANE_MENU_ACTIONS[act](menu.dataset.pane);
-  if (act || !menu.contains(e.target)) closePaneMenu();
+  if (act) closePaneMenu();
+  else if (!menu.contains(e.target)) closePaneMenu(true);
 });
 function focusSideOf(el) {
   if (el?.classList.contains('side-l')) focusPaneSide('l');
