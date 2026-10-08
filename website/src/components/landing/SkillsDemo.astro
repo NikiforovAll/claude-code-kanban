@@ -88,7 +88,7 @@ Report:      send the result to shop-main with SendMessage`,
       { kind: 'tool', name: 'TaskCreate', arg: '4 tasks', result: 'The cards are in Pending' },
       {
         kind: 'event',
-        text: '[kanban board] The user moved task 4 "Add a rate limit to /login" from pending to in_progress. Start this task now, and set it to completed with TaskUpdate when the work is done.',
+        text: '[kanban board] Start task 4 "Add a rate limit to /login" now. Mark it completed when done.',
       },
       { kind: 'tool', name: 'Read', arg: 'api/routes/login.js' },
       { kind: 'tool', name: 'Edit', arg: 'api/routes/login.js' },

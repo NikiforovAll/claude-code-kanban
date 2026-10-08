@@ -38,27 +38,28 @@ Example prompts:
 
 ## Steer a session from the board
 
-The plugin listens to the board in every session. When you drag one of the session's task cards to a new column, the session gets a prompt like this:
+The plugin listens to the board in every session. When you drag one of the session's task cards to a new column, the session gets a command like this:
 
 ```text
-[kanban board] The user moved task <id> "<subject>" from <from> to <to>. <what the move means> Description: <description>
+[kanban board] Start task <id> "<subject>" now. Mark it completed when done. Description: <description>
 ```
 
-The line has no `Description:` part when the card has no description. The line itself tells Claude what the move means, so no skill is needed:
+The line has no `Description:` part when the card has no description. Each move sends its own command, so no skill is needed:
 
-| Move | What Claude does |
+| Move | Command |
 |---|---|
-| To `in_progress` | Starts the task now, and sets it to `completed` with `TaskUpdate` when the work is done. The card then moves to Completed. |
-| From `in_progress` to `pending` | Stops work on the task and parks it. |
-| To `completed` | Stops. You consider the task done. |
-| To `cancelled` | Abandons the task. It undoes nothing unless you ask. |
+| To `in_progress` | `Start task <id> "<subject>" now. Mark it completed when done.` The card moves to Completed when Claude finishes. |
+| From `in_progress` to `pending` | `Stop work on task <id> "<subject>" and leave it for later.` |
+| To `completed` | `Stop work on task <id> "<subject>": it is done.` |
+| To `cancelled` | `Drop task <id> "<subject>". Keep the changes made so far.` |
+| Any other move | `Task <id> "<subject>" is now <status>.` |
 
 An idle session starts a turn at once. A busy session gets the prompt when its current turn ends, so a move to Pending does not stop a turn in progress. Moves you make in quick succession arrive as one prompt.
 
-When you send [review comments](/claude-code-kanban/guides/review-comments/) on a file or the plan, the session gets a prompt like this, and Claude reads the review file and does what the comments ask:
+When you send [review comments](/claude-code-kanban/guides/review-comments/) on a file or the plan, the session gets this command, and Claude reads the review file and does what the comments ask:
 
 ```text
-[kanban board] The user left <n> review comments on <source>. Address them: <review file>
+[kanban board] Address <n> review comments on <source>: <review file>
 ```
 
 Know these limits:
