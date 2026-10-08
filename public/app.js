@@ -4625,8 +4625,9 @@ function sgDetach(type, ref) {
 
 // Where a session renders inside a group: the project block it was moved under, its own
 // project's block, or - when the user lifted it out - the group's own loose list.
+// A transient dispatch group has no members: its sessions render under their own project's block.
 function sgHostOf(group, session) {
-  if (!group || !session) return null;
+  if (!group || group.transient || !session) return null;
   const m = group.members.find((x) => x.type === 'session' && x.ref === session.id);
   const isMemberProject = (path) => !!path && group.members.some((x) => x.type === 'project' && x.ref === path);
   if (m?.under && isMemberProject(m.under)) return m.under;
