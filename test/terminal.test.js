@@ -333,6 +333,19 @@ describe('ptyEnv', () => {
     assert.equal(env.PORT, undefined);
   });
 
+  it('names the terminal with CCK_TERMINAL_ID and drops an inherited one', () => {
+    const TID = 'dddddddd-0000-0000-0000-000000000001';
+    assert.equal(ptyEnv({ claudeDir: '/c', isDefaultDir: true, cckUrl: 'http://127.0.0.1:1', terminalId: TID }).CCK_TERMINAL_ID, TID);
+    const saved = process.env.CCK_TERMINAL_ID;
+    process.env.CCK_TERMINAL_ID = TID;
+    try {
+      assert.equal(ptyEnv({ claudeDir: '/c', isDefaultDir: true }).CCK_TERMINAL_ID, undefined);
+    } finally {
+      if (saved === undefined) delete process.env.CCK_TERMINAL_ID;
+      else process.env.CCK_TERMINAL_ID = saved;
+    }
+  });
+
   it('drops an inherited CCK_URL when the port is not known yet', () => {
     const saved = process.env.CCK_URL;
     process.env.CCK_URL = 'http://127.0.0.1:1';
@@ -563,6 +576,7 @@ describe('terminal restore', () => {
       which: (n) => n,
       isLiveElsewhere: (id) => id === ELSEWHERE,
       resolveCwd: (id) => ([A, B, ELSEWHERE].includes(id) ? os.tmpdir() : null),
+      isAllowedFolder: () => true,
       liveSessions: () => live,
       isPidAlive: (pid) => !dead.has(pid),
       exitPollMs: SAVE_MS,
@@ -599,6 +613,25 @@ describe('terminal restore', () => {
     assert.equal(envOf(A).CLAUDE_CODE_TASK_LIST_ID, 'shared-list');
     assert.equal(envOf(B).CLAUDE_CODE_TASK_LIST_ID, undefined);
     assert.deepEqual(store.data.taskLists, { [A]: 'shared-list' });
+    t.shutdown();
+  });
+
+  it('gives each terminal an id in its env and its list entry, and keeps it across a restore', async () => {
+    const TID = 'dddddddd-0000-0000-0000-000000000001';
+    const { t, pty, store } = service(true, { sessions: [A], terminalIds: { [A]: TID, [UNKNOWN]: TID } });
+    t.restore();
+    await until(() => t.list().length === 1);
+    assert.equal(t.list()[0].terminalId, TID);
+    assert.equal(pty.spawned[0].env.CCK_TERMINAL_ID, TID);
+
+    const r = await t.startNew({ id: UNKNOWN, cwd: os.tmpdir() });
+    assert.equal(r.id, UNKNOWN);
+    const fresh = t.list().find((s) => s.id === UNKNOWN).terminalId;
+    assert.match(fresh, /^[0-9a-f-]{36}$/);
+    assert.notEqual(fresh, TID);
+    assert.equal(pty.spawned[1].env.CCK_TERMINAL_ID, fresh);
+    await until(() => store.data.sessions.length === 2);
+    assert.deepEqual(store.data.terminalIds, { [A]: TID, [UNKNOWN]: fresh });
     t.shutdown();
   });
 

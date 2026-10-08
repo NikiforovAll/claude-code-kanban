@@ -108,7 +108,10 @@ describe('terminal host process', { skip: !ptyAvailable }, () => {
     const next = (t) => new Promise((resolve) => viewer.on('message', (m) => { if (m.t === t) resolve(m); }));
     await next('ready');
     await until(() => terminal.isRunning(SHELL_ID), 'state copy');
-    assert.deepEqual((await terminal.sessions()).map((s) => s.id), [SHELL_ID]);
+    const [listed] = await terminal.sessions();
+    assert.equal(listed.id, SHELL_ID);
+    assert.equal(terminal.hasTerminal(listed.terminalId), true);
+    assert.equal(terminal.hasTerminal('00000000-0000-4000-8000-000000000000'), false);
 
     const result = next('result');
     viewer.send({ t: 'go', ms: BLOCK_MS });

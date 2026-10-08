@@ -48,6 +48,7 @@ const { buildDecision, decisionFileName, isDecisionFile, approvalsFrom, boardRef
 const { getClaudeDir, getArgValue, storageNamespace, isDefaultClaudeDir } = require('./lib/claude-dir');
 const { readTerminalConfig } = require('./lib/terminal');
 const { createTerminalClient } = require('./lib/terminal-client');
+const { createShowStore, mountShowRoutes, showBodyParser, SHOW_PATH } = require('./lib/show');
 const { readLiveSessions, isPidAlive, isSessionLive } = require('./lib/live-sessions');
 const { createProcStats } = require('./lib/proc-stats');
 const { createDispatchRegistry } = require('./lib/dispatch');
@@ -660,6 +661,7 @@ app.param('name', (_req, res, next, val) => {
   next();
 });
 
+app.use(SHOW_PATH, showBodyParser());
 // Parse JSON bodies. A review of 50 comments at the field caps is about 450 kB.
 app.use(express.json({ limit: '1mb' }));
 // #endregion
@@ -3321,6 +3323,16 @@ function resolveSessionFolder(id) {
   return meta ? meta.project || meta.cwd || null : null;
 }
 
+// The host saves its terminals; cck adds the show map (terminal id → session id) beside them.
+const terminalsFile = jsonFile(TERMINALS_FILE);
+let savedTerminals = terminalsFile.load() || {};
+
+function saveTerminals() {
+  const kept = new Set(Object.values(savedTerminals.terminalIds || {}));
+  const showSessions = show.prune((id) => kept.has(id) || terminal.hasTerminal(id));
+  terminalsFile.save({ ...savedTerminals, showSessions });
+}
+
 const terminal = createTerminalClient({
   config: readTerminalConfig({ getArgValue }),
   net,
@@ -3328,7 +3340,11 @@ const terminal = createTerminalClient({
   isDefaultDir: isDefaultClaudeDir(CLAUDE_DIR),
   sessionsDir: SESSIONS_DIR,
   token: process.env.CCK_TERMINAL_TOKEN,
-  ...jsonFile(TERMINALS_FILE),
+  load: terminalsFile.load,
+  save: (data) => {
+    savedTerminals = data;
+    saveTerminals();
+  },
   // The project, not the last cwd: `claude --resume` finds a session under the
   // project dir it started in, and cwd drifts into subdirectories.
   resolveCwd: resolveSessionFolder,
@@ -3395,6 +3411,22 @@ app.delete('/api/terminals/:id', terminalRoute(async (req, res) => {
   if (err === 'not-found') return res.status(404).json({ error: 'no such terminal' });
   res.status(204).end();
 }));
+
+const show = createShowStore({
+  load: () => savedTerminals.showSessions,
+  onChange: saveTerminals,
+  resolveDir: (id) => {
+    const meta = sessionMetaFor(id);
+    return meta ? getScratchpadDir(id, meta) : null;
+  },
+});
+mountShowRoutes(app, {
+  store: show,
+  authorized: (token) => terminal.authorized(token),
+  hasTerminal: (id) => terminal.hasTerminal(id),
+  readPreviewFile,
+  broadcast,
+});
 
 // Served from node_modules, never a CDN: any script on this page can use the token.
 const XTERM_FILES = {
