@@ -5371,6 +5371,41 @@ code.language-tree .hljs-title {
   color: var(--text-muted);
   border-bottom: 1px solid var(--border);
 }
+.msg-log-loading {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 14px;
+  animation: boot-fade 0.2s ease-out var(--log-loading-delay, 0ms) both;
+}
+.msg-log-loading-row {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.msg-log-loading-row span {
+  height: 9px;
+  width: 75%;
+  border-radius: 4px;
+  background: var(--border);
+  animation: breathe 1.4s ease-in-out infinite;
+}
+.msg-log-loading-row span + span {
+  width: 45%;
+}
+.msg-log-loading-row:nth-child(even) span:first-child {
+  width: 60%;
+}
+.msg-log-loading-label {
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: center;
+}
+@media (prefers-reduced-motion: reduce) {
+  .msg-log-loading-row span {
+    animation: none;
+  }
+}
 
 /* #endregion */
 

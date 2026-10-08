@@ -696,6 +696,7 @@ function setActivityFilter(kind) {
 
 let lastCurrentTasksHash = '';
 let taskFetchSeq = 0;
+let switchSeq = 0;
 const taskRetry = { timer: null, delay: 0 };
 
 // The board refetches only on an SSE update that names the open session, so a failed refresh
@@ -709,8 +710,17 @@ function retryTaskFetch(sessionId) {
 }
 
 async function fetchTasks(sessionId) {
-  const seq = ++taskFetchSeq;
   const refresh = viewMode === 'session' && sessionId === currentSessionId;
+  const seq = ++taskFetchSeq;
+  const logSeq = refresh ? switchSeq : ++switchSeq;
+  let msgPage = null;
+  if (!refresh) {
+    if (!agentLogMode) msgPage = fetchSessionMessagesPage(sessionId).catch(() => null);
+    if (messagePanelOpen) scheduleLogLoading(logSeq);
+  } else if (logLoading) {
+    endLogLoading();
+    if (messagePanelOpen && !agentLogMode) renderMessages(currentMessages);
+  }
   // The PTY already runs, so the attach need not wait for the session fetch and the render after it.
   if (!refresh && termState.sessionId !== sessionId && runningTerminals.has(sessionId) && wantsTerminalFor(sessionId))
     openTerminal(sessionId, terminalOpenMode(sessionId));
@@ -730,6 +740,10 @@ async function fetchTasks(sessionId) {
     lastCurrentTasksHash = '';
     updateUrl();
     renderSession();
+    if (!agentLogMode) {
+      resetMessageScrollState();
+      fetchMessages(sessionId, msgPage);
+    }
     return;
   }
   if (seq !== taskFetchSeq) return;
@@ -768,12 +782,16 @@ async function fetchTasks(sessionId) {
     for (const k of Object.keys(teamColorMap)) delete teamColorMap[k];
     sessionJustSelected = true;
     resetAgentState();
+    if (messagePanelOpen && !agentLogMode) {
+      if (logLoading?.seq !== logSeq) scheduleLogLoading(logSeq);
+      showLogLoading(logSeq);
+    }
   }
   updateUrl();
   renderSession();
   renderSessions();
   fetchAgents(sessionId);
-  if (!agentLogMode) fetchMessages(sessionId);
+  if (!agentLogMode) fetchMessages(sessionId, msgPage);
 }
 //#endregion
 
@@ -827,6 +845,8 @@ async function fetchProjectView(projectPath) {
   viewMode = 'project';
   currentProjectPath = projectPath;
   currentSessionId = null;
+  switchSeq++;
+  endLogLoading();
   setCurrentMessages([]);
   lastMessagesHash = '';
   if (messagePanelOpen) toggleMessagePanel();
@@ -936,7 +956,7 @@ function toggleMessagePanel() {
   panel.classList.toggle('visible', messagePanelOpen);
   document.getElementById('message-toggle')?.classList.toggle('active', messagePanelOpen);
   if (messagePanelOpen && currentSessionId) {
-    if (currentMessages.length) renderMessages(currentMessages);
+    if (currentMessages.length || lastMessagesHash) renderMessages(currentMessages);
     fetchMessages(currentSessionId);
   }
   updateUrl();
@@ -1078,10 +1098,46 @@ async function fetchSessionMessagesPage(sessionId, { before, limit = MSG_PAGE_LI
   return res.ok ? res.json() : null;
 }
 
-async function fetchMessages(sessionId) {
+const LOG_LOADING_DELAY_MS = 150;
+let logLoading = null;
+
+function scheduleLogLoading(seq) {
+  clearTimeout(logLoading?.timer);
+  logLoading = { seq, startedAt: performance.now(), shown: false };
+  logLoading.timer = setTimeout(() => showLogLoading(seq), LOG_LOADING_DELAY_MS);
+}
+
+// Called again when the new session's header lands, so the old log never sits under it;
+// the delay keeps a fast switch from flashing the skeleton.
+function showLogLoading(seq) {
+  if (!logLoading || logLoading.seq !== seq || logLoading.shown) return;
+  logLoading.shown = true;
+  const delay = Math.max(0, Math.round(LOG_LOADING_DELAY_MS - (performance.now() - logLoading.startedAt)));
+  const rows = '<div class="msg-log-loading-row"><span></span><span></span></div>'.repeat(4);
+  document.getElementById('message-panel-pinned').innerHTML = '';
+  document.getElementById('message-panel-content').innerHTML =
+    `<div class="msg-log-loading" style="--log-loading-delay:${delay}ms" role="status" aria-live="polite">${rows}<div class="msg-log-loading-label">Loading session log…</div></div>`;
+}
+
+function endLogLoading() {
+  if (!logLoading) return;
+  clearTimeout(logLoading.timer);
+  logLoading = null;
+}
+
+async function fetchMessages(sessionId, page) {
+  const seq = switchSeq;
   try {
-    const data = await fetchSessionMessagesPage(sessionId);
-    if (!data) return;
+    const data = await (page || fetchSessionMessagesPage(sessionId));
+    if (seq !== switchSeq || sessionId !== currentSessionId) return;
+    if (!data) {
+      if (logLoading?.seq === seq && messagePanelOpen && !agentLogMode) {
+        endLogLoading();
+        document.getElementById('message-panel-content').innerHTML =
+          '<div class="msg-empty">Could not load the session log</div>';
+      }
+      return;
+    }
     let agentEnriched = false;
     for (const m of data.messages) {
       if (m.agentId && m.agentPrompt) {
@@ -1778,6 +1834,7 @@ async function discardWaiting() {
 }
 
 function renderMessages(messages) {
+  endLogLoading();
   const container = document.getElementById('message-panel-content');
   const pinnedContainer = document.getElementById('message-panel-pinned');
   pinnedContainer.innerHTML = agentLogMode ? '' : renderPinnedSection();
@@ -3568,6 +3625,8 @@ function showNoSession() {
   viewMode = 'none';
   if (agentLogMode) exitAgentLogMode();
   currentSessionId = null;
+  switchSeq++;
+  endLogLoading();
   ownerFilter = '';
   resetAgentState();
   currentTasks = [];

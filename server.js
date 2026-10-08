@@ -3047,7 +3047,12 @@ async function sendSessionMessages(req, res) {
     hasMore = messages.length > limit;
     if (hasMore) messages = messages.slice(-limit);
   }
-  const compactPromise = cachedByMtime(compactSummaryCache, jsonlPath, jsonlPath, () => readCompactSummaries(jsonlPath), []);
+  const compactedMsgs = messages
+    .filter(m => m.systemLabel === 'Compacted')
+    .sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
+  const compactPromise = compactedMsgs.some(m => !m.compactSummary)
+    ? cachedByMtime(compactSummaryCache, jsonlPath, jsonlPath, () => readCompactSummaries(jsonlPath), [])
+    : null;
   const agentMessages = messages.filter(m => m.tool === 'Agent' && m.toolUseId);
   if (agentMessages.length) {
     const progressMap = await getProgressMap(jsonlPath);
@@ -3101,11 +3106,8 @@ async function sendSessionMessages(req, res) {
       }
     }
   }
-  const compactSummaries = await compactPromise;
+  const compactSummaries = compactPromise ? await compactPromise : [];
   // Match compaction messages to summaries by chronological order
-  const compactedMsgs = messages
-    .filter(m => m.systemLabel === 'Compacted')
-    .sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
   for (let i = 0; i < compactedMsgs.length; i++) {
     if (i < compactSummaries.length) {
       compactedMsgs[i].compactSummary = compactSummaries[i].summary;

@@ -38,15 +38,31 @@ function makePage() {
     },
     apiPath: (strings, ...values) => strings.reduce((a, s, i) => a + s + (i < values.length ? values[i] : ''), ''),
   };
-  for (const f of 'openTerminal terminalOpenMode wantsTerminalFor exitAgentLogMode closeScratchpad closeDetailPanel expandPinnedFor setSwapPair markOpenSessionRead autoRevealLog loadPins resetMessageScrollState resetAgentState updateUrl fetchAgents fetchMessages renderSessions'.split(' '))
+  for (const f of 'openTerminal terminalOpenMode wantsTerminalFor exitAgentLogMode closeScratchpad closeDetailPanel expandPinnedFor setSwapPair markOpenSessionRead autoRevealLog loadPins resetMessageScrollState resetAgentState updateUrl fetchAgents renderSessions renderMessages'.split(' '))
     ctx[f] = () => {};
   ctx.renderSession = () => ctx.rendered.push(ctx.currentTasks.length);
+  ctx.log = [];
+  ctx.fetchSessionMessagesPage = (id) => {
+    ctx.log.push(`page ${id}`);
+    return Promise.resolve({ messages: [] });
+  };
+  ctx.fetchMessages = (id, page) => ctx.log.push(`messages ${id} ${page ? 'prefetched' : 'fresh'}`);
+  ctx.scheduleLogLoading = (seq) => {
+    ctx.logLoading = { seq };
+    ctx.log.push('schedule loading');
+  };
+  ctx.showLogLoading = () => ctx.log.push('show loading');
+  ctx.endLogLoading = () => {
+    ctx.logLoading = null;
+    ctx.log.push('end loading');
+  };
   vm.runInNewContext(
     [
       'var viewMode = "none", currentSessionId = null, currentTasks = [], agentLogMode = false;',
       'var revealedPlanSessionId = null, revealedStorageSessionId = null, lastSessionId = null;',
       'var currentPins, ownerFilter = "", sessionJustSelected = false;',
-      ...['lastCurrentTasksHash', 'taskFetchSeq', 'taskRetry'].map(decl),
+      'var messagePanelOpen = true, currentMessages = [], logLoading = null;',
+      ...['lastCurrentTasksHash', 'taskFetchSeq', 'switchSeq', 'taskRetry'].map(decl),
       fn('retryTaskFetch'),
       fn('fetchTasks'),
     ].join('\n'),
@@ -109,6 +125,29 @@ describe('fetchTasks', () => {
     await toB;
     assert.equal(page.ctx.currentSessionId, 'A');
     assert.equal(page.ctx.currentTasks.length, 1);
+  });
+
+  it('asks for the log with the tasks, not after them, and covers the wait', async () => {
+    let releaseB;
+    page.reply(URL_B, () => new Promise((r) => (releaseB = () => r(json([])))));
+    page.ctx.log.length = 0;
+    const toB = page.ctx.fetchTasks('B');
+    assert.deepEqual(page.ctx.log, ['page B', 'schedule loading']);
+    releaseB();
+    await toB;
+    assert.deepEqual(page.ctx.log.slice(2), ['show loading', 'messages B prefetched']);
+  });
+
+  it('ends a pending loading state when the open session is fetched again', async () => {
+    let releaseB;
+    page.reply(URL_B, () => new Promise((r) => (releaseB = () => r(json([])))));
+    page.reply(URL_A, () => json(TASKS));
+    const toB = page.ctx.fetchTasks('B');
+    await page.ctx.fetchTasks('A');
+    assert.equal(page.ctx.logLoading, null);
+    releaseB();
+    await toB;
+    assert.equal(page.ctx.currentSessionId, 'A');
   });
 
   it('still opens a session whose fetch fails, with an empty board', async () => {
