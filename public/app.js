@@ -2,23 +2,69 @@
 // Set by the server in index.html: null for the default Claude dir, a per-dir prefix otherwise.
 const STORAGE_NS = window.__STORAGE_NS__ ? `${window.__STORAGE_NS__}:` : '';
 // Theme is hub-wide (echoed to every app via hub:theme), so it stays shared across config dirs.
-const GLOBAL_KEYS = new Set(['theme', 'color-theme']);
+const THEME_KEY = 'theme';
+const COLOR_THEME_KEY = 'color-theme';
+const GLOBAL_KEYS = new Set([THEME_KEY, COLOR_THEME_KEY]);
+// localStorage names are kept as they are: renaming one drops what users saved under it.
+const MESSAGE_PANEL_OPEN_KEY = 'message-panel-open';
+const MESSAGE_PANEL_FULL_KEY = 'message-panel-full';
+const ACTIVITY_FILTER_KEY = 'activityFilter';
+const COLLAPSED_GROUPS_KEY = 'collapsedGroups';
+const PINNED_SESSIONS_KEY = 'pinned-sessions';
+const STICKY_SESSIONS_KEY = 'sticky-sessions';
+const GROUP_PINNED_KEY = 'groupPinnedSessions';
+const SIDEBAR_COLLAPSED_KEY = 'sidebar-collapsed';
+const SIDEBAR_WIDTH_KEY = 'sidebar-width';
+const PINNED_MESSAGES_PREFIX = 'pinned-messages-';
+const pinsKey = (sessionId) => PINNED_MESSAGES_PREFIX + sessionId;
+const modalFullscreenKey = (modalId) => `modal-fullscreen-${modalId}`;
+const sectionCollapsedKey = (containerId) => `${containerId}Collapsed`;
+const panelWidthKey = (panelId) => `${panelId}-width`;
 const nsKey = (k) => (GLOBAL_KEYS.has(k) ? k : STORAGE_NS + k);
 const { normalizeProjectPath, isExactProjectPath, isExactProjectFilter, projectMatcher, sessionProjectKey } =
   projectMatch;
-const store = {
-  keys() {
-    const out = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (k.startsWith(STORAGE_NS)) out.push(k.slice(STORAGE_NS.length));
+// Storage throws when the browser blocks site data or the quota is full. Saved UI state is
+// optional, so a failed read gives null and a failed write returns false.
+function namespacedStorage(area) {
+  const attempt = (fn, fallback) => {
+    try {
+      return fn(window[area]);
+    } catch {
+      return fallback;
     }
-    return out;
-  },
-  getItem: (k) => localStorage.getItem(nsKey(k)),
-  setItem: (k, v) => localStorage.setItem(nsKey(k), v),
-  removeItem: (k) => localStorage.removeItem(nsKey(k)),
-};
+  };
+  return {
+    keys: () =>
+      attempt((s) => {
+        const out = [];
+        for (let i = 0; i < s.length; i++) {
+          const k = s.key(i);
+          if (k.startsWith(STORAGE_NS)) out.push(k.slice(STORAGE_NS.length));
+        }
+        return out;
+      }, []),
+    getItem: (k) => attempt((s) => s.getItem(nsKey(k)), null),
+    setItem: (k, v) =>
+      attempt((s) => {
+        s.setItem(nsKey(k), v);
+        return true;
+      }, false),
+    removeItem: (k) => attempt((s) => s.removeItem(nsKey(k))),
+    readJson(k, fallback = null) {
+      try {
+        return JSON.parse(this.getItem(k)) ?? fallback;
+      } catch {
+        return fallback;
+      }
+    },
+    writeJson(k, v) {
+      return this.setItem(k, JSON.stringify(v));
+    },
+  };
+}
+const store = namespacedStorage('localStorage');
+// Every config dir's board is served on the hub's one kanban origin, so sessionStorage is shared.
+const tabStore = namespacedStorage('sessionStorage');
 
 // The baseline "nothing is filtered" state: what resetState() returns to, what updateUrl() omits
 // from the query string, and what decides whether a control tints ember in the header summary.
@@ -118,28 +164,19 @@ const dismissedSessionIds = loadDismissedSessions();
 let dismissSaveWarned = false;
 
 function loadDismissedSessions() {
-  try {
-    const saved = Object.entries(JSON.parse(store.getItem(DISMISSED_KEY) || '{}'));
-    return new Map(saved.filter(([, at]) => isDismissFresh(at)));
-  } catch {
-    return new Map();
-  }
+  const saved = store.readJson(DISMISSED_KEY, {});
+  return new Map(Object.entries(saved).filter(([, at]) => isDismissFresh(at)));
 }
 
 function persistDismissedSessions() {
   for (const [id, at] of dismissedSessionIds) if (!isDismissFresh(at)) dismissedSessionIds.delete(id);
-  try {
-    store.setItem(DISMISSED_KEY, JSON.stringify(Object.fromEntries(dismissedSessionIds)));
-  } catch (e) {
-    console.error('[dismissed-sessions]', e);
-    // The map still works in memory, so only the next reload is affected. Say so once.
-    if (!dismissSaveWarned) {
-      dismissSaveWarned = true;
-      showToast(
-        'Browser storage is full: dismissed sessions come back on reload. Storage → Clean Orphaned frees space.',
-        'error',
-      );
-    }
+  // The map still works in memory, so only the next reload is affected. Say so once.
+  if (!store.writeJson(DISMISSED_KEY, Object.fromEntries(dismissedSessionIds)) && !dismissSaveWarned) {
+    dismissSaveWarned = true;
+    showToast(
+      'Could not save to browser storage: dismissed sessions come back on reload. If storage is full, Storage → Clean Orphaned frees space.',
+      'error',
+    );
   }
 }
 
@@ -172,7 +209,9 @@ function getUrlState() {
     project: params.get('project'),
     owner: params.get('owner'),
     search: params.get('search'),
-    messages: params.has('messages') ? params.get('messages') === '1' : store.getItem('message-panel-open') === 'true',
+    messages: params.has('messages')
+      ? params.get('messages') === '1'
+      : store.getItem(MESSAGE_PANEL_OPEN_KEY) === 'true',
     projectView: params.get('projectView'),
   };
 }
@@ -196,32 +235,23 @@ function updateUrl() {
 
 const LAST_VIEW_KEY = 'lastView';
 function persistLastView() {
-  try {
-    const data = {
-      view: viewMode,
-      session: currentSessionId,
-      projectPath: viewMode === 'project' ? currentProjectPath : null,
-      // The project filter also lives in the URL, but the hub recreates each iframe at the app's
-      // base URL on reload, so the query string alone doesn't survive a hub refresh.
-      project: filterProject,
-    };
-    store.setItem(LAST_VIEW_KEY, JSON.stringify(data));
-  } catch (_) {}
+  store.writeJson(LAST_VIEW_KEY, {
+    view: viewMode,
+    session: currentSessionId,
+    projectPath: viewMode === 'project' ? currentProjectPath : null,
+    // The project filter also lives in the URL, but the hub recreates each iframe at the app's
+    // base URL on reload, so the query string alone doesn't survive a hub refresh.
+    project: filterProject,
+  });
 }
 function loadLastView() {
-  try {
-    return JSON.parse(store.getItem(LAST_VIEW_KEY)) || null;
-  } catch (_) {
-    return null;
-  }
+  return store.readJson(LAST_VIEW_KEY);
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
 function resetState() {
   history.replaceState(null, '', window.location.pathname);
-  try {
-    store.removeItem(LAST_VIEW_KEY);
-  } catch (_) {}
+  store.removeItem(LAST_VIEW_KEY);
   sessionFilter = FILTER_DEFAULTS.session;
   sessionLimit = SESSION_PAGE;
   filterProject = FILTER_DEFAULTS.project;
@@ -509,7 +539,7 @@ function toggleSection(containerId, chevronId) {
   const chevron = document.getElementById(chevronId);
   const collapsed = container.classList.toggle('collapsed');
   chevron.classList.toggle('rotated', collapsed);
-  store.setItem(`${containerId}Collapsed`, collapsed);
+  store.setItem(sectionCollapsedKey(containerId), collapsed);
 }
 
 function isWaitingSession(s) {
@@ -646,7 +676,7 @@ function setActivityFilter(kind) {
   } else {
     toggleActivityKind(kind);
   }
-  store.setItem('activityFilter', JSON.stringify([...activityFilter]));
+  store.writeJson(ACTIVITY_FILTER_KEY, [...activityFilter]);
   // active/waiting only make sense with the active session filter on
   const targetFilter = activityFilter.size > 0 ? 'active' : sessionFilter;
   if (targetFilter !== sessionFilter) {
@@ -875,7 +905,7 @@ function toggleMessagePanel() {
   const panel = document.getElementById('message-panel');
   messagePanelOpen = !messagePanelOpen;
   termState.panelHidden = false;
-  store.setItem('message-panel-open', messagePanelOpen);
+  store.setItem(MESSAGE_PANEL_OPEN_KEY, messagePanelOpen);
   panel.classList.toggle('visible', messagePanelOpen);
   document.getElementById('message-toggle')?.classList.toggle('active', messagePanelOpen);
   if (messagePanelOpen && currentSessionId) {
@@ -898,7 +928,7 @@ function applyMessagePanelFull(on) {
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML onclick
 function toggleMessagePanelFull() {
   const on = !document.getElementById('message-panel').classList.contains('full-width');
-  store.setItem('message-panel-full', on);
+  store.setItem(MESSAGE_PANEL_FULL_KEY, on);
   applyMessagePanelFull(on);
 }
 
@@ -910,7 +940,7 @@ function initMessagePanelFull() {
     new ResizeObserver(sync).observe(sidebar);
     sync();
   }
-  applyMessagePanelFull(store.getItem('message-panel-full') === 'true');
+  applyMessagePanelFull(store.getItem(MESSAGE_PANEL_FULL_KEY) === 'true');
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML onclick
@@ -918,7 +948,7 @@ async function openSessionWithBookmarks(sessionId) {
   if (!messagePanelOpen) {
     const panel = document.getElementById('message-panel');
     messagePanelOpen = true;
-    store.setItem('message-panel-open', 'true');
+    store.setItem(MESSAGE_PANEL_OPEN_KEY, 'true');
     panel.classList.add('visible');
     document.getElementById('message-toggle')?.classList.add('active');
   }
@@ -1838,15 +1868,12 @@ function getPinId(m) {
 }
 
 function loadPins(sessionId) {
-  try {
-    return JSON.parse(store.getItem(`pinned-messages-${sessionId}`)) || [];
-  } catch {
-    return [];
-  }
+  return readStoredList(pinsKey(sessionId));
 }
 
 function savePins(sessionId, pins) {
-  store.setItem(`pinned-messages-${sessionId}`, JSON.stringify(pins));
+  if (pins.length) store.writeJson(pinsKey(sessionId), pins);
+  else store.removeItem(pinsKey(sessionId));
 }
 
 function isPinned(m) {
@@ -2013,24 +2040,16 @@ let stickySessionIds = new Set();
 const deferredPinPlacement = new Set();
 
 function loadPinnedSessions() {
-  try {
-    return new Set(JSON.parse(store.getItem('pinned-sessions')) || []);
-  } catch {
-    return new Set();
-  }
+  return new Set(readStoredList(PINNED_SESSIONS_KEY));
 }
 
 function loadStickySessions() {
-  try {
-    return new Set(JSON.parse(store.getItem('sticky-sessions')) || []);
-  } catch {
-    return new Set();
-  }
+  return new Set(readStoredList(STICKY_SESSIONS_KEY));
 }
 
 function savePinnedSessions() {
-  store.setItem('pinned-sessions', JSON.stringify([...pinnedSessionIds]));
-  store.setItem('sticky-sessions', JSON.stringify([...stickySessionIds]));
+  store.writeJson(PINNED_SESSIONS_KEY, [...pinnedSessionIds]);
+  store.writeJson(STICKY_SESSIONS_KEY, [...stickySessionIds]);
 }
 
 // Mirror pin state to server so it can be queried by the CLI. UI remains source of truth for itself.
@@ -2468,12 +2487,12 @@ function _applyModalFullscreen(modalId, on) {
 function toggleModalFullscreen(modalId) {
   const on = !_modalEl(modalId).classList.contains('fullscreen');
   _applyModalFullscreen(modalId, on);
-  store.setItem(`modal-fullscreen-${modalId}`, String(on));
+  store.setItem(modalFullscreenKey(modalId), String(on));
 }
 
 function loadModalFullscreen() {
   _forEachFullscreenModal((modalId) => {
-    if (store.getItem(`modal-fullscreen-${modalId}`) === 'true') _applyModalFullscreen(modalId, true);
+    if (store.getItem(modalFullscreenKey(modalId)) === 'true') _applyModalFullscreen(modalId, true);
   });
 }
 
@@ -3634,9 +3653,7 @@ function getFilteredSessions() {
 
 function saveOrder(key, prev, next) {
   if (next.length === prev.length && next.every((id, i) => id === prev[i])) return prev;
-  try {
-    store.setItem(key, JSON.stringify(next));
-  } catch (_) {}
+  store.writeJson(key, next);
   return next;
 }
 
@@ -3831,7 +3848,7 @@ function renderSessions() {
     return;
   }
 
-  const groupPinned = store.getItem('groupPinnedSessions') !== 'false';
+  const groupPinned = store.getItem(GROUP_PINNED_KEY) !== 'false';
   const pinWeight = (s) => (isPlacedSticky(s.id) ? 2 : isInPinnedGroup(s) ? 1 : 0);
   const pinSort = (a, b) => pinWeight(b) - pinWeight(a);
   const renderGroupSessions = (sessions, pinKey) => {
@@ -4507,34 +4524,28 @@ function pinKey(projectPath) {
 }
 
 function loadSessionGroups() {
-  try {
-    const list = JSON.parse(store.getItem(SESSION_GROUPS_KEY) || 'null')?.groups;
-    sessionGroups = (Array.isArray(list) ? list : [])
-      .filter((g) => g && typeof g.id === 'string')
-      .map((g) => ({
-        id: g.id,
-        name: typeof g.name === 'string' && g.name.trim() ? g.name : 'Group',
-        members: (Array.isArray(g.members) ? g.members : [])
-          .filter((m) => m && (m.type === 'project' || m.type === 'session') && typeof m.ref === 'string')
-          .map((m) => {
-            const out = { type: m.type, ref: m.ref };
-            if (typeof m.under === 'string' && m.under) out.under = m.under;
-            if (m.loose === true) out.loose = true;
-            return out;
-          }),
-      }));
-    const released = JSON.parse(store.getItem(SESSION_GROUPS_KEY) || 'null')?.released;
-    sgReleased = new Set(Array.isArray(released) ? released.filter((id) => typeof id === 'string') : []);
-  } catch (_) {
-    sessionGroups = [];
-    sgReleased = new Set();
-  }
+  const saved = store.readJson(SESSION_GROUPS_KEY);
+  const list = saved?.groups;
+  sessionGroups = (Array.isArray(list) ? list : [])
+    .filter((g) => g && typeof g.id === 'string')
+    .map((g) => ({
+      id: g.id,
+      name: typeof g.name === 'string' && g.name.trim() ? g.name : 'Group',
+      members: (Array.isArray(g.members) ? g.members : [])
+        .filter((m) => m && (m.type === 'project' || m.type === 'session') && typeof m.ref === 'string')
+        .map((m) => {
+          const out = { type: m.type, ref: m.ref };
+          if (typeof m.under === 'string' && m.under) out.under = m.under;
+          if (m.loose === true) out.loose = true;
+          return out;
+        }),
+    }));
+  const released = saved?.released;
+  sgReleased = new Set(Array.isArray(released) ? released.filter((id) => typeof id === 'string') : []);
 }
 
 function persistSessionGroups() {
-  try {
-    store.setItem(SESSION_GROUPS_KEY, JSON.stringify({ version: 1, groups: sessionGroups, released: [...sgReleased] }));
-  } catch (_) {}
+  store.writeJson(SESSION_GROUPS_KEY, { version: 1, groups: sessionGroups, released: [...sgReleased] });
 }
 
 function sgGroupById(id) {
@@ -5395,9 +5406,7 @@ function setGroupCollapsed(header, collapsed) {
 }
 
 function persistCollapsedGroups() {
-  try {
-    store.setItem('collapsedGroups', JSON.stringify([...collapsedProjectGroups]));
-  } catch (_) {}
+  store.writeJson(COLLAPSED_GROUPS_KEY, [...collapsedProjectGroups]);
 }
 
 let prevActiveSessionIds = null; // null until primed by the first onlyNew pass
@@ -6543,12 +6552,10 @@ function _renderStorageSessions() {
 
   const msgMap = new Map();
   for (const key of store.keys()) {
-    if (!key.startsWith('pinned-messages-')) continue;
-    const sid = key.slice('pinned-messages-'.length);
-    try {
-      const pins = JSON.parse(store.getItem(key)) || [];
-      if (pins.length) msgMap.set(sid, { pins, key });
-    } catch {}
+    if (!key.startsWith(PINNED_MESSAGES_PREFIX)) continue;
+    const sid = key.slice(PINNED_MESSAGES_PREFIX.length);
+    const pins = loadPins(sid);
+    if (pins.length) msgMap.set(sid, { pins });
   }
 
   const allIds = [...new Set([...pinnedIds, ...msgMap.keys()])];
@@ -6628,7 +6635,7 @@ function _storageUnpinSession(id) {
 }
 
 function _storageClearSessionPins(sessionId) {
-  store.removeItem(`pinned-messages-${sessionId}`);
+  store.removeItem(pinsKey(sessionId));
   if (currentSessionId === sessionId) {
     currentPins = [];
     const el = document.getElementById('message-panel-pinned');
@@ -6639,20 +6646,16 @@ function _storageClearSessionPins(sessionId) {
 }
 
 function _storageUnpinMessage(sessionId, pinId) {
-  const key = `pinned-messages-${sessionId}`;
-  try {
-    const pins = JSON.parse(store.getItem(key)) || [];
-    const idx = pins.findIndex((p) => p.id === pinId);
-    if (idx < 0) return;
-    pins.splice(idx, 1);
-    if (pins.length) store.setItem(key, JSON.stringify(pins));
-    else store.removeItem(key);
-    if (currentSessionId === sessionId) {
-      currentPins = pins;
-      const el = document.getElementById('message-panel-pinned');
-      if (el) el.innerHTML = renderPinnedSection();
-    }
-  } catch {}
+  const pins = loadPins(sessionId);
+  const idx = pins.findIndex((p) => p.id === pinId);
+  if (idx < 0) return;
+  pins.splice(idx, 1);
+  savePins(sessionId, pins);
+  if (currentSessionId === sessionId) {
+    currentPins = pins;
+    const el = document.getElementById('message-panel-pinned');
+    if (el) el.innerHTML = renderPinnedSection();
+  }
   _renderStorageTab();
   _updateStorageTotal();
 }
@@ -6752,20 +6755,14 @@ function _storagePreviewScratchpad(key) {
 
 function _storagePreviewPin(sessionId, pinId) {
   closeStorageManager();
-  const key = `pinned-messages-${sessionId}`;
-  try {
-    const pins = JSON.parse(store.getItem(key)) || [];
-    const pin = pins.find((p) => p.id === pinId);
-    if (!pin) return;
-    document.getElementById('msg-detail-pin-btn').style.display = 'none';
-    currentMsgDetailIdx = null;
-    currentPinDetailId = null;
-    syncMsgDetailPaneBtn();
-    _renderPinToDetail(pin);
-    document.getElementById('msg-detail-modal').classList.add('visible');
-  } catch (e) {
-    console.error('_storagePreviewPin error:', e);
-  }
+  const pin = loadPins(sessionId).find((p) => p.id === pinId);
+  if (!pin) return;
+  document.getElementById('msg-detail-pin-btn').style.display = 'none';
+  currentMsgDetailIdx = null;
+  currentPinDetailId = null;
+  syncMsgDetailPaneBtn();
+  _renderPinToDetail(pin);
+  document.getElementById('msg-detail-modal').classList.add('visible');
 }
 
 function _storageDeleteScratchpad(key) {
@@ -6858,7 +6855,7 @@ function _findOrphanedKeys(known) {
   const orphaned = [];
   for (const id of pinnedSessionIds) if (!known.has(id)) orphaned.push(`__pinned__${id}`);
   for (const id of stickySessionIds) if (!known.has(id)) orphaned.push(`__sticky__${id}`);
-  const sessionKeyPrefixes = ['pinned-messages-', PAD_EMOJI_PREFIX, PREVIEW_STORAGE_PREFIX, PAD_LINKED_PREFIX];
+  const sessionKeyPrefixes = [PINNED_MESSAGES_PREFIX, PAD_EMOJI_PREFIX, PREVIEW_STORAGE_PREFIX, PAD_LINKED_PREFIX];
   for (const key of store.keys()) {
     const pad = _parsePadKey(key);
     if (pad?.kind === 'group') {
@@ -8024,12 +8021,8 @@ const PREVIEW_STORAGE_PREFIX = 'preview-paths-';
 let currentPreviewPath = null;
 
 function readStoredList(key) {
-  try {
-    const arr = JSON.parse(store.getItem(key) || '[]');
-    return Array.isArray(arr) ? arr : [];
-  } catch {
-    return [];
-  }
+  const arr = store.readJson(key);
+  return Array.isArray(arr) ? arr : [];
 }
 
 function getSessionPreviewPaths(sessionId) {
@@ -8063,7 +8056,7 @@ function removeSessionPreviewPath(sessionId, filePath) {
 }
 
 function saveSessionPreviewPaths(sessionId, paths) {
-  if (paths.length) store.setItem(PREVIEW_STORAGE_PREFIX + sessionId, JSON.stringify(paths.slice(0, MAX_LINKED_DOCS)));
+  if (paths.length) store.writeJson(PREVIEW_STORAGE_PREFIX + sessionId, paths.slice(0, MAX_LINKED_DOCS));
   else store.removeItem(PREVIEW_STORAGE_PREFIX + sessionId);
 }
 
@@ -8432,7 +8425,7 @@ function getOfferedPadPaths(sessionId) {
 }
 
 function setOfferedPadPaths(sessionId, paths) {
-  store.setItem(PAD_LINKED_PREFIX + sessionId, JSON.stringify(paths));
+  store.writeJson(PAD_LINKED_PREFIX + sessionId, paths);
 }
 
 async function loadSessionPads(sessionId) {
@@ -10357,13 +10350,13 @@ document.addEventListener('click', (e) => {
 
   if (e.target.closest('.pinned-ungroup-btn')) {
     e.stopPropagation();
-    store.setItem('groupPinnedSessions', 'false');
+    store.setItem(GROUP_PINNED_KEY, 'false');
     renderSessions();
     return;
   }
 
   if (e.target.closest('.pinned-regroup-banner')) {
-    store.setItem('groupPinnedSessions', 'true');
+    store.setItem(GROUP_PINNED_KEY, 'true');
     renderSessions();
     return;
   }
@@ -10497,21 +10490,21 @@ function applyTheme(light) {
 
 function toggleTheme() {
   const light = !isLightTheme();
-  store.setItem('theme', light ? 'light' : 'dark');
+  store.setItem(THEME_KEY, light ? 'light' : 'dark');
   applyTheme(light);
 }
 
 function loadTheme() {
-  const saved = store.getItem('theme');
+  const saved = store.getItem(THEME_KEY);
   const system = window.matchMedia('(prefers-color-scheme: light)');
   applyTheme(saved ? saved === 'light' : system.matches);
   // The prefers-color-scheme CSS only covers the first paint; the class decides after that, so it
   // follows the system until the user picks a theme.
   system.addEventListener('change', (e) => {
-    if (!store.getItem('theme')) applyTheme(e.matches);
+    if (!store.getItem(THEME_KEY)) applyTheme(e.matches);
   });
   buildThemeMenu();
-  const colorTheme = store.getItem('color-theme');
+  const colorTheme = store.getItem(COLOR_THEME_KEY);
   if (colorTheme) document.body.dataset.colorTheme = colorTheme;
   syncColorThemeSelect(colorTheme || 'ember');
 }
@@ -10569,10 +10562,10 @@ function syncColorThemeSelect(id) {
 function setColorTheme(id) {
   if (!id || id === 'ember') {
     delete document.body.dataset.colorTheme;
-    store.removeItem('color-theme');
+    store.removeItem(COLOR_THEME_KEY);
   } else {
     document.body.dataset.colorTheme = id;
-    store.setItem('color-theme', id);
+    store.setItem(COLOR_THEME_KEY, id);
   }
   syncColorThemeSelect(id);
 }
@@ -10584,13 +10577,13 @@ function expandSidebar() {
   const sidebar = document.querySelector('.sidebar');
   if (!sidebar.classList.contains('collapsed')) return;
   sidebar.classList.remove('collapsed');
-  store.setItem('sidebar-collapsed', false);
+  store.setItem(SIDEBAR_COLLAPSED_KEY, false);
 }
 
 function toggleSidebar() {
   const sidebar = document.querySelector('.sidebar');
   const collapsed = sidebar.classList.toggle('collapsed');
-  store.setItem('sidebar-collapsed', collapsed);
+  store.setItem(SIDEBAR_COLLAPSED_KEY, collapsed);
   if (collapsed) {
     sidebar.style.width = '';
     if (focusZone === 'sidebar') setFocusZone('board');
@@ -10602,10 +10595,10 @@ function toggleSidebar() {
 
 function loadSidebarState() {
   const sidebar = document.querySelector('.sidebar');
-  if (store.getItem('sidebar-collapsed') === 'true') {
+  if (store.getItem(SIDEBAR_COLLAPSED_KEY) === 'true') {
     sidebar.classList.add('collapsed');
   }
-  const w = store.getItem('sidebar-width');
+  const w = store.getItem(SIDEBAR_WIDTH_KEY);
   if (w) {
     sidebar.style.setProperty('--sidebar-width', w);
   }
@@ -10660,12 +10653,12 @@ function initSidebarResize() {
     },
     onEnd() {
       sidebar.classList.remove('resizing');
-      store.setItem('sidebar-width', sidebar.style.getPropertyValue('--sidebar-width'));
+      store.setItem(SIDEBAR_WIDTH_KEY, sidebar.style.getPropertyValue('--sidebar-width'));
     },
   });
 }
 
-function initPanelResize(panelId, handleId, cssVar, storageKey) {
+function initPanelResize(panelId, handleId, cssVar) {
   const panel = document.getElementById(panelId);
   const handle = document.getElementById(handleId);
   let startWidth;
@@ -10681,7 +10674,7 @@ function initPanelResize(panelId, handleId, cssVar, storageKey) {
     },
     onEnd() {
       panel.classList.remove('resizing');
-      store.setItem(storageKey, panel.style.getPropertyValue(cssVar));
+      store.setItem(panelWidthKey(panelId), panel.style.getPropertyValue(cssVar));
     },
   });
 }
@@ -10691,7 +10684,7 @@ function loadPanelWidths() {
     ['detail-panel', '--detail-panel-width'],
     ['message-panel', '--message-panel-width'],
   ].forEach(([id, cssVar]) => {
-    const w = store.getItem(`${id}-width`);
+    const w = store.getItem(panelWidthKey(id));
     if (w) document.getElementById(id).style.setProperty(cssVar, w);
   });
 }
@@ -11981,11 +11974,8 @@ async function paneRequest(method, path, body) {
 const PANE_STATE_CAP = 20;
 
 function loadPaneState(key) {
-  try {
-    const map = JSON.parse(sessionStorage.getItem(key));
-    if (map && typeof map === 'object') return map;
-  } catch {}
-  return {};
+  const map = tabStore.readJson(key);
+  return map && typeof map === 'object' ? map : {};
 }
 
 // Puts `sid` last, so the cap drops the least recent session. A null value removes it.
@@ -11993,14 +11983,12 @@ function savePaneState(key, map, sid, value) {
   delete map[sid];
   if (value != null) map[sid] = value;
   const capped = Object.fromEntries(Object.entries(map).slice(-PANE_STATE_CAP));
-  try {
-    sessionStorage.setItem(key, JSON.stringify(capped));
-  } catch {}
+  tabStore.writeJson(key, capped);
   return capped;
 }
 
-// `cck.paneActive`: {[sessionId]: paneId}.
-const PANE_ACTIVE_KEY = 'cck.paneActive';
+// {[sessionId]: paneId}.
+const PANE_ACTIVE_KEY = 'pane-active';
 let paneActive = loadPaneState(PANE_ACTIVE_KEY);
 
 function getActivePaneId(sid) {
@@ -12013,10 +12001,10 @@ function setActivePaneId(sid, id) {
   notePairFocus(sid, id);
 }
 
-// `cck.panePairs`: {[sessionId]: [{l, r, f}]}; sides are pane ids or 'board', `f` the side focused
+// {[sessionId]: [{l, r, f}]}; sides are pane ids or 'board', `f` the side focused
 // last. A tab is in one pair at most, and the pair that holds the active tab is the split on
 // screen. Clicks never change a pair; only the split keys and drags do.
-const PANE_PAIRS_KEY = 'cck.panePairs';
+const PANE_PAIRS_KEY = 'pane-pairs';
 const PANE_SPLIT_RATIO_KEY = 'pane-split-ratio';
 let panePairs = loadPaneState(PANE_PAIRS_KEY);
 const clampSplitRatio = (r) => Math.min(0.85, Math.max(0.15, r));
@@ -13281,8 +13269,7 @@ panePop.addEventListener('keydown', (e) => {
 // leaving the session view or switching sessions drops only the socket; coming back
 // reattaches and the server replays the screen.
 const TERMINAL_TOKEN_KEY = 'terminal-token';
-// Every config dir's board is served on the hub's one kanban origin, so sessionStorage is shared.
-const TERMINAL_FOCUS_KEY = nsKey('terminal-focus');
+const TERMINAL_FOCUS_KEY = 'terminal-focus';
 const TERMINAL_TOKEN_RE = /^[0-9a-f]{64}$/;
 const TERMINAL_MODES_KEY = 'terminal-sessions';
 const TERMINAL_FONT_KEY = 'terminal-font-size';
@@ -13335,17 +13322,11 @@ function readTerminalToken() {
     history.replaceState(null, '', location.pathname + location.search);
     return m[1];
   }
-  try {
-    return sessionStorage.getItem(TERMINAL_TOKEN_KEY);
-  } catch (_) {
-    return null;
-  }
+  return tabStore.getItem(TERMINAL_TOKEN_KEY);
 }
 
 function storeTerminalToken(token) {
-  try {
-    sessionStorage.setItem(TERMINAL_TOKEN_KEY, token);
-  } catch (_) {}
+  tabStore.setItem(TERMINAL_TOKEN_KEY, token);
 }
 
 let tokenRefresh = null;
@@ -13379,9 +13360,7 @@ function setTerminalMode(sessionId, on) {
   const modes = terminalModes();
   if (on) modes.add(sessionId);
   else modes.delete(sessionId);
-  try {
-    store.setItem(TERMINAL_MODES_KEY, JSON.stringify([...modes].slice(-50)));
-  } catch (_) {}
+  store.writeJson(TERMINAL_MODES_KEY, [...modes].slice(-50));
 }
 
 function wantsTerminal() {
@@ -13444,19 +13423,14 @@ function terminalShortcut(e, probe = false) {
 }
 
 function readSwapPair() {
-  try {
-    const pair = JSON.parse(store.getItem(SWAP_KEY));
-    if (Array.isArray(pair) && pair.length === 2) return pair;
-  } catch {}
-  return [null, null];
+  const pair = readStoredList(SWAP_KEY);
+  return pair.length === 2 ? pair : [null, null];
 }
 
 function setSwapPair(last, previous) {
   lastSessionId = last;
   previousSessionId = previous;
-  try {
-    store.setItem(SWAP_KEY, JSON.stringify([last, previous]));
-  } catch {}
+  store.writeJson(SWAP_KEY, [last, previous]);
 }
 
 async function swapToPreviousSession() {
@@ -13953,18 +13927,13 @@ window.addEventListener('focus', () => {
   });
 });
 window.addEventListener('pagehide', () => {
-  try {
-    if (termState.attached && termState.shown && terminalHadFocus) {
-      sessionStorage.setItem(TERMINAL_FOCUS_KEY, currentSessionId);
-    } else sessionStorage.removeItem(TERMINAL_FOCUS_KEY);
-  } catch (_) {}
+  if (termState.attached && termState.shown && terminalHadFocus) tabStore.setItem(TERMINAL_FOCUS_KEY, currentSessionId);
+  else tabStore.removeItem(TERMINAL_FOCUS_KEY);
 });
 
 function restoreTerminalFocus(sessionId) {
-  try {
-    if (sessionStorage.getItem(TERMINAL_FOCUS_KEY) === sessionId) termState.focusNext = true;
-    sessionStorage.removeItem(TERMINAL_FOCUS_KEY);
-  } catch (_) {}
+  if (tabStore.getItem(TERMINAL_FOCUS_KEY) === sessionId) termState.focusNext = true;
+  tabStore.removeItem(TERMINAL_FOCUS_KEY);
 }
 
 // The terminal stands in for the board, so it takes the board zone however focus arrives
@@ -14818,7 +14787,7 @@ if ('serviceWorker' in navigator) {
 
 //#region INIT
 loadTheme();
-if (store.getItem('sessions-filtersCollapsed') === 'true') {
+if (store.getItem(sectionCollapsedKey('sessions-filters')) === 'true') {
   document.getElementById('sessions-filters').classList.add('collapsed');
   document.getElementById('sessions-chevron').classList.add('rotated');
 }
@@ -14857,27 +14826,19 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 loadSidebarState();
-try {
-  const cg = JSON.parse(store.getItem('collapsedGroups') || '[]');
-  // biome-ignore lint/suspicious/useIterableCallbackReturn: forEach side-effect
-  cg.forEach((p) => collapsedProjectGroups.add(p));
-} catch (_) {}
+for (const p of readStoredList(COLLAPSED_GROUPS_KEY)) collapsedProjectGroups.add(p);
 loadSessionGroups();
 initSessionGroupsDnd();
 initSessionPicker();
 initProjectPicker();
-try {
-  const af = JSON.parse(store.getItem('activityFilter') || '[]');
-  // biome-ignore lint/suspicious/useIterableCallbackReturn: forEach side-effect
-  af.forEach((k) => activityFilter.add(k));
-} catch (_) {}
+for (const k of readStoredList(ACTIVITY_FILTER_KEY)) activityFilter.add(k);
 initSidebarResize();
 applyModalZoom();
 loadModalFullscreen();
 initModalResize();
 loadPanelWidths();
-initPanelResize('detail-panel', 'detail-panel-resize', '--detail-panel-width', 'detail-panel-width');
-initPanelResize('message-panel', 'message-panel-resize', '--message-panel-width', 'message-panel-width');
+initPanelResize('detail-panel', 'detail-panel-resize', '--detail-panel-width');
+initPanelResize('message-panel', 'message-panel-resize', '--message-panel-width');
 initMessagePanelFull();
 
 const msgContentEl = document.getElementById('message-panel-content');
