@@ -12371,7 +12371,7 @@ function mountPane(sid, pane) {
   if (existing) {
     paneFrames.delete(key);
     paneFrames.set(key, existing);
-    if (stalePaneViews.delete(existing)) reloadPaneView(sid, pane, existing);
+    if (stalePaneViews.delete(existing)) autoReloadPaneView(sid, pane, existing);
     return key;
   }
   const view = document.createElement('div');
@@ -12504,13 +12504,23 @@ function onPaneFileChanged(filePath) {
     const [sid, paneId] = key.split('/');
     const pane = paneLayout(sid).panes.find((p) => p.id === paneId);
     if (pane?.target !== filePath) continue;
-    if (view.classList.contains('on')) reloadPaneView(sid, pane, view);
+    if (view.classList.contains('on')) autoReloadPaneView(sid, pane, view);
     else stalePaneViews.add(view);
   }
 }
 
+let paneUpdatedToastTimer = 0;
+
+// An editor save can fire several change events, so one toast follows the last reload.
+async function autoReloadPaneView(sid, pane, view) {
+  if (!(await reloadPaneView(sid, pane, view))) return;
+  clearTimeout(paneUpdatedToastTimer);
+  paneUpdatedToastTimer = setTimeout(() => showToast('Pane updated', 'info'), 1000);
+}
+
 // Builds the new view hidden over the old one and swaps them once it has loaded and scrolled,
-// so a reload shows no blank frame and no jump. The newest reload of a view wins.
+// so a reload shows no blank frame and no jump. The newest reload of a view wins; the others
+// resolve false.
 async function reloadPaneView(sid, pane, view) {
   const key = view.dataset.key;
   const token = {};
@@ -12524,7 +12534,7 @@ async function reloadPaneView(sid, pane, view) {
   const fresh = document.createElement('div');
   fresh.dataset.key = key;
   await loadPaneView(sid, pane, fresh, frame && paneFrameScroll.get(frame));
-  if (!live()) return;
+  if (!live()) return false;
   fresh.className = view.className;
   fresh.style.visibility = 'hidden';
   view.after(fresh);
@@ -12541,7 +12551,7 @@ async function reloadPaneView(sid, pane, view) {
   }
   if (!live()) {
     fresh.remove();
-    return;
+    return false;
   }
   paneReloads.delete(key);
   fresh.className = view.className;
@@ -12549,6 +12559,7 @@ async function reloadPaneView(sid, pane, view) {
   view.remove();
   paneFrames.set(key, fresh);
   syncPaneReview();
+  return true;
 }
 
 // One reading width for every pane, kept apart from the modals': a modal's saved size
