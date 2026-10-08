@@ -495,6 +495,11 @@ function resolveSessionId(sessionId) {
   return (teamConfig?.leadSessionId) ? teamConfig.leadSessionId : sessionId;
 }
 
+function sessionMetaFor(sessionId) {
+  const metadata = loadSessionMetadata();
+  return metadata[sessionId] || metadata[resolveSessionId(sessionId)];
+}
+
 // Recent Claude Code releases auto-create a single-member "self-team" for every
 // session: a teams/session-<id>/config.json whose only member is the "team-lead"
 // (the session itself). These are not real multi-agent teams — surfacing them
@@ -1793,8 +1798,7 @@ app.get('/api/projects/:encodedPath/tasks', async (req, res) => {
 // API: Get session plan
 app.get('/api/sessions/:sessionId/plan', async (req, res) => {
   try {
-    const metadata = loadSessionMetadata();
-    const meta = metadata[req.params.sessionId] || metadata[resolveSessionId(req.params.sessionId)];
+    const meta = sessionMetaFor(req.params.sessionId);
     // Most sessions have no saved plan, and the info modal asks for one every time it
     // opens, so "no plan" is a normal answer rather than a 404 in the console.
     const slug = meta?.slug;
@@ -1813,8 +1817,7 @@ app.get('/api/sessions/:sessionId/plan', async (req, res) => {
 
 app.get('/api/sessions/:sessionId/loop', (req, res) => {
   try {
-    const metadata = loadSessionMetadata();
-    const meta = metadata[req.params.sessionId] || metadata[resolveSessionId(req.params.sessionId)];
+    const meta = sessionMetaFor(req.params.sessionId);
     if (!meta?.jsonlPath) return res.json({ wakeups: [], crons: [] });
     const state = refreshLoopInfoState(meta.jsonlPath);
     const filtered = filterActiveLoopInfo(buildLoopInfoFromState(state));
@@ -1856,8 +1859,7 @@ function getArtifactLinks(jsonlPath) {
 
 app.get('/api/sessions/:sessionId/artifacts', async (req, res) => {
   try {
-    const metadata = loadSessionMetadata();
-    const meta = metadata[req.params.sessionId] || metadata[resolveSessionId(req.params.sessionId)];
+    const meta = sessionMetaFor(req.params.sessionId);
     if (!meta?.jsonlPath) return res.json({ artifacts: [] });
     res.json({ artifacts: await getArtifactLinks(meta.jsonlPath) });
   } catch (error) {
@@ -1961,8 +1963,7 @@ function getCreatedPads(meta) {
 
 app.get('/api/sessions/:sessionId/pads', async (req, res) => {
   try {
-    const metadata = loadSessionMetadata();
-    const meta = metadata[req.params.sessionId] || metadata[resolveSessionId(req.params.sessionId)];
+    const meta = sessionMetaFor(req.params.sessionId);
     if (!meta?.jsonlPath) return res.json({ pads: [] });
     res.json({ pads: await getCreatedPads(meta) });
   } catch (error) {
@@ -2295,8 +2296,7 @@ app.post('/api/sessions/:sessionId/workflows/:wfId/open', (req, res) => {
 // API: Open session plan in VS Code
 app.post('/api/sessions/:sessionId/plan/open', (req, res) => {
   try {
-    const metadata = loadSessionMetadata();
-    const meta = metadata[req.params.sessionId] || metadata[resolveSessionId(req.params.sessionId)];
+    const meta = sessionMetaFor(req.params.sessionId);
     const slug = meta?.slug;
     if (!slug) return res.status(404).json({ error: 'No plan found' });
 
@@ -3011,8 +3011,7 @@ app.get('/api/sessions/:sessionId/agents/:agentId/messages/stream', (req, res) =
 async function sendSessionMessages(req, res) {
   const limit = Math.min(parseInt(req.query.limit, 10) || 10, 50);
   const before = req.query.before || null;
-  const metadata = loadSessionMetadata();
-  const meta = metadata[req.params.sessionId] || metadata[resolveSessionId(req.params.sessionId)];
+  const meta = sessionMetaFor(req.params.sessionId);
   const jsonlPath = meta?.jsonlPath;
   if (!jsonlPath) return res.json({ messages: [], hasMore: false, sessionId: req.params.sessionId });
   let messages, hasMore;
@@ -3102,8 +3101,7 @@ async function sendSessionMessages(req, res) {
 app.get('/api/sessions/:sessionId/messages', asyncRoute(sendSessionMessages));
 
 app.get('/api/sessions/:sessionId/tool-result/:toolUseId', asyncRoute(async (req, res) => {
-  const metadata = loadSessionMetadata();
-  const meta = metadata[req.params.sessionId] || metadata[resolveSessionId(req.params.sessionId)];
+  const meta = sessionMetaFor(req.params.sessionId);
   const jsonlPath = meta?.jsonlPath;
   if (!jsonlPath) return res.status(404).json({ error: 'session not found' });
   const content = await readFullToolResult(jsonlPath, req.params.toolUseId);
@@ -3208,8 +3206,7 @@ async function buildToolStats(jsonlPath) {
 }
 
 app.get('/api/sessions/:sessionId/tool-stats', async (req, res) => {
-  const metadata = loadSessionMetadata();
-  const meta = metadata[req.params.sessionId] || metadata[resolveSessionId(req.params.sessionId)];
+  const meta = sessionMetaFor(req.params.sessionId);
   const jsonlPath = meta?.jsonlPath;
   if (!jsonlPath) return res.status(404).json({ error: 'session not found' });
   try {
@@ -3222,8 +3219,7 @@ app.get('/api/sessions/:sessionId/tool-stats', async (req, res) => {
 });
 
 async function sendTranscriptImage(req, res, read) {
-  const metadata = loadSessionMetadata();
-  const meta = metadata[req.params.sessionId] || metadata[resolveSessionId(req.params.sessionId)];
+  const meta = sessionMetaFor(req.params.sessionId);
   const jsonlPath = meta?.jsonlPath;
   if (!jsonlPath) return res.status(404).end();
   const img = await read(jsonlPath);
