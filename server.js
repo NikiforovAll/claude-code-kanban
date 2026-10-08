@@ -4650,7 +4650,5 @@ async function prewarmCaches() {
       throw err;
     }
   });
-
-
-// #endregion
 }
+// #endregion

@@ -533,6 +533,7 @@ function fuzzyMatch(text, query) {
 
 //#endregion
 
+//#region SESSION_ACTIVITY
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
 function toggleSection(containerId, chevronId) {
   const container = document.getElementById(containerId);
@@ -751,14 +752,16 @@ async function fetchTasks(sessionId) {
     renderSession();
   }
 }
+//#endregion
 
-// #region TIMINGS
+//#region TIMINGS
 const WAITING_TTL_MS = 30 * 60 * 1000;
 const AGENT_LOG_MAX = 8;
 const LIVE_INDICATOR_MS = 10 * 1000;
 const JUST_NOW_MS = 60 * 1000;
-// #endregion
+//#endregion
 
+//#region AGENT_FETCHING
 function resetAgentState() {
   currentAgents = [];
   currentWaiting = null;
@@ -876,6 +879,7 @@ async function refreshProjectAgents() {
   lastAgentsHash = hash;
   renderAgentFooter();
 }
+//#endregion
 
 //#region MESSAGE_PANEL
 function setMessagePanelVisible(open) {
