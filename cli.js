@@ -632,9 +632,8 @@ async function runPaneListCli(args, entry) {
 
 async function printLinkedDocs(sessionId, asJson) {
   try {
-    const res = await cliFetch(`/api/document/links?session=${encodeURIComponent(sessionId)}`);
-    if (!res.ok) throw new Error(`Failed to fetch linked docs (${res.status})`);
-    const paths = (await res.json())[sessionId] || [];
+    const links = await cliGetJson(`/api/document/links?session=${encodeURIComponent(sessionId)}`, 'Linked docs');
+    const paths = links[sessionId] || [];
     if (asJson) console.log(JSON.stringify(paths, null, 2));
     else if (!paths.length) console.log(`No linked docs for session ${sessionId.slice(0, 8)}.`);
     else for (const p of paths) console.log(p);
@@ -667,9 +666,11 @@ async function fetchSessionsList(limit, pinnedIds = [], project = null) {
   const q = limit === null ? 'all' : String(limit);
   const pinnedQ = pinnedIds.length ? `&pinned=${pinnedIds.join(',')}` : '';
   const projectQ = project ? `&project=${encodeURIComponent(project)}` : '';
-  const res = await cliFetch(`/api/sessions?limit=${q}${pinnedQ}${projectQ}`);
-  if (!res.ok) throw new Error(`Failed to fetch sessions (${res.status})`);
-  return res.json();
+  return cliGetJson(`/api/sessions?limit=${q}${pinnedQ}${projectQ}`, 'Session list');
+}
+
+function fetchSessionsByIds(ids, label) {
+  return cliGetJson(`/api/sessions?limit=1&include=${ids.map(encodeURIComponent).join(',')}`, label);
 }
 
 async function fetchPinsMap() {
@@ -835,7 +836,7 @@ async function runSessionViewCli(args) {
   if (!resolved) return 1;
   let list;
   try {
-    list = await fetchSessionsList(null);
+    list = await fetchSessionsByIds([resolved.id], 'Session view');
   } catch (e) { reportCliError(e); return 1; }
   const s = list.find(x => x.id === resolved.id);
   if (!s) {
@@ -912,7 +913,7 @@ async function runSessionSearchCli(args) {
   if (!parsed.ok) return usageError(entry, parsed.error);
   try {
     const ids = (await cliGetJson(`/api/sessions/search?q=${encodeURIComponent(text)}`, 'Search')).slice(0, parsed.limit);
-    const list = ids.length ? await cliGetJson(`/api/sessions?limit=1&include=${ids.join(',')}`, 'Search') : [];
+    const list = ids.length ? await fetchSessionsByIds(ids, 'Search') : [];
     const byId = new Map(list.map(s => [s.id, s]));
     const rows = ids.map(id => byId.get(id) || { id });
     if (args.includes('--json')) {
@@ -1123,8 +1124,7 @@ async function runDispatchListCli(args) {
   const q = new URLSearchParams();
   if (!args.includes('--all') && process.env.CLAUDE_CODE_SESSION_ID) q.set('parent', process.env.CLAUDE_CODE_SESSION_ID);
   try {
-    const res = await cliFetch(`/api/dispatch?${q}`);
-    const rows = (await res.json()).running.sort((a, b) => b.startedAt - a.startedAt);
+    const rows = (await cliGetJson(`/api/dispatch?${q}`, 'Dispatch list')).running.sort((a, b) => b.startedAt - a.startedAt);
     if (args.includes('--json')) console.log(JSON.stringify(rows, null, 2));
     else if (!rows.length) console.log('No dispatches.');
     else for (const r of rows) console.log(`${r.session}${r.name ? `  ${r.name}` : ''}${r.group ? `  [${r.group}]` : ''}`);
