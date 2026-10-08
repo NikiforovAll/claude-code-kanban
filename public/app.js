@@ -2421,6 +2421,7 @@ function mountReplyReview(m, body, modal) {
       locate: replyLocateHint(m.timestamp),
     },
     onComment: () => setMsgDetailFollow(false),
+    onSent: closeMsgDetailModal,
   });
 }
 
