@@ -179,6 +179,15 @@ function writeJsonAtomicOrLog(file, obj, mode) {
   }
 }
 
+function readJsonOrNull(file) {
+  try { return JSON.parse(readFileSync(file, 'utf8')); } catch { return null; }
+}
+
+const jsonFile = (file) => ({
+  load: () => readJsonOrNull(file),
+  save: (data) => writeJsonAtomicOrLog(file, data),
+});
+
 function writePins(pins) {
   writeJsonAtomic(PINS_FILE, pins);
 }
@@ -390,12 +399,7 @@ function getGitBranch(cwd) {
   return branch;
 }
 
-const worktrees = createWorktreeStore({
-  load: () => {
-    try { return JSON.parse(readFileSync(WORKTREES_FILE, 'utf8')); } catch { return null; }
-  },
-  save: (data) => writeJsonAtomicOrLog(WORKTREES_FILE, data),
-});
+const worktrees = createWorktreeStore(jsonFile(WORKTREES_FILE));
 
 function getSessionLogStat(meta) {
   if (!meta.jsonlPath) return { mtime: null, hasMessages: false };
@@ -3307,10 +3311,7 @@ const terminal = createTerminalClient({
   isDefaultDir: isDefaultClaudeDir(CLAUDE_DIR),
   sessionsDir: SESSIONS_DIR,
   token: process.env.CCK_TERMINAL_TOKEN,
-  load: () => {
-    try { return JSON.parse(readFileSync(TERMINALS_FILE, 'utf8')); } catch { return null; }
-  },
-  save: (data) => writeJsonAtomicOrLog(TERMINALS_FILE, data),
+  ...jsonFile(TERMINALS_FILE),
   // The project, not the last cwd: `claude --resume` finds a session under the
   // project dir it started in, and cwd drifts into subdirectories.
   resolveCwd: resolveSessionFolder,
@@ -3397,30 +3398,17 @@ app.get('/vendor/xterm/:file', (req, res) => {
 // #endregion
 
 // #region DISPATCH
-const dispatched = createDispatchedStore({
-  load: () => {
-    try { return JSON.parse(readFileSync(DISPATCHED_FILE, 'utf8')); } catch { return null; }
-  },
-  save: (data) => writeJsonAtomicOrLog(DISPATCHED_FILE, data),
-});
+const dispatched = createDispatchedStore(jsonFile(DISPATCHED_FILE));
 
 const dispatches = createDispatchRegistry();
 
 const dispatchGroups = createGroupStore({
-  load: () => {
-    try { return JSON.parse(readFileSync(DISPATCH_GROUPS_FILE, 'utf8')); } catch { return null; }
-  },
-  save: (data) => writeJsonAtomicOrLog(DISPATCH_GROUPS_FILE, data),
+  ...jsonFile(DISPATCH_GROUPS_FILE),
   isAlive: (id) => terminal.isRunning(id) || isSessionLive(loadLiveSessions(), id),
   pinnedIds: () => new Set(Object.keys(readPins())),
 });
 
-const linkedDocs = createLinkedDocStore({
-  load: () => {
-    try { return JSON.parse(readFileSync(LINKED_DOCS_FILE, 'utf8')); } catch { return null; }
-  },
-  save: (data) => writeJsonAtomicOrLog(LINKED_DOCS_FILE, data),
-});
+const linkedDocs = createLinkedDocStore(jsonFile(LINKED_DOCS_FILE));
 
 // The board places a session from these alone, so it never has to move it later.
 function withDispatchPlacement(sessions) {
@@ -4010,7 +3998,7 @@ const panes = createPaneStore({
     const stamp = panesFileStamp();
     if (stamp === panesStamp) return undefined;
     panesStamp = stamp;
-    try { return JSON.parse(readFileSync(PANES_FILE, 'utf8')); } catch { return null; }
+    return readJsonOrNull(PANES_FILE);
   },
   save: (data) => {
     writeJsonAtomicOrLog(PANES_FILE, data);
