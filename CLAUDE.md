@@ -64,7 +64,7 @@ When modifying a feature, open **both** the JS region and the matching CSS regio
 
 ## CLI
 
-Subcommands live in a dispatch table in `cli.js` (`COMMANDS`). `server.js` delegates to `runCli(process.argv)` from `cli.js`. Help is generated from the table, one level at a time: `--help` lists the commands, `help <cmd>` its subcommands, `help <cmd> <sub>` (or `<cmd> <sub> --help`) the flags, notes and examples. There is no manual help text to maintain.
+Subcommands live in a dispatch table in `cli.js` (`COMMANDS`). `server.js` delegates to `runCli(process.argv)` from `cli.js`. Help is generated from the table, one level at a time: `--help` lists the commands, `help <cmd>` its subcommands, `help <cmd> <sub>` (or `<cmd> <sub> --help`) the flags, notes and examples. The server's flags print from `SERVER_FLAGS` in `cli.js`; a new server flag needs a row there and in the website's `reference/cli.md`. The help is read by agents, so keep each line short.
 
 **The help is the CLI reference.** The plugin skills point at it instead of listing flags, so a command change needs no skill change. **Every new command MUST be documented in the dispatch table** with `summary`, `usage`, `flags` (if any), and 1–2 `examples` where they help.
 

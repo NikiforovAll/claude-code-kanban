@@ -333,6 +333,20 @@ function resolveCliCommand(argv) {
   return { kind: 'leaf', name: `${noun} ${verb}`, entry: entry.verbs[verb], args: argv.slice(4) };
 }
 
+// The website's reference/cli.md has the same table; change both.
+const SERVER_FLAGS = [
+  ['--port <n>', 'PORT', 'Port (default 3541)'],
+  ['--open', '', 'Open the board in the browser'],
+  ['--dir <path>', 'CLAUDE_CONFIG_DIR', 'Config dir (default ~/.claude); also for --install'],
+  ['--enable-terminal', '', 'Turn on the embedded terminal'],
+  ['--terminal-shell <shell>', 'CCK_TERMINAL_SHELL', 'gitbash, a program on PATH, or a path'],
+  ['--host <addr>', 'HOST', 'Listen address (default 127.0.0.1)'],
+  ['--allowed-hosts <list>', 'ALLOWED_HOSTS', 'Extra Host header values, comma-separated'],
+  ['--<app>-url <url>', '<APP>_URL', 'Link to app: marketplace, cost, memory'],
+  ['--install, --uninstall', '', 'Install or remove the plugin'],
+  ['--yes', '', 'With --install: no prompt'],
+];
+
 function printTopHelp() {
   console.log('Usage: claude-code-kanban <command> [args] [--flags]\n');
   console.log('Commands:');
@@ -344,13 +358,11 @@ function printTopHelp() {
   console.log('\nFlags:');
   console.log('  --help, -h            Show help (top-level, noun-level, or leaf-level)');
   console.log('  --version, -v         Print version and exit');
-  console.log('\nServer mode (no subcommand):');
-  console.log('  --port <n>            Port to listen on (default 3541)');
-  console.log('  --dir <path>          Override Claude config dir (default ~/.claude); also targets --install/--uninstall');
-  console.log('  --open                Open browser on start');
-  console.log('  --install, --uninstall    Install or remove the plugin');
-  console.log('  --yes                 With --install: install without a prompt');
-  console.log('\nEnvironment:');
+  console.log('\nServer (no command; a flag wins over its env var):');
+  const flagPad = Math.max(...SERVER_FLAGS.map(([flag]) => flag.length)) + 2;
+  const envPad = Math.max(...SERVER_FLAGS.map(([, env]) => env.length)) + 2;
+  for (const [flag, env, desc] of SERVER_FLAGS) console.log(`  ${flag.padEnd(flagPad)}${env.padEnd(envPad)}${desc}`);
+  console.log('\nCommand env:');
   console.log('  CCK_URL               Server base URL, e.g. http://127.0.0.1:4795 (wins over PORT)');
   console.log('  PORT                  Server port (default: the one this config dir\'s server reports, else 3541)');
   console.log('  CLAUDE_CONFIG_DIR     Claude config dir whose board to use');
@@ -1131,4 +1143,4 @@ async function runSkillsGetCli(args) {
   return 0;
 }
 
-module.exports = { runCli, COMMANDS };
+module.exports = { runCli, COMMANDS, SERVER_FLAGS };
