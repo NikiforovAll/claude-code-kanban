@@ -6890,19 +6890,24 @@ async function cleanupOrphanedStorage() {
     return;
   }
   const orphaned = _findOrphanedKeys(known);
-  let pinsChanged = false;
+  const unpinned = new Set();
   for (const key of orphaned) {
     if (key.startsWith('__pinned__')) {
-      pinnedSessionIds.delete(key.slice('__pinned__'.length));
-      pinsChanged = true;
+      const id = key.slice('__pinned__'.length);
+      pinnedSessionIds.delete(id);
+      unpinned.add(id);
     } else if (key.startsWith('__sticky__')) {
-      stickySessionIds.delete(key.slice('__sticky__'.length));
-      pinsChanged = true;
+      const id = key.slice('__sticky__'.length);
+      stickySessionIds.delete(id);
+      unpinned.add(id);
     } else {
       store.removeItem(key);
+      // The server copy would bring the links back on the next merge.
+      if (key.startsWith(PREVIEW_STORAGE_PREFIX)) forgetServerLinkedDoc(key.slice(PREVIEW_STORAGE_PREFIX.length));
     }
   }
-  if (pinsChanged) savePinnedSessions();
+  if (unpinned.size) savePinnedSessions();
+  for (const id of unpinned) offloadSessionPin(id);
   const removed = orphaned.length;
 
   showToast(removed ? `Cleaned ${removed} orphaned item${removed > 1 ? 's' : ''}` : 'No orphaned items found');

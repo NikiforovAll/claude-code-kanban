@@ -165,7 +165,7 @@ The server, the plugin and the installer keep their state in `<config-dir>/.cck/
 
 The server removes `server.json` and its `terminal-tokens/<port>.json` when it exits, if they still belong to it. At start it also removes token files left by servers that are no longer running.
 
-The server deletes old entries every hour. Session data such as dispatch markers, pane layouts, reviews and context status goes when the session's transcript goes, or after Claude Code's `cleanupPeriodDays` (default 30). `agent-activity/` entries go after 2 days. `pins.json` and `linked-docs.json` change only when you pin, unpin, link or unlink.
+The server deletes old entries every hour. Session data such as dispatch markers, pane layouts, reviews and context status goes when the session's transcript goes, or after Claude Code's `cleanupPeriodDays` (default 30). `agent-activity/` entries go after 2 days. `pins.json` and `linked-docs.json` change only when you pin, unpin, link or unlink, or when **Clean Orphaned** removes sessions that no longer exist.
 
 ## Browser-only data
 
@@ -178,4 +178,4 @@ Some data stays in the browser's `localStorage` and never reaches the server:
 
 Each config dir other than `~/.claude` gets its own key prefix, so two config dirs on the same port do not share this data. Another browser or profile does not see it.
 
-To remove data for sessions that no longer exist, open the Storage Manager with <kbd>Shift+S</kbd> and select **Clean Orphaned**.
+To remove data for sessions that no longer exist, open the Storage Manager with <kbd>Shift+S</kbd> and select **Clean Orphaned**. It also removes their pins and linked docs from `pins.json` and `linked-docs.json`.
