@@ -1,7 +1,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
-const { createScratchpadDirResolver } = require('../lib/scratchpad-dir');
+const { createScratchpadDirResolver, scratchpadRoot } = require('../lib/scratchpad-dir');
 const { encodeProjectDirName } = require('../lib/claude-dir');
 
 const ROOT = path.resolve('/tmp/claude');
@@ -67,5 +67,37 @@ describe('getScratchpadDir', () => {
   it('keeps the by-project path when no launch-keyed dir exists', () => {
     const get = resolver({});
     assert.equal(get(ID, { project: SUB, jsonlPath: jsonlUnder(SUB_WT) }), dirFor(SUB_WT));
+  });
+
+  it('takes the dir the transcript recorded, with its root in long form, over the convention', () => {
+    const root = path.resolve('/SHORT~1/claude');
+    const longRoot = path.resolve('/short-long/claude');
+    let calls = 0;
+    const get = createScratchpadDirResolver({
+      root: ROOT,
+      resolveWorktree: () => null,
+      toLong: (p) => (calls++, p === root ? longRoot : p),
+      exists: () => true,
+      isEmpty: () => false,
+    });
+    const other = 'aaaaaaaa-8a20-45e6-aa35-5211fcfa4350';
+    for (const id of [ID, other, ID]) {
+      const meta = { project: SUB, jsonlPath: jsonlUnder(SUB), scratchpadDir: path.join(root, 'x', id, 'scratchpad') };
+      assert.equal(get(id, meta), path.join(longRoot, 'x', id, 'scratchpad'));
+    }
+    assert.equal(calls, 1);
+  });
+});
+
+describe('scratchpadRoot', () => {
+  it('follows Claude Code: /tmp on macOS, the OS temp dir elsewhere, claude-<uid> on Unix', () => {
+    assert.equal(scratchpadRoot({ platform: 'darwin', overrides: [], tmpdir: '/var/folders/x/T', uid: 501 }), '/tmp/claude-501');
+    assert.equal(scratchpadRoot({ platform: 'linux', overrides: [], tmpdir: '/tmp', uid: 1000 }), '/tmp/claude-1000');
+    assert.equal(scratchpadRoot({ platform: 'win32', overrides: [], tmpdir: 'C:\\Temp' }), 'C:\\Temp\\claude');
+  });
+
+  it('takes the first absolute CLAUDE_CODE_TMPDIR and skips a relative one', () => {
+    assert.equal(scratchpadRoot({ platform: 'linux', overrides: [undefined, 'rel/dir', '/data/tmp/'], tmpdir: '/tmp', uid: 1000 }), '/data/tmp/claude-1000');
+    assert.equal(scratchpadRoot({ platform: 'win32', overrides: ['D:/tmp', 'E:\\t'], tmpdir: 'C:\\Temp' }), 'D:\\tmp\\claude');
   });
 });

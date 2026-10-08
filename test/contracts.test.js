@@ -627,6 +627,41 @@ describe('Parser: readSessionInfoFromJsonl', () => {
     }
   });
 
+  it('reads the scratchpad dir from the last environment attachment, as the file grows', () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'cck-scratch-'));
+    const p = path.join(dir, 's.jsonl');
+    const line = (o) => `${JSON.stringify({ ...o, sessionId: 's' })}\n`;
+    const env = (scratchpadDirectory) => line({ type: 'attachment', attachment: { type: 'environment', snapshot: { scratchpadDirectory } } });
+    try {
+      writeFileSync(p, line({ type: 'user', cwd: '/p' }));
+      assert.equal(readSessionInfoFromJsonl(p).scratchpadDir, null);
+      appendFileSync(p, env('/tmp/claude-501/-p/s/scratchpad'));
+      assert.equal(readSessionInfoFromJsonl(p).scratchpadDir, '/tmp/claude-501/-p/s/scratchpad');
+      appendFileSync(p, env('/tmp/claude-501/-p--claude-worktrees-a/s/scratchpad') + line({ type: 'user', cwd: '/p' }));
+      assert.equal(readSessionInfoFromJsonl(p).scratchpadDir, '/tmp/claude-501/-p--claude-worktrees-a/s/scratchpad');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('drops the head scratchpad dir when a cold scan skips the middle of a large transcript', () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'cck-scratch-'));
+    const line = (o) => `${JSON.stringify({ ...o, sessionId: 's' })}\n`;
+    const env = (scratchpadDirectory) => line({ type: 'attachment', attachment: { type: 'environment', snapshot: { scratchpadDirectory } } });
+    const filler = line({ type: 'user', cwd: '/p', timestamp: 't', pad: 'x'.repeat(1000) }).repeat(1300);
+    const turn = line({ type: 'user', cwd: '/p', timestamp: 't' }) + line({ type: 'assistant', cwd: '/p', message: { model: 'm', usage: {} } });
+    try {
+      const gap = path.join(dir, 'gap.jsonl');
+      writeFileSync(gap, env('/tmp/claude-501/-p/s/scratchpad') + filler + env('/tmp/claude-501/-q/s/scratchpad') + filler + turn);
+      assert.equal(readSessionInfoFromJsonl(gap).scratchpadDir, null);
+      const tail = path.join(dir, 'tail.jsonl');
+      writeFileSync(tail, env('/tmp/claude-501/-p/s/scratchpad') + filler + filler + env('/tmp/claude-501/-q/s/scratchpad') + turn);
+      assert.equal(readSessionInfoFromJsonl(tail).scratchpadDir, '/tmp/claude-501/-q/s/scratchpad');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('reads permissionMode from the last prompt, permission-mode line or auto-mode attachment, as the file grows', () => {
     const dir = mkdtempSync(path.join(os.tmpdir(), 'cck-mode-'));
     const p = path.join(dir, 's.jsonl');

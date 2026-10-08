@@ -137,7 +137,7 @@ The server reads these folders in the config dir:
 | `plans/` | Plans |
 | `sessions/` | Registry of running sessions |
 
-It also reads Claude Code scratchpad folders under `<os tmpdir>/claude`.
+It also reads each session's Claude Code scratchpad folder. It takes the folder from the session's transcript. When the transcript does not record it, or records it where the server did not read, it uses Claude Code's rule: `CLAUDE_CODE_TMPDIR` from `env` in `<config-dir>/settings.json` or from the server's environment, else `/tmp` on macOS and the system temp folder elsewhere, then `claude-<uid>` on macOS and Linux or `claude` on Windows. The server reads this once at start.
 
 ## Files it writes
 

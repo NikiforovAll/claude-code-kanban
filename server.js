@@ -12,7 +12,7 @@ const crypto = require('node:crypto');
 const { spawn } = require('node:child_process');
 const { assertOpenTarget, openInEditor, whichSync, exeBehindShim } = require('./lib/open-editor');
 const { createNetGuard } = require('./lib/net-guard');
-const { isContained } = require('./lib/contain');
+const { isContained, realpathDeepest } = require('./lib/contain');
 const { resolveScratchSubdir, listScratchDir } = require('./lib/scratch-files');
 const { fileUrlToPath } = require('./lib/file-url');
 const { httpError: previewError } = require('./lib/http-error');
@@ -55,7 +55,8 @@ const { createGroupStore, isGroupName, suggestGroupName } = require('./lib/dispa
 const { createDispatchedStore, scanTranscripts, pruneSessionDirs, pruneContextStatus, pruneTaskMaps, retentionMs } = require('./lib/retention');
 const { freshRateLimits } = require('./lib/rate-limits');
 const { createWorktreeStore } = require('./lib/worktrees');
-const { createScratchpadDirResolver } = require('./lib/scratchpad-dir');
+const { createScratchpadDirResolver, scratchpadRoot } = require('./lib/scratchpad-dir');
+const { readSettings } = require('./lib/claude-settings');
 const { readGitBranch, sessionGitBranch } = require('./lib/git-branch');
 const { createLinkedDocStore, linkUrl } = require('./lib/linked-docs');
 const { createPaneStore, isOwnOrigin } = require('./lib/panes');
@@ -123,7 +124,18 @@ const TEMP_ROOT = (() => {
   try { return realpathSync.native(os.tmpdir()); } catch { return os.tmpdir(); }
 })();
 // Harness-owned scratchpad root; the per-session dir under it is created lazily.
-const SCRATCHPAD_ROOT = path.join(TEMP_ROOT, 'claude');
+// Used only for a transcript that does not record its scratchpad dir. Settings come first:
+// cck often runs under the hub or a tray, not in the shell where `claude` ran.
+const SCRATCHPAD_ROOT = (() => {
+  const root = scratchpadRoot({
+    platform: process.platform,
+    overrides: [readSettings(path.join(CLAUDE_DIR, 'settings.json'))?.env?.CLAUDE_CODE_TMPDIR, process.env.CLAUDE_CODE_TMPDIR],
+    tmpdir: os.tmpdir(),
+    uid: process.getuid?.(),
+  });
+  // Claude Code resolves the root with realpath too: /private/tmp/claude-<uid> on macOS.
+  return realpathDeepest(root);
+})();
 
 // #endregion
 
@@ -888,6 +900,7 @@ function refreshSessionMetadataPath(jsonlPath) {
   if (info.compactBoundaryUuid) existing.compactBoundaryUuid = info.compactBoundaryUuid;
   existing.permissionMode = info.permissionMode;
   existing.cacheTtl = info.cacheTtl;
+  if (info.scratchpadDir) existing.scratchpadDir = info.scratchpadDir;
   existing.lastReply = info.lastReply;
   return true;
 }
@@ -980,7 +993,8 @@ function loadSessionMetadata() {
           compactBoundaryUuid: sessionInfo.compactBoundaryUuid || null,
           permissionMode: sessionInfo.permissionMode,
           cacheTtl: sessionInfo.cacheTtl || null,
-          lastReply: sessionInfo.lastReply || null
+          lastReply: sessionInfo.lastReply || null,
+          scratchpadDir: sessionInfo.scratchpadDir || null
         };
         sessionIds.push(sessionId);
       }
@@ -1184,6 +1198,8 @@ function getSessionDisplayName(_sessionId, meta) {
 const getScratchpadDir = createScratchpadDirResolver({
   root: SCRATCHPAD_ROOT,
   resolveWorktree: worktrees.resolve,
+  // Transcripts record the 8.3 short form on Windows; path checks and the watcher need the long one.
+  toLong: realpathDeepest,
 });
 
 function buildSessionObject(id, meta, overrides = {}) {
