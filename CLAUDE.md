@@ -8,7 +8,7 @@
 
 ```bash
 npm start            # port 3541
-npm run dev          # start + open browser
+npm run dev          # start, restart on file change (node --watch)
 ```
 
 Also: `npm test` (node test runner over `test/*.test.js`), `claude plugin test .` in `plugin/plugins/claude-code-kanban` (the mod's tests), `npm run validate:schemas`, and Biome for lint (`biome.json`). No build step.
@@ -66,7 +66,7 @@ When modifying a feature, open **both** the JS region and the matching CSS regio
 
 Subcommands live in a dispatch table in `cli.js` (`COMMANDS`). `server.js` delegates to `runCli(process.argv)` from `cli.js`. Help is generated from the table, one level at a time: `--help` lists the commands, `help <cmd>` its subcommands, `help <cmd> <sub>` (or `<cmd> <sub> --help`) the flags, notes and examples. There is no manual help text to maintain.
 
-**The help is the CLI reference.** The plugin skills point at it instead of listing flags, so a command change needs no skill change. **Every new command MUST be documented in the dispatch table** with `summary`, `usage`, `flags` (if any), and 1–2 `examples` where they help. The design contract for the CLI lives in `_plans/cli-scope.md`.
+**The help is the CLI reference.** The plugin skills point at it instead of listing flags, so a command change needs no skill change. **Every new command MUST be documented in the dispatch table** with `summary`, `usage`, `flags` (if any), and 1–2 `examples` where they help.
 
 The CLI finds the server through `CCK_URL`, then `PORT`, then `<config dir>/.cck/server.json`, then 3541. A `server.json` whose pid is dead is an error, not a fallback, because 3541 can be another config dir's board. The embedded terminal sets `CCK_URL` to its own board (`ptyEnv` in `lib/terminal.js`), so a session started there, and its doorbell mod, reach that board even when another board on the same config dir owns `server.json`. Each board writes its terminal token to `.cck/terminal-tokens/<port>.json`, and `dispatch start` reads the file for the port it reaches.
 

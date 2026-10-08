@@ -8,7 +8,9 @@ import Lightbox from '../../../kit/Lightbox.astro';
 
 Press <kbd>?</kbd> (or <kbd>Shift+/</kbd>) to open the **Keyboard Shortcuts** help. Press <kbd>?</kbd> or <kbd>Esc</kbd> to close it. The help does not open while the cursor is in a text field, a text area or a select.
 
-<Shot themed="12-shortcuts" alt="The Keyboard Shortcuts help with the Navigate, Board, Tabs, View, Session, Sessions, Terminal and Hub groups" />
+The help has four tabs: Board, Session, Terminal and Hub. This page lists their groups in the same order.
+
+<Shot themed="12-shortcuts" alt="The Keyboard Shortcuts help with its Board, Session, Terminal and Hub tabs" />
 
 Plain letter keys work only when you press no modifier. For example, <kbd>I</kbd> opens session info, and <kbd>Ctrl+I</kbd> does nothing in Claude Code Kanban. Letter keys do nothing while you type in a field.
 
@@ -24,35 +26,6 @@ Plain letter keys work only when you press no modifier. For example, <kbd>I</kbd
 | <kbd>Enter</kbd> or <kbd>Space</kbd> | Open the selected item |
 
 When the [embedded terminal](/claude-code-kanban/guides/embedded-terminal/) replaces the board, <kbd>Tab</kbd> moves focus between the sidebar and the terminal. If the board has no task cards, <kbd>Tab</kbd> from the sidebar does nothing.
-
-## Session
-
-These keys act on the session under the sidebar cursor, or on the open session.
-
-| Keys | Action |
-| --- | --- |
-| <kbd>P</kbd> | Open the session plan |
-| <kbd>Ctrl+Shift+P</kbd> | Open or close the session picker. It works when the terminal has focus. |
-| <kbd>Shift+P</kbd> | Open the project picker of this board |
-| <kbd>I</kbd> | Open session info |
-| <kbd>.</kbd> | Pin or unpin the session |
-| <kbd>&gt;</kbd> | Make the session sticky, or remove sticky |
-| <kbd>Shift+F10</kbd> | In the sidebar, open the menu of the item under the cursor, to move it to a group. The <kbd>Menu</kbd> key also works. |
-| <kbd>Ctrl+D</kbd> | Dismiss the session |
-| <kbd>Shift+L</kbd> | Show or hide the session log |
-| <kbd>Shift+M</kbd> | Open the last message in follow mode. If a waiting prompt is fresh, open that prompt. If the message detail is open, close it. |
-
-### Message detail
-
-These keys work in the message detail window. See [Session log and details](/claude-code-kanban/guides/session-details/).
-
-| Keys | Action |
-| --- | --- |
-| <kbd>↓</kbd> | Next message. After the last message, show the waiting prompt if there is one. |
-| <kbd>↑</kbd> | Previous message |
-| <kbd>Ctrl+Enter</kbd> | Allow the waiting permission prompt, or approve the waiting plan |
-
-<kbd>Ctrl+Enter</kbd> works only when the waiting prompt is on screen and you can answer it from the board. It does not answer questions. On macOS, <kbd>Cmd+Enter</kbd> also works. See [Answer prompts from the board](/claude-code-kanban/guides/waiting-prompts/).
 
 ## Board
 
@@ -100,24 +73,50 @@ In the sidebar, <kbd>Esc</kbd> removes the keyboard cursor.
 
 The text size keys work only when a window with readable content is open, such as a message, a plan or a preview, or when a pane is on screen. They scale HTML pages too. They also accept <kbd>Ctrl+=</kbd>, <kbd>Ctrl+_</kbd> and the numeric keypad keys, and they work with the cursor in a field. On macOS, <kbd>Cmd</kbd> also works. With no such window open, the browser zooms the page as usual. When the terminal has focus, they change the terminal text size instead (see [Terminal](#terminal)).
 
-## Hub
+## Session
 
-These keys work when Claude Code Kanban runs inside [Claude Code Hub](/claude-code-kanban/guides/claude-code-hub/).
+These keys act on the session under the sidebar cursor, or on the open session.
 
 | Keys | Action |
 | --- | --- |
-| <kbd>M</kbd> | Go to Marketplace, scoped to the session's project |
-| <kbd>$</kbd> | Go to Cost, on the session detail view |
-| <kbd>Ctrl+M</kbd> | Go to Memory, scoped to the session's project |
-| <kbd>Ctrl+Alt+←</kbd> or <kbd>Ctrl+Alt+→</kbd> | Previous or next hub app |
-| <kbd>Alt+1</kbd> to <kbd>Alt+9</kbd> | Go to a hub app by its number |
-| <kbd>Ctrl+Alt+P</kbd> | Open the project picker |
-| <kbd>Ctrl+Alt+W</kbd> | Open the config dir picker |
-| <kbd>Ctrl+Alt+A</kbd> | Open the app launcher |
+| <kbd>P</kbd> | Open the session plan |
+| <kbd>Ctrl+Shift+P</kbd> | Open or close the session picker. It works when the terminal has focus. |
+| <kbd>Shift+P</kbd> | Open the project picker of this board |
+| <kbd>I</kbd> | Open session info |
+| <kbd>.</kbd> | Pin or unpin the session |
+| <kbd>&gt;</kbd> | Make the session sticky, or remove sticky |
+| <kbd>Shift+F10</kbd> | In the sidebar, open the menu of the item under the cursor, to move it to a group. The <kbd>Menu</kbd> key also works. |
+| <kbd>Ctrl+D</kbd> | Dismiss the session |
+| <kbd>Shift+L</kbd> | Show or hide the session log |
+| <kbd>Shift+M</kbd> | Open the last message in follow mode. If a waiting prompt is fresh, open that prompt. If the message detail is open, close it. |
 
-On macOS the keys are the same, written <kbd>⌃⌥←</kbd>, <kbd>⌃⌥→</kbd>, <kbd>⌃⌥P</kbd>, <kbd>⌃⌥W</kbd> and <kbd>⌃⌥A</kbd>, and the hub app numbers use <kbd>⌃⌥1</kbd> to <kbd>⌃⌥9</kbd> instead of bare <kbd>Alt</kbd>.
+### Message detail
 
-These are the hub's default keys. When you [change the hub keys](https://nikiforovall.blog/claude-code-hub/reference/shortcuts/#change-the-keys), the help shows your keys and hides a row that has no key. <kbd>M</kbd>, <kbd>$</kbd> and <kbd>Ctrl+M</kbd> belong to Claude Code Kanban and do not change.
+These keys work in the message detail window. See [Session log and details](/claude-code-kanban/guides/session-details/).
+
+| Keys | Action |
+| --- | --- |
+| <kbd>↓</kbd> | Next message. After the last message, show the waiting prompt if there is one. |
+| <kbd>↑</kbd> | Previous message |
+| <kbd>Ctrl+Enter</kbd> | Allow the waiting permission prompt, or approve the waiting plan |
+
+<kbd>Ctrl+Enter</kbd> works only when the waiting prompt is on screen and you can answer it from the board. It does not answer questions. On macOS, <kbd>Cmd+Enter</kbd> also works. See [Answer prompts from the board](/claude-code-kanban/guides/waiting-prompts/).
+
+## Sessions
+
+| Keys | Action |
+| --- | --- |
+| <kbd>Ctrl+Alt+N</kbd> | Start a new session |
+| <kbd>Ctrl+Alt+R</kbd> | Resume a session with the `claude --resume` picker |
+| <kbd>Ctrl+Alt+S</kbd> | Swap to the previous session |
+| <kbd>Shift+C</kbd> | Copy the session id |
+| <kbd>Ctrl+Shift+C</kbd> | Copy `SendMessage(<name>)`, where the name is the address other sessions use with SendMessage (running sessions only) |
+
+If no session is selected, the copy keys show a "No session selected" message.
+
+On macOS the three <kbd>Ctrl+Alt</kbd> keys are <kbd>⌃⌥N</kbd>, <kbd>⌃⌥R</kbd> and <kbd>⌃⌥S</kbd>.
+
+<kbd>Ctrl+Alt+N</kbd> and <kbd>Ctrl+Alt+R</kbd> work only when the terminal is available. <kbd>Ctrl+Alt+S</kbd> switches between the last two sessions you opened. If the terminal has focus, it keeps focus after the swap. Inside Claude Code Hub, Claude Code Kanban keeps these three keys and does not send them to the hub.
 
 ## Terminal
 
@@ -140,21 +139,26 @@ Inside the terminal:
 - <kbd>R</kbd> reconnects when the loading screen says "Slow to connect". This shows when the connection has not opened after 1.5 s. At other times, <kbd>R</kbd> goes to the terminal as usual.
 - <kbd>Ctrl++</kbd> and <kbd>Ctrl+-</kbd> make the terminal text larger or smaller, from 8 px to 32 px. <kbd>Ctrl+0</kbd> resets it. <kbd>Ctrl+_</kbd> still goes to Claude Code as undo.
 
-## Sessions
+## Hub
+
+These keys work when Claude Code Kanban runs inside [Claude Code Hub](/claude-code-kanban/guides/claude-code-hub/).
+
+The Hub tab of the help shows only the keys that work. Outside the hub, that is the app links set with `--marketplace-url`, `--cost-url` or `--memory-url`. With none of them, the tab is hidden.
 
 | Keys | Action |
 | --- | --- |
-| <kbd>Ctrl+Alt+N</kbd> | Start a new session |
-| <kbd>Ctrl+Alt+R</kbd> | Resume a session with the `claude --resume` picker |
-| <kbd>Ctrl+Alt+S</kbd> | Swap to the previous session |
-| <kbd>Shift+C</kbd> | Copy the session id |
-| <kbd>Ctrl+Shift+C</kbd> | Copy `SendMessage(<name>)`, where the name is the address other sessions use with SendMessage (running sessions only) |
+| <kbd>M</kbd> | Go to Marketplace, scoped to the session's project |
+| <kbd>$</kbd> | Go to Cost, on the session detail view |
+| <kbd>Ctrl+M</kbd> | Go to Memory, scoped to the session's project |
+| <kbd>Ctrl+Alt+←</kbd> or <kbd>Ctrl+Alt+→</kbd> | Previous or next hub app |
+| <kbd>Alt+1</kbd> to <kbd>Alt+9</kbd> | Go to a hub app by its number |
+| <kbd>Ctrl+Alt+P</kbd> | Open the project picker |
+| <kbd>Ctrl+Alt+W</kbd> | Open the config dir picker |
+| <kbd>Ctrl+Alt+A</kbd> | Open the app launcher |
 
-If no session is selected, the copy keys show a "No session selected" message.
+On macOS the keys are the same, written <kbd>⌃⌥←</kbd>, <kbd>⌃⌥→</kbd>, <kbd>⌃⌥P</kbd>, <kbd>⌃⌥W</kbd> and <kbd>⌃⌥A</kbd>, and the hub app numbers use <kbd>⌃⌥1</kbd> to <kbd>⌃⌥9</kbd> instead of bare <kbd>Alt</kbd>.
 
-On macOS the three <kbd>Ctrl+Alt</kbd> keys are <kbd>⌃⌥N</kbd>, <kbd>⌃⌥R</kbd> and <kbd>⌃⌥S</kbd>.
-
-<kbd>Ctrl+Alt+N</kbd> and <kbd>Ctrl+Alt+R</kbd> work only when the terminal is available. <kbd>Ctrl+Alt+S</kbd> switches between the last two sessions you opened. If the terminal has focus, it keeps focus after the swap. Inside Claude Code Hub, Claude Code Kanban keeps these three keys and does not send them to the hub.
+These are the hub's default keys. When you [change the hub keys](https://nikiforovall.blog/claude-code-hub/reference/shortcuts/#change-the-keys), the help shows your keys and hides a row that has no key. <kbd>M</kbd>, <kbd>$</kbd> and <kbd>Ctrl+M</kbd> belong to Claude Code Kanban and do not change.
 
 ## Dialog keys
 
