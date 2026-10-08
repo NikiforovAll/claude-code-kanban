@@ -63,6 +63,7 @@ const { probeFraming, parseOrigin } = require('./lib/frame-policy');
 const { pickFolder } = require('./lib/folder-dialog');
 const { loadSessionCache, saveSessionCache } = require('./lib/session-cache');
 const { countTaskDir } = require('./lib/task-counts');
+const { readTaskDir } = require('./lib/task-dir');
 const { projectMatcher, normalizeProjectPath } = require('./public/project-match');
 const { getParentVerdict, setParentVerdict } = require('./lib/parent-cache');
 
@@ -1744,25 +1745,9 @@ function addOwnerSessions(tasks, listIdOf) {
 
 app.get('/api/sessions/:sessionId', async (req, res) => {
   try {
-    const sessionPath = taskDirFor(req.params.sessionId);
-
     // A session that never used the board has no task dir. That is the common case and
     // an answer, not a failure; a 404 only reached the browser console.
-    if (!existsSync(sessionPath)) {
-      return res.json([]);
-    }
-
-    const taskFiles = readdirSync(sessionPath).filter(f => f.endsWith('.json'));
-    const tasks = [];
-
-    for (const file of taskFiles) {
-      try {
-        const task = JSON.parse(readFileSync(path.join(sessionPath, file), 'utf8'));
-        tasks.push(task);
-      } catch (e) {
-        console.error(`Error parsing ${file}:`, e);
-      }
-    }
+    const tasks = (await readTaskDir(taskDirFor(req.params.sessionId))).map(({ task }) => task);
 
     // Sort by ID (numeric)
     tasks.sort((a, b) => parseInt(a.id, 10) - parseInt(b.id, 10));
@@ -1776,41 +1761,24 @@ app.get('/api/sessions/:sessionId', async (req, res) => {
 });
 
 // API: Get combined tasks for a project (all sessions + shared task lists)
-app.get('/api/projects/:encodedPath/tasks', (req, res) => {
+app.get('/api/projects/:encodedPath/tasks', async (req, res) => {
   try {
     const projectPath = Buffer.from(req.params.encodedPath, 'base64').toString('utf8');
     const metadata = loadSessionMetadata();
-    const { sessionToList } = loadAllTaskMaps();
-
-    const projectSessionIds = Object.entries(metadata)
-      .filter(([, m]) => m.project === projectPath)
-      .map(([id]) => id);
-
-    const taskDirs = new Set();
-    for (const sid of projectSessionIds) {
-      const listName = sessionToList[sid];
-      if (listName) {
-        const dir = path.join(TASKS_DIR, listName);
-        if (existsSync(dir)) taskDirs.add(dir);
-      } else {
-        const dir = path.join(TASKS_DIR, sid);
-        if (existsSync(dir)) taskDirs.add(dir);
-      }
-    }
+    const taskDirs = new Set(
+      Object.entries(metadata)
+        .filter(([, m]) => m.project === projectPath)
+        .map(([id]) => taskDirFor(id)),
+    );
 
     const tasks = [];
-    const seenKeys = new Set();
     for (const dir of taskDirs) {
-      for (const file of readdirSync(dir).filter(f => f.endsWith('.json'))) {
-        try {
-          const task = JSON.parse(readFileSync(path.join(dir, file), 'utf8'));
-          const key = `${dir}:${task.id}`;
-          if (!seenKeys.has(key)) {
-            seenKeys.add(key);
-            task._taskDir = path.basename(dir);
-            tasks.push(task);
-          }
-        } catch (_) {}
+      const seenIds = new Set();
+      for (const { task } of await readTaskDir(dir)) {
+        if (seenIds.has(task.id)) continue;
+        seenIds.add(task.id);
+        task._taskDir = path.basename(dir);
+        tasks.push(task);
       }
     }
     tasks.sort((a, b) => parseInt(a.id, 10) - parseInt(b.id, 10));
@@ -3510,14 +3478,13 @@ app.get('/api/tasks/all', async (_req, res) => {
 
     const metadata = loadSessionMetadata();
     const { listToSessions } = loadAllTaskMaps();
-    const sessionDirs = readdirSync(TASKS_DIR, { withFileTypes: true })
+    const sessionDirs = (await fs.readdir(TASKS_DIR, { withFileTypes: true }))
       .filter(d => d.isDirectory());
+    const dirTasks = await Promise.all(sessionDirs.map((d) => readTaskDir(path.join(TASKS_DIR, d.name))));
 
     const allTasks = [];
 
-    for (const sessionDir of sessionDirs) {
-      const sessionPath = path.join(TASKS_DIR, sessionDir.name);
-      const taskFiles = readdirSync(sessionPath).filter(f => f.endsWith('.json'));
+    sessionDirs.forEach((sessionDir, i) => {
       const meta = metadata[sessionDir.name] || {};
 
       // For custom task list directories (non-UUID dirs), resolve project from the
@@ -3533,20 +3500,15 @@ app.get('/api/tasks/all', async (_req, res) => {
         }
       }
 
-      for (const file of taskFiles) {
-        try {
-          const task = JSON.parse(readFileSync(path.join(sessionPath, file), 'utf8'));
-          allTasks.push({
-            ...task,
-            sessionId: sessionDir.name,
-            sessionName: getSessionDisplayName(sessionDir.name, meta),
-            project
-          });
-        } catch {
-          // Skip invalid files
-        }
+      for (const { task } of dirTasks[i]) {
+        allTasks.push({
+          ...task,
+          sessionId: sessionDir.name,
+          sessionName: getSessionDisplayName(sessionDir.name, meta),
+          project
+        });
       }
-    }
+    });
 
     res.json(allTasks);
   } catch (error) {
@@ -3646,21 +3608,7 @@ app.put('/api/tasks/:sessionId/:taskId', async (req, res) => {
 // A deleted task can't block anything, so drop the dangling reference instead of
 // refusing the delete -- a stale blockedBy id would pin the other task as BLOCKED forever.
 async function deleteTasks(dir, shouldDelete) {
-  let files;
-  try {
-    files = (await fs.readdir(dir)).filter((f) => f.endsWith('.json'));
-  } catch (e) {
-    if (e.code === 'ENOENT') return [];
-    throw e;
-  }
-  const tasks = [];
-  for (const file of files) {
-    try {
-      tasks.push({ file, task: JSON.parse(await fs.readFile(path.join(dir, file), 'utf8')) });
-    } catch (e) {
-      console.error(`Error parsing ${file}:`, e);
-    }
-  }
+  const tasks = await readTaskDir(dir);
   const doomed = tasks.filter((t) => shouldDelete(t));
   const doomedIds = new Set(doomed.map(({ task }) => task.id));
   const strip = (ids) => ids?.filter((id) => !doomedIds.has(id));
