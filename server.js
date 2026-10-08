@@ -116,7 +116,8 @@ const PANES_FILE = path.join(CCK_DIR, 'panes.json');
 const SERVER_INFO_FILE = path.join(CCK_DIR, 'server.json');
 const TERMINAL_TOKENS_DIR = path.join(CCK_DIR, 'terminal-tokens');
 const SESSION_CACHE_FILE = path.join(CCK_DIR, 'session-cache.json');
-const TERMINALS_FILE = path.join(CCK_DIR, 'terminals.json');
+// Every board on a config dir rewrites the whole file, so a test board points this elsewhere.
+const TERMINALS_FILE = process.env.CCK_TERMINALS_FILE ? path.resolve(process.env.CCK_TERMINALS_FILE) : path.join(CCK_DIR, 'terminals.json');
 // os.tmpdir() can be an 8.3 short path on Windows; transcripts record the long form.
 const TEMP_ROOT = (() => {
   try { return realpathSync.native(os.tmpdir()); } catch { return os.tmpdir(); }

@@ -12,7 +12,7 @@ State that cck writes under `<config dir>/.cck/` must not grow without a limit. 
 - **cck-generated, per project:** worktrees (`worktrees.json`). See [Worktrees](#worktrees).
 - **cck-generated, live state:** each holds only what is live, so it needs no sweep.
   - `dispatch-groups.json`: a session leaves its group 1 minute after no member's `claude` runs, unless it is pinned (`lib/dispatch-groups.js`).
-  - `terminals.json`: the open terminals and the ones still waiting to restore, at most `maxSessions` (`lib/terminal.js`).
+  - `terminals.json`: the open terminals and the ones still waiting to restore, at most `maxSessions` (`lib/terminal.js`). `CCK_TERMINALS_FILE` moves it out of `.cck`; a file there is the tester's to delete.
   - `server.json` and `terminal-tokens/<port>.json`: one per running board. The server removes its own when it exits, and at start removes token files of boards that no longer run.
 - **Caches:** `session-cache.json` is rebuilt cold when it passes 8 MB (`lib/session-cache.js`).
 - **Installer:** `plugin/`, a copy of the plugin, replaced on each `--install`.

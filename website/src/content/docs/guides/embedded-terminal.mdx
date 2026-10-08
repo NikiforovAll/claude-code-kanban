@@ -136,6 +136,8 @@ Terminals run in the server, so a page reload keeps them. A server restart ends 
 
 The server keeps the list of open terminals in `<config-dir>/.cck/terminals.json`. As soon as it listens, it runs `claude --resume` for each one, two seconds apart, without waiting for a page to open. A session shows as running, and a click attaches to it. The server skips a session that runs in another terminal or has no transcript. A terminal you end leaves the list. A terminal whose Claude Code exited, so only the shell runs, also leaves it; when you resume that session again in the same terminal, it comes back. Shell terminals are not restored, nor is a resume picker until you pick a session in it. A resumed session waits at its prompt and does not continue a turn that the restart cut off.
 
+Each server writes the whole list, so two servers on one config dir overwrite each other's terminals. Give a second server its own file with `CCK_TERMINALS_FILE=<path>`.
+
 ## Choose the shell
 
 The terminal starts a shell and runs Claude Code in it. To pick the shell, use `--terminal-shell <value>` or the `CCK_TERMINAL_SHELL` environment variable. The value is one of:
