@@ -9205,6 +9205,10 @@ function setupEventSource() {
 
       if (data.type === 'dispatch-update') onDispatchUpdate();
 
+      if (data.type === 'show:posted') onShowPosted(data);
+
+      if (data.type === 'show:cleared') onShowCleared(data);
+
       if (data.type === 'agent-update') {
         if (!data.unreadOnly) pendingAgentSessionIds.add(data.sessionId);
         clearTimeout(agentRefreshTimer);
@@ -13521,8 +13525,10 @@ function toggleTerminal() {
   syncTerminal();
 }
 
+// The show card sits in the pane but is not the terminal, so Alt+` from it goes to the terminal.
 function terminalPaneFocused() {
-  return document.getElementById('terminal-pane').contains(document.activeElement);
+  const active = document.activeElement;
+  return document.getElementById('terminal-pane').contains(active) && !showCardEl().contains(active);
 }
 
 // Kanban's own session keys (new, resume, swap) use the hub's modifier, so the hub leaves them alone.
@@ -13617,6 +13623,7 @@ function syncTerminal() {
   }
   sessionView.classList.toggle('terminal-mode', on);
   syncPanes();
+  syncShowCard();
   pushTerminalClaims();
   if (!on) {
     // A hidden xterm textarea drops focus, but a display:none iframe keeps it and would take keys unseen.
@@ -14398,6 +14405,470 @@ async function endAllTerminals() {
 
 //#endregion
 
+//#region SHOW
+// The card the session in the embedded terminal posts to with the show tool. It belongs to the
+// terminal, not the session: /clear and the --resume picker change the session id, the terminal id
+// stays. Nothing here runs until the terminal view shows a terminal that has posts.
+const SHOW_MSG = 'cck-show:';
+const SHOW_SIZE_KEY = 'cck-show-size-v2';
+const SHOW_MIN_W = 280;
+const SHOW_MIN_H = 120;
+const SHOW_INSET = 8;
+const SHOW_CSP =
+  "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; frame-src 'none'; connect-src 'none'; form-action 'none'";
+// The card's token contract (the show skill lists these names) mapped to the board's theme vars.
+const SHOW_TOKENS = {
+  '--color-bg': '--bg-surface',
+  '--color-bg-subtle': '--bg-deep',
+  '--color-text': '--text-primary',
+  // --text-muted is too faint for body text on the card.
+  '--color-text-muted': '--text-tertiary',
+  '--color-border': '--border',
+  '--color-accent': '--accent',
+  '--color-info': '--info',
+  '--color-success': '--success',
+  '--color-warning': '--warning',
+  '--color-danger': '--danger',
+};
+// Bundled fonts do not load in the opaque-origin srcdoc.
+const SHOW_FONTS = {
+  '--font-sans': "system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif",
+  '--font-mono': "ui-monospace, 'Cascadia Mono', Consolas, 'SF Mono', monospace",
+};
+const SHOW_FRAME_BASE =
+  'html{color-scheme:var(--color-scheme)}body{margin:0;padding:12px 14px;background:var(--color-bg);color:var(--color-text);font:13px/1.5 var(--font-sans)}' +
+  'h1,h2,h3,h4{margin:0 0 .5em;font-weight:600;line-height:1.3}h1{font-size:16px}h2{font-size:14px}h3,h4{font-size:13px}p{margin:0 0 .6em}a{color:var(--color-accent)}' +
+  'code,pre,kbd{font-family:var(--font-mono);font-size:12px}pre{padding:8px 10px;border-radius:6px;background:var(--color-bg-subtle);border:1px solid var(--color-border);overflow:auto}' +
+  'table{border-collapse:collapse;font-size:12px}th,td{border:1px solid var(--color-border);padding:4px 8px;text-align:left}th{background:var(--color-bg-subtle)}hr{border:0;border-top:1px solid var(--color-border)}' +
+  'button{font:inherit;font-size:12px;padding:5px 12px;border-radius:6px;border:1px solid var(--color-border);background:transparent;color:var(--color-text);cursor:pointer}' +
+  'button.primary{background:var(--color-accent);border-color:var(--color-accent);color:#fff}input,select,textarea{font:inherit;color:var(--color-text)}';
+const SHOW_MERMAID_INIT =
+  '%%{init: {"fontFamily": "IBM Plex Mono, monospace","themeVariables": {"fontSize": "12px"}, "flowchart": {"nodeSpacing": 28, "rankSpacing": 28, "padding": 6}}}%%\n';
+const SHOW_ICONS = {
+  prev: '<path d="M15 18l-6-6 6-6"/>',
+  next: '<path d="M9 18l6-6-6-6"/>',
+  collapse: '<path d="M18 15l-6-6-6 6"/>',
+  uncollapse: '<path d="M6 9l6 6 6-6"/>',
+  expand: '<path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>',
+  restore: '<path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/>',
+  clear: '<path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>',
+  close: '<path d="M18 6L6 18M6 6l12 12"/>',
+};
+
+// PTY id → terminal id, from the terminal list. A terminal started after the last list read is
+// missing until a post asks for it.
+const terminalIds = new Map();
+const showClosed = new Set();
+const showState = {
+  terminalId: null,
+  sessionId: null,
+  posts: [],
+  idx: 0,
+  expanded: false,
+  collapsed: false,
+  marked: new Set(),
+  rendered: null,
+  frame: null,
+  frameH: 0,
+  frameY: 0,
+  listSeq: 0,
+  bodySeq: 0,
+  lookup: null,
+};
+let showSize = store.readJson(SHOW_SIZE_KEY);
+let showHostObserver = null;
+
+function showCardEl() {
+  return document.getElementById('show-card');
+}
+
+function showIcon(name) {
+  return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${SHOW_ICONS[name]}</svg>`;
+}
+
+function rememberTerminalIds(list) {
+  terminalIds.clear();
+  for (const t of list) if (t.terminalId) terminalIds.set(t.id, t.terminalId);
+}
+
+function shownTerminalId() {
+  return wantsTerminal() ? (terminalIds.get(currentSessionId) ?? null) : null;
+}
+
+// Runs on every view change, so it returns at once unless the shown terminal changed.
+function syncShowCard() {
+  const pty = wantsTerminal() ? currentSessionId : null;
+  if (pty && !terminalIds.has(pty) && showState.lookup !== pty) {
+    showState.lookup = pty;
+    loadTerminals()
+      .then(syncShowCard)
+      .catch(() => {});
+  }
+  const tid = shownTerminalId();
+  if (tid === showState.terminalId) return;
+  Object.assign(showState, { terminalId: tid, sessionId: null, posts: [], idx: 0, rendered: null });
+  showState.marked.clear();
+  renderShow();
+  if (tid) loadShowPosts(tid, { newest: true });
+}
+
+async function loadShowPosts(tid, { newest = false } = {}) {
+  const seq = ++showState.listSeq;
+  const data = await getJson(apiPath`/api/terminals/${tid}/show`, null, { cache: 'no-store' });
+  if (seq !== showState.listSeq || tid !== showState.terminalId) return false;
+  const shownId = showState.posts[showState.idx]?.id;
+  showState.sessionId = data?.sessionId ?? null;
+  showState.posts = Array.isArray(data?.posts) ? data.posts : [];
+  const at = showState.posts.findIndex((p) => p.id === shownId);
+  showState.idx = newest || at < 0 ? Math.max(0, showState.posts.length - 1) : at;
+  return true;
+}
+
+async function onShowPosted(d) {
+  if (typeof d.terminalId !== 'string') return;
+  if (!showState.terminalId) {
+    if (!wantsTerminal()) return;
+    if (!terminalIds.has(currentSessionId)) showState.lookup = null;
+    syncShowCard();
+    return;
+  }
+  if (d.terminalId !== showState.terminalId) return;
+  if (d.sessionId !== showState.sessionId) {
+    showState.posts = [];
+    showState.marked.clear();
+    showState.rendered = null;
+  }
+  if (!(await loadShowPosts(d.terminalId))) return;
+  const i = showState.posts.findIndex((p) => p.id === d.id);
+  if (i < 0) return renderShow();
+  if (d.replaced) {
+    if (i !== showState.idx) showState.marked.add(d.id);
+    else if (showState.rendered) showState.rendered.stale = true;
+    return renderShow();
+  }
+  showState.idx = i;
+  showClosed.delete(d.terminalId);
+  renderShow({ flash: true });
+}
+
+function onShowCleared(d) {
+  if (d.terminalId !== showState.terminalId) return;
+  showState.posts = [];
+  showState.marked.clear();
+  renderShow();
+}
+
+function showHeaderHtml(p) {
+  const n = showState.posts.length;
+  const i = showState.idx;
+  const key = p.key ? `<span class="show-sep">·</span><span class="show-key">${escapeHtml(p.key)}</span>` : '';
+  const btn = (cmd, icon, title, disabled = false) =>
+    `<button type="button" class="show-btn${cmd === 'clear' ? ' clear' : ''}" data-show="${escapeHtml(cmd)}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}"${disabled ? ' disabled' : ''}>${showIcon(icon)}</button>`;
+  const { collapsed, expanded } = showState;
+  return `<span class="show-nav"><span class="show-title" title="${escapeHtml(p.title)}">${escapeHtml(p.title)}</span>${key}</span>
+    <span class="show-pager">${btn('prev', 'prev', 'Previous post', i === 0)}<span class="show-pos">${i + 1}/${n}</span>${btn('next', 'next', 'Next post', i === n - 1)}</span>
+    <span class="show-actions">${btn('collapse', collapsed ? 'uncollapse' : 'collapse', collapsed ? 'Show the post' : 'Collapse to the header')}${btn('expand', expanded ? 'restore' : 'expand', expanded ? 'Back to the card' : 'Fill the terminal')}${btn('clear', 'clear', 'Clear every post of this terminal')}${btn('close', 'close', 'Close until the next post')}</span>`;
+}
+
+function showTicksHtml() {
+  return showState.posts
+    .map((p, i) => {
+      const marked = showState.marked.has(p.id);
+      const title = marked ? `${p.title} · updated` : p.title;
+      return `<button type="button" class="show-tick${i === showState.idx ? ' on' : ''}${marked ? ' dot' : ''}" data-go="${i}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}"></button>`;
+    })
+    .join('');
+}
+
+function renderShow({ flash = false } = {}) {
+  const card = showCardEl();
+  const chip = document.getElementById('show-reopen');
+  const n = showState.posts.length;
+  const open = n > 0 && !showClosed.has(showState.terminalId);
+  chip.hidden = !n || open;
+  chip.querySelector('.show-reopen-n').textContent = `show · ${n}`;
+  card.classList.toggle('open', open);
+  if (!open) {
+    showState.rendered = null;
+    showState.frame = null;
+    showHostObserver?.disconnect();
+    card.replaceChildren();
+    return;
+  }
+  showState.idx = Math.min(Math.max(0, showState.idx), n - 1);
+  const p = showState.posts[showState.idx];
+  showState.marked.delete(p.id);
+  card.classList.toggle('expanded', showState.expanded && !showState.collapsed);
+  card.classList.toggle('collapsed', showState.collapsed);
+  if (!card.firstChild) {
+    card.innerHTML = `<header class="show-head"></header><div class="show-ticks"></div><div class="show-body"></div>
+      <div class="show-grip" title="Resize · double-click to fit"><svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M1 1v8h8M1 5l4 4"/></svg></div>`;
+  }
+  card.querySelector('.show-head').innerHTML = showHeaderHtml(p);
+  card.querySelector('.show-ticks').innerHTML = showTicksHtml();
+  const r = showState.rendered;
+  if (!showState.collapsed && (!r || r.stale || r.id !== p.id || r.updatedAt !== p.updatedAt)) {
+    renderShowBody(p, r?.id === p.id);
+  }
+  if (flash) {
+    card.classList.remove('flash');
+    void card.offsetWidth;
+    card.classList.add('flash');
+  }
+  showHostObserver ??= new ResizeObserver(() => layoutShow());
+  showHostObserver.observe(document.getElementById('terminal-host'));
+  layoutShow();
+}
+
+async function renderShowBody(p, samePost) {
+  const seq = ++showState.bodySeq;
+  const tid = showState.terminalId;
+  showState.rendered = { id: p.id, updatedAt: p.updatedAt };
+  const data = await getJson(apiPath`/api/terminals/${tid}/show/${p.id}`, null, { cache: 'no-store' });
+  const card = showCardEl();
+  const body = card.querySelector('.show-body');
+  if (seq !== showState.bodySeq || !body) return;
+  const html = data?.kind === 'html';
+  card.classList.toggle('html', html);
+  if (html) {
+    const restoreY = samePost && showState.frame ? showState.frameY : 0;
+    showState.frameY = restoreY;
+    if (samePost && showState.frame?.isConnected) {
+      showState.frame.srcdoc = showSrcdoc(data.content, restoreY);
+    } else {
+      showState.frameH = 0;
+      body.replaceChildren(createShowFrame(p.title, showSrcdoc(data.content, 0)));
+    }
+    layoutShow();
+    return;
+  }
+  showState.frame = null;
+  const keepScroll = samePost ? body.scrollTop : 0;
+  const md = document.createElement('div');
+  md.className = 'show-md';
+  if (!data) md.innerHTML = '<p class="show-gone">This post is gone.</p>';
+  else renderPreviewContent(md, data.file || p.file || '', data.content ?? '', data.kind);
+  for (const pre of md.querySelectorAll('pre.mermaid')) {
+    const src = pre.getAttribute('data-original') || pre.textContent;
+    if (/^\s*(---|%%\{)/.test(src)) continue;
+    pre.setAttribute('data-original', SHOW_MERMAID_INIT + src);
+    pre.textContent = SHOW_MERMAID_INIT + src;
+  }
+  body.replaceChildren(md);
+  body.scrollTop = keepScroll;
+  layoutShow();
+}
+
+// No allow-popups: it opens window.open as a way out. The CSP blocks fetch and remote sub-resources,
+// but not navigation or WebRTC; the real guard is that only the terminal's own agent can post.
+function createShowFrame(title, srcdoc) {
+  const frame = document.createElement('iframe');
+  frame.className = 'show-frame';
+  frame.title = title;
+  frame.setAttribute('sandbox', 'allow-scripts');
+  frame.setAttribute('referrerpolicy', 'no-referrer');
+  frame.srcdoc = srcdoc;
+  bridgedFrames.add(frame);
+  frame.addEventListener('load', () => sendBridgeClaims([frame], bridgeClaims(keyClaims())));
+  showState.frame = frame;
+  return frame;
+}
+
+function showTokens() {
+  const css = getComputedStyle(document.body);
+  const out = { ...SHOW_FONTS, '--color-scheme': isLightTheme() ? 'light' : 'dark' };
+  for (const [token, v] of Object.entries(SHOW_TOKENS)) out[token] = css.getPropertyValue(v).trim();
+  return out;
+}
+
+// A fragment gets base element styles; a whole document keeps its own and gets only the tokens,
+// first in its head, so its styles win.
+function showSrcdoc(content, restoreY) {
+  const tokens = Object.entries(showTokens())
+    .map(([k, v]) => `${k}:${v}`)
+    .join(';');
+  const head = `<meta http-equiv="Content-Security-Policy" content="${SHOW_CSP}"><style>:root{${tokens}}</style>`;
+  const bridge = `<script>(${showBridge})(${Math.max(0, Math.round(restoreY) || 0)});</script>${REVIEW_BRIDGE_TAG}`;
+  if (!/^\s*(<!doctype|<html)/i.test(content)) {
+    return `<!doctype html><html><head><meta charset="utf-8">${head}<style>${SHOW_FRAME_BASE}</style></head><body>${content}${bridge}</body></html>`;
+  }
+  const at = /<head[^>]*>/i.exec(content) || /<html[^>]*>/i.exec(content);
+  const inject = at?.[0].toLowerCase().startsWith('<head') ? head : `<head>${head}</head>`;
+  const cut = at ? at.index + at[0].length : 0;
+  return content.slice(0, cut) + inject + content.slice(cut) + bridge;
+}
+
+// Runs inside the card as source text, so it must not close over anything outside its own body.
+// Keys and links go through reviewBridge, which the card loads next to this.
+function showBridge(restoreY) {
+  const P = 'cck-show:';
+  const send = (msg) => parent.postMessage({ ...msg, type: P + msg.type }, '*');
+  const restore = () => {
+    if (restoreY) scrollTo(0, restoreY);
+  };
+  restore();
+  addEventListener('load', restore);
+  let lastH = -1;
+  const measure = () => {
+    const b = document.body;
+    const cs = getComputedStyle(b);
+    const h = Math.ceil(b.getBoundingClientRect().height + parseFloat(cs.marginTop) + parseFloat(cs.marginBottom));
+    if (h === lastH) return;
+    lastH = h;
+    send({ type: 'height', h });
+  };
+  new ResizeObserver(measure).observe(document.body);
+  let raf = 0;
+  addEventListener('scroll', () => {
+    if (raf) return;
+    raf = requestAnimationFrame(() => {
+      raf = 0;
+      send({ type: 'scroll', y: scrollY });
+    });
+  });
+  addEventListener('message', (e) => {
+    if (e.source !== parent || e.data?.type !== `${P}tokens`) return;
+    for (const [k, v] of Object.entries(e.data.tokens)) document.documentElement.style.setProperty(k, v);
+  });
+}
+
+window.addEventListener('message', (e) => {
+  const frame = showState.frame;
+  if (!frame || e.source !== frame.contentWindow || typeof e.data?.type !== 'string') return;
+  if (e.data.type === `${SHOW_MSG}scroll`) showState.frameY = Number(e.data.y) || 0;
+  else if (e.data.type === `${SHOW_MSG}height`) {
+    showState.frameH = Number(e.data.h) || 0;
+    layoutShow();
+  }
+});
+
+// The same body attributes the terminal theme watches; a markdown card follows the board's CSS.
+new MutationObserver(() => {
+  showState.frame?.contentWindow?.postMessage({ type: `${SHOW_MSG}tokens`, tokens: showTokens() }, '*');
+}).observe(document.body, { attributes: true, attributeFilter: ['class', 'data-color-theme', 'style'] });
+
+function showFitSize(w, h) {
+  return { w: Math.min(Math.max(360, Math.round(w * 0.4)), 640, w - 2 * SHOW_INSET), h: Math.round(h * 0.6) };
+}
+
+function showClampSize(size, w, h) {
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(v, hi));
+  return { w: clamp(size.w, SHOW_MIN_W, w - 2 * SHOW_INSET), h: clamp(size.h, SHOW_MIN_H, h - 2 * SHOW_INSET) };
+}
+
+function layoutShow() {
+  const card = showCardEl();
+  if (!card.classList.contains('open')) return;
+  const host = document.getElementById('terminal-host');
+  const w = host.clientWidth;
+  const h = host.clientHeight;
+  if (!w || !h) return;
+  const fit = showFitSize(w, h);
+  card.style.setProperty('--show-fit-w', `${fit.w}px`);
+  card.style.setProperty('--show-fit-h', `${fit.h}px`);
+  const sized = !!showSize && !showState.expanded && !showState.collapsed;
+  card.classList.toggle('sized', sized);
+  if (sized) {
+    const s = showClampSize(showSize, w, h);
+    card.style.setProperty('--show-w', `${s.w}px`);
+    card.style.setProperty('--show-h', `${s.h}px`);
+  }
+  const frame = showState.frame;
+  if (!frame) return;
+  const peek = !showState.expanded && !sized;
+  const chrome = card.querySelector('.show-head').offsetHeight + card.querySelector('.show-ticks').offsetHeight + 2;
+  frame.style.flex = peek ? 'none' : '1';
+  frame.style.height = peek ? `${Math.min(showState.frameH || SHOW_MIN_H, fit.h - chrome)}px` : '';
+}
+
+function showCommand(cmd) {
+  const tid = showState.terminalId;
+  if (cmd === 'prev' || cmd === 'next') {
+    showState.idx += cmd === 'prev' ? -1 : 1;
+    showState.collapsed = false;
+  } else if (cmd === 'collapse') showState.collapsed = !showState.collapsed;
+  else if (cmd === 'expand') {
+    showState.expanded = !showState.expanded;
+    showState.collapsed = false;
+  } else if (cmd === 'close') showClosed.add(tid);
+  else if (cmd === 'clear') {
+    showState.posts = [];
+    showState.marked.clear();
+    terminalFetch(apiPath`/api/terminals/${tid}/show`, 'DELETE')
+      .then((res) => {
+        if (!res.ok && res.status !== 404) showToast(`Could not clear the posts (HTTP ${res.status})`, 'error');
+      })
+      .catch((e) => showToast(e.message, 'error'));
+  }
+  renderShow();
+}
+
+function initShowCard() {
+  const card = showCardEl();
+  // The header buttons must not take focus from the terminal; a click in the body may.
+  card.addEventListener('mousedown', (e) => {
+    if (e.target.closest('.show-head, .show-ticks')) e.preventDefault();
+  });
+  card.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-show]');
+    if (b) {
+      if (!b.disabled) showCommand(b.dataset.show);
+      return;
+    }
+    const t = e.target.closest('[data-go]');
+    if (!t) return;
+    showState.idx = Number(t.dataset.go);
+    showState.collapsed = false;
+    renderShow();
+  });
+  // Pointer capture keeps the drag when the pointer crosses the card's frame or the terminal's.
+  card.addEventListener('pointerdown', (e) => {
+    const grip = e.target.closest('.show-grip');
+    if (!grip || e.button !== 0) return;
+    e.preventDefault();
+    grip.setPointerCapture(e.pointerId);
+    const r = card.getBoundingClientRect();
+    const start = { x: e.clientX, y: e.clientY, w: r.width, h: r.height };
+    let last = e;
+    let raf = 0;
+    document.body.classList.add('show-resizing');
+    const move = (ev) => {
+      last = ev;
+      raf ||= requestAnimationFrame(() => {
+        raf = 0;
+        showSize = { w: Math.round(start.w + start.x - last.clientX), h: Math.round(start.h + last.clientY - start.y) };
+        layoutShow();
+      });
+    };
+    const up = () => {
+      cancelAnimationFrame(raf);
+      grip.removeEventListener('pointermove', move);
+      grip.removeEventListener('pointerup', up);
+      grip.removeEventListener('pointercancel', up);
+      document.body.classList.remove('show-resizing');
+      const host = document.getElementById('terminal-host');
+      if (showSize) showSize = showClampSize(showSize, host.clientWidth, host.clientHeight);
+      store.writeJson(SHOW_SIZE_KEY, showSize);
+      layoutShow();
+    };
+    grip.addEventListener('pointermove', move);
+    grip.addEventListener('pointerup', up);
+    grip.addEventListener('pointercancel', up);
+  });
+  card.addEventListener('dblclick', (e) => {
+    if (!e.target.closest('.show-grip')) return;
+    showSize = null;
+    store.removeItem(SHOW_SIZE_KEY);
+    layoutShow();
+  });
+  document.getElementById('show-reopen').addEventListener('click', () => {
+    showClosed.delete(showState.terminalId);
+    renderShow({ flash: true });
+  });
+}
+
+//#endregion
+
 //#region NEW_SESSION
 // claude writes no transcript until the first message, so until then the sidebar shows a
 // placeholder built from the form. newSpecs holds one entry per such session; the entry
@@ -14544,6 +15015,8 @@ async function loadTerminals() {
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
   const list = data.sessions || [];
   runningTerminals = new Set(list.map((t) => t.id));
+  rememberTerminalIds(list);
+  syncShowCard();
   pushTerminalClaims();
   renderActivityChip();
   return list;
@@ -14975,6 +15448,7 @@ loadSessionGroups();
 initSessionGroupsDnd();
 initSessionPicker();
 initProjectPicker();
+initShowCard();
 for (const k of readStoredList(ACTIVITY_FILTER_KEY)) activityFilter.add(k);
 initSidebarResize();
 applyModalZoom();
