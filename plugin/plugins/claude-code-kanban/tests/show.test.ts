@@ -90,27 +90,19 @@ test('posts the body with the terminal token and answers with the position', asy
     body: { id: 'p1', title: 'Plan', key: 'plan', index: 2, count: 3, replaced: false },
   })
   await $.session.start({ cwd: 'C:/proj', surface: 'terminal', isInteractive: true })
-  const res = await $.tool.call(call({ title: 'Plan', key: 'plan', kind: 'markdown', content: '# hi' }))
+  const res = await $.tool.call(call({ title: 'Plan', key: 'plan', kind: 'markdown', file: 'C:/proj/plan.md' }))
   expect(res.result).toBe('Shown "Plan" (plan, 2/3)')
   expect(board.requests).toEqual([
     {
       url: `${CCK_URL}/api/terminals/${TERMINAL_ID}/show`,
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-terminal-token': 'tok-abc' },
-      body: { sessionId: 'sid-1', title: 'Plan', key: 'plan', kind: 'markdown', content: '# hi' },
+      body: { sessionId: 'sid-1', title: 'Plan', key: 'plan', kind: 'markdown', file: 'C:/proj/plan.md' },
     },
   ])
 })
 
-test('a file post sends the path and no content', async ($, on) => {
-  const board = engine(on, GATE, { status: 200, body: { id: 'p1', title: 'Doc', key: null, index: 1, count: 1 } })
-  await $.session.start({ cwd: 'C:/proj', surface: 'terminal', isInteractive: true })
-  const res = await $.tool.call(call({ title: 'Doc', file: 'C:/proj/doc.md' }))
-  expect(res.result).toBe('Shown "Doc" (1/1)')
-  expect(board.requests[0]?.body).toEqual({ sessionId: 'sid-1', title: 'Doc', file: 'C:/proj/doc.md' })
-})
-
-test('a claim sends neither content nor file and answers with the file to write', async ($, on) => {
+test('a claim sends no file and answers with the file to write', async ($, on) => {
   const path = 'C:/s/.cck/show/p1.md'
   const board = engine(on, GATE, { status: 200, body: { id: 'p1', title: 'Plan', key: 'plan', index: 1, count: 1, path } })
   await $.session.start({ cwd: 'C:/proj', surface: 'terminal', isInteractive: true })
@@ -119,18 +111,18 @@ test('a claim sends neither content nor file and answers with the file to write'
   expect(board.requests[0]?.body).toEqual({ sessionId: 'sid-1', title: 'Plan', key: 'plan' })
 })
 
-test('a 413 answer reaches the model as an error with the server text', async ($, on) => {
-  const error = 'over 16 KB: call show without content and write the card to the file it names'
-  engine(on, GATE, { status: 413, body: { error } })
+test('a 400 answer reaches the model as an error with the server text', async ($, on) => {
+  const error = 'file not found: C:/proj/gone.md'
+  engine(on, GATE, { status: 400, body: { error } })
   await $.session.start({ cwd: 'C:/proj', surface: 'terminal', isInteractive: true })
-  const res = await $.tool.call(call({ title: 'Big', kind: 'markdown', content: 'x' }))
+  const res = await $.tool.call(call({ title: 'Gone', file: 'C:/proj/gone.md' }))
   expect(res.deny).toBe(error)
 })
 
 test('a network error reaches the model as an error', async ($, on) => {
   engine(on, GATE, new Error('connect ECONNREFUSED 127.0.0.1:4100'))
   await $.session.start({ cwd: 'C:/proj', surface: 'terminal', isInteractive: true })
-  const res = await $.tool.call(call({ title: 'Plan', kind: 'markdown', content: 'x' }))
+  const res = await $.tool.call(call({ title: 'Plan' }))
   expect(res.deny).toContain(`Cannot reach cck at ${CCK_URL}`)
   expect(res.deny).toContain('ECONNREFUSED')
 })
@@ -139,7 +131,7 @@ test('no token file: no request, an error that names the board', async ($, on) =
   const board = engine(on, GATE)
   delete board.files[TOKEN_FILE]
   await $.session.start({ cwd: 'C:/proj', surface: 'terminal', isInteractive: true })
-  const res = await $.tool.call(call({ title: 'Plan', kind: 'markdown', content: 'x' }))
+  const res = await $.tool.call(call({ title: 'Plan' }))
   expect(res.deny).toContain('No terminal token')
   expect(board.requests).toEqual([])
 })

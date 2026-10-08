@@ -42,6 +42,25 @@ describe('pane store', () => {
     assert.deepEqual(panes.get('s9'), { rev: 0, panes: [], updatedAt: null });
   });
 
+  it('marks a show card pane and keeps the mark on disk', () => {
+    const { open } = memoryStore();
+    const panes = open();
+    assert.equal(panes.add('s1', { kind: 'html', target: 'C:\\pad\\card.html', show: true }).pane.show, true);
+    assert.equal('show' in panes.add('s1', { kind: 'html', target: 'C:\\repo\\b.html', show: false }).pane, false);
+    assert.equal(open().get('s1').panes[0].show, true);
+  });
+
+  it('drops the show panes of removed posts and keeps a plain pane of the same file', () => {
+    const panes = memoryStore().open();
+    panes.add('s1', { kind: 'html', target: 'C:\\pad\\a.html', show: true });
+    panes.add('s1', { kind: 'html', target: 'C:\\pad\\b.html', show: true });
+    panes.add('s2', { kind: 'html', target: 'C:\\pad\\a.html' });
+    assert.deepEqual(ids(panes.removeShow('s1', ['c:/pad/a.html'])), ['p2']);
+    assert.equal(panes.removeShow('s1', ['C:\\pad\\a.html']), null);
+    assert.equal(panes.removeShow('s2', ['C:\\pad\\a.html']), null);
+    assert.equal(panes.removeShow('s9', ['C:\\pad\\a.html']), null);
+  });
+
   it('lists the file targets of every session, without URLs', () => {
     const panes = memoryStore().open();
     panes.add('s1', url(1));

@@ -3421,6 +3421,7 @@ mountShowRoutes(app, {
   hasTerminal: (id) => terminal.hasTerminal(id),
   readPreviewFile,
   broadcast,
+  onRemoved: (sessionId, paths) => panes.removeShow(sessionId, paths),
 });
 
 // Served from node_modules, never a CDN: any script on this page can use the token.
@@ -4117,11 +4118,11 @@ app.get('/api/panes/:sessionId', (req, res) => {
 
 app.post('/api/panes/:sessionId', async (req, res) => {
   try {
-    const { target, base, title, kind } = req.body || {};
+    const { target, base, title, kind, show } = req.body || {};
     if (typeof target !== 'string' || !target) throw previewError(400, 'target is required', 'bad_target');
     // A message target is a session log message id, which the board resolves when it shows the pane.
     const resolved = kind === 'message' ? { kind, target } : await resolvePaneTarget(target, base);
-    res.json(panes.add(req.params.sessionId, { ...resolved, title }));
+    res.json(panes.add(req.params.sessionId, { ...resolved, title, show: show === true }));
   } catch (error) {
     paneRouteError(res, error, 'POST /api/panes');
   }

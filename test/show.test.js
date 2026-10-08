@@ -15,7 +15,7 @@ const UNKNOWN = 'aaaaaaaa-0000-0000-0000-000000000009';
 
 function board(root, saved = {}) {
   const events = [];
-  const state = { saves: 0, map: saved };
+  const state = { saves: 0, map: saved, removed: [] };
   const store = createShowStore({
     load: () => state.map,
     onChange: () => { state.saves++; state.map = store.prune(() => true); },
@@ -36,6 +36,7 @@ function board(root, saved = {}) {
       return { content: fs.readFileSync(abs, 'utf8'), kind: abs.endsWith('.md') ? 'markdown' : 'text' };
     },
     broadcast: (e) => events.push(e),
+    onRemoved: (sessionId, paths) => state.removed.push({ sessionId, paths }),
   });
   return { app, store, events, state };
 }
@@ -54,6 +55,23 @@ async function listen(app) {
 }
 
 const showUrl = (terminalId = TERMINAL) => `/api/terminals/${terminalId}/show`;
+
+async function until(check, ms = 3000) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    const v = check();
+    if (v) return v;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  return check();
+}
+
+// Writes a claim's file and waits for its refresh, so no late event lands in a later check.
+async function write(b, post, text) {
+  const since = b.events.length;
+  fs.writeFileSync(post.path, text);
+  assert.ok(await until(() => b.events.slice(since).some((e) => e.type === 'show:posted' && e.id === post.id)));
+}
 
 describe('show routes', () => {
   let root;
@@ -80,29 +98,31 @@ describe('show routes', () => {
     assert.deepEqual(r.body, { sessionId: null, posts: [] });
   });
 
-  it('posts markdown, stores it in the scratchpad and sends show:posted without the content', async () => {
-    const r = await api.call('POST', showUrl(), { sessionId: A, title: 'Plan', content: '# Plan' });
+  it('claims a markdown card in the scratchpad and sends show:posted without the content', async () => {
+    const r = await api.call('POST', showUrl(), { sessionId: A, title: 'Plan' });
     assert.equal(r.status, 200);
     const file = path.join(showDir(A), `${r.body.id}.md`);
     assert.deepEqual({ ...r.body, id: undefined }, { id: undefined, title: 'Plan', key: null, index: 1, count: 1, replaced: false, path: file });
-    assert.equal(fs.readFileSync(file, 'utf8'), '# Plan');
     const index = JSON.parse(fs.readFileSync(path.join(showDir(A), 'index.json'), 'utf8'));
     assert.equal(index.sessionId, A);
     assert.deepEqual(index.posts.map((p) => [p.id, p.kind, p.file]), [[r.body.id, 'markdown', null]]);
     const { path: _, ...shown } = r.body;
     assert.deepEqual(b.events.at(-1), { type: 'show:posted', terminalId: TERMINAL, sessionId: A, ...shown });
 
+    await write(b, r.body, '# Plan');
     const got = await api.call('GET', `${showUrl()}/${r.body.id}`);
-    assert.deepEqual(got.body, { id: r.body.id, title: 'Plan', key: null, kind: 'markdown', content: '# Plan', file: null, url: null });
+    assert.deepEqual(got.body, { id: r.body.id, title: 'Plan', key: null, kind: 'markdown', content: '# Plan', file: null, path: file, url: null });
   });
 
   it('replaces a keyed post in place, keeping its id and position', async () => {
-    const first = await api.call('POST', showUrl(), { sessionId: A, title: 'Diagram', key: 'arch', content: 'v1' });
-    await api.call('POST', showUrl(), { sessionId: A, title: 'Notes', content: 'n' });
-    const again = await api.call('POST', showUrl(), { sessionId: A, title: 'Diagram v2', key: 'arch', kind: 'html', content: '<p>v2</p>' });
+    const first = await api.call('POST', showUrl(), { sessionId: A, title: 'Diagram', key: 'arch' });
+    await write(b, first.body, 'v1');
+    await write(b, (await api.call('POST', showUrl(), { sessionId: A, title: 'Notes' })).body, 'n');
+    const again = await api.call('POST', showUrl(), { sessionId: A, title: 'Diagram v2', key: 'arch', kind: 'html' });
     const html = path.join(showDir(A), `${first.body.id}.html`);
     assert.deepEqual(again.body, { id: first.body.id, title: 'Diagram v2', key: 'arch', index: 2, count: 3, replaced: true, path: html });
     assert.equal(fs.existsSync(path.join(showDir(A), `${first.body.id}.md`)), false);
+    await write(b, again.body, '<p>v2</p>');
     const list = await api.call('GET', showUrl());
     assert.deepEqual(list.body.posts.map((p) => p.title), ['Plan', 'Diagram v2', 'Notes']);
     const got = await api.call('GET', `${showUrl()}/${first.body.id}`);
@@ -120,7 +140,7 @@ describe('show routes', () => {
     assert.equal(r.body.path, null);
     fs.writeFileSync(md, 'two');
     const got = await api.call('GET', `${showUrl()}/${r.body.id}`);
-    assert.deepEqual(got.body, { id: r.body.id, title: 'Doc', key: null, kind: 'markdown', content: 'two', file: md, url: null });
+    assert.deepEqual(got.body, { id: r.body.id, title: 'Doc', key: null, kind: 'markdown', content: 'two', file: md, path: md, url: null });
 
     const img = await api.call('POST', showUrl(), { sessionId: A, title: 'Shot', file: png });
     const gotImg = await api.call('GET', `${showUrl()}/${img.body.id}`);
@@ -132,6 +152,15 @@ describe('show routes', () => {
     assert.equal((await api.call('GET', `${showUrl()}/${r.body.id}`)).status, 404);
   });
 
+  it('draws an SVG file as HTML without its prolog', async () => {
+    const svg = path.join(root, 'pic.svg');
+    fs.writeFileSync(svg, '<?xml version="1.0"?>\n<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "x">\n<svg viewBox="0 0 2 1"/>');
+    const r = await api.call('POST', showUrl(), { sessionId: A, title: 'Pic', file: svg });
+    const got = await api.call('GET', `${showUrl()}/${r.body.id}`);
+    assert.equal(got.body.kind, 'html');
+    assert.equal(got.body.content, '\n<svg viewBox="0 0 2 1"/>');
+  });
+
   it('refuses a file that is missing or cannot be shown', async () => {
     const missing = await api.call('POST', showUrl(), { sessionId: A, title: 'x', file: path.join(root, 'nope.md') });
     assert.equal(missing.status, 400);
@@ -141,7 +170,7 @@ describe('show routes', () => {
   });
 
   it('answers 401 without the token, 404 for no live terminal, 409 for no transcript', async () => {
-    const body = { sessionId: A, title: 't', content: 'c' };
+    const body = { sessionId: A, title: 't' };
     const before = b.events.length;
     assert.equal((await api.call('POST', showUrl(), body, null)).status, 401);
     assert.equal((await api.call('POST', showUrl(), body, 'wrong')).status, 401);
@@ -159,12 +188,11 @@ describe('show routes', () => {
 
   it('answers 400 for a bad body', async () => {
     const bad = [
-      { title: 't', content: 'c' },
-      { sessionId: 'nope', title: 't', content: 'c' },
-      { sessionId: A, content: 'c' },
-      { sessionId: A, title: 't', content: 'c', file: path.join(root, 'doc.md') },
-      { sessionId: A, title: 't', kind: 'svg', content: 'c' },
-      { sessionId: A, title: 't', key: 7, content: 'c' },
+      { title: 't' },
+      { sessionId: 'nope', title: 't' },
+      { sessionId: A },
+      { sessionId: A, title: 't', kind: 'svg' },
+      { sessionId: A, title: 't', key: 7 },
       { sessionId: A, title: 't', file: 'relative.md' },
     ];
     for (const body of bad) {
@@ -174,27 +202,16 @@ describe('show routes', () => {
     }
   });
 
-  it('caps content at 16 KB in UTF-8 bytes, and takes 15 KB of multibyte text', async () => {
-    const cap = 'over 16 KB: call show without content and write the card to the file it names';
-    const over = await api.call('POST', showUrl(), { sessionId: A, title: 'big', content: 'x'.repeat(16 * 1024 + 1) });
-    assert.equal(over.status, 413);
-    assert.equal(over.body.error, cap);
-    const wide = await api.call('POST', showUrl(), { sessionId: A, title: 'big', content: 'é'.repeat(8 * 1024 + 1) });
-    assert.equal(wide.status, 413);
-    const huge = await api.call('POST', showUrl(), { sessionId: A, title: 'big', content: 'x'.repeat(100 * 1024) });
-    assert.equal(huge.status, 413);
-    assert.equal(huge.body.error, cap);
-
-    const text = '漢'.repeat(5 * 1024);
-    assert.equal(Buffer.byteLength(text), 15 * 1024);
-    const ok = await api.call('POST', showUrl(), { sessionId: A, title: 'wide', content: text });
-    assert.equal(ok.status, 200);
-    assert.equal((await api.call('GET', `${showUrl()}/${ok.body.id}`)).body.content, text);
+  it('refuses inline content and names the claim form', async () => {
+    const r = await api.call('POST', showUrl(), { sessionId: A, title: 't', content: 'c' });
+    assert.equal(r.status, 400);
+    assert.match(r.body.error, /call show without file to get a file/);
   });
 
   it('switches the card to a new session id and saves the map', async () => {
     const saves = b.state.saves;
-    const r = await api.call('POST', showUrl(), { sessionId: B, title: 'After clear', content: 'b' });
+    const r = await api.call('POST', showUrl(), { sessionId: B, title: 'After clear' });
+    await write(b, r.body, 'b');
     assert.deepEqual({ index: r.body.index, count: r.body.count }, { index: 1, count: 1 });
     assert.equal(b.state.saves, saves + 1);
     assert.deepEqual(b.state.map, { [TERMINAL]: B });
@@ -202,7 +219,7 @@ describe('show routes', () => {
     assert.equal(list.body.sessionId, B);
     assert.deepEqual(list.body.posts.map((p) => p.title), ['After clear']);
     assert.ok(fs.existsSync(path.join(showDir(A), 'index.json')));
-    await api.call('POST', showUrl(), { sessionId: B, title: 'Second', content: 'b2' });
+    await write(b, (await api.call('POST', showUrl(), { sessionId: B, title: 'Second' })).body, 'b2');
     assert.equal(b.state.saves, saves + 1);
   });
 
@@ -220,8 +237,34 @@ describe('show routes', () => {
     }
   });
 
+  it('DELETE of one post drops it and its file and sends show:removed', async () => {
+    const posts = (await api.call('GET', showUrl())).body.posts;
+    const id = posts.find((p) => p.title === 'Second').id;
+    const url = `${showUrl()}/${id}`;
+    assert.equal((await api.call('DELETE', url, undefined, 'wrong')).status, 401);
+    assert.equal((await api.call('DELETE', `${showUrl(OTHER_TERMINAL)}/${id}`)).status, 404);
+    assert.equal((await api.call('DELETE', url)).status, 204);
+    assert.deepEqual(b.events.at(-1), { type: 'show:removed', terminalId: TERMINAL, sessionId: B, id, count: posts.length - 1 });
+    assert.deepEqual(b.state.removed.at(-1), { sessionId: B, paths: [path.join(showDir(B), `${id}.md`)] });
+    assert.equal(fs.existsSync(path.join(showDir(B), `${id}.md`)), false);
+    assert.deepEqual((await api.call('GET', showUrl())).body.posts.map((p) => p.title), ['After clear']);
+    assert.equal((await api.call('GET', url)).status, 404);
+    assert.equal((await api.call('DELETE', url)).status, 404);
+  });
+
+  it('DELETE of one file post keeps the session\'s file', async () => {
+    const file = path.join(root, 'keep.md');
+    fs.writeFileSync(file, '# keep');
+    const r = await api.call('POST', showUrl(), { sessionId: B, title: 'File', file });
+    assert.equal((await api.call('DELETE', `${showUrl()}/${r.body.id}`)).status, 204);
+    assert.deepEqual(b.state.removed.at(-1), { sessionId: B, paths: [file] });
+    assert.ok(fs.existsSync(file));
+  });
+
   it('DELETE removes the current session\'s show folder and sends show:cleared', async () => {
+    const [left] = (await api.call('GET', showUrl())).body.posts;
     const r = await api.call('DELETE', showUrl());
+    assert.deepEqual(b.state.removed.at(-1), { sessionId: B, paths: [path.join(showDir(B), `${left.id}.md`)] });
     assert.equal(r.status, 204);
     assert.equal(fs.existsSync(showDir(B)), false);
     assert.ok(fs.existsSync(showDir(A)));
@@ -229,16 +272,6 @@ describe('show routes', () => {
     assert.deepEqual((await api.call('GET', showUrl())).body, { sessionId: B, posts: [] });
   });
 });
-
-async function until(check, ms = 3000) {
-  const end = Date.now() + ms;
-  while (Date.now() < end) {
-    const v = check();
-    if (v) return v;
-    await new Promise((r) => setTimeout(r, 25));
-  }
-  return check();
-}
 
 describe('show claims', () => {
   let root;
@@ -294,15 +327,6 @@ describe('show claims', () => {
     assert.equal(html.path, md.path.replace(/\.md$/, '.html'));
     assert.equal(fs.existsSync(md.path), false);
     assert.equal(fs.readFileSync(html.path, 'utf8'), '# v2');
-  });
-
-  it('sends no refresh for its own write of inline content', async () => {
-    const { body: r } = await api.call('POST', showUrl(), { sessionId: A, title: 'Note', content: 'inline' });
-    const since = b.events.length;
-    await new Promise((res) => setTimeout(res, 500));
-    assert.equal(refreshes(r.id, since).length, 0);
-    fs.writeFileSync(r.path, 'edited');
-    assert.ok(await until(() => refreshes(r.id, since).length === 1));
   });
 });
 

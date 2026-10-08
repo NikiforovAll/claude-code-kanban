@@ -1,6 +1,6 @@
 ---
 name: show
-description: HTML contract and theme variables for an HTML card in the cck overlay, and layout tips for a mermaid card. Use before you show an HTML card or a mermaid diagram with the show tool.
+description: Show card guide for the cck overlay. Use before a show call that posts HTML (a chart, mockup or diagram) or a mermaid diagram.
 ---
 
 # Show cards
@@ -9,10 +9,11 @@ The `mcp__claude-code-kanban__show` tool exists only in a Claude Code session st
 
 ## HTML contract
 
-This applies to `kind: "html"` content and to the `.html` file of a claim.
+This applies to the `.html` file that a `kind: "html"` post names.
 
 - Write a body fragment: no `<!doctype>`, `<html>`, `<head>` or `<body>`. The overlay wraps it in a sandboxed document. `<style>` and `<script>` work; the script has no access to the page around it.
 - The card is about 360 to 640 px wide and sizes its height to the content. Keep the content in normal flow, without `position: fixed` or `100vh`.
+- One chart or diagram per card, under an `<h2>` that says what to see. Keep it flat: solid fills and 1 px lines.
 - Open links with `<a href="https://...">`; the overlay opens them in a new browser tab.
 - Take every color and font from these variables, so the card follows the user's light or dark theme:
 
@@ -23,7 +24,17 @@ This applies to `kind: "html"` content and to the `.html` file of a claim.
 | `--color-border` | Lines, box outlines |
 | `--color-accent` | The one thing to look at |
 | `--color-info`, `--color-success`, `--color-warning`, `--color-danger` | Status |
+| `--color-series-1` … `--color-series-8` | Chart series, in order |
+| `--color-ramp-1` … `--color-ramp-5` | One-hue magnitude, least to most |
 | `--font-sans`, `--font-mono` | Fonts |
+
+## Card kinds
+
+Any HTML that helps the user see the point is a good card: a comparison table, a checklist, a before and after, a diff, a small interactive widget, a mix of these. The HTML contract above is all it needs. Three kinds have their own guide; read it before you write that kind:
+
+- Chart, stat tile or meter: [references/chart.md](references/chart.md)
+- Mockup of a screen, dialog or form: [references/mockup.md](references/mockup.md)
+- Diagram in SVG of a system, flow, states or layers: [references/diagram.md](references/diagram.md)
 
 ## Mermaid
 

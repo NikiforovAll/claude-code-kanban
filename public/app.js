@@ -2683,6 +2683,7 @@ function modalZoomLabel() {
 function applyModalZoom() {
   document.documentElement.style.setProperty('--modal-zoom', String(modalZoom));
   for (const el of document.querySelectorAll('.pane-zoom-val')) el.textContent = modalZoomLabel();
+  postToShowFrames(() => ({ type: `${SHOW_MSG}zoom`, z: modalZoom }));
 }
 
 // delta 0 resets to 100%
@@ -2708,7 +2709,7 @@ function isAnyModalOpen() {
 
 // An open modal owns the zoom keys even when it has nothing to scale.
 function isZoomableOnScreen() {
-  return isAnyModalOpen() ? isZoomableModalOpen() : isPaneDocOnScreen();
+  return isAnyModalOpen() ? isZoomableModalOpen() : isPaneDocOnScreen() || isShowCardFocused();
 }
 
 const ZOOM_KEYS = { '+': 0.1, '=': 0.1, NumpadAdd: 0.1, '-': -0.1, _: -0.1, NumpadSubtract: -0.1, 0: 0, Numpad0: 0 };
@@ -5225,11 +5226,19 @@ function sgOpenMenu(x, y, kind, ref) {
   menu.className = 'sg-menu';
   menu.setAttribute('role', 'menu');
   const canFork = kind === 'session' && !!forkableSession(ref);
-  menu.setAttribute('aria-label', canFork ? 'Session actions' : `Move ${label} to group`);
+  const canEnd = kind === 'session' && runningTerminals.has(ref);
+  const actions =
+    (canFork
+      ? '<button class="sg-menu-item" role="menuitem" data-sg-action="fork" title="claude --resume --fork-session">Fork</button>'
+      : '') +
+    (canEnd
+      ? '<button class="sg-menu-item" role="menuitem" data-sg-action="end" title="Alt+Shift+`">End terminal</button>'
+      : '');
+  menu.setAttribute('aria-label', actions ? 'Session actions' : `Move ${label} to group`);
   menu.dataset.sgKind = kind;
   menu.dataset.sgRef = ref;
   menu.innerHTML = `
-        ${canFork ? '<div class="sg-menu-label" aria-hidden="true">Session</div><button class="sg-menu-item" role="menuitem" data-sg-action="fork" title="claude --resume --fork-session">Fork</button>' : ''}
+        ${actions ? `<div class="sg-menu-label" aria-hidden="true">Session</div>${actions}` : ''}
         <div class="sg-menu-label" aria-hidden="true">Move ${label} to group</div>
         ${rows}
         <button class="sg-menu-item" role="menuitem" data-sg-move="__new__">+ New group…</button>
@@ -5278,6 +5287,7 @@ document.addEventListener('click', (e) => {
   const move = item.dataset.sgMove;
   sgCloseMenu();
   if (item.dataset.sgAction === 'fork') return forkSession(sgRef);
+  if (item.dataset.sgAction === 'end') return closeTerminalSession(sgRef);
   if (move === '__none__') {
     sgDetach(sgKind, sgRef);
     persistSessionGroups();
@@ -7113,6 +7123,10 @@ document.addEventListener('keydown', (e) => {
     adjustModalZoom(zoom);
     return;
   }
+  if (isShowCardFocused() && !isAnyModalOpen() && showCardKey(e)) {
+    e.preventDefault();
+    return;
+  }
 
   // Above the text-field guard: xterm's input is a textarea, and the toggle must work from it.
   const terminalPrompt = document.getElementById('terminal-prompt');
@@ -7840,7 +7854,8 @@ function reviewBridge(textBefore, headingBefore, rangeAt, comboOf, fieldSelector
   });
 }
 
-const TEXT_FIELD_SELECTOR = 'input, textarea, select, [contenteditable]';
+const TEXT_FIELD_SELECTOR =
+  'input:not([type=checkbox], [type=radio], [type=button], [type=submit], [type=reset], [type=range], [type=color], [type=file], [type=image]), textarea, select, [contenteditable]';
 
 const REVIEW_BRIDGE_TAG = `<script>(${reviewBridge})(${reviewTextBefore}, ${reviewHeadingBefore}, ${reviewRangeAt}, ${ClaudeHub.comboOf}, ${JSON.stringify(TEXT_FIELD_SELECTOR)});</script>`;
 
@@ -7873,6 +7888,9 @@ const PANE_CLAIMS = [
   ...['|', '{', '}'].map((key) => ({ shiftKey: true, key, code: '' })),
   ...['BracketLeft', 'BracketRight', 'KeyW'].map((code) => ({ altKey: true, key: 'Unidentified', code })),
 ];
+
+// Ctrl+D removes the show card's post (showCardKey); other pages keep it.
+const SHOW_CLAIMS = ['ctrlKey', 'metaKey'].map((mod) => ({ [mod]: true, key: 'd', code: '' }));
 
 // Claimed only while comments wait, so a previewed page keeps Ctrl+Enter otherwise.
 const REVIEW_SEND_CLAIMS = ['ctrlKey', 'metaKey'].map((mod) => ({ [mod]: true, key: 'Enter', code: '' }));
@@ -8252,7 +8270,7 @@ function createPreviewFrame(className, srcdoc, sandbox = 'allow-scripts allow-po
   frame.setAttribute('referrerpolicy', 'no-referrer');
   frame.srcdoc = srcdoc;
   bridgedFrames.add(frame);
-  frame.addEventListener('load', () => sendBridgeClaims([frame], bridgeClaims(keyClaims())));
+  frame.addEventListener('load', () => sendBridgeClaimsAll([frame], keyClaims()));
   return frame;
 }
 
@@ -9207,6 +9225,7 @@ function setupEventSource() {
       if (data.type === 'show:posted') onShowPosted(data);
 
       if (data.type === 'show:cleared') onShowCleared(data);
+      if (data.type === 'show:removed') onShowRemoved(data);
 
       if (data.type === 'agent-update') {
         if (!data.unreadOnly) pendingAgentSessionIds.add(data.sessionId);
@@ -12522,7 +12541,11 @@ async function loadPaneView(sid, pane, view, scroll) {
     const restore = scroll
       ? `<script>addEventListener('load',()=>requestAnimationFrame(()=>scrollTo(${Number(scroll.x) || 0},${Number(scroll.y) || 0})))</script>`
       : '';
-    const frame = createPreviewFrame('pane-frame modal-zoomable', data.content + REVIEW_BRIDGE_TAG + restore);
+    // A show card's own zoom follows the text zoom (showBridge), so its frame is not .modal-zoomable.
+    const [cls, doc] = pane.show
+      ? ['pane-frame show-pane-frame', showSrcdoc(data.content, scroll?.y)]
+      : ['pane-frame modal-zoomable', data.content + REVIEW_BRIDGE_TAG + restore];
+    const frame = createPreviewFrame(cls, doc);
     frame.title = pane.title;
     view.appendChild(frame);
     attachPaneReview(view, sid, fileReviewOpts(data.path, data.kind, frame, frame));
@@ -12706,7 +12729,7 @@ function attachPaneReview(view, sessionId, opts) {
 
 function syncPaneReview() {
   const view = activePaneView();
-  setBaseReview((view && paneReviews.get(view)) || null);
+  setBaseReview((view && paneReviews.get(view)) || (wantsTerminal() && showState.review) || null);
 }
 
 function unmountPane(sid, paneId) {
@@ -13884,6 +13907,14 @@ function bridgeClaims(claims) {
   return { ...claims, keys: [...claims.keys, ...ZOOM_CLAIMS, ...PANE_CLAIMS, ...review] };
 }
 
+function sendBridgeClaimsAll(frames, claims) {
+  const base = bridgeClaims(claims);
+  const rest = frames.filter((f) => f !== showState.frame);
+  sendBridgeClaims(rest, base);
+  if (rest.length < frames.length)
+    sendBridgeClaims([showState.frame], { ...base, keys: [...base.keys, ...SHOW_CLAIMS] });
+}
+
 function pushTerminalClaims() {
   if (terminalClaimsQueued) return;
   terminalClaimsQueued = true;
@@ -13892,7 +13923,7 @@ function pushTerminalClaims() {
     const bridged = bridgedFrameEls();
     if (!termFrame.inited && !bridged.length) return;
     const claims = keyClaims();
-    sendBridgeClaims(bridged, bridgeClaims(claims));
+    sendBridgeClaimsAll(bridged, claims);
     if (!termFrame.inited) return;
     const sig = JSON.stringify(claims);
     if (sig === termFrame.claims) return;
@@ -13951,10 +13982,6 @@ function adjustTerminalFontSize(step) {
     terminalFrameSend('font', { size });
   }
   showToast(`Terminal ${size}px`);
-}
-
-function terminalSend(msg) {
-  if (termState.socket) terminalFrameSend('send', { msg });
 }
 
 function setTerminalStatus(text) {
@@ -14272,11 +14299,6 @@ function onTerminalMessage(sessionId, msg, tail = '') {
   }
 }
 
-// biome-ignore lint/correctness/noUnusedVariables: used in HTML
-function endTerminalSession() {
-  terminalSend({ t: 'kill' });
-}
-
 // Detaching first means no exit message reaches the pane, so no Resume prompt shows before the board.
 // Terminal mode must go too: left on, opening the session again reconnects in 'auto' and resumes claude.
 async function closeTerminalSession(id = termState.sessionId) {
@@ -14429,17 +14451,28 @@ const SHOW_TOKENS = {
   '--color-warning': '--warning',
   '--color-danger': '--danger',
 };
+// One chart palette for every color theme, checked against each theme in show-card.test.js.
+const SHOW_PALETTE = {
+  light: {
+    series: ['#2a78d6', '#c4511c', '#008a72', '#ad6f00', '#c4467a', '#008300', '#4a3aa7', '#d03a3a'],
+    ramp: ['#5598e7', '#2a78d6', '#1c5cab', '#104281', '#0a2b57'],
+  },
+  dark: {
+    series: ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#2a9a2a', '#9085e9', '#e66767'],
+    ramp: ['#256abf', '#3987e5', '#6da7ec', '#9ec5f4', '#cde2fb'],
+  },
+};
 // Bundled fonts do not load in the opaque-origin srcdoc.
 const SHOW_FONTS = {
   '--font-sans': "system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif",
   '--font-mono': "ui-monospace, 'Cascadia Mono', Consolas, 'SF Mono', monospace",
 };
 const SHOW_FRAME_BASE =
-  'html{color-scheme:var(--color-scheme)}body{margin:0;padding:12px 14px;background:var(--color-bg);color:var(--color-text);font:13px/1.5 var(--font-sans)}' +
-  'h1,h2,h3,h4{margin:0 0 .5em;font-weight:600;line-height:1.3}h1{font-size:16px}h2{font-size:14px}h3,h4{font-size:13px}p{margin:0 0 .6em}a{color:var(--color-accent)}' +
-  'code,pre,kbd{font-family:var(--font-mono);font-size:12px}pre{padding:8px 10px;border-radius:6px;background:var(--color-bg-subtle);border:1px solid var(--color-border);overflow:auto}' +
-  'table{border-collapse:collapse;font-size:12px}th,td{border:1px solid var(--color-border);padding:4px 8px;text-align:left}th{background:var(--color-bg-subtle)}hr{border:0;border-top:1px solid var(--color-border)}' +
-  'button{font:inherit;font-size:12px;padding:5px 12px;border-radius:6px;border:1px solid var(--color-border);background:transparent;color:var(--color-text);cursor:pointer}' +
+  `html{color-scheme:var(--color-scheme);font-size:13px}body{margin:0;padding:.9rem 1.1rem;background:var(--color-bg);color:var(--color-text);font:1rem/1.5 var(--font-sans)}` +
+  'h1,h2,h3,h4{margin:0 0 .5em;font-weight:600;line-height:1.3}h1{font-size:1.25rem}h2{font-size:1.1rem}h3,h4{font-size:1rem}p{margin:0 0 .6em}a{color:var(--color-accent)}' +
+  'code,pre,kbd{font-family:var(--font-mono);font-size:.92rem}pre{padding:.6rem .8rem;border-radius:6px;background:var(--color-bg-subtle);border:1px solid var(--color-border);overflow:auto}' +
+  'table{border-collapse:collapse;font-size:.92rem}th,td{border:1px solid var(--color-border);padding:.3rem .6rem;text-align:left}th{background:var(--color-bg-subtle)}hr{border:0;border-top:1px solid var(--color-border)}' +
+  'button{font:inherit;font-size:.92rem;padding:.4rem .9rem;border-radius:6px;border:1px solid var(--color-border);background:transparent;color:var(--color-text);cursor:pointer}' +
   'button.primary{background:var(--color-accent);border-color:var(--color-accent);color:#fff}input,select,textarea{font:inherit;color:var(--color-text)}';
 const SHOW_MERMAID_INIT =
   '%%{init: {"fontFamily": "IBM Plex Mono, monospace","themeVariables": {"fontSize": "12px"}, "flowchart": {"nodeSpacing": 28, "rankSpacing": 28, "padding": 6}}}%%\n';
@@ -14452,6 +14485,7 @@ const SHOW_ICONS = {
   restore: '<path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/>',
   clear: '<path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>',
   close: '<path d="M18 6L6 18M6 6l12 12"/>',
+  pane: '<use href="#icon-pane"/>',
 };
 
 // PTY id → terminal id, from the terminal list. A terminal started after the last list read is
@@ -14470,15 +14504,52 @@ const showState = {
   frame: null,
   frameH: 0,
   frameY: 0,
+  frameFocused: false,
   listSeq: 0,
   bodySeq: 0,
   lookup: null,
+  review: null,
+  path: null,
 };
 let showSize = store.readJson(SHOW_SIZE_KEY);
 let showHostObserver = null;
 
 function showCardEl() {
   return document.getElementById('show-card');
+}
+
+// Focus that moves from the terminal's frame (another process) into the card's frame leaves the
+// board's activeElement on the terminal frame and fires no event here, so the card's frame
+// reports its own focus and blur (showBridge).
+function isShowCardFocused() {
+  if (showState.frameFocused && showState.frame?.isConnected) return true;
+  const el = document.activeElement;
+  return el?.tagName !== 'IFRAME' && !!el?.closest('#show-card .show-body');
+}
+
+// Deferred, because a blur in the board comes before activeElement changes.
+function syncShowFocus() {
+  setTimeout(() => showCardEl()?.classList.toggle('focused', isShowCardFocused()));
+}
+
+// [ and ] page the posts, Ctrl+D removes the one on screen. The body keeps focus, because a render
+// replaces an HTML card's frame.
+function showCardKey(e) {
+  const focusBody = () => showCardEl().querySelector('.show-body').focus();
+  if (matchKey(e, '[', ']')) {
+    showCommand(e.key === ']' ? 'next' : 'prev');
+    focusBody();
+    return true;
+  }
+  const p = showState.posts[showState.idx];
+  if (ClaudeHub.comboOf(e) !== 'ctrl+d' || !p) return false;
+  const message = `Remove "${p.title}" from the card?`;
+  confirmModal({ title: 'Remove post', message, okLabel: 'Remove' }).then((ok) => {
+    if (!ok || showState.posts[showState.idx]?.id !== p.id) return;
+    showCommand('remove');
+    focusBody();
+  });
+  return true;
 }
 
 function showIcon(name) {
@@ -14508,7 +14579,7 @@ function syncShowCard() {
   Object.assign(showState, { terminalId: tid, sessionId: null, idx: 0 });
   resetShowPosts();
   renderShow();
-  if (tid) loadShowPosts(tid, { newest: true });
+  if (tid) loadShowPosts(tid, { newest: true }).then((ok) => ok && renderShow());
 }
 
 async function loadShowPosts(tid, { newest = false } = {}) {
@@ -14552,16 +14623,30 @@ function onShowCleared(d) {
   renderShow();
 }
 
+function dropShowPost(id) {
+  const i = showState.posts.findIndex((p) => p.id === id);
+  if (i < 0) return false;
+  showState.posts.splice(i, 1);
+  showState.marked.delete(id);
+  if (i < showState.idx || showState.idx >= showState.posts.length) showState.idx--;
+  return true;
+}
+
+function onShowRemoved(d) {
+  if (d.terminalId !== showState.terminalId || d.sessionId !== showState.sessionId) return;
+  if (dropShowPost(d.id)) renderShow();
+}
+
 function showHeaderHtml(p) {
   const n = showState.posts.length;
   const i = showState.idx;
   const key = p.key ? `<span class="show-sep">·</span><span class="show-key">${escapeHtml(p.key)}</span>` : '';
   const btn = (cmd, icon, title, disabled = false) =>
-    `<button type="button" class="show-btn${cmd === 'clear' ? ' clear' : ''}" data-show="${escapeHtml(cmd)}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}"${disabled ? ' disabled' : ''}>${showIcon(icon)}</button>`;
+    `<button type="button" class="show-btn${cmd === 'remove' ? ' remove' : ''}" data-show="${escapeHtml(cmd)}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}"${disabled ? ' disabled' : ''}>${showIcon(icon)}</button>`;
   const { collapsed, expanded } = showState;
   return `<span class="show-nav"><span class="show-title" title="${escapeHtml(p.title)}">${escapeHtml(p.title)}</span>${key}</span>
     <span class="show-pager">${btn('prev', 'prev', 'Previous post', i === 0)}<span class="show-pos">${i + 1}/${n}</span>${btn('next', 'next', 'Next post', i === n - 1)}</span>
-    <span class="show-actions">${btn('collapse', collapsed ? 'uncollapse' : 'collapse', collapsed ? 'Show the post' : 'Collapse to the header')}${btn('expand', expanded ? 'restore' : 'expand', expanded ? 'Back to the card' : 'Fill the terminal')}${btn('clear', 'clear', 'Clear every post of this terminal')}${btn('close', 'close', 'Close until the next post')}</span>`;
+    <span class="show-actions">${btn('pane', 'pane', 'Open in a pane of the session')}${btn('collapse', collapsed ? 'uncollapse' : 'collapse', collapsed ? 'Show the post' : 'Collapse to the header')}${btn('expand', expanded ? 'restore' : 'expand', expanded ? 'Back to the card' : 'Fill the terminal')}${btn('remove', 'clear', 'Remove this post · Shift+click clears every post')}${btn('close', 'close', 'Close until the next post')}</span>`;
 }
 
 function showTicksHtml() {
@@ -14585,6 +14670,7 @@ function renderShow({ flash = false } = {}) {
   if (!open) {
     showState.rendered = null;
     showState.frame = null;
+    setShowReview(null);
     showHostObserver?.disconnect();
     showHostObserver = null;
     card.replaceChildren();
@@ -14596,7 +14682,8 @@ function renderShow({ flash = false } = {}) {
   card.classList.toggle('expanded', showState.expanded && !showState.collapsed);
   card.classList.toggle('collapsed', showState.collapsed);
   if (!card.firstChild) {
-    card.innerHTML = `<header class="show-head"></header><div class="show-ticks"></div><div class="show-body"></div>
+    card.innerHTML = `<header class="show-head"></header><div class="show-ticks"></div><div class="show-body" tabindex="-1"></div>
+      <aside class="review-panel show-review" hidden></aside>
       <div class="show-grip" title="Resize · double-click to fit"><svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M1 1v8h8M1 5l4 4"/></svg></div>`;
   }
   card.querySelector('.show-head').innerHTML = showHeaderHtml(p);
@@ -14613,6 +14700,7 @@ function renderShow({ flash = false } = {}) {
   if (!showHostObserver) {
     showHostObserver = new ResizeObserver(() => layoutShow());
     showHostObserver.observe(document.getElementById('terminal-host'));
+    showHostObserver.observe(card.querySelector('.show-review'));
   }
   layoutShow();
 }
@@ -14625,7 +14713,10 @@ async function renderShowBody(p, samePost) {
   const card = showCardEl();
   const body = card.querySelector('.show-body');
   if (seq !== showState.bodySeq || !body) return;
+  showState.path = data && !data.waiting ? data.path : null;
   const html = data?.kind === 'html' && !data.waiting;
+  // A new frame or document drops focus to the page, and Ctrl +/- then zooms the terminal.
+  const refocus = isShowCardFocused() ? () => body.focus() : () => {};
   card.classList.toggle('html', html);
   if (html) {
     const restoreY = samePost && showState.frame ? showState.frameY : 0;
@@ -14636,13 +14727,15 @@ async function renderShowBody(p, samePost) {
       showState.frameH = 0;
       body.replaceChildren(createShowFrame(p.title, showSrcdoc(data.content, 0)));
     }
+    refocus();
+    setShowReview(showReviewOpts(p, data, body, showState.frame));
     layoutShow();
     return;
   }
   showState.frame = null;
   const keepScroll = samePost ? body.scrollTop : 0;
   const md = document.createElement('div');
-  md.className = 'show-md';
+  md.className = 'show-md modal-zoomable';
   if (!data) md.innerHTML = '<p class="show-gone">This post is gone.</p>';
   else if (data.waiting) md.innerHTML = '<p class="show-gone">Waiting for content.</p>';
   else renderPreviewContent(md, data.file || p.file || '', data.content ?? '', data.kind);
@@ -14653,8 +14746,35 @@ async function renderShowBody(p, samePost) {
     pre.textContent = SHOW_MERMAID_INIT + src;
   }
   body.replaceChildren(md);
+  refocus();
   body.scrollTop = keepScroll;
+  setShowReview(data && !data.waiting ? showReviewOpts(p, data, md, null) : null);
   layoutShow();
+}
+
+function showReviewOpts(p, data, contentEl, frame) {
+  const opts = fileReviewOpts(data.path ?? '', data.kind, contentEl, frame);
+  if (!opts) return null;
+  const card = showCardEl();
+  return {
+    ...opts,
+    panelEl: card.querySelector('.show-review'),
+    hostEl: card,
+    sessionId: showState.sessionId,
+    source: {
+      kind: 'show',
+      id: p.id,
+      label: `the show card "${p.title}"`,
+      locate: data.path ? `The card shows ${data.path}.` : null,
+    },
+  };
+}
+
+// The card's review is the base review in the terminal view, like a pane's elsewhere.
+function setShowReview(opts) {
+  if (showState.review === opts) return;
+  showState.review = opts;
+  syncPaneReview();
 }
 
 // No allow-popups: it opens window.open as a way out. The CSP blocks fetch and remote sub-resources,
@@ -14663,26 +14783,30 @@ function createShowFrame(title, srcdoc) {
   const frame = createPreviewFrame('show-frame', srcdoc, 'allow-scripts');
   frame.title = title;
   showState.frame = frame;
+  showState.frameFocused = false;
   return frame;
 }
 
 function showTokens() {
   const css = getComputedStyle(document.body);
-  const out = { ...SHOW_FONTS, '--color-scheme': isLightTheme() ? 'light' : 'dark' };
+  const mode = isLightTheme() ? 'light' : 'dark';
+  const out = { ...SHOW_FONTS, '--color-scheme': mode };
   for (const [token, v] of Object.entries(SHOW_TOKENS)) out[token] = css.getPropertyValue(v).trim();
+  for (const [kind, colors] of Object.entries(SHOW_PALETTE[mode])) {
+    for (const [i, c] of colors.entries()) out[`--color-${kind}-${i + 1}`] = c;
+  }
   return out;
 }
 
-// A fragment gets base element styles; a whole document keeps its own and gets only the tokens,
-// first in its head, so its styles win.
+// A whole document gets the tokens and base styles first in its head, so its own styles win.
 function showSrcdoc(content, restoreY) {
   const tokens = Object.entries(showTokens())
     .map(([k, v]) => `${k}:${v}`)
     .join(';');
-  const head = `<meta http-equiv="Content-Security-Policy" content="${SHOW_CSP}"><style>:root{${tokens}}</style>`;
-  const bridge = `<script>(${showBridge})(${Math.max(0, Math.round(restoreY) || 0)});</script>${REVIEW_BRIDGE_TAG}`;
+  const head = `<meta http-equiv="Content-Security-Policy" content="${SHOW_CSP}"><style>:root{${tokens}}${SHOW_FRAME_BASE}</style>`;
+  const bridge = `<script>(${showBridge})(${Math.max(0, Math.round(restoreY) || 0)}, ${modalZoom});</script>${REVIEW_BRIDGE_TAG}`;
   if (!/^\s*(<!doctype|<html)/i.test(content)) {
-    return `<!doctype html><html><head><meta charset="utf-8">${head}<style>${SHOW_FRAME_BASE}</style></head><body>${content}${bridge}</body></html>`;
+    return `<!doctype html><html><head><meta charset="utf-8">${head}</head><body>${content}${bridge}</body></html>`;
   }
   const at = /<head[^>]*>/i.exec(content) || /<html[^>]*>/i.exec(content);
   const inject = at?.[0].toLowerCase().startsWith('<head') ? head : `<head>${head}</head>`;
@@ -14692,7 +14816,7 @@ function showSrcdoc(content, restoreY) {
 
 // Runs inside the card as source text, so it must not close over anything outside its own body.
 // Keys and links go through reviewBridge, which the card loads next to this.
-function showBridge(restoreY) {
+function showBridge(restoreY, textZoom) {
   const P = 'cck-show:';
   const send = (msg) => parent.postMessage({ ...msg, type: P + msg.type }, '*');
   const restore = () => {
@@ -14700,6 +14824,15 @@ function showBridge(restoreY) {
   };
   restore();
   addEventListener('load', restore);
+  // Zoom, not a root font size, because most cards are sized in px: 1 up to a 480px card, 16/13 at 1000px, at most 18/13.
+  // The board's text zoom (Ctrl +/-) multiplies it; the zoom shrinks innerWidth, so the fit reads the unzoomed width.
+  const fit = () => {
+    const width = innerWidth * (Number.parseFloat(document.documentElement.style.zoom) || 1);
+    const z = Math.min(Math.max((10.2 + width * 0.0058) / 13, 1), 18 / 13) * textZoom;
+    document.documentElement.style.zoom = z !== 1 ? z.toFixed(3) : '';
+  };
+  fit();
+  addEventListener('resize', fit);
   let lastH = -1;
   const measure = () => {
     const b = document.body;
@@ -14710,6 +14843,8 @@ function showBridge(restoreY) {
     send({ type: 'height', h });
   };
   new ResizeObserver(measure).observe(document.body);
+  addEventListener('focus', () => send({ type: 'focus', on: true }));
+  addEventListener('blur', () => send({ type: 'focus', on: false }));
   let raf = 0;
   addEventListener('scroll', () => {
     if (raf) return;
@@ -14719,8 +14854,13 @@ function showBridge(restoreY) {
     });
   });
   addEventListener('message', (e) => {
-    if (e.source !== parent || e.data?.type !== `${P}tokens`) return;
-    for (const [k, v] of Object.entries(e.data.tokens)) document.documentElement.style.setProperty(k, v);
+    if (e.source !== parent) return;
+    if (e.data?.type === `${P}zoom`) {
+      textZoom = Number(e.data.z) || 1;
+      fit();
+    } else if (e.data?.type === `${P}tokens`) {
+      for (const [k, v] of Object.entries(e.data.tokens)) document.documentElement.style.setProperty(k, v);
+    }
   });
 }
 
@@ -14728,7 +14868,10 @@ window.addEventListener('message', (e) => {
   const frame = showState.frame;
   if (!frame || e.source !== frame.contentWindow || typeof e.data?.type !== 'string') return;
   if (e.data.type === `${SHOW_MSG}scroll`) showState.frameY = Number(e.data.y) || 0;
-  else if (e.data.type === `${SHOW_MSG}height`) {
+  else if (e.data.type === `${SHOW_MSG}focus`) {
+    showState.frameFocused = e.data.on === true;
+    syncShowFocus();
+  } else if (e.data.type === `${SHOW_MSG}height`) {
     showState.frameH = Number(e.data.h) || 0;
     layoutShow();
   }
@@ -14736,8 +14879,16 @@ window.addEventListener('message', (e) => {
 
 // The same body attributes the terminal theme watches; a markdown card follows the board's CSS.
 new MutationObserver(() => {
-  showState.frame?.contentWindow?.postMessage({ type: `${SHOW_MSG}tokens`, tokens: showTokens() }, '*');
+  postToShowFrames(() => ({ type: `${SHOW_MSG}tokens`, tokens: showTokens() }));
 }).observe(document.body, { attributes: true, attributeFilter: ['class', 'data-color-theme', 'style'] });
+
+// Builds the message only when a frame is there, because showTokens forces a style recalc.
+function postToShowFrames(makeMsg) {
+  const frames = [showState.frame, ...document.querySelectorAll('.show-pane-frame')].filter((f) => f?.contentWindow);
+  if (!frames.length) return;
+  const msg = makeMsg();
+  for (const f of frames) f.contentWindow.postMessage(msg, '*');
+}
 
 function showFitSize(w, h) {
   return { w: Math.min(Math.max(360, Math.round(w * 0.4)), 640, w - 2 * SHOW_INSET), h: Math.round(h * 0.6) };
@@ -14768,22 +14919,54 @@ function layoutShow() {
   const frame = showState.frame;
   if (!frame) return;
   const peek = !showState.expanded && !sized;
-  const chrome = card.querySelector('.show-head').offsetHeight + card.querySelector('.show-ticks').offsetHeight + 2;
+  const chrome =
+    card.querySelector('.show-head').offsetHeight +
+    card.querySelector('.show-ticks').offsetHeight +
+    card.querySelector('.show-review').offsetHeight +
+    2;
   frame.style.flex = peek ? 'none' : '1';
   frame.style.height = peek ? `${Math.min(showState.frameH || SHOW_MIN_H, fit.h - chrome)}px` : '';
 }
 
+async function openShowInPane() {
+  const sid = showState.sessionId;
+  const target = showState.path;
+  if (!sid || !target) return showToast('The post has no file yet');
+  const title = showState.posts[showState.idx]?.title;
+  const onScreen = await postPane(sid, { target, title, show: true, base: getSessionBaseDir(sid) || undefined });
+  if (onScreen === null || (onScreen && !wantsTerminal())) return;
+  const open = () => (sid === currentSessionId && wantsTerminal() ? toggleTerminal() : openSession(sid));
+  showToast('Card added as a pane', 'success', { label: 'Open', onClick: open });
+}
+
 function showCommand(cmd) {
   const tid = showState.terminalId;
+  if (cmd === 'pane') {
+    openShowInPane();
+    return;
+  }
   if (cmd === 'prev' || cmd === 'next') {
-    showState.idx += cmd === 'prev' ? -1 : 1;
+    const i = showState.idx + (cmd === 'prev' ? -1 : 1);
+    if (i < 0 || i >= showState.posts.length) return;
+    showState.idx = i;
     showState.collapsed = false;
   } else if (cmd === 'collapse') showState.collapsed = !showState.collapsed;
   else if (cmd === 'expand') {
     showState.expanded = !showState.expanded;
     showState.collapsed = false;
   } else if (cmd === 'close') showClosed.add(tid);
-  else if (cmd === 'clear') {
+  else if (cmd === 'remove') {
+    const id = showState.posts[showState.idx]?.id;
+    if (!id) return;
+    dropShowPost(id);
+    terminalFetch(apiPath`/api/terminals/${tid}/show/${id}`, 'DELETE')
+      .then((res) => {
+        if (res.ok || res.status === 404) return;
+        showToast(`Could not remove the post (HTTP ${res.status})`, 'error');
+        loadShowPosts(tid).then((ok) => ok && renderShow());
+      })
+      .catch((e) => showToast(e.message, 'error'));
+  } else if (cmd === 'clear') {
     resetShowPosts();
     terminalFetch(apiPath`/api/terminals/${tid}/show`, 'DELETE')
       .then((res) => {
@@ -14796,14 +14979,20 @@ function showCommand(cmd) {
 
 function initShowCard() {
   const card = showCardEl();
-  // The header buttons must not take focus from the terminal; a click in the body may.
+  card.addEventListener('focusin', syncShowFocus);
+  card.addEventListener('focusout', syncShowFocus);
+  // A click on the header gives the card focus, so its keys and zoom apply next. Close and
+  // collapse hide the body and leave focus where it was.
   card.addEventListener('mousedown', (e) => {
-    if (e.target.closest('.show-head, .show-ticks')) e.preventDefault();
+    if (!e.target.closest('.show-head, .show-ticks')) return;
+    e.preventDefault();
+    if (showState.collapsed || e.target.closest('[data-show="close"], [data-show="collapse"]')) return;
+    card.querySelector('.show-body').focus();
   });
   card.addEventListener('click', (e) => {
     const b = e.target.closest('[data-show]');
     if (b) {
-      if (!b.disabled) showCommand(b.dataset.show);
+      if (!b.disabled) showCommand(b.dataset.show === 'remove' && e.shiftKey ? 'clear' : b.dataset.show);
       return;
     }
     const t = e.target.closest('[data-go]');

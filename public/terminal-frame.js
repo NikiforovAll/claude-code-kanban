@@ -313,8 +313,6 @@
           return open(m);
         case 'detach':
           return detach();
-        case 'send':
-          return send(m.msg);
         case 'theme':
           return applyTheme(m.options);
         case 'font':
