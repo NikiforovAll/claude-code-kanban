@@ -20,6 +20,7 @@ function board(root, saved = {}) {
     load: () => state.map,
     onChange: () => { state.saves++; state.map = store.prune(() => true); },
     resolveDir: (id) => ([A, B].includes(id) ? path.join(root, id, 'scratchpad') : null),
+    onPosted: (e) => events.push({ type: 'show:posted', ...e }),
   });
   const app = express();
   app.use(SHOW_PATH, showBodyParser());
@@ -67,6 +68,7 @@ describe('show routes', () => {
 
   after(() => {
     api.server.close();
+    b.store.prune(() => false);
     fs.rmSync(root, { recursive: true, force: true });
   });
 
@@ -81,12 +83,14 @@ describe('show routes', () => {
   it('posts markdown, stores it in the scratchpad and sends show:posted without the content', async () => {
     const r = await api.call('POST', showUrl(), { sessionId: A, title: 'Plan', content: '# Plan' });
     assert.equal(r.status, 200);
-    assert.deepEqual({ ...r.body, id: undefined }, { id: undefined, title: 'Plan', key: null, index: 1, count: 1, replaced: false });
-    assert.equal(fs.readFileSync(path.join(showDir(A), `${r.body.id}.md`), 'utf8'), '# Plan');
+    const file = path.join(showDir(A), `${r.body.id}.md`);
+    assert.deepEqual({ ...r.body, id: undefined }, { id: undefined, title: 'Plan', key: null, index: 1, count: 1, replaced: false, path: file });
+    assert.equal(fs.readFileSync(file, 'utf8'), '# Plan');
     const index = JSON.parse(fs.readFileSync(path.join(showDir(A), 'index.json'), 'utf8'));
     assert.equal(index.sessionId, A);
     assert.deepEqual(index.posts.map((p) => [p.id, p.kind, p.file]), [[r.body.id, 'markdown', null]]);
-    assert.deepEqual(b.events.at(-1), { type: 'show:posted', terminalId: TERMINAL, sessionId: A, ...r.body });
+    const { path: _, ...shown } = r.body;
+    assert.deepEqual(b.events.at(-1), { type: 'show:posted', terminalId: TERMINAL, sessionId: A, ...shown });
 
     const got = await api.call('GET', `${showUrl()}/${r.body.id}`);
     assert.deepEqual(got.body, { id: r.body.id, title: 'Plan', key: null, kind: 'markdown', content: '# Plan', file: null, url: null });
@@ -96,7 +100,8 @@ describe('show routes', () => {
     const first = await api.call('POST', showUrl(), { sessionId: A, title: 'Diagram', key: 'arch', content: 'v1' });
     await api.call('POST', showUrl(), { sessionId: A, title: 'Notes', content: 'n' });
     const again = await api.call('POST', showUrl(), { sessionId: A, title: 'Diagram v2', key: 'arch', kind: 'html', content: '<p>v2</p>' });
-    assert.deepEqual(again.body, { id: first.body.id, title: 'Diagram v2', key: 'arch', index: 2, count: 3, replaced: true });
+    const html = path.join(showDir(A), `${first.body.id}.html`);
+    assert.deepEqual(again.body, { id: first.body.id, title: 'Diagram v2', key: 'arch', index: 2, count: 3, replaced: true, path: html });
     assert.equal(fs.existsSync(path.join(showDir(A), `${first.body.id}.md`)), false);
     const list = await api.call('GET', showUrl());
     assert.deepEqual(list.body.posts.map((p) => p.title), ['Plan', 'Diagram v2', 'Notes']);
@@ -112,6 +117,7 @@ describe('show routes', () => {
     fs.writeFileSync(png, 'x');
     const r = await api.call('POST', showUrl(), { sessionId: A, title: 'Doc', file: md });
     assert.equal(r.status, 200);
+    assert.equal(r.body.path, null);
     fs.writeFileSync(md, 'two');
     const got = await api.call('GET', `${showUrl()}/${r.body.id}`);
     assert.deepEqual(got.body, { id: r.body.id, title: 'Doc', key: null, kind: 'markdown', content: 'two', file: md, url: null });
@@ -156,7 +162,6 @@ describe('show routes', () => {
       { title: 't', content: 'c' },
       { sessionId: 'nope', title: 't', content: 'c' },
       { sessionId: A, content: 'c' },
-      { sessionId: A, title: 't' },
       { sessionId: A, title: 't', content: 'c', file: path.join(root, 'doc.md') },
       { sessionId: A, title: 't', kind: 'svg', content: 'c' },
       { sessionId: A, title: 't', key: 7, content: 'c' },
@@ -169,18 +174,19 @@ describe('show routes', () => {
     }
   });
 
-  it('caps content at 64 KB in UTF-8 bytes, and takes 60 KB of multibyte text', async () => {
-    const over = await api.call('POST', showUrl(), { sessionId: A, title: 'big', content: 'x'.repeat(64 * 1024 + 1) });
+  it('caps content at 16 KB in UTF-8 bytes, and takes 15 KB of multibyte text', async () => {
+    const cap = 'over 16 KB: call show without content and write the card to the file it names';
+    const over = await api.call('POST', showUrl(), { sessionId: A, title: 'big', content: 'x'.repeat(16 * 1024 + 1) });
     assert.equal(over.status, 413);
-    assert.equal(over.body.error, 'over 64 KB: write it to a file and pass file');
-    const wide = await api.call('POST', showUrl(), { sessionId: A, title: 'big', content: 'é'.repeat(32 * 1024 + 1) });
+    assert.equal(over.body.error, cap);
+    const wide = await api.call('POST', showUrl(), { sessionId: A, title: 'big', content: 'é'.repeat(8 * 1024 + 1) });
     assert.equal(wide.status, 413);
-    const huge = await api.call('POST', showUrl(), { sessionId: A, title: 'big', content: 'x'.repeat(300 * 1024) });
+    const huge = await api.call('POST', showUrl(), { sessionId: A, title: 'big', content: 'x'.repeat(100 * 1024) });
     assert.equal(huge.status, 413);
-    assert.equal(huge.body.error, 'over 64 KB: write it to a file and pass file');
+    assert.equal(huge.body.error, cap);
 
-    const text = '漢'.repeat(20 * 1024);
-    assert.equal(Buffer.byteLength(text), 60 * 1024);
+    const text = '漢'.repeat(5 * 1024);
+    assert.equal(Buffer.byteLength(text), 15 * 1024);
     const ok = await api.call('POST', showUrl(), { sessionId: A, title: 'wide', content: text });
     assert.equal(ok.status, 200);
     assert.equal((await api.call('GET', `${showUrl()}/${ok.body.id}`)).body.content, text);
@@ -221,6 +227,82 @@ describe('show routes', () => {
     assert.ok(fs.existsSync(showDir(A)));
     assert.deepEqual(b.events.at(-1), { type: 'show:cleared', terminalId: TERMINAL, sessionId: B });
     assert.deepEqual((await api.call('GET', showUrl())).body, { sessionId: B, posts: [] });
+  });
+});
+
+async function until(check, ms = 3000) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    const v = check();
+    if (v) return v;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  return check();
+}
+
+describe('show claims', () => {
+  let root;
+  let b;
+  let api;
+
+  before(async () => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'cck-show-claim-'));
+    b = board(root);
+    api = await listen(b.app);
+  });
+
+  after(() => {
+    api.server.close();
+    b.store.prune(() => false);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  const refreshes = (id, since) => b.events.slice(since).filter((e) => e.id === id && e.type === 'show:posted');
+
+  it('names a file it does not create, and the card waits for it', async () => {
+    const r = await api.call('POST', showUrl(), { sessionId: A, title: 'Plan', key: 'plan' });
+    assert.equal(r.status, 200);
+    assert.equal(r.body.path, path.join(root, A, 'scratchpad', '.cck', 'show', `${r.body.id}.md`));
+    assert.equal(fs.existsSync(r.body.path), false);
+    const got = await api.call('GET', `${showUrl()}/${r.body.id}`);
+    assert.equal(got.body.waiting, true);
+    assert.equal(got.body.content, null);
+  });
+
+  it('refreshes the card on each write, once per settled save', async () => {
+    const { body: claim } = await api.call('POST', showUrl(), { sessionId: A, title: 'Plan', key: 'plan' });
+    const since = b.events.length;
+    fs.writeFileSync(claim.path, '# v1');
+    fs.appendFileSync(claim.path, '\nmore');
+    assert.ok(await until(() => refreshes(claim.id, since).length === 1));
+    const ev = refreshes(claim.id, since)[0];
+    assert.deepEqual(ev, { type: 'show:posted', terminalId: TERMINAL, sessionId: A, id: claim.id, title: 'Plan', key: 'plan', index: 1, count: 1, replaced: true });
+    assert.equal((await api.call('GET', `${showUrl()}/${claim.id}`)).body.content, '# v1\nmore');
+
+    const before = (await api.call('GET', showUrl())).body.posts[0].updatedAt;
+    await new Promise((r) => setTimeout(r, 20));
+    fs.writeFileSync(claim.path, '# v2');
+    assert.ok(await until(() => refreshes(claim.id, since).length === 2));
+    assert.notEqual((await api.call('GET', showUrl())).body.posts[0].updatedAt, before);
+  });
+
+  it('keeps the file on a second claim with the same key, and renames it for a new kind', async () => {
+    const { body: md } = await api.call('POST', showUrl(), { sessionId: A, title: 'Plan', key: 'plan' });
+    assert.equal(fs.readFileSync(md.path, 'utf8'), '# v2');
+    const { body: html } = await api.call('POST', showUrl(), { sessionId: A, title: 'Plan', key: 'plan', kind: 'html' });
+    assert.equal(html.id, md.id);
+    assert.equal(html.path, md.path.replace(/\.md$/, '.html'));
+    assert.equal(fs.existsSync(md.path), false);
+    assert.equal(fs.readFileSync(html.path, 'utf8'), '# v2');
+  });
+
+  it('sends no refresh for its own write of inline content', async () => {
+    const { body: r } = await api.call('POST', showUrl(), { sessionId: A, title: 'Note', content: 'inline' });
+    const since = b.events.length;
+    await new Promise((res) => setTimeout(res, 500));
+    assert.equal(refreshes(r.id, since).length, 0);
+    fs.writeFileSync(r.path, 'edited');
+    assert.ok(await until(() => refreshes(r.id, since).length === 1));
   });
 });
 

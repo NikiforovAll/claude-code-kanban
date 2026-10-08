@@ -3409,6 +3409,7 @@ app.delete('/api/terminals/:id', terminalRoute(async (req, res) => {
 const show = createShowStore({
   load: () => savedTerminals.showSessions,
   onChange: saveTerminals,
+  onPosted: (e) => broadcast({ type: 'show:posted', ...e }),
   resolveDir: (id) => {
     const meta = sessionMetaFor(id);
     return meta ? getScratchpadDir(id, meta) : null;

@@ -14625,7 +14625,7 @@ async function renderShowBody(p, samePost) {
   const card = showCardEl();
   const body = card.querySelector('.show-body');
   if (seq !== showState.bodySeq || !body) return;
-  const html = data?.kind === 'html';
+  const html = data?.kind === 'html' && !data.waiting;
   card.classList.toggle('html', html);
   if (html) {
     const restoreY = samePost && showState.frame ? showState.frameY : 0;
@@ -14644,6 +14644,7 @@ async function renderShowBody(p, samePost) {
   const md = document.createElement('div');
   md.className = 'show-md';
   if (!data) md.innerHTML = '<p class="show-gone">This post is gone.</p>';
+  else if (data.waiting) md.innerHTML = '<p class="show-gone">Waiting for content.</p>';
   else renderPreviewContent(md, data.file || p.file || '', data.content ?? '', data.kind);
   for (const pre of md.querySelectorAll('pre.mermaid')) {
     const src = pre.getAttribute('data-original') || pre.textContent;

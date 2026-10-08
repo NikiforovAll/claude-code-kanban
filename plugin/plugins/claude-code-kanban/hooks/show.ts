@@ -5,14 +5,15 @@ export const TOOL = 'mcp__claude-code-kanban__show'
 export const SKILL_LINE = /^\s*-\s*claude-code-kanban:show(?=:|\s*$)/
 
 type ShowInput = { title: string; key?: string; kind?: 'markdown' | 'html'; content?: string; file?: string }
-type Shown = { title: string; key?: string | null; index: number; count: number }
+type Shown = { title: string; key?: string | null; index: number; count: number; path?: string | null }
 
 export function boardPort(cckUrl: string) {
   return /^[a-z]+:\/\/[^/]*:(\d+)(?:\/|$)/i.exec(cckUrl)?.[1]
 }
 
-export function shownText({ title, key, index, count }: Shown) {
-  return `Shown "${title}" (${key ? `${key}, ` : ''}${index}/${count})`
+export function shownText({ title, key, index, count, path }: Shown, claim = false) {
+  const at = `"${title}" (${key ? `${key}, ` : ''}${index}/${count})`
+  return claim ? `Card ${at} is ready. Write it to ${path}; the card refreshes on each save.` : `Shown ${at}`
 }
 
 export function dropSkillLine(listing: string) {
@@ -79,7 +80,7 @@ async function post($: EngineInterface, input: ShowInput) {
     return { deny: `Cannot reach cck at ${t.url}: ${err instanceof Error ? err.message : String(err)}` }
   }
   if (!res.ok) return { deny: errorText(res.status, res.text) }
-  return { result: shownText(JSON.parse(res.text) as Shown) }
+  return { result: shownText(JSON.parse(res.text) as Shown, content == null && file == null) }
 }
 
 // A -p run is detached from the terminal, so only an interactive session gets the tool.
@@ -89,15 +90,20 @@ export const register: Register = on => {
       await $.tool.register({
         name: 'show',
         description:
-          'Show a titled markdown or HTML card, or a file, in the cck overlay above this terminal. Load the claude-code-kanban:show skill first.',
+          'Show a card in the cck overlay above this terminal, when the user asks you to show, draw or visualize something, or to keep a card current. The user decides what goes on it. Pass content for a small one-shot card. Pass neither content nor file to get a file to write the card into: the card refreshes on each save, so use it for a card you keep current or one over 16 KB. Pass file to show a file that already exists.',
         inputSchema: {
           type: 'object',
           properties: {
             title: { type: 'string', description: 'Card title' },
-            kind: { type: 'string', enum: ['markdown', 'html'], description: 'Required with content' },
-            content: { type: 'string', description: 'Markdown or an HTML body fragment, at most 64 KB' },
-            file: { type: 'string', description: 'Absolute path of a file to show, instead of kind and content' },
-            key: { type: 'string', description: 'Replaces the post with this key' },
+            kind: {
+              type: 'string',
+              enum: ['markdown', 'html'],
+              description:
+                'markdown (default): mermaid, diff and code fences render. html: a body fragment; load the claude-code-kanban:show skill first for the HTML contract',
+            },
+            content: { type: 'string', description: 'The card, at most 16 KB' },
+            file: { type: 'string', description: 'Absolute path of an existing markdown, HTML, image or text file' },
+            key: { type: 'string', description: 'Card name: the same key replaces the card in place and keeps its file' },
           },
           required: ['title'],
         },

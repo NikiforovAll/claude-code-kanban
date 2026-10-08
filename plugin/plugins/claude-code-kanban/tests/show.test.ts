@@ -55,6 +55,9 @@ test('helpers: the port of CCK_URL, the answer line, the listing filter', async 
   expect(boardPort('http://localhost')).toBe(undefined)
   expect(shownText({ title: 'Plan', key: 'plan', index: 3, count: 7 })).toBe('Shown "Plan" (plan, 3/7)')
   expect(shownText({ title: 'Map', key: null, index: 1, count: 1 })).toBe('Shown "Map" (1/1)')
+  expect(shownText({ title: 'Plan', key: 'plan', index: 1, count: 1, path: 'C:/s/p1.md' }, true)).toBe(
+    'Card "Plan" (plan, 1/1) is ready. Write it to C:/s/p1.md; the card refreshes on each save.',
+  )
   expect(dropSkillLine(LISTING)).toBe(LISTING.replace('- claude-code-kanban:show\n', ''))
   expect(dropSkillLine('- claude-code-kanban:show: Show a diagram\n- x')).toBe('- x')
 })
@@ -107,8 +110,17 @@ test('a file post sends the path and no content', async ($, on) => {
   expect(board.requests[0]?.body).toEqual({ sessionId: 'sid-1', title: 'Doc', file: 'C:/proj/doc.md' })
 })
 
+test('a claim sends neither content nor file and answers with the file to write', async ($, on) => {
+  const path = 'C:/s/.cck/show/p1.md'
+  const board = engine(on, GATE, { status: 200, body: { id: 'p1', title: 'Plan', key: 'plan', index: 1, count: 1, path } })
+  await $.session.start({ cwd: 'C:/proj', surface: 'terminal', isInteractive: true })
+  const res = await $.tool.call(call({ title: 'Plan', key: 'plan' }))
+  expect(res.result).toBe(`Card "Plan" (plan, 1/1) is ready. Write it to ${path}; the card refreshes on each save.`)
+  expect(board.requests[0]?.body).toEqual({ sessionId: 'sid-1', title: 'Plan', key: 'plan' })
+})
+
 test('a 413 answer reaches the model as an error with the server text', async ($, on) => {
-  const error = 'over 64 KB: write it to a file and pass file'
+  const error = 'over 16 KB: call show without content and write the card to the file it names'
   engine(on, GATE, { status: 413, body: { error } })
   await $.session.start({ cwd: 'C:/proj', surface: 'terminal', isInteractive: true })
   const res = await $.tool.call(call({ title: 'Big', kind: 'markdown', content: 'x' }))
