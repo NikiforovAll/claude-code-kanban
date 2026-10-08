@@ -28,6 +28,7 @@ const {
   modelDisplayName,
   buildSessionDigest,
   readCompactSummaries,
+  fillCompactSummaries,
   readArtifactLinks,
   readScratchpadCreations,
   extractPromptFromTranscript,
@@ -3047,9 +3048,7 @@ async function sendSessionMessages(req, res) {
     hasMore = messages.length > limit;
     if (hasMore) messages = messages.slice(-limit);
   }
-  const compactedMsgs = messages
-    .filter(m => m.systemLabel === 'Compacted')
-    .sort((a, b) => (a.timestamp || '').localeCompare(b.timestamp || ''));
+  const compactedMsgs = messages.filter(m => m.systemLabel === 'Compacted');
   const compactPromise = compactedMsgs.some(m => !m.compactSummary)
     ? cachedByMtime(compactSummaryCache, jsonlPath, jsonlPath, () => readCompactSummaries(jsonlPath), [])
     : null;
@@ -3106,13 +3105,7 @@ async function sendSessionMessages(req, res) {
       }
     }
   }
-  const compactSummaries = compactPromise ? await compactPromise : [];
-  // Match compaction messages to summaries by chronological order
-  for (let i = 0; i < compactedMsgs.length; i++) {
-    if (i < compactSummaries.length) {
-      compactedMsgs[i].compactSummary = compactSummaries[i].summary;
-    }
-  }
+  if (compactPromise) fillCompactSummaries(compactedMsgs, await compactPromise);
   // The client keeps needing toolUseId when it builds a follow-up URL from it:
   // lazy-fetching a truncated tool result, or fetching each tool-result image.
   const clientNeedsToolUseId = (msg) => msg.toolResultTruncated || msg.toolResultImageCount;

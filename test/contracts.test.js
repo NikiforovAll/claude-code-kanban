@@ -21,6 +21,7 @@ const {
   readMessagesPage,
   buildAgentProgressMap,
   readCompactSummaries,
+  fillCompactSummaries,
   findTerminatedTeammates,
   extractPromptFromTranscript,
   extractModelFromTranscript,
@@ -1290,6 +1291,52 @@ describe('Parser: readCompactSummaries', () => {
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }
+  });
+
+  it('gives each chip on an older page its own summary', async () => {
+    const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'parser-test-'));
+    const sessionName = 'compact-page';
+    const sessionFile = path.join(tmpDir, `${sessionName}.jsonl`);
+    const subagentsDir = path.join(tmpDir, sessionName, 'subagents');
+    mkdirSync(subagentsDir, { recursive: true });
+    const preamble = 'This session is being continued from a previous conversation that ran out of context. The conversation is summarized below:\n';
+    const user = (text, timestamp) => JSON.stringify({ type: 'user', message: { role: 'user', content: text }, timestamp });
+    const compact = (text, timestamp) => JSON.stringify({ type: 'user', isCompactSummary: true, message: { role: 'user', content: preamble + text }, timestamp });
+    writeFileSync(sessionFile, [
+      user('start', '2026-03-05T10:00:00.000Z'),
+      compact('Summary one', '2026-03-05T10:10:00.000Z'),
+      user('after one', '2026-03-05T10:15:00.000Z'),
+      compact('', '2026-03-05T10:20:00.000Z'),
+      user('after two', '2026-03-05T10:25:00.000Z'),
+      compact('Summary three', '2026-03-05T10:30:00.000Z'),
+      user('after three', '2026-03-05T10:35:00.000Z')
+    ].join('\n') + '\n');
+    writeFileSync(path.join(subagentsDir, 'agent-acompact-two.jsonl'), JSON.stringify({
+      type: 'assistant',
+      message: { role: 'assistant', content: [{ type: 'text', text: '<summary>Summary two</summary>' }] },
+      timestamp: '2026-03-05T10:19:58.000Z'
+    }) + '\n');
+
+    try {
+      const page = readMessagesPage(sessionFile, 4, '2026-03-05T10:40:00.000Z');
+      const chips = page.messages.filter(m => m.systemLabel === 'Compacted');
+      assert.deepEqual(chips.map(c => c.timestamp), ['2026-03-05T10:20:00.000Z', '2026-03-05T10:30:00.000Z']);
+      assert.equal(chips[0].compactSummary, null);
+
+      fillCompactSummaries(chips, await readCompactSummaries(sessionFile));
+      assert.deepEqual(chips.map(c => c.compactSummary), ['Summary two', 'Summary three']);
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves a chip empty when no subagent summary is near it', () => {
+    const chips = [{ systemLabel: 'Compacted', compactSummary: null, timestamp: '2026-03-05T10:20:00.000Z' }];
+    fillCompactSummaries(chips, [
+      { timestamp: '2026-03-05T10:10:00.000Z', summary: 'Summary one', source: 'inline' },
+      { timestamp: '2026-03-05T09:00:00.000Z', summary: 'Old', source: 'subagent' }
+    ]);
+    assert.equal(chips[0].compactSummary, null);
   });
 });
 
