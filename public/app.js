@@ -2954,11 +2954,11 @@ function renderToolParamsHtml(params) {
     html += `<div style="margin-top:8px;padding-top:6px;border-top:1px solid var(--border)">`;
     if (params.old_string) {
       html += `<div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:2px">old_string</div>
-            <pre class="${TINTED_PRE_CLASS}" style="max-height:200px;overflow:auto;border-left:3px solid #e55;padding-left:8px">${escapeHtml(params.old_string)}</pre>`;
+            <pre class="${TINTED_PRE_CLASS} msg-detail-pre-old">${escapeHtml(params.old_string)}</pre>`;
     }
     if (params.new_string) {
       html += `<div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:2px;margin-top:6px">new_string</div>
-            <pre class="${TINTED_PRE_CLASS}" style="max-height:200px;overflow:auto;border-left:3px solid #5b5;padding-left:8px">${escapeHtml(params.new_string)}</pre>`;
+            <pre class="${TINTED_PRE_CLASS} msg-detail-pre-new">${escapeHtml(params.new_string)}</pre>`;
     }
     html += `</div>`;
   }

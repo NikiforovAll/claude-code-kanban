@@ -4772,6 +4772,18 @@ code.language-tree .hljs-title {
   border-radius: 6px;
   padding: 8px 10px;
 }
+.msg-detail-pre-old,
+.msg-detail-pre-new {
+  max-height: 200px;
+  overflow: auto;
+  padding-left: 8px;
+}
+.msg-detail-pre-old {
+  border-left: 3px solid var(--danger);
+}
+.msg-detail-pre-new {
+  border-left: 3px solid var(--success);
+}
 .expand-toggle-btn {
   background: none;
   border: none;
