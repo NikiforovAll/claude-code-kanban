@@ -695,66 +695,85 @@ function setActivityFilter(kind) {
 }
 
 let lastCurrentTasksHash = '';
+let taskFetchSeq = 0;
+const taskRetry = { timer: null, delay: 0 };
+
+// The board refetches only on an SSE update that names the open session, so a failed refresh
+// must retry by itself: when the session's tasks stop changing, no later event repairs it.
+function retryTaskFetch(sessionId) {
+  clearTimeout(taskRetry.timer);
+  taskRetry.delay = Math.min((taskRetry.delay || 1000) * 2, 30000);
+  taskRetry.timer = setTimeout(() => {
+    if (sessionId === currentSessionId && viewMode === 'session') return fetchTasks(sessionId);
+  }, taskRetry.delay);
+}
 
 async function fetchTasks(sessionId) {
+  const seq = ++taskFetchSeq;
+  const refresh = viewMode === 'session' && sessionId === currentSessionId;
+  // The PTY already runs, so the attach need not wait for the session fetch and the render after it.
+  if (!refresh && termState.sessionId !== sessionId && runningTerminals.has(sessionId) && wantsTerminalFor(sessionId))
+    openTerminal(sessionId, terminalOpenMode(sessionId));
+  viewMode = 'session';
+  document.getElementById('message-toggle')?.style.removeProperty('display');
+  let newTasks;
   try {
-    const refresh = viewMode === 'session' && sessionId === currentSessionId;
-    // The PTY already runs, so the attach need not wait for the session fetch and the render after it.
-    if (!refresh && termState.sessionId !== sessionId && runningTerminals.has(sessionId) && wantsTerminalFor(sessionId))
-      openTerminal(sessionId, terminalOpenMode(sessionId));
-    viewMode = 'session';
-    document.getElementById('message-toggle')?.style.removeProperty('display');
     const res = await api(apiPath`/api/sessions/${sessionId}`);
-
     if (!res.ok) throw new Error(`Failed to fetch tasks: ${res.status}`);
-    const newTasks = await res.json();
-
-    const hash = JSON.stringify(newTasks);
-    if (sessionId === currentSessionId && hash === lastCurrentTasksHash) return;
-    lastCurrentTasksHash = hash;
-
-    currentTasks = newTasks;
-    if (agentLogMode && sessionId !== currentSessionId) exitAgentLogMode();
-    if (sessionId !== currentSessionId && document.getElementById('scratchpad-modal').classList.contains('visible'))
-      closeScratchpad();
-    if (sessionId !== currentSessionId && detailPanel.classList.contains('visible')) closeDetailPanel();
-    if (revealedPlanSessionId && sessionId !== revealedPlanSessionId) {
-      revealedPlanSessionId = null;
-    }
-    if (revealedStorageSessionId && sessionId !== revealedStorageSessionId) {
-      revealedStorageSessionId = null;
-    }
-    if (currentSessionId && currentSessionId !== sessionId && deferredPinPlacement.delete(currentSessionId))
-      expandPinnedFor(currentSessionId);
-    if (lastSessionId !== sessionId) setSwapPair(sessionId, lastSessionId);
-    const switched = sessionId !== currentSessionId;
-    currentSessionId = sessionId;
-    markOpenSessionRead();
-    if (switched) autoRevealLog(sessionId);
-    // A task change in the open session must not reset the messages, the agents or the owner
-    // filter: that reset rebuilds the panels and reads as a reload after each card move.
-    if (!refresh) {
-      currentPins = loadPins(sessionId);
-      ownerFilter = '';
-      resetMessageScrollState();
-      for (const k of Object.keys(ownerColorCache)) delete ownerColorCache[k];
-      for (const k of Object.keys(teamColorMap)) delete teamColorMap[k];
-      sessionJustSelected = true;
-      resetAgentState();
-    }
-    updateUrl();
-    renderSession();
-    renderSessions();
-    fetchAgents(sessionId);
-    if (!agentLogMode) fetchMessages(sessionId);
+    newTasks = await res.json();
   } catch (error) {
     console.error('Failed to fetch tasks:', error);
+    if (seq !== taskFetchSeq) return;
+    if (sessionId === currentSessionId) return retryTaskFetch(sessionId);
     currentTasks = [];
     currentSessionId = sessionId;
     lastCurrentTasksHash = '';
     updateUrl();
     renderSession();
+    return;
   }
+  if (seq !== taskFetchSeq) return;
+  clearTimeout(taskRetry.timer);
+  taskRetry.delay = 0;
+
+  const hash = JSON.stringify(newTasks);
+  if (sessionId === currentSessionId && hash === lastCurrentTasksHash) return;
+  lastCurrentTasksHash = hash;
+
+  currentTasks = newTasks;
+  if (agentLogMode && sessionId !== currentSessionId) exitAgentLogMode();
+  if (sessionId !== currentSessionId && document.getElementById('scratchpad-modal').classList.contains('visible'))
+    closeScratchpad();
+  if (sessionId !== currentSessionId && detailPanel.classList.contains('visible')) closeDetailPanel();
+  if (revealedPlanSessionId && sessionId !== revealedPlanSessionId) {
+    revealedPlanSessionId = null;
+  }
+  if (revealedStorageSessionId && sessionId !== revealedStorageSessionId) {
+    revealedStorageSessionId = null;
+  }
+  if (currentSessionId && currentSessionId !== sessionId && deferredPinPlacement.delete(currentSessionId))
+    expandPinnedFor(currentSessionId);
+  if (lastSessionId !== sessionId) setSwapPair(sessionId, lastSessionId);
+  const switched = sessionId !== currentSessionId;
+  currentSessionId = sessionId;
+  markOpenSessionRead();
+  if (switched) autoRevealLog(sessionId);
+  // A task change in the open session must not reset the messages, the agents or the owner
+  // filter: that reset rebuilds the panels and reads as a reload after each card move.
+  if (!refresh) {
+    currentPins = loadPins(sessionId);
+    ownerFilter = '';
+    resetMessageScrollState();
+    for (const k of Object.keys(ownerColorCache)) delete ownerColorCache[k];
+    for (const k of Object.keys(teamColorMap)) delete teamColorMap[k];
+    sessionJustSelected = true;
+    resetAgentState();
+  }
+  updateUrl();
+  renderSession();
+  renderSessions();
+  fetchAgents(sessionId);
+  if (!agentLogMode) fetchMessages(sessionId);
 }
 //#endregion
 
