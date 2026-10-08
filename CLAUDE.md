@@ -13,7 +13,7 @@ npm run dev          # start, restart on file change (node --watch)
 
 Also: `npm test` (node test runner over `test/*.test.js`), `claude plugin test .` in `plugin/plugins/claude-code-kanban` (the mod's tests), `npm run validate:schemas`, and Biome for lint (`biome.json`). No build step.
 
-Biome covers `public/app.js`, `public/project-match.js`, `public/link-url.js`, `public/style.css`, `server.js`, `cli.js`, `install.js` and `lib/`, and the pre-commit hook and CI run `biome check` over all of them. The server files are lint-only (an override), because the formatter would rewrite thousands of lines for no benefit. `package.json` sets `"type": "commonjs"` so Biome parses `.js` as script; without it Biome reads the files as modules and flags every `'use strict'` as redundant. Biome rejects a top-level `return`, so server.js runs its body through `startServer()` instead; the body is left unindented.
+Biome covers the files in `files.includes` of `biome.json`, and the pre-commit hook and CI run `biome check` over all of them. The server files are lint-only (an override), because the formatter would rewrite thousands of lines for no benefit. `package.json` sets `"type": "commonjs"` so Biome parses `.js` as script; without it Biome reads the files as modules and flags every `'use strict'` as redundant. Biome rejects a top-level `return`, so server.js runs its body through `startServer()` instead; the body is left unindented.
 
 You have an access to gh cli to work on this project: https://github.com/NikiforovAll/claude-code-kanban
 
@@ -32,7 +32,7 @@ lib/session-events.js  Session event doorbell: queue, long-poll handler, line fo
 
 **Data flow:** task JSON files → chokidar → SSE → REST fetch → Kanban render (JSON diff to skip no-ops)
 
-**Server:** 3 chokidar watchers (tasks/teams/projects) · SSE broadcasts · REST API · session cache (10s TTL) · port fallback
+**Server:** chokidar watchers (the session ones are listed in `docs/session-scanning.md`) · SSE broadcasts · REST API · session cache (10s TTL) · port fallback
 
 **Frontend:** sidebar (sessions, filters, live feed) · kanban board · task detail panel · SSE debounced (500ms tasks, 2s metadata capped at 5s) · paused while off screen (`hub:active`, see `docs/session-scanning.md`)
 
