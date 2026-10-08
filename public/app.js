@@ -546,6 +546,10 @@ function toggleSection(containerId, chevronId) {
 function isWaitingSession(s) {
   return !!s.hasWaitingForUser;
 }
+function sessionBarClass(s) {
+  if (isWaitingSession(s)) return 'permission-pending';
+  return s.unread ? 'unread' : '';
+}
 function isActiveSession(s) {
   return !s.hasWaitingForUser && (s.inProgress > 0 || s.hasRecentLog || s.hasRunningAgents);
 }
@@ -3747,7 +3751,7 @@ function renderSessions() {
         : '';
     const metricsHtml = progressHtml + (showCtx ? renderContextBar(session) : '');
     return `
-          <button onclick="openSession('${sid}')" draggable="true" data-session-id="${escapeHtml(session.id)}" class="session-item ${isActive ? 'active' : ''} ${session.hasWaitingForUser ? 'permission-pending' : ''} ${session.unread ? 'unread' : ''} ${tempClass} ${idleClass} ${justFinishedClass}">
+          <button onclick="openSession('${sid}')" draggable="true" data-session-id="${escapeHtml(session.id)}" class="session-item ${isActive ? 'active' : ''} ${sessionBarClass(session)} ${tempClass} ${idleClass} ${justFinishedClass}">
             <span class="session-pin-btn${pinClass}" onclick="event.stopPropagation();toggleSessionPin('${sid}')" title="${pinTitle} session">${pinState === 'sticky' ? SESSION_STAR_SVG : SESSION_PIN_SVG}</span>
             <div class="session-name">${escapeHtml(sessionName)}</div>
             ${projectHtml ? `<div class="session-secondary">${projectHtml}</div>` : ''}
@@ -11202,7 +11206,7 @@ function renderSessionPicker() {
     .map((s, i) => {
       const outside = i >= local.length;
       const project = s.project ? (outside ? s.project : pathBasename(s.project)) : '';
-      return `<button class="sp-row${s.id === currentSessionId ? ' current' : ''}${outside ? ' outside' : ''}" data-idx="${i}" title="${escapeHtml(s.project ? `${s.id}\n${s.project}` : s.id)}">
+      return `<button class="sp-row${s.id === currentSessionId ? ' current' : ''}${outside ? ' outside' : ''} ${sessionBarClass(s)}" data-idx="${i}" title="${escapeHtml(s.project ? `${s.id}\n${s.project}` : s.id)}">
         ${spDotHtml(s)}
         <span class="sp-name">${escapeHtml(sessionDisplayName(s))}</span>
         <span class="sp-project">${escapeHtml(project)}</span>

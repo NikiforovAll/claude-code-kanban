@@ -1049,7 +1049,9 @@ body.booting .boot-splash {
 }
 
 .session-item.unread::before,
-.session-item.permission-pending::before {
+.session-item.permission-pending::before,
+.sp-row.unread::before,
+.sp-row.permission-pending::before {
   content: '';
   position: absolute;
   inset: -1px;
@@ -1058,13 +1060,15 @@ body.booting .boot-splash {
   pointer-events: none;
 }
 
-.session-item.permission-pending::before {
+.session-item.permission-pending::before,
+.sp-row.permission-pending::before {
   border-left-color: var(--warning);
   animation: agent-badge-pulse 1.6s ease-in-out infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .session-item.permission-pending::before {
+  .session-item.permission-pending::before,
+  .sp-row.permission-pending::before {
     animation: none;
   }
 }
@@ -7362,6 +7366,7 @@ select.form-input option:checked {
 }
 
 .sp-row {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;

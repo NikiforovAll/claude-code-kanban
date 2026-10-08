@@ -58,6 +58,8 @@ The client maps the signals to one state per session. The order matters: the fir
 
 A stale card returns to full opacity on hover, when it is the open session, when the keyboard selects it, or when it is sticky.
 
+The sidebar card and the picker row share a left bar (`.unread`, `.permission-pending`): pulsing yellow when the session waits on the user, else accent when it is `unread`.
+
 The sidebar computes `warm`/`stale` and `idle` in `renderSessions` (`tempClass`, `idleClass`). The picker picks the state in `spState` and draws it with `spDotHtml`: a 14px `.sp-state` slot from `SP_STATES` sets the state color, and holds a dot, or the terminal glyph for a session with a terminal running in the board (`runningTerminals`). The slot keeps the names aligned. Rerenders go through `renderSessionViews`, which redraws the sidebar and the open picker.
 
 Soft green is `--success-faded`, `color-mix(in srgb, var(--success) 35%, var(--text-muted))`, declared on the just-finished elements so it follows the theme's `--success`. It stays apart from the Working green in both themes.
