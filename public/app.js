@@ -6078,7 +6078,7 @@ function filteredShortcutGroups(query) {
     .flatMap((t) => t.groups)
     .map((g) => ({
       title: g.title,
-      rows: g.rows.filter((r) => fuzzyMatch(`${r.label} ${helpKeys(r).join(' ')}`, query)),
+      rows: g.rows.filter((r) => fuzzyMatch(`${r.label} ${helpKeys(r).join(' ')}`.replaceAll('−', '-'), query)),
     }))
     .filter((g) => g.rows.length);
 }
