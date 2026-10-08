@@ -5947,7 +5947,7 @@ const SHORTCUT_TABS = [
           { keys: ['Shift', 'L'], combo: true, label: 'Toggle session log' },
           { keys: ['Shift', 'M'], combo: true, label: 'Open last message' },
           { keys: ['↑', '↓'], label: 'Previous / next message in detail' },
-          { keys: ['Ctrl', 'Enter'], combo: true, label: 'Allow / approve the waiting prompt' },
+          { keys: ['Ctrl', 'Enter'], combo: true, label: 'Allow / approve the waiting prompt; send review comments' },
         ],
       },
       {
@@ -7787,6 +7787,7 @@ const PANE_CLAIMS = [
   ...['\\', '[', ']'].map((key) => ({ key, code: '' })),
   ...['|', '{', '}'].map((key) => ({ shiftKey: true, key, code: '' })),
   ...['BracketLeft', 'BracketRight', 'KeyW'].map((code) => ({ altKey: true, key: 'Unidentified', code })),
+  ...['ctrlKey', 'metaKey'].map((mod) => ({ [mod]: true, key: 'Enter', code: '' })),
 ];
 
 function sendBridgeClaims(frames, claims) {
@@ -7857,10 +7858,22 @@ function showReviewOffer(picked) {
 }
 
 function onReviewOfferKey(e) {
+  if (isReviewSendKey(e)) {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    sendReview();
+    return;
+  }
   if (reviewPopMode !== 'offer' || !matchKey(e, 'c', 'C')) return;
   e.preventDefault();
   e.stopImmediatePropagation();
   reviewPopEl().querySelector('.review-offer-btn').click();
+}
+
+function isReviewSendKey(e) {
+  if (e.key !== 'Enter' || !(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return false;
+  if (reviewPopMode === 'editor' || !reviewItems().length) return false;
+  return !e.target.closest?.('input, textarea, select, [contenteditable]');
 }
 
 function openReviewEditor(picked) {
