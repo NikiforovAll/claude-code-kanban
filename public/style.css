@@ -4808,6 +4808,19 @@ code.language-tree .hljs-title {
   max-height: 300px;
   overflow: auto;
 }
+.modal-status {
+  padding: 16px;
+  color: var(--text-secondary);
+}
+.modal-status-tight {
+  padding: 8px 0;
+  color: var(--text-secondary);
+}
+.modal-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-secondary);
+}
 .expand-toggle-btn {
   background: none;
   border: none;

@@ -11361,7 +11361,7 @@ function refreshOpenPlan() {
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
 function showLoopModal(sessionId) {
   const body = document.getElementById('loop-modal-body');
-  body.innerHTML = '<div style="padding:16px;color:var(--text-secondary);">Loading…</div>';
+  body.innerHTML = '<div class="modal-status">Loading…</div>';
   document.getElementById('loop-modal').classList.add('visible');
   getJson(apiPath`/api/sessions/${sessionId}/loop`, { wakeups: [], crons: [] }).then(renderLoopModalBody);
 }
@@ -11430,8 +11430,7 @@ function renderLoopModalBody(data) {
   const wakeups = data.wakeups || [];
   const crons = data.crons || [];
   if (!wakeups.length && !crons.length) {
-    body.innerHTML =
-      '<div style="padding:24px;text-align:center;color:var(--text-secondary);">No scheduled wakeups or cron jobs.</div>';
+    body.innerHTML = '<div class="modal-empty">No scheduled wakeups or cron jobs.</div>';
     return;
   }
   const section = (title, items, kind) =>
@@ -11480,14 +11479,13 @@ function showWorkflowModal(sessionId) {
   _workflowSessionId = sessionId;
   setWorkflowHeader('Workflows', null);
   const body = document.getElementById('workflow-modal-body');
-  body.innerHTML = '<div style="padding:16px;color:var(--text-secondary);">Loading…</div>';
+  body.innerHTML = '<div class="modal-status">Loading…</div>';
   document.getElementById('workflow-modal').classList.add('visible');
   getJson(apiPath`/api/sessions/${sessionId}/workflows`, { workflows: [] }).then((data) => {
     _workflowList = data.workflows || [];
     if (!_workflowList.length) {
       setWorkflowHeader('Workflows', null);
-      body.innerHTML =
-        '<div style="padding:24px;text-align:center;color:var(--text-secondary);">No workflow scripts for this session.</div>';
+      body.innerHTML = '<div class="modal-empty">No workflow scripts for this session.</div>';
     } else if (_workflowList.length === 1) {
       showWorkflowRun(_workflowList[0].id);
     } else {
@@ -11531,10 +11529,10 @@ function showWorkflowRun(wfId) {
   const name = _workflowList.find((w) => w.id === wfId)?.name || wfId;
   setWorkflowHeader(name, wfId);
   const body = document.getElementById('workflow-modal-body');
-  body.innerHTML = '<div style="padding:16px;color:var(--text-secondary);">Loading…</div>';
+  body.innerHTML = '<div class="modal-status">Loading…</div>';
   getJson(apiPath`/api/sessions/${_workflowSessionId}/workflows/${wfId}/run`).then((run) => {
     if (!run) {
-      body.innerHTML = '<div style="padding:16px;color:var(--text-secondary);">Failed to load run state.</div>';
+      body.innerHTML = '<div class="modal-status">Failed to load run state.</div>';
       return;
     }
     renderWorkflowRun(run);
@@ -11622,10 +11620,10 @@ function renderWorkflowRun(run) {
 
 function loadWorkflowCode(wfId, codeEl) {
   if (!codeEl) return;
-  codeEl.innerHTML = '<div style="padding:8px 0;color:var(--text-secondary);">Loading…</div>';
+  codeEl.innerHTML = '<div class="modal-status-tight">Loading…</div>';
   getJson(apiPath`/api/sessions/${_workflowSessionId}/workflows/${wfId}`).then((data) => {
     if (!data?.content) {
-      codeEl.innerHTML = '<div style="padding:8px 0;color:var(--text-secondary);">Failed to load script.</div>';
+      codeEl.innerHTML = '<div class="modal-status-tight">Failed to load script.</div>';
       return;
     }
     let highlighted;
@@ -11760,12 +11758,12 @@ let _toolStatsData = null;
 function showToolStatsModal(sessionId) {
   if (!sessionId) return;
   const body = document.getElementById('tool-stats-modal-body');
-  body.innerHTML = '<div style="padding:16px;color:var(--text-secondary);">Loading…</div>';
+  body.innerHTML = '<div class="modal-status">Loading…</div>';
   document.getElementById('tool-stats-modal').classList.add('visible');
 
   getJson(apiPath`/api/sessions/${sessionId}/tool-stats`).then((data) => {
     if (!data) {
-      body.innerHTML = '<div style="padding:16px;color:var(--text-secondary);">Failed to load tool statistics.</div>';
+      body.innerHTML = '<div class="modal-status">Failed to load tool statistics.</div>';
       return;
     }
     _toolStatsSortCol = 'count';
@@ -11789,7 +11787,7 @@ function renderToolStatsBody(data) {
   if (!tools?.length) {
     return (
       summary +
-      '<div style="padding:24px;text-align:center;color:var(--text-tertiary);">No tool calls recorded in this session.</div>'
+      '<div class="modal-empty" style="color:var(--text-tertiary)">No tool calls recorded in this session.</div>'
     );
   }
 
