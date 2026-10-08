@@ -1,28 +1,6 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const { createDispatchRegistry } = require('../lib/dispatch');
 const { claudeArgsFor, parseNewSpec } = require('../lib/terminal');
-
-describe('dispatch registry', () => {
-  it('lists running dispatches, by parent when asked', () => {
-    const reg = createDispatchRegistry({ now: () => 7 });
-    reg.add({ session: 's-1', parent: 'p-1', cwd: '/a', name: 'one', group: 'g' });
-    reg.add({ session: 's-2', parent: 'p-2', cwd: '/b' });
-    assert.deepEqual(reg.list({ parent: 'p-1' }), [
-      { session: 's-1', parent: 'p-1', cwd: '/a', name: 'one', group: 'g', worktree: null, startedAt: 7 },
-    ]);
-    assert.equal(reg.list().length, 2);
-  });
-
-  it('forgets a dispatch when its terminal ends', () => {
-    const reg = createDispatchRegistry();
-    reg.add({ session: 's-1', parent: 'p-1', cwd: '/a' });
-    assert.equal(reg.has('s-1'), true);
-    assert.equal(reg.remove('s-1'), true);
-    assert.equal(reg.remove('s-1'), false);
-    assert.deepEqual(reg.list(), []);
-  });
-});
 
 describe('claude args pass-through', () => {
   const spec = (extraArgs) => parseNewSpec({ cwd: '/a', name: 'x', model: 'sonnet', extraArgs });

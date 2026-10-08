@@ -37,8 +37,8 @@ const MONTH = 30 * DAY_MS;
 describe('createDispatchedStore', () => {
   it('records a marker with its starter and saves it', () => {
     const { s, writes } = store();
-    s.record('a', 'p');
-    assert.deepEqual(s.get('a'), { parent: 'p', at: 1_000_000_000 });
+    s.record('a', { parent: 'p', name: 'w', group: 'g', cwd: '/a', worktree: true });
+    assert.deepEqual(s.get('a'), { parent: 'p', at: 1_000_000_000, name: 'w', group: 'g', cwd: '/a', worktree: true });
     assert.equal(writes.length, 1);
   });
 
@@ -49,7 +49,7 @@ describe('createDispatchedStore', () => {
         sessions: { ok: { parent: 'p', status: 'failed', at: 5 }, bad: { status: 'x' }, worse: null },
       },
     });
-    assert.deepEqual(s.get('ok'), { parent: 'p', at: 5 });
+    assert.deepEqual(s.get('ok'), { parent: 'p', at: 5, name: null, group: null, cwd: null, worktree: null });
     assert.equal(s.get('bad'), null);
     assert.equal(s.get('worse'), null);
   });
@@ -90,6 +90,23 @@ describe('createDispatchedStore', () => {
     clock.t += GRACE_MS;
     assert.equal(s.prune({ known: null, maxAgeMs: MONTH }), 0);
     assert.equal(writes.length, 1);
+  });
+
+  it('lists the running dispatches, by parent when asked', () => {
+    const { s } = store();
+    s.record('s-1', { parent: 'p-1', cwd: '/a', name: 'one', group: 'g' });
+    s.record('s-2', { parent: 'p-2', cwd: '/b' });
+    assert.deepEqual(s.running(() => true, { parent: 'p-1' }), [
+      { session: 's-1', parent: 'p-1', cwd: '/a', name: 'one', group: 'g', worktree: null, startedAt: 1_000_000_000 },
+    ]);
+    assert.deepEqual(s.running((id) => id === 's-2').map((r) => r.session), ['s-2']);
+  });
+
+  it('lists a dispatch again after a restart resumes its terminal', () => {
+    const before = store();
+    before.s.record('s-1', { parent: 'p-1', name: 'one', worktree: 'wt' });
+    const { s } = store({ saved: before.writes.at(-1) });
+    assert.deepEqual(s.running(() => true).map((r) => [r.session, r.name, r.worktree]), [['s-1', 'one', 'wt']]);
   });
 });
 

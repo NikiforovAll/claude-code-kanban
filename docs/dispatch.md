@@ -19,7 +19,8 @@ started  SendMessage to the starter, as the spec says
 - Args after `--` go to `claude` after `--session-id` (`claudeArgsFor` in `lib/terminal.js`). They reach a shell command line inside plain quotes, so `parseNewSpec` refuses a value with a quote, `%` or a control character, more than 64 args, and the flags cck sets or that would not start a new session (`OWNED_FLAGS`). A restored terminal runs `claude --resume <id>` without them.
 - `--task-list [id]` (opt-in) sets `CLAUDE_CODE_TASK_LIST_ID` in the PTY env, never on the command line, so the session shares that task list; with no value the CLI sends the starter's own list (`CLAUDE_CODE_TASK_LIST_ID`, else `CLAUDE_CODE_SESSION_ID`). `ptyEnv` strips an inherited value, so no terminal shares a list unless asked. `terminals.json` keeps it as `taskLists: {<id>: <list>}`, so a restored terminal resumes with it.
 - A task in the starter's list whose `owner` is a started session's name links to that session (`addOwnerSessions` in `server.js`, see `docs/session-scanning.md`).
-- The running list is in memory (`lib/dispatch.js`): an entry lives while the session's terminal runs. It feeds the placeholder and `dispatch list`.
+- The running list (`running` of the store in `lib/retention.js`) is the markers in `dispatched.json` whose session has a running cck terminal. A marker keeps `parent`, `name`, `group`, `cwd` and `worktree`, so a session that cck resumes after a restart, or that the user reopens, is in the list again. It feeds the placeholder, `dispatch list` and `dispatch end`. A marker never ends, so a session the user reopens weeks later is again in its starter's `dispatch list`, until the marker expires.
+- A resumed starter gets a new `SendMessage` peer name, and `SendMessage` cannot address a session by id. The starter sends each running worker its new name (`skills/dispatch/SKILL.md`).
 
 ## Placement
 

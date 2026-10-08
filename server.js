@@ -52,7 +52,6 @@ const { createTerminalClient } = require('./lib/terminal-client');
 const { createShowStore, mountShowRoutes, showBodyParser, SHOW_PATH } = require('./lib/show');
 const { readLiveSessions, isPidAlive, isSessionLive } = require('./lib/live-sessions');
 const { createProcStats } = require('./lib/proc-stats');
-const { createDispatchRegistry } = require('./lib/dispatch');
 const { createGroupStore, isGroupName, suggestGroupName } = require('./lib/dispatch-groups');
 const { createDispatchedStore, scanTranscripts, pruneSessionDirs, pruneContextStatus, pruneTaskMaps, retentionMs } = require('./lib/retention');
 const { freshRateLimits } = require('./lib/rate-limits');
@@ -3346,7 +3345,7 @@ const terminal = createTerminalClient({
   isAllowedFolder,
   onChange: () => broadcast({ type: 'terminals-update', ids: terminal.ids() }),
   onExit: (id) => {
-    if (dispatches.remove(id)) broadcast({ type: 'dispatch-update' });
+    if (dispatched.get(id)) broadcast({ type: 'dispatch-update' });
   },
 });
 
@@ -3444,8 +3443,6 @@ app.get('/vendor/xterm/:file', (req, res) => {
 // #region DISPATCH
 const dispatched = createDispatchedStore(jsonFile(DISPATCHED_FILE));
 
-const dispatches = createDispatchRegistry();
-
 const dispatchGroups = createGroupStore({
   ...jsonFile(DISPATCH_GROUPS_FILE),
   isAlive: (id) => terminal.isRunning(id) || isSessionLive(loadLiveSessions(), id),
@@ -3481,8 +3478,7 @@ app.post('/api/dispatch', terminalRoute(async (req, res) => {
   }
   const started = await terminal.startNew({ cwd, name, model, worktree, taskList, prompt: spec.trim(), extraArgs: claudeArgs });
   if (started.error) return res.status(started.status).json({ error: started.error });
-  dispatches.add({ session: started.id, parent, cwd: started.cwd, name, group: group || null, worktree });
-  dispatched.record(started.id, parent);
+  dispatched.record(started.id, { parent, cwd: started.cwd, name, group, worktree });
   // The starter stays where it is: moving it would jump it under the user.
   if (group) dispatchGroups.join(group, [started.id]);
   broadcast({ type: 'dispatch-update' });
@@ -3492,7 +3488,7 @@ app.post('/api/dispatch', terminalRoute(async (req, res) => {
 app.get('/api/dispatch', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   const parent = typeof req.query.parent === 'string' && req.query.parent ? req.query.parent : null;
-  res.json({ running: dispatches.list({ parent }) });
+  res.json({ running: dispatched.running(terminal.isRunning, { parent }) });
 });
 // #endregion
 

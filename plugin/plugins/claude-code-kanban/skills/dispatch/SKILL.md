@@ -22,6 +22,8 @@ End every spec with the reply line, because you usually need the result to conti
 When you are done, or cannot finish, send the result to <your peer name> with the SendMessage tool, then stop.
 ```
 
+A resumed session gets a new peer name, and the reply line still names the old one. After this session resumes, send each worker in `dispatch list` your new name with `SendMessage`.
+
 `--handoff` is a skill argument that drops the reply line: the session owns the task, and the user follows it on the board. Keep it out of the `dispatch start` command.
 
 ## Track on the board (optional)
