@@ -267,31 +267,52 @@ let lastTasksHash = '';
 //#endregion
 
 //#region DATA_FETCHING
+function apiPath(strings, ...values) {
+  return strings.reduce((out, s, i) => out + encodeURIComponent(values[i - 1]) + s);
+}
+
+function api(path, { method, body, query, headers, cache } = {}) {
+  const qs = query ? new URLSearchParams(Object.entries(query).filter(([, v]) => v != null)).toString() : '';
+  const json = body != null;
+  return fetch(qs ? `${path}?${qs}` : path, {
+    method,
+    cache,
+    headers: json ? { 'Content-Type': 'application/json', ...headers } : headers,
+    body: json ? JSON.stringify(body) : undefined,
+  });
+}
+
+async function getJson(path, fallback = null, opts) {
+  try {
+    const res = await api(path, opts);
+    return res.ok ? await res.json() : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 async function fetchSessions(includeTasks = true, focusId = currentSessionId) {
   try {
     const allPinnedIds = new Set([...pinnedSessionIds, ...stickySessionIds]);
     if (revealedPlanSessionId) allPinnedIds.add(revealedPlanSessionId);
     if (revealedStorageSessionId) allPinnedIds.add(revealedStorageSessionId);
-    const pinnedParam = allPinnedIds.size > 0 ? `&pinned=${[...allPinnedIds].join(',')}` : '';
-    // The focused session must come back whatever the filters say: renderSession and the
-    // info modal both look it up in `sessions` and bail when it is absent, so a session
-    // opened from outside the current filter would leave the view on the previous one.
-    const includeParam = focusId ? `&include=${encodeURIComponent(focusId)}` : '';
-    const projectParam =
-      filterProject === '__recent__'
-        ? `&recentHours=${RECENT_PROJECT_HOURS}`
-        : filterProject
-          ? `&project=${encodeURIComponent(filterProject)}`
-          : '';
-    const filterParam = sessionFilter === 'active' ? '&filter=active' : '';
-    const sessionsPromise = fetch(
-      `/api/sessions?limit=${sessionLimit}${pinnedParam}${includeParam}${projectParam}${filterParam}`,
-    ).then((r) => {
-      sessionsHasMore = r.headers.get('X-Has-More') === 'true';
-      return r.json();
+    const recent = filterProject === '__recent__';
+    const res = await api('/api/sessions', {
+      query: {
+        limit: sessionLimit,
+        pinned: allPinnedIds.size > 0 ? [...allPinnedIds].join(',') : null,
+        // The focused session must come back whatever the filters say: renderSession and the
+        // info modal both look it up in `sessions` and bail when it is absent, so a session
+        // opened from outside the current filter would leave the view on the previous one.
+        include: focusId || null,
+        recentHours: recent ? RECENT_PROJECT_HOURS : null,
+        project: !recent && filterProject ? filterProject : null,
+        filter: sessionFilter === 'active' ? 'active' : null,
+      },
     });
-
-    const newSessions = await sessionsPromise;
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    sessionsHasMore = res.headers.get('X-Has-More') === 'true';
+    const newSessions = await res.json();
     const sessionsHash = JSON.stringify(newSessions);
     if (sessionsHash !== lastSessionsHash) {
       lastSessionsHash = sessionsHash;
@@ -316,9 +337,7 @@ function markSessionRead(sessionId) {
   if (!session?.unread) return;
   session.unread = false;
   document.querySelector(`.session-item[data-session-id="${CSS.escape(sessionId)}"]`)?.classList.remove('unread');
-  fetch(`/api/sessions/${encodeURIComponent(sessionId)}/read`, { method: 'POST' }).catch((e) =>
-    console.error('[markSessionRead]', e),
-  );
+  api(apiPath`/api/sessions/${sessionId}/read`, { method: 'POST' }).catch((e) => console.error('[markSessionRead]', e));
 }
 
 function markOpenSessionRead() {
@@ -326,7 +345,8 @@ function markOpenSessionRead() {
 }
 
 async function loadSearchTasks() {
-  const newTasks = await fetch('/api/tasks/all').then((r) => r.json());
+  const newTasks = await getJson('/api/tasks/all');
+  if (!newTasks) return;
   const tasksHash = JSON.stringify(newTasks);
   if (tasksHash === lastTasksHash) return;
   lastTasksHash = tasksHash;
@@ -360,14 +380,9 @@ sessionsList.addEventListener('scroll', loadMoreIfNearEnd, { passive: true });
 
 // Sessions by id, in the order given, ignoring every sidebar filter — that is what `include` means.
 async function fetchSessionsByIds(ids) {
-  try {
-    const r = await fetch(`/api/sessions?limit=1&include=${ids.map(encodeURIComponent).join(',')}`);
-    if (!r.ok) return [];
-    const byId = new Map((await r.json()).map((s) => [s.id, s]));
-    return ids.map((id) => byId.get(id)).filter(Boolean);
-  } catch (_) {
-    return [];
-  }
+  const rows = await getJson('/api/sessions', [], { query: { limit: 1, include: ids.join(',') } });
+  const byId = new Map(rows.map((s) => [s.id, s]));
+  return ids.map((id) => byId.get(id)).filter(Boolean);
 }
 
 async function fetchSessionById(id) {
@@ -401,11 +416,7 @@ function sessionSearch(onFound) {
   let found = null;
   let timer = null;
   const run = async (key) => {
-    let ids = [];
-    try {
-      const r = await fetch(`/api/sessions/search?q=${encodeURIComponent(key)}`);
-      if (r.ok) ids = await r.json();
-    } catch (_) {}
+    const ids = await getJson('/api/sessions/search', [], { query: { q: key } });
     if (key !== current) return;
     const rows = ids.length ? await fetchSessionsByIds(ids) : [];
     if (key !== current) return;
@@ -658,7 +669,7 @@ async function fetchTasks(sessionId) {
       openTerminal(sessionId, terminalOpenMode(sessionId));
     viewMode = 'session';
     document.getElementById('message-toggle')?.style.removeProperty('display');
-    const res = await fetch(`/api/sessions/${sessionId}`);
+    const res = await api(apiPath`/api/sessions/${sessionId}`);
 
     if (!res.ok) throw new Error(`Failed to fetch tasks: ${res.status}`);
     const newTasks = await res.json();
@@ -728,7 +739,7 @@ function resetAgentState() {
 
 async function fetchAgents(sessionId) {
   try {
-    const res = await fetch(`/api/sessions/${sessionId}/agents`);
+    const res = await api(apiPath`/api/sessions/${sessionId}/agents`);
     if (!res.ok) {
       resetAgentState();
       return;
@@ -774,19 +785,8 @@ async function fetchProjectView(projectPath) {
 
   const encoded = btoa(projectPath);
   const [tasksResult, agentResults] = await Promise.all([
-    fetch(`/api/projects/${encodeURIComponent(encoded)}/tasks`)
-      .then((r) => r.json())
-      .catch((e) => {
-        console.error('[fetchProjectView] tasks:', e);
-        return [];
-      }),
-    Promise.all(
-      activeSessionIds.map((id) =>
-        fetch(`/api/sessions/${id}/agents`)
-          .then((r) => r.json())
-          .catch(() => ({ agents: [] })),
-      ),
-    ),
+    getJson(apiPath`/api/projects/${encoded}/tasks`, []),
+    Promise.all(activeSessionIds.map((id) => getJson(apiPath`/api/sessions/${id}/agents`, { agents: [] }))),
   ]);
   currentTasks = tasksResult;
   const seen = new Set();
@@ -821,11 +821,7 @@ async function refreshProjectAgents() {
   const projectSessions = sessions.filter((s) => s.project === currentProjectPath);
   const activeSessionIds = projectSessions.filter((s) => isSessionActive(s) || isAnyPinned(s.id)).map((s) => s.id);
   const agentResults = await Promise.all(
-    activeSessionIds.map((id) =>
-      fetch(`/api/sessions/${id}/agents`)
-        .then((r) => r.json())
-        .catch(() => ({ agents: [] })),
-    ),
+    activeSessionIds.map((id) => getJson(apiPath`/api/sessions/${id}/agents`, { agents: [] })),
   );
   const seen = new Set();
   currentAgents = [];
@@ -964,7 +960,7 @@ async function viewAgentLog(agentId) {
     agentLogSSE.close();
     agentLogSSE = null;
   }
-  agentLogSSE = new EventSource(`/api/sessions/${agentLogMode.sessionId}/agents/${resolvedId}/messages/stream`);
+  agentLogSSE = new EventSource(apiPath`/api/sessions/${agentLogMode.sessionId}/agents/${resolvedId}/messages/stream`);
   agentLogSSE.addEventListener('agent-log-update', (e) => {
     if (!agentLogMode || agentLogMode.agentId !== resolvedId) return;
     try {
@@ -998,10 +994,10 @@ async function fetchAgentMessages() {
   if (!agentLogMode) return;
   const { sessionId, agentId } = agentLogMode;
   try {
-    const res = await fetch(`/api/sessions/${sessionId}/agents/${agentId}/messages?limit=100`);
-    if (!res.ok || !agentLogMode || agentLogMode.agentId !== agentId) return;
-    const data = await res.json();
-    if (!agentLogMode || agentLogMode.agentId !== agentId) return;
+    const data = await getJson(apiPath`/api/sessions/${sessionId}/agents/${agentId}/messages`, null, {
+      query: { limit: 100 },
+    });
+    if (!data || !agentLogMode || agentLogMode.agentId !== agentId) return;
     setCurrentMessages(data.messages);
     if (messagePanelOpen) renderMessages(data.messages);
     maybeFollowLatest();
@@ -1021,9 +1017,7 @@ function openLiveLatestMessage() {
 const MSG_PAGE_LIMIT = 15;
 
 async function fetchSessionMessagesPage(sessionId, { before, limit = MSG_PAGE_LIMIT } = {}) {
-  const qs = new URLSearchParams({ limit });
-  if (before) qs.set('before', before);
-  const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/messages?${qs}`);
+  const res = await api(apiPath`/api/sessions/${sessionId}/messages`, { query: { limit, before: before || null } });
   return res.ok ? res.json() : null;
 }
 
@@ -1670,10 +1664,9 @@ function rejectWaitingPlan(inputId) {
 async function respondWaiting(payload) {
   if (!currentSessionId || !currentWaiting?.id) return;
   try {
-    const res = await fetch(`/api/sessions/${encodeURIComponent(currentSessionId)}/waiting/respond`, {
+    const res = await api(apiPath`/api/sessions/${currentSessionId}/waiting/respond`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: currentWaiting.id, ...payload }),
+      body: { id: currentWaiting.id, ...payload },
     });
     if (res.ok || res.status === 409 || res.status === 410) {
       clearWaitingUi();
@@ -1720,9 +1713,7 @@ function clearWaitingUi() {
 async function discardWaiting() {
   if (!currentSessionId) return;
   try {
-    const res = await fetch(`/api/sessions/${encodeURIComponent(currentSessionId)}/waiting/discard`, {
-      method: 'POST',
-    });
+    const res = await api(apiPath`/api/sessions/${currentSessionId}/waiting/discard`, { method: 'POST' });
     if (res.ok) clearWaitingUi();
   } catch (e) {
     console.error('[discardWaiting]', e);
@@ -2045,11 +2036,7 @@ function savePinnedSessions() {
 // Mirror pin state to server so it can be queried by the CLI. UI remains source of truth for itself.
 function offloadSessionPin(sessionId) {
   const state = getSessionPinState(sessionId);
-  fetch('/api/session/pin', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id: sessionId, state }),
-  }).catch(() => {});
+  api('/api/session/pin', { method: 'POST', body: { id: sessionId, state } }).catch(() => {});
 }
 
 function clearSessionPin(sessionId) {
@@ -3132,9 +3119,7 @@ async function _toggleToolResultExpand(btn) {
     btn.disabled = true;
     btn.textContent = 'Loading…';
     try {
-      const r = await fetch(
-        `/api/sessions/${encodeURIComponent(currentSessionId)}/tool-result/${encodeURIComponent(btn.dataset.toolUseId)}`,
-      );
+      const r = await api(apiPath`/api/sessions/${currentSessionId}/tool-result/${btn.dataset.toolUseId}`);
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const { content } = await r.json();
       f.innerHTML = toolOutputHtml(content);
@@ -3175,11 +3160,7 @@ async function copyMsgToClipboard(btn) {
 
 async function postAndToast(url, body, label) {
   try {
-    const r = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
+    const r = await api(url, { method: 'POST', body });
     showToast(`${r.ok ? 'Opened' : 'Failed to open'} ${label}`, r.ok ? 'success' : 'error');
   } catch (_e) {
     showToast(`Failed to open ${label}`, 'error');
@@ -3395,7 +3376,7 @@ function togglePinFromAgentModal() {
 async function dismissAgent(agentId) {
   if (!currentSessionId || !agentId) return;
   try {
-    const res = await fetch(`/api/sessions/${currentSessionId}/agents/${agentId}/stop`, { method: 'POST' });
+    const res = await api(apiPath`/api/sessions/${currentSessionId}/agents/${agentId}/stop`, { method: 'POST' });
     if (res.ok) {
       currentWaiting = null;
       fetchAgents(currentSessionId);
@@ -4397,11 +4378,7 @@ function startAddTask(tile) {
     input.disabled = true;
     const sessionId = currentSessionId;
     try {
-      const res = await fetch(`/api/tasks/${sessionId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ subject }),
-      });
+      const res = await api(apiPath`/api/tasks/${sessionId}`, { method: 'POST', body: { subject } });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       // The response carries the finished task, and the watcher will resend it within the
       // SSE debounce anyway -- so show it now rather than paying a session refetch for it.
@@ -4493,11 +4470,7 @@ async function onColumnDrop(e) {
   task.status = newStatus;
   renderKanban();
   try {
-    const res = await fetch(`/api/tasks/${sessionId}/${taskId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: newStatus }),
-    });
+    const res = await api(apiPath`/api/tasks/${sessionId}/${taskId}`, { method: 'PUT', body: { status: newStatus } });
     if (res.ok) return;
   } catch (_) {}
   if (task.status === newStatus) {
@@ -5621,15 +5594,9 @@ async function showTaskDetail(taskId, sessionId = null) {
 
   // If task not found in currentTasks, fetch it from the session
   if (!task && sessionId && sessionId !== 'undefined') {
-    try {
-      const res = await fetch(`/api/sessions/${sessionId}`);
-      const tasks = await res.json();
-      task = tasks.find((t) => t.id === taskId);
-      if (!task) return;
-    } catch (error) {
-      console.error('Failed to fetch task:', error);
-      return;
-    }
+    const tasks = await getJson(apiPath`/api/sessions/${sessionId}`, []);
+    task = tasks.find((t) => t.id === taskId);
+    if (!task) return;
   }
 
   if (!task) return;
@@ -5809,11 +5776,7 @@ function editDescription(descEl, task, sessionId) {
 
 async function saveTaskField(taskId, sessionId, field, value) {
   try {
-    const res = await fetch(`/api/tasks/${sessionId}/${taskId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ [field]: value }),
-    });
+    const res = await api(apiPath`/api/tasks/${sessionId}/${taskId}`, { method: 'PUT', body: { [field]: value } });
 
     if (res.ok) {
       lastCurrentTasksHash = null;
@@ -5880,15 +5843,13 @@ async function deleteTask(taskId, sessionId) {
   if (!ok) return;
 
   try {
-    const res = await fetch(`/api/tasks/${sessionId}/${taskId}`, {
-      method: 'DELETE',
-    });
+    const res = await api(apiPath`/api/tasks/${sessionId}/${taskId}`, { method: 'DELETE' });
 
     if (res.ok) {
       closeDetailPanel();
       await refreshCurrentView();
     } else {
-      const error = await res.json();
+      const error = await res.json().catch(() => ({}));
       alert(`Failed to delete task: ${error.error || 'Unknown error'}`);
     }
   } catch (error) {
@@ -6489,7 +6450,7 @@ function _updateStorageTotal() {
 let _storageKnownSessions = null;
 
 async function _fetchKnownSessions() {
-  const res = await fetch('/api/sessions/known');
+  const res = await api('/api/sessions/known');
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const known = new Map((await res.json()).map((s) => [s.id, s]));
   for (const s of sessions) known.set(s.id, s);
@@ -8026,7 +7987,7 @@ async function sendReview() {
   const items = reviewItems();
   if (!items.length) return;
   try {
-    const res = await terminalFetch(`/api/sessions/${encodeURIComponent(sessionId)}/review`, 'POST', {
+    const res = await terminalFetch(apiPath`/api/sessions/${sessionId}/review`, 'POST', {
       source,
       comments: items.map(({ quote, comment, context }) => ({ quote, comment, ...context })),
     });
@@ -8119,14 +8080,7 @@ function setSessionDocLink(sessionId, filePath, unlink) {
 
 // Links sent while no tab was open reach the browser only through the server copy.
 async function mergeServerLinkedDocs() {
-  let bySession;
-  try {
-    const res = await fetch('/api/document/links');
-    if (!res.ok) return;
-    bySession = await res.json();
-  } catch {
-    return;
-  }
+  const bySession = await getJson('/api/document/links', {});
   for (const [sessionId, paths] of Object.entries(bySession || {})) {
     const local = getSessionPreviewPaths(sessionId);
     const known = new Set(local.map(canonicalPath));
@@ -8138,8 +8092,9 @@ async function mergeServerLinkedDocs() {
 }
 
 function forgetServerLinkedDoc(sessionId, filePath) {
-  const q = filePath ? `?path=${encodeURIComponent(filePath)}` : '';
-  fetch(`/api/document/links/${encodeURIComponent(sessionId)}${q}`, { method: 'DELETE' }).catch(() => {});
+  api(apiPath`/api/document/links/${sessionId}`, { method: 'DELETE', query: { path: filePath || null } }).catch(
+    () => {},
+  );
 }
 
 function afterLinkedDocsChanged(sessionId) {
@@ -8367,9 +8322,7 @@ function openPreviewInEditor() {
 async function openPreviewByPath(filePath, base, onUnsupported) {
   if (!filePath) return;
   try {
-    const qs = new URLSearchParams({ path: filePath });
-    if (base) qs.set('base', base);
-    const r = await fetch(`/api/preview?${qs}`);
+    const r = await api('/api/preview', { query: { path: filePath, base: base || null } });
     if (!r.ok) {
       showToast('Preview file unavailable', 'error');
       return;
@@ -8458,12 +8411,8 @@ async function loadPreviewKinds(sessionId, paths) {
   try {
     await Promise.all(
       pending.map(async (p) => {
-        let kind = null;
-        try {
-          const r = await fetch(`/api/file/resolve?path=${encodeURIComponent(p)}`);
-          if (r.ok) kind = (await r.json()).kind;
-        } catch (_) {}
-        previewKindByPath.set(p, kind);
+        const data = await getJson('/api/file/resolve', {}, { query: { path: p } });
+        previewKindByPath.set(p, data.kind ?? null);
       }),
     );
   } finally {
@@ -8489,15 +8438,12 @@ function setOfferedPadPaths(sessionId, paths) {
 async function loadSessionPads(sessionId) {
   if (!sessionId || padsFetched.has(sessionId)) return;
   padsFetched.add(sessionId);
-  let pads;
-  try {
-    const r = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/pads`);
-    if (!r.ok) throw new Error(r.status);
-    pads = (await r.json()).pads || [];
-  } catch (_) {
+  const data = await getJson(apiPath`/api/sessions/${sessionId}/pads`);
+  if (!data) {
     padsFetched.delete(sessionId);
     return;
   }
+  const pads = data.pads || [];
   const offered = new Set(getOfferedPadPaths(sessionId).map(canonicalPath));
   const fresh = pads.map((p) => p.path).filter((p) => !offered.has(canonicalPath(p)));
   if (!fresh.length) return;
@@ -8660,15 +8606,10 @@ function makeSectionLoader({ attr, endpoint, pick, innerHtml, ttlMs = 0 }) {
       const cached = store.get(sessionId);
       if (cached && Date.now() - cached.at < ttlMs) return;
       inFlight.add(sessionId);
-      try {
-        const res = await fetch(`/api/sessions/${sessionId}/${endpoint}`);
-        if (!res.ok) return;
-        store.set(sessionId, { at: Date.now(), data: pick(await res.json()) });
-      } catch (_) {
-        return;
-      } finally {
-        inFlight.delete(sessionId);
-      }
+      const data = await getJson(apiPath`/api/sessions/${sessionId}/${endpoint}`);
+      inFlight.delete(sessionId);
+      if (!data) return;
+      store.set(sessionId, { at: Date.now(), data: pick(data) });
       paintSectionSlots(attr, sessionId, innerHtml(sessionId));
     },
   };
@@ -8918,13 +8859,9 @@ async function toggleScratchFolder(sessionId, dirPath) {
   }
   scratchFolders.set(dirPath, { status: 'loading', children: [] });
   scratchFilesSection.repaint(sessionId);
-  let entry = { status: 'error', children: [] };
-  try {
-    const res = await fetch(`/api/sessions/${sessionId}/scratchpad-files?path=${encodeURIComponent(dirPath)}`);
-    if (res.ok) entry = { status: 'ready', children: (await res.json()).files || [] };
-  } catch (_) {
-    // Reads "Failed to load"; closing and reopening the folder retries.
-  }
+  const data = await getJson(apiPath`/api/sessions/${sessionId}/scratchpad-files`, null, { query: { path: dirPath } });
+  // An error entry reads "Failed to load"; closing and reopening the folder retries.
+  const entry = data ? { status: 'ready', children: data.files || [] } : { status: 'error', children: [] };
   // The user may have closed the folder while the request was in flight.
   if (scratchFolders.has(dirPath)) {
     scratchFolders.set(dirPath, entry);
@@ -9025,10 +8962,7 @@ async function linkFileByPath(sessionId, raw, slot) {
     }
   } else {
     try {
-      const qs = new URLSearchParams({ path: value });
-      const base = getSessionBaseDir(sessionId);
-      if (base) qs.set('base', base);
-      const r = await fetch(`/api/file/resolve?${qs}`);
+      const r = await api('/api/file/resolve', { query: { path: value, base: getSessionBaseDir(sessionId) || null } });
       const data = await r.json().catch(() => ({}));
       if (!r.ok || !data.exists) {
         fail(data.error || 'File not found');
@@ -10507,15 +10441,9 @@ let projectsCache = null;
 
 async function loadProjects() {
   if (!projectsCacheDirty && projectsCache) return projectsCache;
-  let projects;
-  try {
-    const res = await fetch('/api/projects');
-    projects = await res.json();
-  } catch (_e) {
-    projects = [...new Set(sessions.map((s) => s.project).filter(Boolean))]
-      .sort()
-      .map((p) => ({ path: p, modifiedAt: null }));
-  }
+  const projects =
+    (await getJson('/api/projects')) ??
+    [...new Set(sessions.map((s) => s.project).filter(Boolean))].sort().map((p) => ({ path: p, modifiedAt: null }));
   projectsCache = projects;
   projectsCacheDirty = false;
   return projects;
@@ -10795,29 +10723,18 @@ async function showSessionInfoModal(sessionId) {
   };
 
   const teamPromise = session.isTeam
-    ? fetch(`/api/teams/${session.teamName || sessionId}`)
-        .then((r) => (r.ok ? r.json() : null))
-        .catch(() => null)
+    ? getJson(apiPath`/api/teams/${session.teamName || sessionId}`)
     : Promise.resolve(null);
 
-  const planPromise = fetch(`/api/sessions/${sessionId}/plan`)
-    .then((r) => (r.ok ? r.json() : null))
-    .catch(() => null)
-    .then((data) => {
-      if (data?.content) _pendingPlanPath = data.path || null;
-      return data?.content || null;
-    });
+  const planPromise = getJson(apiPath`/api/sessions/${sessionId}/plan`).then((data) => {
+    if (data?.content) _pendingPlanPath = data.path || null;
+    return data?.content || null;
+  });
 
   const tasksPromise =
-    cachedTasks.length > 0
-      ? Promise.resolve(cachedTasks)
-      : fetch(`/api/sessions/${sessionId}`)
-          .then((r) => (r.ok ? r.json() : []))
-          .catch(() => []);
+    cachedTasks.length > 0 ? Promise.resolve(cachedTasks) : getJson(apiPath`/api/sessions/${sessionId}`, []);
 
-  const parentPromise = fetch(`/api/sessions/${sessionId}/parent`)
-    .then((r) => (r.ok ? r.json() : null))
-    .catch(() => null);
+  const parentPromise = getJson(apiPath`/api/sessions/${sessionId}/parent`);
 
   const [teamConfig, planContent, tasks, parentInfo] = await Promise.all([
     teamPromise,
@@ -11428,18 +11345,15 @@ function initProjectPicker() {
 //#region PLAN
 function refreshOpenPlan() {
   if (!_planSessionId || !document.getElementById('plan-modal').classList.contains('visible')) return;
-  fetch(`/api/sessions/${_planSessionId}/plan`)
-    .then((r) => (r.ok ? r.json() : null))
-    .then((data) => {
-      if (data?.content && (data.content !== _pendingPlanContent || data.path !== _pendingPlanPath)) {
-        _pendingPlanContent = data.content;
-        _pendingPlanPath = data.path || null;
-        document.getElementById('plan-modal-body').innerHTML = renderMarkdown(_pendingPlanContent);
-        mountPlanReview();
-        syncPlanPaneBtn();
-      }
-    })
-    .catch(() => {});
+  getJson(apiPath`/api/sessions/${_planSessionId}/plan`).then((data) => {
+    if (data?.content && (data.content !== _pendingPlanContent || data.path !== _pendingPlanPath)) {
+      _pendingPlanContent = data.content;
+      _pendingPlanPath = data.path || null;
+      document.getElementById('plan-modal-body').innerHTML = renderMarkdown(_pendingPlanContent);
+      mountPlanReview();
+      syncPlanPaneBtn();
+    }
+  });
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
@@ -11447,12 +11361,7 @@ function showLoopModal(sessionId) {
   const body = document.getElementById('loop-modal-body');
   body.innerHTML = '<div style="padding:16px;color:var(--text-secondary);">Loading…</div>';
   document.getElementById('loop-modal').classList.add('visible');
-  fetch(`/api/sessions/${sessionId}/loop`)
-    .then((r) => (r.ok ? r.json() : { wakeups: [], crons: [] }))
-    .catch(() => ({ wakeups: [], crons: [] }))
-    .then((data) => {
-      renderLoopModalBody(data);
-    });
+  getJson(apiPath`/api/sessions/${sessionId}/loop`, { wakeups: [], crons: [] }).then(renderLoopModalBody);
 }
 
 function fmtLoopDelay(s) {
@@ -11571,21 +11480,18 @@ function showWorkflowModal(sessionId) {
   const body = document.getElementById('workflow-modal-body');
   body.innerHTML = '<div style="padding:16px;color:var(--text-secondary);">Loading…</div>';
   document.getElementById('workflow-modal').classList.add('visible');
-  fetch(`/api/sessions/${sessionId}/workflows`)
-    .then((r) => (r.ok ? r.json() : { workflows: [] }))
-    .catch(() => ({ workflows: [] }))
-    .then((data) => {
-      _workflowList = data.workflows || [];
-      if (!_workflowList.length) {
-        setWorkflowHeader('Workflows', null);
-        body.innerHTML =
-          '<div style="padding:24px;text-align:center;color:var(--text-secondary);">No workflow scripts for this session.</div>';
-      } else if (_workflowList.length === 1) {
-        showWorkflowRun(_workflowList[0].id);
-      } else {
-        renderWorkflowPicker(_workflowList);
-      }
-    });
+  getJson(apiPath`/api/sessions/${sessionId}/workflows`, { workflows: [] }).then((data) => {
+    _workflowList = data.workflows || [];
+    if (!_workflowList.length) {
+      setWorkflowHeader('Workflows', null);
+      body.innerHTML =
+        '<div style="padding:24px;text-align:center;color:var(--text-secondary);">No workflow scripts for this session.</div>';
+    } else if (_workflowList.length === 1) {
+      showWorkflowRun(_workflowList[0].id);
+    } else {
+      renderWorkflowPicker(_workflowList);
+    }
+  });
 }
 
 function setWorkflowHeader(name, wfId) {
@@ -11624,16 +11530,13 @@ function showWorkflowRun(wfId) {
   setWorkflowHeader(name, wfId);
   const body = document.getElementById('workflow-modal-body');
   body.innerHTML = '<div style="padding:16px;color:var(--text-secondary);">Loading…</div>';
-  fetch(`/api/sessions/${_workflowSessionId}/workflows/${encodeURIComponent(wfId)}/run`)
-    .then((r) => (r.ok ? r.json() : null))
-    .catch(() => null)
-    .then((run) => {
-      if (!run) {
-        body.innerHTML = '<div style="padding:16px;color:var(--text-secondary);">Failed to load run state.</div>';
-        return;
-      }
-      renderWorkflowRun(run);
-    });
+  getJson(apiPath`/api/sessions/${_workflowSessionId}/workflows/${wfId}/run`).then((run) => {
+    if (!run) {
+      body.innerHTML = '<div style="padding:16px;color:var(--text-secondary);">Failed to load run state.</div>';
+      return;
+    }
+    renderWorkflowRun(run);
+  });
 }
 
 function fmtTokens(t) {
@@ -11718,26 +11621,23 @@ function renderWorkflowRun(run) {
 function loadWorkflowCode(wfId, codeEl) {
   if (!codeEl) return;
   codeEl.innerHTML = '<div style="padding:8px 0;color:var(--text-secondary);">Loading…</div>';
-  fetch(`/api/sessions/${_workflowSessionId}/workflows/${encodeURIComponent(wfId)}`)
-    .then((r) => (r.ok ? r.json() : null))
-    .catch(() => null)
-    .then((data) => {
-      if (!data?.content) {
-        codeEl.innerHTML = '<div style="padding:8px 0;color:var(--text-secondary);">Failed to load script.</div>';
-        return;
-      }
-      let highlighted;
-      if (typeof hljs !== 'undefined' && hljs.getLanguage('javascript')) {
-        highlighted = hljs.highlight(data.content, { language: 'javascript' }).value;
-      } else {
-        highlighted = escapeHtml(data.content);
-      }
-      codeEl.innerHTML = `<pre><code class="hljs language-javascript">${highlighted}</code></pre>`;
-    });
+  getJson(apiPath`/api/sessions/${_workflowSessionId}/workflows/${wfId}`).then((data) => {
+    if (!data?.content) {
+      codeEl.innerHTML = '<div style="padding:8px 0;color:var(--text-secondary);">Failed to load script.</div>';
+      return;
+    }
+    let highlighted;
+    if (typeof hljs !== 'undefined' && hljs.getLanguage('javascript')) {
+      highlighted = hljs.highlight(data.content, { language: 'javascript' }).value;
+    } else {
+      highlighted = escapeHtml(data.content);
+    }
+    codeEl.innerHTML = `<pre><code class="hljs language-javascript">${highlighted}</code></pre>`;
+  });
 }
 
 function openWorkflowInEditor(wfId) {
-  postAndToast(`/api/sessions/${_workflowSessionId}/workflows/${encodeURIComponent(wfId)}/open`, {}, 'in editor');
+  postAndToast(apiPath`/api/sessions/${_workflowSessionId}/workflows/${wfId}/open`, {}, 'in editor');
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
@@ -11753,17 +11653,14 @@ function closeWorkflowModal() {
 }
 
 function openPlanForSession(sid) {
-  fetch(`/api/sessions/${sid}/plan`)
-    .then((r) => (r.ok ? r.json() : null))
-    .catch(() => null)
-    .then((data) => {
-      if (data?.content) {
-        _pendingPlanContent = data.content;
-        _pendingPlanPath = data.path || null;
-        _planSessionId = sid;
-        openPlanModal();
-      }
-    });
+  getJson(apiPath`/api/sessions/${sid}/plan`).then((data) => {
+    if (data?.content) {
+      _pendingPlanContent = data.content;
+      _pendingPlanPath = data.path || null;
+      _planSessionId = sid;
+      openPlanModal();
+    }
+  });
 }
 
 function openPlanModal() {
@@ -11814,7 +11711,7 @@ function closePlanModal() {
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
 function openPlanInEditor() {
   if (!_planSessionId) return;
-  postAndToast(`/api/sessions/${_planSessionId}/plan/open`, {}, 'in editor');
+  postAndToast(apiPath`/api/sessions/${_planSessionId}/plan/open`, {}, 'in editor');
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
@@ -11864,19 +11761,16 @@ function showToolStatsModal(sessionId) {
   body.innerHTML = '<div style="padding:16px;color:var(--text-secondary);">Loading…</div>';
   document.getElementById('tool-stats-modal').classList.add('visible');
 
-  fetch(`/api/sessions/${sessionId}/tool-stats`)
-    .then((r) => (r.ok ? r.json() : null))
-    .catch(() => null)
-    .then((data) => {
-      if (!data) {
-        body.innerHTML = '<div style="padding:16px;color:var(--text-secondary);">Failed to load tool statistics.</div>';
-        return;
-      }
-      _toolStatsSortCol = 'count';
-      _toolStatsSortDir = 'desc';
-      _toolStatsData = data;
-      body.innerHTML = renderToolStatsBody(data);
-    });
+  getJson(apiPath`/api/sessions/${sessionId}/tool-stats`).then((data) => {
+    if (!data) {
+      body.innerHTML = '<div style="padding:16px;color:var(--text-secondary);">Failed to load tool statistics.</div>';
+      return;
+    }
+    _toolStatsSortCol = 'count';
+    _toolStatsSortDir = 'desc';
+    _toolStatsData = data;
+    body.innerHTML = renderToolStatsBody(data);
+  });
 }
 
 function renderToolStatsBody(data) {
@@ -12040,10 +11934,7 @@ function paneOwnOrigin(pane) {
 
 async function probePaneFraming(sid, pane) {
   const q = new URLSearchParams({ ancestors: paneAncestors().join(',') });
-  const { frameable } = await paneRequest(
-    'GET',
-    `/api/panes/${encodeURIComponent(sid)}/${encodeURIComponent(pane.id)}/framing?${q}`,
-  );
+  const { frameable } = await paneRequest('GET', `${apiPath`/api/panes/${sid}/${pane.id}/framing`}?${q}`);
   if (frameable === false) paneRefused.add(pane.target);
   return frameable;
 }
@@ -12067,10 +11958,8 @@ function applyPaneLayout(sid, layout) {
 }
 
 async function fetchPaneLayout(sid) {
-  try {
-    const r = await fetch(`/api/panes/${encodeURIComponent(sid)}`);
-    if (r.ok) applyPaneLayout(sid, await r.json());
-  } catch {}
+  const layout = await getJson(apiPath`/api/panes/${sid}`);
+  if (layout) applyPaneLayout(sid, layout);
 }
 
 function refetchPaneLayout() {
@@ -12080,11 +11969,7 @@ function refetchPaneLayout() {
 
 async function paneRequest(method, path, body) {
   try {
-    const r = await fetch(path, {
-      method,
-      headers: body ? { 'Content-Type': 'application/json' } : undefined,
-      body: body ? JSON.stringify(body) : undefined,
-    });
+    const r = await api(path, { method, body });
     const data = await r.json().catch(() => ({}));
     return r.ok ? data : { error: data.error || `${method} failed (${r.status})`, code: data.code };
   } catch {
@@ -12509,11 +12394,7 @@ async function loadPaneView(sid, pane, view, scroll) {
     await loadMessagePaneView(sid, pane, view);
     return;
   }
-  let data = null;
-  try {
-    const r = await fetch(`/api/preview?${new URLSearchParams({ path: pane.target })}`);
-    if (r.ok) data = await r.json();
-  } catch {}
+  const data = await getJson('/api/preview', null, { query: { path: pane.target } });
   if (data?.kind === 'html') {
     // The frame's origin is opaque, so the page restores its own scroll on load.
     const restore = scroll
@@ -12780,7 +12661,7 @@ async function closePane(paneId) {
   }
   unmountPane(sid, paneId);
   syncPanes();
-  const res = await paneRequest('DELETE', `/api/panes/${encodeURIComponent(sid)}/${encodeURIComponent(paneId)}`);
+  const res = await paneRequest('DELETE', apiPath`/api/panes/${sid}/${paneId}`);
   if (res.layout) applyPaneLayout(sid, res.layout);
   else if (res.code === 'no_pane') fetchPaneLayout(sid);
   else showToast(res.error, 'error');
@@ -12867,7 +12748,7 @@ async function deleteBoardTasks(onlyCompleted) {
   });
   if (!ok) return;
   const q = onlyCompleted ? '?status=completed' : '';
-  const res = await paneRequest('DELETE', `/api/tasks/${encodeURIComponent(sid)}${q}`);
+  const res = await paneRequest('DELETE', `${apiPath`/api/tasks/${sid}`}${q}`);
   if (res.error) {
     showToast(`Failed to delete tasks: ${res.error}`, 'error');
     return;
@@ -12904,7 +12785,7 @@ async function endPaneRename(input, save) {
   const pane = paneById(id);
   const title = input.value.trim();
   if (save && sid && pane && title !== pane.title) {
-    const res = await paneRequest('PATCH', `/api/panes/${encodeURIComponent(sid)}/${encodeURIComponent(id)}`, {
+    const res = await paneRequest('PATCH', apiPath`/api/panes/${sid}/${id}`, {
       title,
     });
     if (res.error) showToast(res.error, 'error');
@@ -13000,7 +12881,7 @@ async function addPane(raw) {
 
 // Shows the added pane. True when its session is still on screen, null when the add failed.
 async function postPane(sid, body) {
-  const res = await paneRequest('POST', `/api/panes/${encodeURIComponent(sid)}`, body);
+  const res = await paneRequest('POST', apiPath`/api/panes/${sid}`, body);
   if (!res.pane) {
     showToast(res.error, 'error');
     return null;
@@ -13260,7 +13141,7 @@ async function movePaneItem({ sid, fixed, movable, from, to, after }) {
   const items = movable.filter((it) => it !== from);
   items.splice(items.indexOf(to) + (after ? 1 : 0), 0, from);
   const order = [fixed, ...items].flatMap((it) => it.ids).filter((id) => id !== 'board');
-  const res = await paneRequest('PATCH', `/api/panes/${encodeURIComponent(sid)}`, { order });
+  const res = await paneRequest('PATCH', apiPath`/api/panes/${sid}`, { order });
   if (res.error) showToast(res.error, 'error');
   else applyPaneLayout(sid, res.layout);
 }
@@ -14286,7 +14167,7 @@ async function closeTerminalSession(id = termState.sessionId) {
   }
   setTerminalMode(id, false);
   syncTerminal();
-  await terminalFetch(`/api/terminals/${encodeURIComponent(id)}`, 'DELETE').catch(() => {});
+  await terminalFetch(apiPath`/api/terminals/${id}`, 'DELETE').catch(() => {});
   dropPlaceholder(id);
 }
 
@@ -14320,13 +14201,9 @@ async function pollTerminalProcStats() {
   if (!isOnScreen()) return;
   let cck;
   let host;
-  try {
-    const res = await fetch('/api/terminals/stats', { cache: 'no-store' });
-    if (!res.ok) return;
-    ({ cck, host, terminals: terminalProcStats } = await res.json());
-  } catch (_) {
-    return;
-  }
+  const stats = await getJson('/api/terminals/stats', null, { cache: 'no-store' });
+  if (!stats) return;
+  ({ cck, host, terminals: terminalProcStats } = stats);
   const parts = [cck && `cck ${formatTerminalProc(cck)}`, host && `terminal host ${formatTerminalProc(host)}`];
   document.getElementById('terminal-manager-stats').textContent = parts.filter(Boolean).join(' · ');
   for (const el of document.querySelectorAll('#terminal-manager-body [data-proc]')) {
@@ -14394,15 +14271,7 @@ async function renderTerminalManager() {
 }
 
 async function terminalFetch(url, method, body) {
-  const send = () =>
-    fetch(url, {
-      method,
-      headers: {
-        'X-Terminal-Token': terminalToken || '',
-        ...(body && { 'Content-Type': 'application/json' }),
-      },
-      ...(body && { body: JSON.stringify(body) }),
-    });
+  const send = () => api(url, { method, body, headers: { 'X-Terminal-Token': terminalToken || '' } });
   const res = await send();
   return res.status === 401 && (await refreshTerminalToken()) ? send() : res;
 }
@@ -14476,23 +14345,21 @@ function mergePlaceholders(list) {
 }
 
 async function loadDispatches() {
-  try {
-    const res = await fetch('/api/dispatch', { cache: 'no-store' });
-    const { running = [] } = await res.json();
-    dispatchSpecs.clear();
-    for (const r of running) {
-      if (!r.session || sessions.some((s) => s.id === r.session && !s.placeholder)) continue;
-      dispatchSpecs.set(r.session, {
-        mode: 'dispatch',
-        cwd: r.cwd,
-        name: r.name,
-        worktree: r.worktree,
-        group: r.group,
-        parent: r.parent,
-        startedAt: r.startedAt,
-      });
-    }
-  } catch (_) {}
+  const data = await getJson('/api/dispatch', null, { cache: 'no-store' });
+  if (!data) return;
+  dispatchSpecs.clear();
+  for (const r of data.running || []) {
+    if (!r.session || sessions.some((s) => s.id === r.session && !s.placeholder)) continue;
+    dispatchSpecs.set(r.session, {
+      mode: 'dispatch',
+      cwd: r.cwd,
+      name: r.name,
+      worktree: r.worktree,
+      group: r.group,
+      parent: r.parent,
+      startedAt: r.startedAt,
+    });
+  }
 }
 
 async function onDispatchUpdate() {
@@ -14559,8 +14426,10 @@ async function restorePendingSessions() {
 }
 
 async function loadTerminals() {
-  const res = await fetch('/api/terminals', { cache: 'no-store' });
-  const list = (await res.json()).sessions || [];
+  const res = await api('/api/terminals', { cache: 'no-store' });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  const list = data.sessions || [];
   runningTerminals = new Set(list.map((t) => t.id));
   pushTerminalClaims();
   renderActivityChip();
@@ -15130,18 +14999,17 @@ function refreshRateLimits() {
   if (footerState.timer) return;
   footerState.timer = setTimeout(() => {
     footerState.timer = null;
-    fetch('/api/rate-limits')
-      .then((r) => r.json())
-      .then((rl) => {
-        scheduleRateLimitReset(rl);
-        const fh = rl?.five_hour?.used_percentage ?? null;
-        const sd = rl?.seven_day?.used_percentage ?? null;
-        const key = `${fh}|${sd}`;
-        if (key === footerState.limitsKey) return;
-        footerState.limitsKey = key;
-        renderSidebarFooter(rl);
-      })
-      .catch(() => {});
+    // The route answers null when no session has reported limits, so failure needs its own value.
+    getJson('/api/rate-limits', false).then((rl) => {
+      if (rl === false) return;
+      scheduleRateLimitReset(rl);
+      const fh = rl?.five_hour?.used_percentage ?? null;
+      const sd = rl?.seven_day?.used_percentage ?? null;
+      const key = `${fh}|${sd}`;
+      if (key === footerState.limitsKey) return;
+      footerState.limitsKey = key;
+      renderSidebarFooter(rl);
+    });
   }, 1500);
 }
 
@@ -15156,15 +15024,12 @@ function scheduleRateLimitReset(rl) {
   const ms = Math.min(...resets) * 1000 - Date.now() + 1000;
   footerState.resetTimer = setTimeout(refreshRateLimits, Math.min(Math.max(ms, 0), 2 ** 31 - 1));
 }
-fetch('/api/version')
-  .then((r) => r.json())
-  .then((d) => {
-    footerState.version = d.version;
-    footerState.plugin = d.plugin ?? null;
-    renderSidebarFooter(null);
-    refreshRateLimits();
-  })
-  .catch(() => {});
+getJson('/api/version', {}).then((d) => {
+  footerState.version = d.version;
+  footerState.plugin = d.plugin ?? null;
+  renderSidebarFooter(null);
+  refreshRateLimits();
+});
 
 const urlState = getUrlState();
 const lastView = loadLastView();
@@ -15191,12 +15056,10 @@ if (urlState.search) {
   document.getElementById('boot-verb').textContent = pickRandom(verbs);
 }
 
-fetch('/api/config')
-  .then((r) => r.json())
+getJson('/api/config')
   .then((c) => {
-    appConfig = c;
+    if (c) appConfig = c;
   })
-  .catch(() => {})
   .then(restorePendingSessions)
   .then(() =>
     fetchSessions(

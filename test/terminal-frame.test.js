@@ -275,6 +275,7 @@ describe('ending a terminal from the board', () => {
       syncTerminal: () => calls.push('sync'),
       terminalFetch: async (url, method) => calls.push(`${method} ${url}`),
       dropPlaceholder: () => {},
+      apiPath: appFunction('apiPath', { encodeURIComponent }),
     });
     return { close, calls };
   }
