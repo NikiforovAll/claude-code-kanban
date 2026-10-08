@@ -7718,7 +7718,9 @@ function reviewBridge(textBefore, headingBefore, rangeAt, comboOf, fieldSelector
   let forward = new Set();
   document.addEventListener('keydown', (e) => {
     if (e.defaultPrevented || e.target.closest?.(fieldSelector)) return;
-    if (!forward.has(comboOf(e)) && !keySigs(e).some((s) => claims.has(s))) return;
+    const sigs = keySigs(e);
+    const offerKey = pending && sigs.includes('|k:c');
+    if (!offerKey && !forward.has(comboOf(e)) && !sigs.some((s) => claims.has(s))) return;
     e.preventDefault();
     send({ type: 'key', key: e.key, code: e.code, ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, meta: e.metaKey });
   });
