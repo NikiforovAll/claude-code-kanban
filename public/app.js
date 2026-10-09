@@ -10079,8 +10079,53 @@ function isLightTheme() {
   return document.body.classList.contains('light');
 }
 
-function getMermaidTheme() {
-  return isLightTheme() ? 'default' : 'dark';
+const MERMAID_VARS = {
+  background: '--bg-surface',
+  primaryTextColor: '--text-primary',
+  primaryBorderColor: '--accent',
+  secondaryColor: '--bg-hover',
+  tertiaryColor: '--bg-surface',
+  lineColor: '--text-tertiary',
+  textColor: '--text-primary',
+  titleColor: '--text-primary',
+  clusterBkg: '--bg-surface',
+  clusterBorder: '--border',
+  edgeLabelBackground: '--bg-surface',
+  actorLineColor: '--text-tertiary',
+  noteBkgColor: '--bg-deep',
+  noteBorderColor: '--border',
+  noteTextColor: '--text-primary',
+  pieStrokeColor: '--bg-surface',
+  pieOuterStrokeColor: '--border',
+  pieTitleTextColor: '--text-primary',
+  pieLegendTextColor: '--text-primary',
+  fontFamily: '--mono',
+};
+// --bg-elevated sits too close to the dark page for a node, and the base theme derives near-black ER
+// rows from a dark primaryColor.
+const MERMAID_MODE_VARS = {
+  dark: { primaryColor: '--bg-hover', rowOdd: '--bg-hover', rowEven: '--bg-elevated' },
+  light: { primaryColor: '--bg-elevated', rowOdd: '--bg-elevated', rowEven: '--bg-elevated' },
+};
+let mermaidThemeKey = '';
+
+// The base theme derives its other colors from these, and it parses colors itself, so it takes
+// resolved values rather than var() references.
+function mermaidConfig() {
+  const css = getComputedStyle(document.body);
+  const mode = isLightTheme() ? 'light' : 'dark';
+  const themeVariables = { darkMode: mode === 'dark', pieOpacity: '1', pieSectionTextColor: '#fff' };
+  for (const [k, name] of Object.entries({ ...MERMAID_VARS, ...MERMAID_MODE_VARS[mode] })) {
+    themeVariables[k] = css.getPropertyValue(name).trim();
+  }
+  SHOW_PALETTE[mode].series.forEach((c, i) => {
+    themeVariables[`pie${i + 1}`] = c;
+    themeVariables[`cScale${i}`] = c;
+  });
+  // ER labels are half see-through, so lines cross their text, and ER circles have a fixed white fill.
+  const themeCSS = `.relationshipLabelBox, .relationshipLabelBox rect { opacity: 1; } marker circle { fill: ${themeVariables.background}; }`;
+  // The default neo look draws borders as an accent-to-gray gradient with a drop shadow.
+  return { startOnLoad: false, theme: 'base', look: 'classic', themeVariables, themeCSS };
 }
 
 // Mermaid is about 3 MB, so it loads on the first diagram instead of on the page's critical path.
@@ -10097,7 +10142,9 @@ function loadMermaid() {
     script.integrity = MERMAID_SCRIPT.integrity;
     script.crossOrigin = 'anonymous';
     script.onload = () => {
-      mermaid.initialize({ startOnLoad: false, theme: getMermaidTheme() });
+      const config = mermaidConfig();
+      mermaidThemeKey = JSON.stringify(config);
+      mermaid.initialize(config);
       resolve();
     };
     script.onerror = () => {
@@ -10110,9 +10157,16 @@ function loadMermaid() {
   return mermaidLoading;
 }
 
+let mermaidQueue = Promise.resolve();
+
+// mermaid.run is async, and two runs that overlap draw diagrams over each other.
+function queueMermaid(work) {
+  mermaidQueue = mermaidQueue.then(work).catch((err) => console.warn(err.message));
+}
+
 function initMermaidBlocks(container) {
-  const blocks = (container || document).querySelectorAll('pre.mermaid:not([data-processed])');
-  if (!blocks.length) return;
+  const root = container || document;
+  if (!root.querySelector('pre.mermaid:not([data-processed])')) return;
   if (typeof mermaid === 'undefined') {
     loadMermaid().then(
       () => initMermaidBlocks(container),
@@ -10120,18 +10174,36 @@ function initMermaidBlocks(container) {
     );
     return;
   }
-  mermaid.run({ nodes: [...blocks] });
+  queueMermaid(() => {
+    const blocks = [...root.querySelectorAll('pre.mermaid:not([data-processed])')];
+    // Set here, after DOMPurify: it drops an attribute whose value holds `-->`, as most diagrams do.
+    for (const b of blocks) if (!b.hasAttribute('data-original')) b.setAttribute('data-original', b.textContent);
+    return blocks.length ? mermaid.run({ nodes: blocks }) : undefined;
+  });
 }
 
 function reinitMermaidTheme() {
   if (typeof mermaid === 'undefined') return;
-  mermaid.initialize({ startOnLoad: false, theme: getMermaidTheme() });
-  document.querySelectorAll('pre.mermaid[data-processed]').forEach((el) => {
-    el.removeAttribute('data-processed');
-    el.innerHTML = escapeHtml(el.getAttribute('data-original') || '');
+  queueMermaid(() => {
+    const config = mermaidConfig();
+    const key = JSON.stringify(config);
+    if (key === mermaidThemeKey) return;
+    mermaidThemeKey = key;
+    mermaid.initialize(config);
+    document.querySelectorAll('pre.mermaid[data-processed]').forEach((el) => {
+      el.removeAttribute('data-processed');
+      el.innerHTML = escapeHtml(el.getAttribute('data-original') || '');
+    });
+    initMermaidBlocks();
   });
-  initMermaidBlocks();
 }
+
+// Keyed on the colors for the same reason as the terminal theme: under the hub a theme change
+// lands in two steps.
+new MutationObserver(reinitMermaidTheme).observe(document.body, {
+  attributes: true,
+  attributeFilter: ['class', 'data-color-theme', 'style'],
+});
 
 const _agentTabTexts = {};
 
@@ -10666,7 +10738,6 @@ function applyTheme(light) {
   const light$ = document.getElementById('hljs-theme-light');
   if (dark$) dark$.disabled = light;
   if (light$) light$.disabled = !light;
-  reinitMermaidTheme();
 }
 
 function toggleTheme() {
@@ -14516,7 +14587,7 @@ const SHOW_FRAME_BASE =
   'button{font:inherit;font-size:.92rem;padding:.4rem .9rem;border-radius:6px;border:1px solid var(--color-border);background:transparent;color:var(--color-text);cursor:pointer}' +
   'button.primary{background:var(--color-accent);border-color:var(--color-accent);color:#fff}input,select,textarea{font:inherit;color:var(--color-text)}';
 const SHOW_MERMAID_INIT =
-  '%%{init: {"fontFamily": "IBM Plex Mono, monospace","themeVariables": {"fontSize": "12px"}, "flowchart": {"nodeSpacing": 28, "rankSpacing": 28, "padding": 6}}}%%\n';
+  '%%{init: {"themeVariables": {"fontSize": "12px"}, "flowchart": {"nodeSpacing": 28, "rankSpacing": 28, "padding": 6}}}%%\n';
 const SHOW_ICONS = {
   prev: '<path d="M15 18l-6-6 6-6"/>',
   next: '<path d="M9 18l6-6-6-6"/>',
@@ -14793,10 +14864,8 @@ async function renderShowBody(p, samePost) {
   else if (data.waiting) md.innerHTML = '<p class="show-gone">Waiting for content.</p>';
   else renderPreviewContent(md, data.file || p.file || '', data.content ?? '', data.kind);
   for (const pre of md.querySelectorAll('pre.mermaid')) {
-    const src = pre.getAttribute('data-original') || pre.textContent;
-    if (/^\s*(---|%%\{)/.test(src)) continue;
-    pre.setAttribute('data-original', SHOW_MERMAID_INIT + src);
-    pre.textContent = SHOW_MERMAID_INIT + src;
+    if (/^\s*(---|%%\{)/.test(pre.textContent)) continue;
+    pre.textContent = SHOW_MERMAID_INIT + pre.textContent;
   }
   body.replaceChildren(md);
   refocus();
@@ -15649,7 +15718,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const renderer = new marked.Renderer();
     renderer.code = ({ text, lang }) => {
       if (lang === 'mermaid') {
-        return `<pre class="mermaid" data-original="${escapeHtml(text)}">${escapeHtml(text)}</pre>`;
+        return `<pre class="mermaid">${escapeHtml(text)}</pre>`;
       }
       if (treeHighlight.wantsTree(lang, text)) {
         return `<pre><code class="hljs language-tree">${treeHighlight.highlightTree(text)}</code></pre>`;
