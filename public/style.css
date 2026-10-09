@@ -2457,7 +2457,8 @@ body.booting .boot-splash {
 .detail-desc pre code {
   background: color-mix(in srgb, var(--text-muted) 8%, transparent);
   border: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
-  padding: 12px;
+  --code-pad-x: 12px;
+  padding: 12px var(--code-pad-x);
   border-radius: 6px;
   display: block;
   overflow-x: auto;
@@ -2475,6 +2476,14 @@ code.ct {
   --ct-line: color-mix(in srgb, var(--text-muted) 85%, transparent);
 }
 
+/* One grid column: every row stretches to the widest one, so the bands line up when the block scrolls.
+   The rows hold the side padding, so a band and the focus bar run to the block's edges. A container
+   sets --code-pad-x to its code blocks' side padding. */
+pre code.hljs.ct {
+  display: grid;
+  padding-inline: 0;
+}
+
 code.ct .ct-name {
   color: var(--text-primary);
   font-weight: 600;
@@ -2485,8 +2494,8 @@ code.ct [data-ct-in]:not(.ct-focus) .ct-name {
 }
 
 code.ct .ct-row {
-  display: block;
   min-width: max-content;
+  padding-inline: var(--code-pad-x, 10px);
 }
 
 code.ct .ct-row:empty::before {
@@ -4024,7 +4033,8 @@ body.light .show-card.focused {
 .show-md pre code {
   display: block;
   overflow-x: auto;
-  padding: 8px 10px;
+  --code-pad-x: 10px;
+  padding: 8px var(--code-pad-x);
   border-radius: 6px;
   background: color-mix(in srgb, var(--text-muted) 8%, transparent);
   border: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
@@ -5398,10 +5408,12 @@ body.show-resizing iframe {
   display: block;
   overflow-x: auto;
 }
-/* The bodies around these tables set `word-break: break-word`, which lets a cell break
+/* The bodies around these tables set `word-break: break-word` or `overflow-wrap: anywhere`, which let a cell break
    between any two letters, so the table layout shrinks short columns to one letter. */
 .rendered-md th,
 .rendered-md td,
+.show-md th,
+.show-md td,
 .waiting-question-text th,
 .waiting-question-text td,
 .waiting-option-desc th,
