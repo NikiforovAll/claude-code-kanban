@@ -3533,9 +3533,10 @@ app.post('/api/clawd/context', clawdRoute(async (req, res) => {
   res.status(204).end();
 }));
 
-app.get('/api/clawd/context', clawdRoute(async (_req, res) => {
+app.get('/api/clawd/context', clawdRoute(async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   const focus = clawd.focus;
+  if (req.query.seen === String(focus?.sessionId ?? null)) return res.status(204).end();
   if (!focus) return res.json({ sessionId: null });
   const meta = sessionMetaFor(focus.sessionId) || {};
   res.json({

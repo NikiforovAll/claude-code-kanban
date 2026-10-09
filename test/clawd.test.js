@@ -43,7 +43,8 @@ describe('clawd', () => {
     assert.equal(args[args.indexOf('--agent') + 1], CLAWD_AGENT);
     assert.equal(args[args.indexOf('--plugin-dir') + 1], CLAWD_PLUGIN_DIR);
     assert.equal(args[args.indexOf('--add-dir') + 1], root);
-    assert.ok(fs.existsSync(args[args.indexOf('--append-system-prompt-file') + 1]));
+    const skill = fs.readFileSync(args[args.indexOf('--append-system-prompt-file') + 1], 'utf8');
+    assert.match(skill, /^# Kanban Skill/);
     assert.ok(fs.existsSync(path.join(CLAWD_PLUGIN_DIR, 'agents', 'clawd.md')));
   });
 

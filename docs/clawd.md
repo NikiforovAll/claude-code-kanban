@@ -14,7 +14,8 @@ Clawd is a Claude Code session that belongs to the board, not to a project. The 
 ## The agent
 
 - The agent lives in `clawd/` at the package root, a plugin dir with one agent, `cck-clawd:clawd` (`clawd/agents/clawd.md`). It moves into the `claude-code-kanban` plugin once it settles, and the flag becomes `--agent claude-code-kanban:clawd`.
-- cck starts it with `--plugin-dir <pkg>/clawd --agent cck-clawd:clawd --append-system-prompt-file <pkg>/plugin/plugins/claude-code-kanban/skills/kanban/SKILL.md`.
+- cck starts it with `--plugin-dir <pkg>/clawd --agent cck-clawd:clawd --append-system-prompt-file <clawd folder>/kanban-skill.md`.
+- `kanban-skill.md` is the kanban `SKILL.md` without its frontmatter, written on each start: the file flag appends text as is.
 - The kanban skill goes in through `--append-system-prompt-file`, because an agent run with `--agent` (the main thread) does not preload the `skills:` of its frontmatter. That was checked with `claude -p`: the skill body was in context only with the file flag.
 - `--agent` and the plugin dir belong to the process, so `/clear` keeps Clawd.
 
@@ -36,7 +37,8 @@ Clawd is a Claude Code session that belongs to the board, not to a project. The 
 ## Ambient context
 
 - The board posts the session on screen to `POST /api/clawd/context` when it changes. It posts only after Clawd was opened in this page.
-- `GET /api/clawd/context` answers `{sessionId, project, name, gitBranch, transcript, updatedAt}`, with the name and branch the board shows. The agent prompt tells Clawd to curl the route whenever the user says "this session".
+- `GET /api/clawd/context` answers `{sessionId, project, name, gitBranch, transcript, updatedAt}`, with the name and branch the board shows.
+- A `UserPromptSubmit` hook in the plugin (`clawd/hooks/focus.js`) reads the route before each message and adds a `Focused session:` line to it, only when the focused session changed since the last message of this chat. It keeps the last one in `<clawd folder>/focus-seen.txt` and sends it as `?seen=`; the route answers 204 when the focus is the same, before it reads any session metadata. A a `SessionStart` hook after a compact deletes that file, because the summary may drop the line. A board that does not answer adds nothing.
 - The board posts from `updateUrl()`, the one place every session or project switch passes through.
 - With two boards on one server, the last post wins.
 
@@ -50,6 +52,7 @@ Clawd is a Claude Code session that belongs to the board, not to a project. The 
 - Footer button: one element, rendered with the footer. No polling.
 - On demand only: the first open starts one claude process and loads one terminal frame. The frame stays loaded until the page closes.
 - Session switch: one small POST, only after Clawd was opened.
+- Each Clawd message: one node start and one local GET in the hook, and one context line when the focus changed.
 - Watcher and scans: one string compare per project folder and per transcript event.
 
 ## Not in the POC
