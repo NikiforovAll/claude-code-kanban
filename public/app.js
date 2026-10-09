@@ -5521,7 +5521,11 @@ function expandActiveGroups({ onlyNew = false } = {}) {
     if (!isSessionActive(s)) continue;
     activeIds.add(s.id);
     if (onlyNew && (!primed || prevActiveSessionIds.has(s.id))) continue;
-    if (uncollapseFor(s)) changed = true;
+    try {
+      if (uncollapseFor(s)) changed = true;
+    } catch (err) {
+      console.error('uncollapseFor failed for session', s.id, err);
+    }
   }
   prevActiveSessionIds = activeIds;
   if (changed) persistCollapsedGroups();

@@ -32,3 +32,36 @@ describe('sgHostOf', () => {
     assert.equal(sgHostOf(group, session), 'C:/repo');
   });
 });
+
+describe('expandActiveGroups', () => {
+  function setup() {
+    const ctx = {
+      sessions: [],
+      calls: [],
+      persisted: 0,
+      console: { error() {} },
+      isSessionActive: () => true,
+      persistCollapsedGroups() {
+        ctx.persisted++;
+      },
+      uncollapseFor(s) {
+        ctx.calls.push(s.id);
+        if (s.id === 'bad') throw new Error('boom');
+        return true;
+      },
+    };
+    vm.runInNewContext(`let prevActiveSessionIds = null;\n${fn('expandActiveGroups')}\nthis.expandActiveGroups = expandActiveGroups;`, ctx);
+    return ctx;
+  }
+
+  it('skips a session whose uncollapse throws and does not retry it on the next render', () => {
+    const ctx = setup();
+    ctx.expandActiveGroups({ onlyNew: true });
+    ctx.sessions = [{ id: 'bad' }, { id: 'good' }];
+    assert.doesNotThrow(() => ctx.expandActiveGroups({ onlyNew: true }));
+    assert.deepEqual(ctx.calls, ['bad', 'good']);
+    assert.equal(ctx.persisted, 1);
+    ctx.expandActiveGroups({ onlyNew: true });
+    assert.deepEqual(ctx.calls, ['bad', 'good']);
+  });
+});
