@@ -468,7 +468,7 @@
 
   <!-- File Preview Modal (markdown rendered inline, HTML in a sandboxed iframe) -->
   <div id="preview-modal" class="modal-overlay" style="z-index:10002;" onclick="closePreviewModal()">
-    <div class="modal preview-modal-dialog review-host" onclick="event.stopPropagation()">
+    <div class="modal preview-modal-dialog review-host" tabindex="-1" onclick="event.stopPropagation()">
       <div class="modal-header">
         <h3 class="modal-title" id="preview-modal-title">Preview</h3>
         <div style="display:flex;gap:4px;align-items:center;">

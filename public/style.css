@@ -7049,6 +7049,7 @@ body.light .msg-assistant .msg-text {
   max-height: 90vh;
   display: flex;
   flex-direction: column;
+  outline: none;
 }
 
 .modal.preview-modal-dialog.fullscreen {

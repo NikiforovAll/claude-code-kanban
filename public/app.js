@@ -8179,6 +8179,7 @@ async function sendReview() {
 //#region MARKDOWN_PREVIEW
 const PREVIEW_STORAGE_PREFIX = 'preview-paths-';
 let currentPreviewPath = null;
+let previewFromTerminal = false;
 
 function readStoredList(key) {
   const arr = store.readJson(key);
@@ -8378,6 +8379,9 @@ function openPreviewModal(filePath, content, kind) {
   else renderPreviewContent(bodyEl, filePath, content, kind);
   document.getElementById('preview-modal-meta').textContent = filePath;
   document.getElementById('preview-modal').classList.add('visible');
+  // A preview the CLI opens finds focus in the terminal frame, whose keys never reach the board's Esc.
+  previewFromTerminal ||= terminalPaneFocused();
+  document.querySelector('#preview-modal .modal').focus();
   updatePreviewLinkBtn();
   const panelEl = document.getElementById('preview-review-panel');
   const opts = fileReviewOpts(filePath, kind, bodyEl, isHtml ? bodyEl.querySelector('iframe') : null);
@@ -8457,6 +8461,8 @@ function closePreviewModal() {
   // Empty the body so an iframe preview is destroyed and its scripts/timers stop.
   document.getElementById('preview-modal-body').innerHTML = '';
   currentPreviewPath = null;
+  if (previewFromTerminal) focusTerminalPane();
+  previewFromTerminal = false;
 }
 
 function openFileInEditor(filePath) {
