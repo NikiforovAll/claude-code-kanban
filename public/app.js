@@ -8345,10 +8345,13 @@ function highlightCode(text, lang) {
 function renderSourcePreview(filePath, content) {
   const ext = langOfPath(filePath);
   const value = highlightCode(content, ext);
-  if (value != null) {
-    return `<pre class="preview-source"><code class="hljs language-${escapeHtml(ext)}">${value}</code></pre>`;
-  }
-  return `<pre class="preview-source"><code class="hljs">${escapeHtml(content)}</code></pre>`;
+  const n = treeHighlight.lineCount(content);
+  const gutter = `<span class="src-gutter" aria-hidden="true">${Array.from({ length: n }, (_, i) => i + 1).join('\n')}</span>`;
+  const code =
+    value != null
+      ? `<code class="hljs language-${escapeHtml(ext)}">${value}</code>`
+      : `<code class="hljs">${escapeHtml(content)}</code>`;
+  return `<pre class="preview-source" data-lines="${n}">${gutter}${code}</pre>`;
 }
 
 // Every kind but html, which needs a frame.
@@ -12461,6 +12464,7 @@ function syncPanes() {
     const side = sides.get(el.dataset.key);
     el.classList.toggle('on', side !== undefined);
     markPaneSide(el, side, el.dataset.key === focusKey);
+    if (paneLineWanted.size && side !== undefined) applyPaneLine(el);
   }
   const boardWasSplit = boardInSplit();
   markPaneSide(paneBoard, boardSide, !!boardSide && !pane);
@@ -12653,6 +12657,7 @@ async function loadPaneView(sid, pane, view, scroll) {
     body.parentElement.dataset.path = data.path;
     renderPreviewContent(body, data.path, data.content, data.kind);
     attachPaneReview(view, sid, fileReviewOpts(data.path, data.kind, body, null));
+    applyPaneLine(view);
     return;
   }
   const [title, text] = !data
@@ -13143,6 +13148,45 @@ async function postPane(sid, body) {
   setActivePaneId(sid, res.pane.id);
   applyPaneLayout(sid, res.layout);
   return sid === paneSessionId();
+}
+
+// Pane key → line to show once the pane's source is rendered and on screen. Not stored with the pane.
+const paneLineWanted = new Map();
+
+function applyPaneLine(view) {
+  const line = paneLineWanted.get(view.dataset.key);
+  const body = view.querySelector('.pane-doc-body');
+  if (!line || !body || !view.offsetParent) return;
+  paneLineWanted.delete(view.dataset.key);
+  markSourceLine(body, line);
+}
+
+async function openPaneAtLine(sid, { path, line }, base) {
+  const onScreen = await postPane(sid, { target: path, base });
+  if (onScreen === null) return;
+  paneLineWanted.set(`${sid}/${getActivePaneId(sid)}`, line);
+  if (onScreen) syncPanes();
+  toastPaneAdded(sid, onScreen, pathBasename(path));
+}
+
+async function openPreviewAtLine({ path, line }, base) {
+  await openPreviewByPath(path, base, openFileInEditor);
+  if (currentPreviewPath) markSourceLine(document.getElementById('preview-modal-body'), line);
+}
+
+// A band under the line, so the text stays as it is; past the end it marks the last line.
+function markSourceLine(bodyEl, line) {
+  const pre = bodyEl.querySelector('.preview-source');
+  if (!pre) return;
+  let band = pre.querySelector('.src-line');
+  if (!band) {
+    band = document.createElement('div');
+    band.className = 'src-line';
+    band.setAttribute('aria-hidden', 'true');
+    pre.prepend(band);
+  }
+  band.style.setProperty('--line', Math.min(line, Number(pre.dataset.lines) || 1) - 1);
+  band.scrollIntoView({ block: 'center', inline: 'nearest' });
 }
 
 function openFileInPane(filePath, closeModal) {
@@ -15096,9 +15140,14 @@ async function openShowInPane() {
   if (!sid || !target) return showToast('The post has no file yet');
   const title = showState.posts[showState.idx]?.title;
   const onScreen = await postPane(sid, { target, title, show: true, base: getSessionBaseDir(sid) || undefined });
+  toastPaneAdded(sid, onScreen, 'Card');
+}
+
+// `onScreen` is postPane's result: null failed, true is already in view unless the terminal covers it.
+function toastPaneAdded(sid, onScreen, label) {
   if (onScreen === null || (onScreen && !wantsTerminal())) return;
   const open = () => (sid === currentSessionId && wantsTerminal() ? toggleTerminal() : openSession(sid));
-  showToast('Card added as a pane', 'success', { label: 'Open', onClick: open });
+  showToast(`${label} added as a pane`, 'success', { label: 'Open', onClick: open });
 }
 
 function showCommand(cmd) {
@@ -15767,14 +15816,22 @@ function onCallstackFold(e) {
 document.addEventListener('click', onCallstackFold, true);
 document.addEventListener('keydown', onCallstackFold, true);
 
-let callstackHoverRow = null;
-function onCallstackHover(e) {
-  const row = e.target.closest?.('code.ct .ct-row') || null;
-  if (row === callstackHoverRow) return;
-  callstackHoverRow = row;
-  treeHighlight.markPath(row);
+// A path:line note opens its file at that line: as a pane of the session, or in the preview with
+// Shift, from a modal, or with no session.
+function onCallstackLoc(e) {
+  const el = e.target.closest?.('code.ct .ct-loc');
+  const loc = el && treeHighlight.parseLoc(el.textContent);
+  // Shift+click extends the selection to the link, so a selection there is the click's own.
+  if (!loc || (!e.shiftKey && !window.getSelection().isCollapsed)) return;
+  e.preventDefault();
+  e.stopPropagation();
+  if (e.shiftKey) window.getSelection().collapseToEnd();
+  const sid = el.closest('#show-card') ? showState.sessionId : currentSessionId;
+  const base = (sid && getSessionBaseDir(sid)) || undefined;
+  if (e.shiftKey || !sid || el.closest('.modal-overlay')) openPreviewAtLine(loc, base);
+  else openPaneAtLine(sid, loc, base);
 }
-document.addEventListener('mouseover', onCallstackHover);
+document.addEventListener('click', onCallstackLoc, true);
 
 document.addEventListener('DOMContentLoaded', () => {
   if (typeof marked !== 'undefined' && typeof hljs !== 'undefined') {

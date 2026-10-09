@@ -2629,14 +2629,6 @@ code.ct .ct-has[aria-expanded='false'] .ct-name::after {
   font-weight: 400;
 }
 
-code.ct .ct-path:not(.ct-focus, .ct-add, .ct-del) {
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
-}
-
-code.ct .ct-path .ct-name {
-  color: var(--accent-text);
-}
-
 .detail-desc code {
   background: color-mix(in srgb, var(--text-muted) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
@@ -7365,8 +7357,10 @@ body.light .msg-assistant .msg-text {
 /* Source is read line by line, so it keeps its own line breaks and scrolls sideways
    instead of inheriting the body's `word-break: break-word`. */
 .preview-source {
+  --src-pad-y: 10px;
+  position: relative;
   margin: 0;
-  padding: 10px 12px;
+  padding: var(--src-pad-y) 12px;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -7379,10 +7373,47 @@ body.light .msg-assistant .msg-text {
   tab-size: 4;
 }
 
-.preview-source code {
+.preview-source:has(.src-gutter) {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  padding-left: 0;
+}
+
+/* Sticky, so the numbers stay put while the code scrolls sideways. */
+.preview-source .src-gutter {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  margin-right: 12px;
+  padding: 0 10px 0 12px;
+  text-align: right;
+  color: var(--text-muted);
+  background: inherit;
+  border-right: 1px solid var(--border);
+  user-select: none;
+}
+
+/* `.hljs` in the selector outranks the theme's `pre code.hljs` padding and scroll, which would
+   shift the text off the gutter and the line band. */
+.preview-source code.hljs {
+  position: relative;
   background: none;
   padding: 0;
+  overflow: visible;
   font: inherit;
+}
+
+/* Lines never wrap (white-space: pre), so line N starts N - 1 line heights below the padding. */
+.preview-source .src-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(var(--src-pad-y) + var(--line) * 1lh);
+  height: 1lh;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent);
+  z-index: 2;
+  pointer-events: none;
 }
 
 .preview-html-frame {

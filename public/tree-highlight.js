@@ -178,17 +178,19 @@ const treeHighlight = (() => {
     }
   }
 
-  // Lights the callers of `row` up to the root; null clears the block that had them.
-  let pathCode = null;
-  function markPath(row) {
-    for (const r of pathCode?.querySelectorAll('.ct-path') || []) r.classList.remove('ct-path');
-    pathCode = row?.closest('code') || null;
-    for (const id of row?.dataset.ctIn?.split(' ') || []) {
-      pathCode.querySelector(`[data-ct="${id}"]`)?.classList.add('ct-path');
-    }
+  // A note in the LOC form → { path, line }, else null.
+  function parseLoc(text) {
+    if (!LOC.test(text)) return null;
+    const [path, line] = text.split(':');
+    return { path, line: Math.max(1, Number(line)) };
   }
 
-  return { wantsTree, highlightTree, renderTree, toggleFold, markPath };
+  // A trailing newline does not start a line.
+  function lineCount(text) {
+    return Math.max(1, text.split('\n').length - (text.endsWith('\n') ? 1 : 0));
+  }
+
+  return { wantsTree, highlightTree, renderTree, toggleFold, parseLoc, lineCount };
 })();
 
 if (typeof module === 'object' && module.exports) module.exports = treeHighlight;

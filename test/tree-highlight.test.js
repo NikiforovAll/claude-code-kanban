@@ -1,6 +1,6 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert');
-const { wantsTree, highlightTree, renderTree } = require('../public/tree-highlight');
+const { wantsTree, highlightTree, renderTree, parseLoc, lineCount } = require('../public/tree-highlight');
 
 const CALL_TREE = `BackgroundTaskQueueService        Channel.CreateUnbounded<IBackgroundTaskEvent>()
         │  (DocEvent, SecurityEvent, SearchEvent all go in here)
@@ -264,5 +264,29 @@ describe('renderTree', () => {
     const html = renderTree('a  <img src=x>\n  b  "q"');
     assert.equal(html.includes('<img'), false);
     assert.match(html, /&lt;img src=x&gt;/);
+  });
+});
+
+describe('parseLoc', () => {
+  it('takes the path and the line, and drops a column', () => {
+    assert.deepEqual(parseLoc('src/orders/place.ts:40'), { path: 'src/orders/place.ts', line: 40 });
+    assert.deepEqual(parseLoc('lib/a.js:7:12'), { path: 'lib/a.js', line: 7 });
+  });
+
+  it('makes line 0 the first line', () => {
+    assert.deepEqual(parseLoc('a.js:0'), { path: 'a.js', line: 1 });
+  });
+
+  it('leaves notes that are not a location', () => {
+    for (const note of ['throws on an empty cart', 'a.js', 'a.js:x', 'a b.js:3', 'C:/a.js:3']) assert.equal(parseLoc(note), null);
+  });
+});
+
+describe('lineCount', () => {
+  it('counts lines, not a trailing newline', () => {
+    assert.equal(lineCount('a\nb\nc'), 3);
+    assert.equal(lineCount('a\nb\nc\n'), 3);
+    assert.equal(lineCount('a\n\n'), 2);
+    assert.equal(lineCount(''), 1);
   });
 });
