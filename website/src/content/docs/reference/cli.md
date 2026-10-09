@@ -105,7 +105,7 @@ The server writes `server.json` on start, so the CLI finds a server that fell ba
 Cannot reach cck server for ~/.claude on port 3541. Start it first with "claude-code-kanban".
 ```
 
-Commands that change the browser view (`doc preview`, `session open`) act on board tabs that are open at that moment. With no tab open, nothing shows. `doc link` and `session pin` are also kept by the server, so a tab that opens later shows them.
+Commands that change the browser view (`doc preview`, `session open`) act on board tabs that are open at that moment. With no tab open, nothing shows. `doc link`, `session pin` and `session group` are also kept by the server, so a tab that opens later shows them.
 
 `doc preview` is the only command that opens something on the user's screen. `doc link` and `pane add` change nothing on screen, so prefer them while the user works.
 
@@ -240,6 +240,26 @@ claude-code-kanban session pin <id> [--sticky] [--unpin]
 
 Pins the session in the sidebar. `--sticky` makes it sticky: always shown, at the top of the list. `--unpin` clears the pin and the sticky state. The server keeps pins in `<config-dir>/.cck/pins.json`, so `session list` sees them.
 
+### session group
+
+```bash
+claude-code-kanban session group <id> (<group> | --with <session>) [--create] [--json]
+```
+
+Moves the session into a group in the sidebar. `<group>` is a group name, in any case, or a group id, as [`group list`](#group-list) prints them. The session leaves the group it was in. In a group that holds the session's project, the session shows in that project's block; else it shows on the group's own level. With no group of that name, the command fails and lists the groups; `--create` makes the group instead. Two groups with the same name need the group id.
+
+`--with <session>` puts the session in the group that another session shows in: the group that holds that session, else the group that holds its project, else a group named like its dispatch group. When that session is in no group, the command fails; `--create` makes a group named after it that holds both sessions. `--json` prints `{group, name, created, left, rev}`, where `left` is the name of the group the session was in.
+
+### session ungroup
+
+```bash
+claude-code-kanban session ungroup <id> [--json]
+```
+
+Takes the session out of its group and out of its dispatch group, as dragging it to Ungrouped does. A session whose project is in a group still shows in that group: move the project on the board. `--json` prints `{left, rev}`.
+
+The server keeps groups in `<config-dir>/.cck/groups.json`, and connected board tabs show a change at once.
+
 ### session plan
 
 ```bash
@@ -255,6 +275,14 @@ claude-code-kanban session agents <id> [--json]
 ```
 
 Lists the subagents of the session with the columns `AGENT`, `STATUS`, `AGE`, `TYPE` and `DESCRIPTION`, and prints `Waiting for the user.` when the session waits for an answer. It needs the cck hooks in the config dir (`--install`). `--json` prints `{agents, waitingForUser}`.
+
+## group list
+
+```bash
+claude-code-kanban group list [--json]
+```
+
+Lists the session groups in sidebar order, with the columns `ID`, `PROJECTS`, `SESSIONS` and `NAME`. A nested group is indented under its parent. Pass a name or id from this list to `session group`. Dispatch groups are not listed, because they go when their sessions end. `--json` prints `{rev, groups}`, each group as `{id, name, parent, members}`.
 
 ## task list
 

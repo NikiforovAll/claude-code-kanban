@@ -99,7 +99,7 @@ const COMMANDS = {
     },
   },
   session: {
-    summary: 'List, search, open and inspect Claude Code sessions',
+    summary: 'List, search, open, inspect and group Claude Code sessions',
     verbs: {
       list: {
         summary: 'List sessions (pinned/sticky always included)',
@@ -185,6 +185,50 @@ const COMMANDS = {
           'claude-code-kanban session pin $CLAUDE_SESSION_ID --unpin',
         ],
         run: runSessionPinCli,
+      },
+      group: {
+        summary: 'Move a session into a group in the sidebar',
+        usage: 'claude-code-kanban session group <id> (<group> | --with <session>) [--create] [--json]',
+        flags: {
+          '<id>': 'Full session id, or a unique prefix',
+          '<group>': 'Group name (any case) or group id, from `group list`',
+          '--with <session>': 'Join the group this other session shows in (id or unique prefix)',
+          '--create': 'Make the group when none matches; with --with, it holds both sessions',
+          '--json': 'Output JSON ({group, name, created, left, rev})',
+        },
+        notes: 'The session leaves the group it was in. In a group that holds its project, it shows in that project\'s block.',
+        examples: [
+          'claude-code-kanban session group $CLAUDE_SESSION_ID "Auth refactor"',
+          'claude-code-kanban session group 3fa9c1 release-prep --create',
+          'claude-code-kanban session group 3fa9c1 --with $CLAUDE_SESSION_ID --create',
+        ],
+        run: runSessionGroupCli,
+      },
+      ungroup: {
+        summary: 'Take a session out of its group',
+        usage: 'claude-code-kanban session ungroup <id> [--json]',
+        flags: {
+          '<id>': 'Full session id, or a unique prefix',
+          '--json': 'Output JSON ({left, rev})',
+        },
+        notes: 'Also takes it out of its dispatch group. A session whose project is in a group still shows there; move the project on the board.',
+        examples: ['claude-code-kanban session ungroup $CLAUDE_SESSION_ID'],
+        run: runSessionUngroupCli,
+      },
+    },
+  },
+  group: {
+    summary: 'Read the session groups in the sidebar',
+    verbs: {
+      list: {
+        summary: 'List the groups, nested groups under their parent, in sidebar order',
+        usage: 'claude-code-kanban group list [--json]',
+        flags: {
+          '--json': 'Output JSON ({rev, groups: [{id, name, parent, members: [{type, ref}]}]})',
+        },
+        notes: 'Pass a name or id to `session group`. Dispatch groups are not listed: they go when their sessions end.',
+        examples: ['claude-code-kanban group list'],
+        run: runGroupListCli,
       },
     },
   },
@@ -834,6 +878,75 @@ async function runSessionPinCli(args) {
     console.log(`Session ${label}: ${resolved.id}${resolved.customTitle ? ` (${resolved.customTitle})` : ''}`);
     return 0;
   } catch (e) { reportCliError(e); return 1; }
+}
+
+const postSessionGroup = (id, body, label) => cliPostJson(`/api/sessions/${encodeURIComponent(id)}/group`, body, label);
+
+async function runSessionGroupCli(args, entry) {
+  const [idArg, groupArg] = positionals(args, ['--with']);
+  const withArg = getArgValue(args, 'with');
+  if (!idArg || (!groupArg && !withArg)) {
+    printLeafHelp(entry);
+    return 1;
+  }
+  if (groupArg && withArg) return usageError(entry, 'Give one of <group> or --with.');
+  const [resolved, peer] = await Promise.all([idArg, withArg].map((a) => a && resolveSessionByIdOrPrefix(a)));
+  if (!resolved || (withArg && !peer)) return 1;
+  const create = args.includes('--create');
+  try {
+    const out = await postSessionGroup(resolved.id, peer ? { with: peer.id, create } : { group: groupArg, create }, 'Group');
+    if (!out) return 1;
+    const { group, name, created, left, rev } = out;
+    if (args.includes('--json')) console.log(JSON.stringify({ group, name, created, left, rev }, null, 2));
+    else console.log(`Session ${resolved.id.slice(0, 8)} moved to ${created ? 'new ' : ''}group "${name}" (${group})`);
+    return 0;
+  } catch (e) { reportCliError(e); return 1; }
+}
+
+async function runSessionUngroupCli(args, entry) {
+  const [idArg] = positionals(args, []);
+  if (!idArg) {
+    printLeafHelp(entry);
+    return 1;
+  }
+  const resolved = await resolveSessionByIdOrPrefix(idArg);
+  if (!resolved) return 1;
+  try {
+    const out = await postSessionGroup(resolved.id, { group: null }, 'Ungroup');
+    if (!out) return 1;
+    const { left, rev } = out;
+    const short = resolved.id.slice(0, 8);
+    if (args.includes('--json')) console.log(JSON.stringify({ left, rev }, null, 2));
+    else console.log(left ? `Session ${short} left group "${left}"` : `Session ${short} was in no group`);
+    return 0;
+  } catch (e) { reportCliError(e); return 1; }
+}
+
+async function runGroupListCli(args) {
+  let state;
+  try {
+    state = await cliGetJson('/api/groups', 'Group list');
+  } catch (e) { reportCliError(e); return 1; }
+  const { rev, groups } = state;
+  if (args.includes('--json')) {
+    console.log(JSON.stringify({ rev, groups }, null, 2));
+    return 0;
+  }
+  if (!groups.length) {
+    console.log('No groups.');
+    return 0;
+  }
+  const rows = [];
+  const add = (parent, depth) => {
+    for (const g of groups.filter((x) => x.parent === parent)) {
+      const count = (type) => g.members.filter((m) => m.type === type).length;
+      rows.push([g.id, count('project'), count('session'), `${'  '.repeat(depth)}${g.name}`]);
+      add(g.id, depth + 1);
+    }
+  };
+  add(null, 0);
+  printTable(['ID', 'PROJECTS', 'SESSIONS', 'NAME'], rows);
+  return 0;
 }
 
 async function runSessionViewCli(args) {

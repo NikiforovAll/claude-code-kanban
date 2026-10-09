@@ -168,6 +168,48 @@ describe('user groups', () => {
     assert.equal(disk.data.rev, 2);
   });
 
+  it('groups a session by group name or id, and ungroups it', () => {
+    const s = harness().store();
+    s.create({ id: 'a', name: 'Auth Work' });
+    s.create({ id: 'b', name: 'B' });
+    const moved = s.groupSession('s1', { group: 'auth work' });
+    assert.deepEqual([moved.group, moved.name, moved.created, moved.left], ['a', 'Auth Work', false, null]);
+    const again = s.groupSession('s1', { group: 'b' });
+    assert.equal(again.left, 'Auth Work');
+    assert.deepEqual(again.groups.map((g) => g.members.map((m) => m.ref)), [[], ['s1']]);
+    const out = s.groupSession('s1', { group: null });
+    assert.deepEqual([out.group, out.left, out.released], [null, 'B', ['s1']]);
+    assert.deepEqual(out.groups.map((g) => g.members.length), [0, 0]);
+  });
+
+  it('refuses an unknown or ambiguous group name unless asked to create it', () => {
+    const s = harness().store();
+    s.create({ id: 'a', name: 'Dup' });
+    s.create({ id: 'b', name: 'dup' });
+    assert.equal(status(() => s.groupSession('s1', { group: 'Dup' })), 400);
+    assert.equal(status(() => s.groupSession('s1', { group: 'Nope' })), 404);
+    assert.equal(status(() => s.groupSession('s1', { group: ' ' })), 400);
+    assert.equal(s.state().rev, 2);
+    const made = s.groupSession('s1', { group: 'Nope', create: true });
+    assert.deepEqual([made.created, made.name, made.rev], [true, 'Nope', 3]);
+    assert.deepEqual(made.groups.at(-1).members, [{ type: 'session', ref: 's1' }]);
+  });
+
+  it('puts a session in the group another session shows in', () => {
+    const s = harness().store();
+    s.create({ id: 'a', name: 'A', members: [{ type: 'session', ref: 'p1' }] });
+    s.create({ id: 'b', name: 'B', members: [{ type: 'project', ref: 'C:/repo' }] });
+    s.create({ id: 'c', name: 'api-work' });
+    assert.equal(s.groupSession('s1', { peer: { ref: 'p1', project: 'C:/repo' } }).group, 'a');
+    assert.equal(s.groupSession('s1', { peer: { ref: 'p2', project: 'C:/repo' } }).group, 'b');
+    assert.equal(s.groupSession('s1', { peer: { ref: 'p3', dispatchGroup: 'api-work' } }).group, 'c');
+    assert.equal(status(() => s.groupSession('s1', { peer: { ref: 'p4' } })), 404);
+    assert.equal(status(() => s.groupSession('s1', { peer: { ref: 's1' } })), 400);
+    const made = s.groupSession('s1', { peer: { ref: 'p4', name: 'Fix login' }, create: true });
+    assert.deepEqual([made.created, made.name], [true, 'Fix login']);
+    assert.deepEqual(made.groups.at(-1).members.map((m) => m.ref), ['p4', 's1']);
+  });
+
   it('drops malformed data on load', () => {
     const { store } = harness({
       rev: 4,

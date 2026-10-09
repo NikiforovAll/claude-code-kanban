@@ -67,7 +67,7 @@ const { pickFolder } = require('./lib/folder-dialog');
 const { loadSessionCache, saveSessionCache } = require('./lib/session-cache');
 const { countTaskDir } = require('./lib/task-counts');
 const { readTaskDir } = require('./lib/task-dir');
-const { projectMatcher, normalizeProjectPath } = require('./public/project-match');
+const { projectMatcher, normalizeProjectPath, sessionProjectKey } = require('./public/project-match');
 const { getParentVerdict, setParentVerdict } = require('./lib/parent-cache');
 
 if (process.argv.includes("--install") || process.argv.includes("--uninstall")) {
@@ -4027,6 +4027,19 @@ app.post('/api/groups/release', groupRoute((b) => userGroups.release(b.ids)));
 app.patch('/api/groups/:id', groupRoute((b, p) => userGroups.update(p.id, b)));
 app.delete('/api/groups/:id', groupRoute((_b, p) => userGroups.remove(p.id)));
 app.put('/api/groups/:id/members', groupRoute((b, p) => userGroups.place(p.id, b)));
+// `with` names another session; its project is keyed as the board keys it, by the worktree's repo.
+function groupPeer(id) {
+  const meta = loadSessionMetadata()[id];
+  if (!meta) throw previewError(404, `no session ${id}`);
+  return {
+    ref: id,
+    project: sessionProjectKey({ project: meta.project, worktree: worktrees.resolve(meta.project) }),
+    dispatchGroup: dispatchGroups.snapshot().get(id) || null,
+    name: getSessionDisplayName(id, meta) || `Session ${id.slice(0, 8)}`,
+  };
+}
+app.post('/api/sessions/:id/group', groupRoute((b, p) =>
+  userGroups.groupSession(p.id, { ...b, peer: typeof b.with === 'string' ? groupPeer(b.with) : undefined })));
 // #endregion
 
 app.get('/api/preview', async (req, res) => {
