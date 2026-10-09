@@ -6066,9 +6066,21 @@ const SHORTCUT_TABS = [
         rows: [
           { keys: ['Ctrl', '`'], combo: true, label: 'Show / hide terminal' },
           { keys: ['Alt', '`'], combo: true, label: 'Focus terminal / page' },
+          { keys: ['Ctrl', 'Alt', '`'], combo: true, hubMod: true, label: 'Focus terminal / show card' },
           { keys: ['Alt', 'Shift', '`'], combo: true, label: 'End terminal' },
           { keys: ['Ctrl', 'Shift', '`'], combo: true, label: 'All terminals' },
           { keys: ['Ctrl', '+/−/0'], combo: true, label: 'Terminal text size' },
+        ],
+      },
+      {
+        title: 'Show card (focused)',
+        rows: [
+          { keys: ['[', ']'], label: 'Previous / next post' },
+          { keys: ['Alt', 'Enter'], combo: true, label: 'Fill the terminal / back to the card' },
+          { keys: ['Esc'], label: 'Back to the card, else collapse to the header' },
+          { keys: ['Alt', 'W'], combo: true, label: 'Close until the next post' },
+          { keys: ['Ctrl', 'D'], combo: true, label: 'Remove the post' },
+          { keys: ['Ctrl', '+/−/0'], combo: true, label: 'Card text size' },
         ],
       },
     ],
@@ -7893,8 +7905,12 @@ const PANE_CLAIMS = [
   ...['BracketLeft', 'BracketRight', 'KeyW'].map((code) => ({ altKey: true, key: 'Unidentified', code })),
 ];
 
-// Ctrl+D removes the show card's post (showCardKey); other pages keep it.
-const SHOW_CLAIMS = ['ctrlKey', 'metaKey'].map((mod) => ({ [mod]: true, key: 'd', code: '' }));
+// Ctrl+D, Alt+Enter and Esc act on the show card (showCardKey); other pages keep them. Alt+W is in PANE_CLAIMS.
+const SHOW_CLAIMS = [
+  ...['ctrlKey', 'metaKey'].map((mod) => ({ [mod]: true, key: 'd', code: '' })),
+  { altKey: true, key: 'Enter', code: '' },
+  { key: 'Escape', code: '' },
+];
 
 // Claimed only while comments wait, so a previewed page keeps Ctrl+Enter otherwise.
 const REVIEW_SEND_CLAIMS = ['ctrlKey', 'metaKey'].map((mod) => ({ [mod]: true, key: 'Enter', code: '' }));
@@ -13587,6 +13603,7 @@ function terminalShortcut(e, probe = false) {
     return () => openNewSession(null, e.code === 'KeyR');
   }
   if (e.code !== 'Backquote' || e.metaKey) return null;
+  if (ctrlAlt) return toggleShowFocus;
   if (e.ctrlKey && !e.altKey) return e.shiftKey ? openTerminalManager : toggleTerminal;
   if (e.altKey && !e.ctrlKey && !e.shiftKey) return toggleTerminalFocus;
   if (!e.altKey || !e.shiftKey || e.ctrlKey) return null;
@@ -13623,6 +13640,19 @@ function toggleTerminalFocus() {
   }
   if (terminalPaneFocused()) leaveTerminalPane();
   else focusTerminalPane();
+}
+
+function toggleShowFocus() {
+  if (isShowCardFocused()) {
+    focusTerminalPane();
+    return;
+  }
+  if (!wantsTerminal() || !showState.posts.length) return;
+  if (showClosed.delete(showState.terminalId) || showState.collapsed) {
+    showState.collapsed = false;
+    renderShow();
+  }
+  focusShowBody();
 }
 
 // Idempotent: runs on every view change, so whichever path changed the view lands here.
@@ -13984,6 +14014,7 @@ function adjustTerminalFontSize(step) {
     else store.setItem(TERMINAL_FONT_KEY, String(size));
     termState.fontSize = size;
     terminalFrameSend('font', { size });
+    layoutShow();
   }
   showToast(`Terminal ${size}px`);
 }
@@ -14536,17 +14567,29 @@ function syncShowFocus() {
   setTimeout(() => showCardEl()?.classList.toggle('focused', isShowCardFocused()));
 }
 
-// [ and ] page the posts, Ctrl+D removes the one on screen. The body keeps focus, because a render
-// replaces an HTML card's frame.
+function focusShowBody() {
+  showCardEl()?.querySelector('.show-body')?.focus();
+}
+
+const SHOW_KEY_COMMANDS = { 'alt+Enter': 'expand', 'alt+w': 'close' };
+
+// The body keeps focus, because a render replaces an HTML card's frame.
 function showCardKey(e) {
-  const focusBody = () => showCardEl().querySelector('.show-body').focus();
   if (matchKey(e, '[', ']')) {
     showCommand(e.key === ']' ? 'next' : 'prev');
-    focusBody();
+    focusShowBody();
+    return true;
+  }
+  const combo = ClaudeHub.comboOf(e);
+  const cmd = combo === 'Escape' ? (showState.expanded ? 'expand' : 'collapse') : SHOW_KEY_COMMANDS[combo];
+  if (cmd) {
+    showCommand(cmd);
+    if (cmd === 'expand') focusShowBody();
+    else focusTerminalPane();
     return true;
   }
   const p = showState.posts[showState.idx];
-  if (ClaudeHub.comboOf(e) !== 'ctrl+d' || !p) return false;
+  if (combo !== 'ctrl+d' || !p) return false;
   const message = `Remove "${p.title}" from the card?`;
   confirmModal({ title: 'Remove post', message, okLabel: 'Remove' }).then((ok) => {
     if (!ok || showState.posts[showState.idx]?.id !== p.id) return;
@@ -14650,7 +14693,7 @@ function showHeaderHtml(p) {
   const { collapsed, expanded } = showState;
   return `<span class="show-nav"><span class="show-title" title="${escapeHtml(p.title)}">${escapeHtml(p.title)}</span>${key}</span>
     <span class="show-pager">${btn('prev', 'prev', 'Previous post', i === 0)}<span class="show-pos">${i + 1}/${n}</span>${btn('next', 'next', 'Next post', i === n - 1)}</span>
-    <span class="show-actions">${btn('pane', 'pane', 'Open in a pane of the session')}${btn('collapse', collapsed ? 'uncollapse' : 'collapse', collapsed ? 'Show the post' : 'Collapse to the header')}${btn('expand', expanded ? 'restore' : 'expand', expanded ? 'Back to the card' : 'Fill the terminal')}${btn('remove', 'clear', 'Remove this post · Shift+click clears every post')}${btn('close', 'close', 'Close until the next post')}</span>`;
+    <span class="show-actions">${btn('pane', 'pane', 'Open in a pane of the session')}${btn('collapse', collapsed ? 'uncollapse' : 'collapse', collapsed ? 'Show the post' : 'Collapse to the header · Esc')}${btn('expand', expanded ? 'restore' : 'expand', expanded ? 'Back to the card · Alt+Enter or Esc' : 'Fill the terminal · Alt+Enter')}${btn('remove', 'clear', 'Remove this post · Ctrl+D · Shift+click clears every post')}${btn('close', 'close', 'Close until the next post · Alt+W')}</span>`;
 }
 
 function showTicksHtml() {
@@ -14913,6 +14956,7 @@ function layoutShow() {
   const fit = showFitSize(w, h);
   card.style.setProperty('--show-fit-w', `${fit.w}px`);
   card.style.setProperty('--show-fit-h', `${fit.h}px`);
+  card.style.setProperty('--show-term-font', `${currentTerminalFontSize()}px`);
   const sized = !!showSize && !showState.expanded && !showState.collapsed;
   card.classList.toggle('sized', sized);
   if (sized) {
@@ -14991,12 +15035,13 @@ function initShowCard() {
     if (!e.target.closest('.show-head, .show-ticks')) return;
     e.preventDefault();
     if (showState.collapsed || e.target.closest('[data-show="close"], [data-show="collapse"]')) return;
-    card.querySelector('.show-body').focus();
+    focusShowBody();
   });
   card.addEventListener('click', (e) => {
     const b = e.target.closest('[data-show]');
     if (b) {
       if (!b.disabled) showCommand(b.dataset.show === 'remove' && e.shiftKey ? 'clear' : b.dataset.show);
+      if (b.dataset.show === 'collapse' && !showState.collapsed) focusShowBody();
       return;
     }
     const t = e.target.closest('[data-go]');

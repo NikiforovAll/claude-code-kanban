@@ -126,6 +126,7 @@ These keys work anywhere on the page, also from inside the terminal. See [Embedd
 | --- | --- |
 | <kbd>Ctrl+&#96;</kbd> | Show or hide the terminal |
 | <kbd>Alt+&#96;</kbd> | Move focus between the terminal and the page. If the terminal is hidden, show it. |
+| <kbd>Ctrl+Alt+&#96;</kbd> | Move focus between the terminal and the show card. A closed or collapsed card opens first. |
 | <kbd>Alt+Shift+&#96;</kbd> | End the terminal session and close it. This works in the session view whenever the session has a running terminal, also when the terminal is hidden. |
 | <kbd>Ctrl+Shift+&#96;</kbd> | Open the Terminals manager |
 
@@ -138,6 +139,21 @@ Inside the terminal:
 - <kbd>Ctrl+V</kbd> pastes from the clipboard.
 - <kbd>R</kbd> reconnects when the loading screen says "Slow to connect". This shows when the connection has not opened after 1.5 s. At other times, <kbd>R</kbd> goes to the terminal as usual.
 - <kbd>Ctrl++</kbd> and <kbd>Ctrl+-</kbd> make the terminal text larger or smaller, from 8 px to 32 px. <kbd>Ctrl+0</kbd> resets it. <kbd>Ctrl+_</kbd> still goes to Claude Code as undo.
+
+### Show card
+
+These keys work while the show card above the terminal has focus. Press <kbd>Ctrl+Alt+&#96;</kbd>, or click the card's header or body, to focus it.
+
+| Keys | Action |
+| --- | --- |
+| <kbd>[</kbd> or <kbd>]</kbd> | Previous or next post |
+| <kbd>Alt+Enter</kbd> | Fill the terminal with the card, or go back to the card size |
+| <kbd>Esc</kbd> | Go back to the card size. If the card is not expanded, collapse it to its header and focus the terminal. |
+| <kbd>Alt+W</kbd> | Close the card until the next post, and focus the terminal |
+| <kbd>Ctrl+D</kbd> | Remove the post on screen, after a confirm |
+| <kbd>Ctrl++</kbd>, <kbd>Ctrl+-</kbd>, <kbd>Ctrl+0</kbd> | Card text size |
+
+A text field inside an HTML card keeps these keys.
 
 ## Hub
 

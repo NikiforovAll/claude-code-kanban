@@ -3519,7 +3519,8 @@ code.language-tree .hljs-title {
 
 .show-card {
   --show-inset: 8px;
-  --show-prompt-inset: 88px;
+  /* Six terminal rows (prompt, its rules, status line) at xterm's cell height of about 1.2 × font size. */
+  --show-prompt-inset: calc(var(--show-inset) + 7.2 * var(--show-term-font, 13px));
   position: absolute;
   z-index: 2;
   top: var(--show-inset);

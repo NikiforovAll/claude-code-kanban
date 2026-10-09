@@ -104,6 +104,85 @@ describe('showBridge', () => {
   });
 });
 
+const press = (key, mods = {}) => ({ key, code: '', ctrlKey: false, altKey: false, shiftKey: false, metaKey: false, ...mods });
+
+describe('showCardKey', () => {
+  const { comboOf } = require('./vendor/claude-hub-sdk.js');
+  function setup(state = {}) {
+    const log = [];
+    const showState = { idx: 0, posts: [{ id: 'p1', title: 'T' }], expanded: false, ...state };
+    const key = appFunction('showCardKey', {
+      ClaudeHub: { comboOf },
+      showState,
+      SHOW_KEY_COMMANDS: appConst('SHOW_KEY_COMMANDS'),
+      matchKey: appFunction('matchKey'),
+      focusShowBody: () => log.push('focus body'),
+      showCommand: (cmd) => log.push(cmd),
+      focusTerminalPane: () => log.push('focus terminal'),
+      confirmModal: () => new Promise(() => {}),
+    });
+    return { key, log };
+  }
+
+  it('toggles expand on Alt+Enter and keeps focus on the body', () => {
+    const { key, log } = setup();
+    assert.equal(key(press('Enter', { altKey: true })), true);
+    assert.deepEqual(log, ['expand', 'focus body']);
+  });
+
+  it('goes back from expand on Esc, else collapses and focuses the terminal', () => {
+    const expanded = setup({ expanded: true });
+    expanded.key(press('Escape'));
+    assert.deepEqual(expanded.log, ['expand', 'focus body']);
+    const card = setup();
+    card.key(press('Escape'));
+    assert.deepEqual(card.log, ['collapse', 'focus terminal']);
+  });
+
+  it('closes on Alt+W and focuses the terminal', () => {
+    const { key, log } = setup();
+    assert.equal(key(press('w', { altKey: true, code: 'KeyW' })), true);
+    assert.deepEqual(log, ['close', 'focus terminal']);
+  });
+
+  it('leaves Enter, Ctrl+Enter and plain letters alone', () => {
+    const { key, log } = setup();
+    for (const e of [press('Enter'), press('Enter', { ctrlKey: true }), press('f')]) assert.equal(key(e), false);
+    assert.deepEqual(log, []);
+  });
+});
+
+describe('Ctrl+Alt+` focuses the show card', () => {
+  const toggleShowFocus = () => {};
+  const toggleTerminalFocus = () => {};
+  const shortcut = appFunction('terminalShortcut', {
+    toggleShowFocus,
+    toggleTerminalFocus,
+    hubModDown: appFunction('hubModDown'),
+    zoomDelta: () => undefined,
+    matchKey: () => false,
+  });
+  const tick = (mods) => press('`', { code: 'Backquote', getModifierState: () => false, ...mods });
+
+  it('maps Ctrl+Alt+` to the card and leaves Alt+` on the terminal toggle', () => {
+    assert.equal(shortcut(tick({ ctrlKey: true, altKey: true })), toggleShowFocus);
+    assert.equal(shortcut(tick({ altKey: true })), toggleTerminalFocus);
+  });
+
+  it('leaves AltGr+` to the terminal', () => {
+    assert.equal(shortcut(tick({ ctrlKey: true, altKey: true, getModifierState: (m) => m === 'AltGraph' })), null);
+  });
+});
+
+describe('SHOW_CLAIMS', () => {
+  it('claims Alt+Enter and Esc from the card frame, not Ctrl+Enter', () => {
+    const claims = appConst('SHOW_CLAIMS');
+    assert.ok(claims.some((c) => c.altKey && c.key === 'Enter' && !c.ctrlKey));
+    assert.ok(claims.some((c) => c.key === 'Escape' && !c.altKey && !c.ctrlKey));
+    assert.ok(!claims.some((c) => c.ctrlKey && c.key === 'Enter'));
+  });
+});
+
 // The gates of the dataviz skill's validate_palette.js, run against every cck theme's surface.
 describe('show chart palette', () => {
   const palette = appConst('SHOW_PALETTE');
