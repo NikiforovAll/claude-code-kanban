@@ -69,6 +69,8 @@ The header has a Sticky button. Inside [Claude Code Hub](/claude-code-kanban/gui
 
 Context bars, total token counts and cost come from a mod in the plugin. It needs Claude Code 2.1.287 or later. Without it, the board shows only the rows that come from the transcript. See [Getting started](/claude-code-kanban/getting-started/).
 
+A full context bar is the point where Claude Code compacts. When your user or project settings set a smaller auto-compact window or percent, the bar uses that point and not the model's full window.
+
 The **Cache** row counts down until the prompt cache expires. The time starts at the last request of the main session. The time, the TTL (5 minutes or 1 hour), the model and the token counts of the last request come from the transcript, so the model name, these counts and this row show without the plugin too. After the time runs out, the next request writes the whole context to the cache again, and that costs more than a cache read. The row is green above 5 minutes, orange from 2 to 5 minutes and red under 2 minutes. Hover over it to see the clock time it expires and the estimated cost of that write. When the cache has expired, the row shows that cost, for example `expired · ~$1.08`. The estimate uses the list input price of the model and the cache-write rate of the TTL (1.25× for 5 minutes, 2× for 1 hour). It does not show for a model that cck has no price for. On a subscription plan the write costs usage limit, not money, but the estimate still shows how large it is.
 
 ## Tool stats
@@ -165,7 +167,7 @@ Press <kbd>Ctrl+Shift+P</kbd> to open the session picker and jump to a session.
 - <kbd>Ctrl+Space</kbd> peeks at the recent messages of the selected session.
 - <kbd>Esc</kbd> closes the picker.
 
-The picker lists the sessions the sidebar shows. To find a session outside the current filter, type 3 or more characters of its name or its session id. In a session id, dashes are optional. Matches from all sessions show below the sidebar matches, newest first, with the full project path. Up to 20 are shown.
+The picker lists the sessions the sidebar shows, with the same left bar for unread and waiting sessions. To find a session outside the current filter, type 3 or more characters of its name or its session id. In a session id, dashes are optional. Matches from all sessions show below the sidebar matches, newest first, with the full project path. Up to 20 are shown.
 
 ## Choose the editor
 

@@ -14,13 +14,15 @@ You can comment on a file in the Preview dialog or on the plan in the plan dialo
 
 - Markdown, HTML and text files in the Preview dialog. See [Linked documents](/claude-code-kanban/guides/session-details/#linked-documents) for how to open one.
 - The plan of a session in the plan dialog. Press <kbd>P</kbd> to open it.
+- Claude's replies in the message dialog, for the main session. Your first comment stops the dialog from following the latest message, so the reply stays on screen.
+- File panes and show cards.
 
 Images do not take comments.
 
 ## Add comments
 
 1. Select text in the file. A **Comment** button shows next to the selection.
-2. Click **Comment**, type your comment and press <kbd>Ctrl+Enter</kbd> to add it. The text you selected gets a highlight.
+2. Click **Comment**, or press <kbd>C</kbd>, then type your comment and press <kbd>Ctrl+Enter</kbd> to add it. The text you selected gets a highlight.
 3. Add more comments. The dialog gets wider, and a side panel lists each comment under the text it quotes.
 
 In the side panel:
@@ -34,7 +36,7 @@ Comments you have not sent stay with the file and the session. Close the dialog 
 
 ## Send
 
-Click **Send**. The board writes the comments to a Markdown file in `<config-dir>/.cck/reviews/<session id>/`. Then it gives them to the session in the first way that works:
+Click **Send**, or press <kbd>Ctrl+Enter</kbd> when the comment editor is closed. The board writes the comments to a Markdown file in `<config-dir>/.cck/reviews/<session id>/`. Then it gives them to the session in the first way that works:
 
 1. If the session [listens to the board](/claude-code-kanban/guides/plugin-skills/#steer-a-session-from-the-board), Claude gets a prompt that points at the review file. If Claude is busy, the prompt waits until the turn ends. The board keeps the review until the session has it, so a board restart, a `/clear` or a closed session does not lose it: a resumed session gets it.
 2. Else, if the session runs in the [embedded terminal](/claude-code-kanban/guides/embedded-terminal/) and does not wait on a prompt, the board pastes a request that points at the review file into the terminal.

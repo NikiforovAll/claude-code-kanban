@@ -321,7 +321,7 @@ claude-code-kanban dispatch list [--all] [--json]
 
 Lists the sessions that the current session started and that still run in the board's terminal. Outside Claude Code, where `CLAUDE_CODE_SESSION_ID` is not set, it lists every one on the board. `--all` lists every one on this board.
 
-The list lives in the server's memory. A session leaves it when its terminal ends, and a server restart clears it.
+A session leaves the list when its terminal ends. The board saves the list, so after a server restart it lists again the sessions that the board resumes.
 
 ### dispatch end
 
