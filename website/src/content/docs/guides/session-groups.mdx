@@ -39,7 +39,9 @@ A group with no items shows the hint "Drop a session or a project here". When a 
 
 ## Where groups are saved
 
-Claude Code Kanban saves your groups in the browser's local storage, under the key `sessionGroups` (with a prefix for each config dir other than the default one). Each browser has its own groups. Each Claude config dir also has its own groups, so groups you make for one config dir do not show for another.
+The server saves your groups in `<config-dir>/.cck/groups.json`, so every browser and window on the board shows the same groups, and a change in one shows in the others at once. Each Claude config dir has its own groups, so groups you make for one config dir do not show for another.
+
+Older versions kept groups in the browser's local storage, under the key `sessionGroups`. The first board that loads after the upgrade moves its groups to the server one time and then sets the `groupsMigratedAt` key, so it does not move them again. A browser that loads later shows the server's groups; its own older groups stay in `sessionGroups` but do not show.
 
 Groups hold references to sessions and projects. A session that the sidebar filter hides stays in its group.
 

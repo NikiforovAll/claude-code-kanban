@@ -4,6 +4,7 @@ State that cck writes under `<config dir>/.cck/` must not grow without a limit. 
 
 ## Who owns the data
 
+- **Session groups:** `groups.json` (`lib/user-groups.js`) is user-managed and changes only when the user edits a group. The caps bound it: at most 200 groups of 500 members each, and the newest 500 session ids released from a dispatch group. cck does not expire it.
 - **User-managed:** pins (`pins.json`, the server copy of the board's session pins) and linked docs (`linked-docs.json`, the server copy of links made with `doc link`, at most 200 per session). They change only when the user pins, unpins, links or unlinks. The Storage Manager's Clean Orphaned removes the browser and server copies for sessions that no longer exist, so cck does not expire these files.
 - **User-written:** `config.json`. cck only reads it.
 - **cck-generated, short-lived:** `agent-activity/`. The sweep in the `CLEANUP` region of `server.js` runs every hour. It deletes a session folder older than 2 days, or an empty one older than 30 minutes, and the board's approval answers (`_decision-*.json`) older than 30 minutes. It skips `agent-activity/_task-maps/`, because the plugin mod rewrites those files in place and the folder's mtime does not change.

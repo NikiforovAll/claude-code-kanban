@@ -4588,8 +4588,8 @@ async function onColumnDrop(e) {
 
 //#region SESSION_GROUPS
 // User-named groups that hold whole projects and individual sessions, dragged in from the
-// sidebar. They render above the project groups. Membership is a workspace preference kept in
-// localStorage; an id missing from `sessions` is NOT proof the session is gone (sessionLimit
+// sidebar. They render above the project groups. Membership is a workspace preference kept on
+// the server; an id missing from `sessions` is NOT proof the session is gone (sessionLimit
 // windows the list), so membership is never garbage-collected on load.
 const SESSION_GROUPS_KEY = 'sessionGroups';
 const SG_ACTION_SELECTOR =
@@ -4611,14 +4611,64 @@ function pinKey(projectPath) {
   return projectPath === '__ungrouped__' ? '__pinned___ungrouped__' : `__pinned_${projectPath}__`;
 }
 
-function loadSessionGroups() {
-  const saved = store.readJson(SESSION_GROUPS_KEY);
+// The server keeps the groups (`/api/groups`, lib/user-groups.js). `sessionGroups` in localStorage
+// is the copy from before that: the board imports it once and never writes it, so it stays as a
+// backup.
+const GROUPS_MIGRATED_AT = 'groupsMigratedAt';
+let sgRev = null;
+let sgSaving = null;
+let sgDirty = false;
+let sgUnsent = false;
+let sgSeenRev = 0;
+
+// Until it succeeds the board shows no groups, and it tries again on the next load or SSE reconnect.
+async function syncSessionGroups() {
+  const migrated = !!store.getItem(GROUPS_MIGRATED_AT);
+  const local = migrated ? null : store.readJson(SESSION_GROUPS_KEY);
+  const hasLocal = local?.groups?.length > 0 || local?.released?.length > 0;
+  try {
+    const res = hasLocal
+      ? await api('/api/groups/import', { method: 'POST', body: { groups: local.groups, released: local.released } })
+      : await api('/api/groups');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    sgTakeServer(await res.json());
+    if (!migrated) store.setItem(GROUPS_MIGRATED_AT, new Date().toISOString());
+    if (sgSeenRev > sgRev) sgRefresh(sgSeenRev);
+  } catch (e) {
+    console.warn('[groups] server sync failed:', e.message);
+  }
+}
+
+// The SSE event for this board's own write often arrives before the write's response.
+async function sgRefresh(rev = Infinity) {
+  await sgSaving;
+  if (sgRev !== null && sgRev >= rev) return;
+  const data = await getJson('/api/groups');
+  if (data) sgTakeServer(data);
+}
+
+function sgTakeServer(data, force = false) {
+  if (!Number.isInteger(data?.rev) || (!force && sgRev !== null && data.rev <= sgRev)) return;
+  sgRev = data.rev;
+  sgApplyState(data);
+  renderSessions();
+}
+
+// An event during the first sync is kept, because the sync's read may be older than it.
+function onGroupChanged(data) {
+  if (!Number.isInteger(data?.rev)) return;
+  sgSeenRev = Math.max(sgSeenRev, data.rev);
+  if (sgRev !== null && data.rev > sgRev) sgRefresh(data.rev);
+}
+
+function sgApplyState(saved) {
   const list = saved?.groups;
   sessionGroups = (Array.isArray(list) ? list : [])
     .filter((g) => g && typeof g.id === 'string')
     .map((g) => ({
       id: g.id,
       name: typeof g.name === 'string' && g.name.trim() ? g.name : 'Group',
+      parent: typeof g.parent === 'string' ? g.parent : null,
       members: (Array.isArray(g.members) ? g.members : [])
         .filter((m) => m && (m.type === 'project' || m.type === 'session') && typeof m.ref === 'string')
         .map((m) => {
@@ -4633,7 +4683,60 @@ function loadSessionGroups() {
 }
 
 function persistSessionGroups() {
-  store.writeJson(SESSION_GROUPS_KEY, { version: 1, groups: sessionGroups, released: [...sgReleased] });
+  if (sgRev === null) {
+    showToast('Groups are not loaded from the server; this change is not saved', 'error');
+    return;
+  }
+  sgDirty = true;
+  sgSaving ??= sgFlush().finally(() => {
+    sgSaving = null;
+  });
+}
+
+// Writes run one at a time; edits made meanwhile go out in the next write. A 409 means another
+// board wrote first: its state wins and this board's unsent edit is dropped. A write that does not
+// reach the server is sent again on SSE reconnect.
+async function sgFlush() {
+  while (sgDirty) {
+    sgDirty = false;
+    let res;
+    try {
+      res = await api('/api/groups', {
+        method: 'PUT',
+        body: { rev: sgRev, groups: sessionGroups, released: [...sgReleased] },
+      });
+    } catch (e) {
+      console.warn('[groups] save failed:', e.message);
+      sgUnsent = true;
+      showToast('Groups not saved: the server is unreachable. Retrying when it is back', 'error');
+      return;
+    }
+    sgUnsent = false;
+    const data = await res.json().catch(() => null);
+    if (res.ok && Number.isInteger(data?.rev)) {
+      sgRev = data.rev;
+      if (!sgDirty) sgTakeCleaned(data);
+      continue;
+    }
+    showToast(
+      res.status === 409
+        ? 'Groups changed in another window; showing the latest'
+        : `Groups not saved (${data?.error || res.status})`,
+      res.status === 409 ? undefined : 'error',
+    );
+    sgDirty = false;
+    const fresh = res.status === 409 ? data : await getJson('/api/groups');
+    if (fresh) sgTakeServer(fresh, true);
+  }
+}
+
+// The server drops what breaks its rules (a member in two groups, a group past the limit) and
+// trims long names; the board shows what was saved.
+function sgTakeCleaned(data) {
+  const saved = JSON.stringify({ groups: data.groups, released: data.released });
+  if (saved === JSON.stringify({ groups: sessionGroups, released: [...sgReleased] })) return;
+  sgApplyState(data);
+  renderSessions();
 }
 
 function sgGroupById(id) {
@@ -4744,6 +4847,7 @@ function sgCreateGroup(name) {
   const group = {
     id: `g_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
     name: (name || '').trim() || `Group ${sessionGroups.length + 1}`,
+    parent: null,
     members: [],
   };
   sessionGroups.push(group);
@@ -4752,7 +4856,9 @@ function sgCreateGroup(name) {
 }
 
 function sgDeleteGroup(id) {
+  const parent = sgGroupById(id)?.parent ?? null;
   sessionGroups = sessionGroups.filter((g) => g.id !== id);
+  for (const g of sessionGroups) if (g.parent === id) g.parent = parent;
   if (collapsedProjectGroups.delete(sgKey(id))) persistCollapsedGroups();
   persistSessionGroups();
 }
@@ -5136,11 +5242,6 @@ function initSessionGroupsDnd() {
   sessionsList.addEventListener('touchstart', sgOnTouchStart, { passive: true });
   sessionsList.addEventListener('touchend', sgCancelLongPress);
   sessionsList.addEventListener('touchmove', sgCancelLongPress, { passive: true });
-  window.addEventListener('storage', (e) => {
-    if (e.key !== SESSION_GROUPS_KEY) return;
-    loadSessionGroups();
-    renderSessions();
-  });
 }
 //#endregion
 
@@ -6972,7 +7073,7 @@ function _findOrphanedKeys(known) {
   for (const key of store.keys()) {
     const pad = _parsePadKey(key);
     if (pad?.kind === 'group') {
-      if (!sgGroupById(pad.id)) orphaned.push(key);
+      if (sgRev !== null && !sgGroupById(pad.id)) orphaned.push(key);
       continue;
     }
     const prefix = pad ? null : sessionKeyPrefixes.find((p) => key.startsWith(p));
@@ -9184,6 +9285,9 @@ function setupEventSource() {
         fetchSessions().catch(() => {});
         if (currentSessionId) fetchTasks(currentSessionId);
         refetchPaneLayout();
+        if (sgRev === null) syncSessionGroups();
+        else if (sgUnsent) persistSessionGroups();
+        else sgRefresh();
         if (terminalAvailable())
           loadTerminals()
             .then(renderSessions)
@@ -9294,6 +9398,10 @@ function setupEventSource() {
 
       if (data.type === 'session:pin') {
         handleSessionPinEvent(data);
+      }
+
+      if (data.type === 'group:changed') {
+        onGroupChanged(data);
       }
 
       if (data.type === 'pane:changed') {
@@ -14698,7 +14806,7 @@ function syncShowFocus() {
 // An HTML card's own keys and scroll keys reach it only inside its frame.
 function focusShowBody() {
   const frame = showState.frame;
-  if (frame?.isConnected) frame.focus();
+  if (frame?.isConnected && frame.loaded) frame.focus();
   else showCardEl()?.querySelector('.show-body')?.focus();
 }
 
@@ -14997,9 +15105,13 @@ function setShowReview(opts) {
 function createShowFrame(title, srcdoc) {
   const frame = createPreviewFrame('show-frame', srcdoc, 'allow-scripts');
   frame.title = title;
-  // Focus given before a document loads stays on the frame element, out of the document's keys.
+  // Focus given before the first document loads stays on the frame element, out of the document's
+  // keys, and the document never reports focus or blur, so the body holds focus until then.
   frame.addEventListener('load', () => {
-    if (frame === document.activeElement) frame.contentWindow?.focus();
+    const waited = !frame.loaded && document.activeElement === frame.parentElement;
+    frame.loaded = true;
+    if (waited) frame.focus();
+    else if (frame === document.activeElement) frame.contentWindow?.focus();
   });
   showState.frame = frame;
   showState.frameFocused = false;
@@ -15884,7 +15996,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 loadSidebarState();
 for (const p of readStoredList(COLLAPSED_GROUPS_KEY)) collapsedProjectGroups.add(p);
-loadSessionGroups();
+syncSessionGroups();
 initSessionGroupsDnd();
 initSessionPicker();
 initProjectPicker();

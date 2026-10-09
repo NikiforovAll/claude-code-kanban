@@ -53,6 +53,7 @@ const { createShowStore, mountShowRoutes, showBodyParser, SHOW_PATH } = require(
 const { readLiveSessions, isPidAlive, isSessionLive } = require('./lib/live-sessions');
 const { createProcStats } = require('./lib/proc-stats');
 const { createGroupStore, isGroupName, suggestGroupName } = require('./lib/dispatch-groups');
+const { createUserGroupStore } = require('./lib/user-groups');
 const { createDispatchedStore, scanTranscripts, pruneSessionDirs, pruneContextStatus, pruneTaskMaps, retentionMs } = require('./lib/retention');
 const { freshRateLimits } = require('./lib/rate-limits');
 const { createWorktreeStore } = require('./lib/worktrees');
@@ -111,6 +112,7 @@ const AGENT_ACTIVITY_DIR = path.join(CCK_DIR, 'agent-activity');
 const CONTEXT_STATUS_DIR = path.join(CCK_DIR, 'context-status');
 const PINS_FILE = path.join(CCK_DIR, 'pins.json');
 const DISPATCH_GROUPS_FILE = path.join(CCK_DIR, 'dispatch-groups.json');
+const USER_GROUPS_FILE = path.join(CCK_DIR, 'groups.json');
 const DISPATCHED_FILE = path.join(CCK_DIR, 'dispatched.json');
 const WORKTREES_FILE = path.join(CCK_DIR, 'worktrees.json');
 const LINKED_DOCS_FILE = path.join(CCK_DIR, 'linked-docs.json');
@@ -3964,6 +3966,68 @@ app.get('/api/session/pins', (_req, res) => {
     res.status(500).json({ error: error.message || 'Failed' });
   }
 });
+
+// #region USER_GROUPS
+const userGroupsFileStamp = () => {
+  try {
+    const s = statSync(USER_GROUPS_FILE);
+    return `${s.mtimeMs}:${s.size}`;
+  } catch {
+    return null;
+  }
+};
+let userGroupsStamp;
+const userGroups = createUserGroupStore({
+  load: () => {
+    const stamp = userGroupsFileStamp();
+    if (stamp === userGroupsStamp) return undefined;
+    userGroupsStamp = stamp;
+    return readJsonOrNull(USER_GROUPS_FILE);
+  },
+  save: (data) => {
+    writeJsonAtomicOrLog(USER_GROUPS_FILE, data);
+    userGroupsStamp = userGroupsFileStamp();
+  },
+});
+// The watcher tells this board's pages about another board's write; the reload in each route
+// covers a write that lands before the watcher fires.
+chokidar.watch(USER_GROUPS_FILE, { ignoreInitial: true }).on('all', (event) => {
+  if ((event === 'add' || event === 'change') && userGroups.reload()) {
+    broadcast({ type: 'group:changed', rev: userGroups.state().rev });
+  }
+});
+
+// A 409 is a stale rev and carries the current state, so the board needs no second read.
+function groupRoute(fn) {
+  return (req, res, next) => {
+    userGroups.reload();
+    const before = userGroups.state().rev;
+    let out;
+    try {
+      out = fn(req.body || {}, req.params);
+    } catch (e) {
+      if (e.status === 409) return res.status(409).json({ error: e.message, ...userGroups.state() });
+      return next(e);
+    }
+    res.json(out);
+    if (out.rev !== before) broadcast({ type: 'group:changed', rev: out.rev });
+  };
+}
+
+app.get('/api/groups', (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  userGroups.reload();
+  res.json(userGroups.state());
+});
+app.post('/api/groups', groupRoute((b) => userGroups.create(b)));
+app.put('/api/groups', groupRoute((b) => userGroups.replace(b)));
+app.post('/api/groups/import', groupRoute((b) => userGroups.importLocal(b)));
+app.post('/api/groups/ungroup', groupRoute((b) => userGroups.ungroup(b)));
+app.post('/api/groups/release', groupRoute((b) => userGroups.release(b.ids)));
+app.patch('/api/groups/:id', groupRoute((b, p) => userGroups.update(p.id, b)));
+app.delete('/api/groups/:id', groupRoute((_b, p) => userGroups.remove(p.id)));
+app.put('/api/groups/:id/members', groupRoute((b, p) => userGroups.place(p.id, b)));
+// #endregion
 
 app.get('/api/preview', async (req, res) => {
   const abs = resolvePreviewPath(req.query.path, req.query.base);

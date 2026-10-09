@@ -152,6 +152,7 @@ The server, the plugin and the installer keep their state in `<config-dir>/.cck/
 | `pins.json` | Server | Copy of the browser's session pins, so the CLI can read them |
 | `linked-docs.json` | Server | Docs linked with `doc link`, so a link sent while no board is open is not lost |
 | `dispatched.json` | Server | Sessions started with `dispatch start` |
+| `groups.json` | Server | Session groups you make on the board |
 | `dispatch-groups.json` | Server | Groups made with `dispatch start --group` |
 | `panes.json` | Server | Pane layout of each session |
 | `reviews/<sessionId>/<time>.md` | Server | Review comments sent to a session |
@@ -171,7 +172,6 @@ The server deletes old entries every hour. Session data such as dispatch markers
 
 Some data stays in the browser's `localStorage` and never reaches the server:
 
-- Session groups
 - Pinned messages
 - Linked documents added on the board (links made with `doc link` are also in `linked-docs.json`)
 - Scratchpad notes

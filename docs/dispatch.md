@@ -35,5 +35,5 @@ A started session must not jump into a group after it appears, so its place is d
 - `--group` puts the started session in the group. The starter stays where it is, because moving it would jump it under the user.
 - A group lives while any member's claude runs (a cck terminal or a live registry pid), and for 60 s after (a claude that has not registered yet, a resume, registry lag).
 - After that, only pinned members (`pins.json`) stay. So a pinned group survives a server restart; everything else returns to its project block, once its session has ended.
-- Named groups (localStorage) win: a session the user placed, or whose project sits in a named group, stays there. A named group with the transient group's name takes its sessions in.
+- Named groups (`.cck/groups.json`) win: a session the user placed, or whose project sits in a named group, stays there. A named group with the transient group's name takes its sessions in.
 - **Keep** on a transient group header creates a named group with the same name and its sessions. Later dispatches with that `--group` land in it by name.
