@@ -3410,6 +3410,7 @@ const show = createShowStore({
   load: () => savedTerminals.showSessions,
   onChange: saveTerminals,
   onPosted: (e) => broadcast({ type: 'show:posted', ...e }),
+  startedSession: terminal.sessionOfTerminal,
   resolveDir: (id) => {
     const meta = sessionMetaFor(id);
     return meta ? getScratchpadDir(id, meta) : null;

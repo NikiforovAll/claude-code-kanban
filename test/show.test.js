@@ -342,4 +342,28 @@ describe('show store', () => {
     assert.deepEqual(store.prune((id) => id === TERMINAL), { [TERMINAL]: A });
     assert.equal(store.sessionOf(OTHER_TERMINAL), null);
   });
+
+  it('gives a session resumed in a new terminal its posts', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cck-show-resume-'));
+    try {
+      let saves = 0;
+      const store = createShowStore({
+        load: () => null,
+        onChange: () => saves++,
+        resolveDir: (id) => ([A, B].includes(id) ? path.join(root, id) : null),
+        startedSession: (id) => ({ [OTHER_TERMINAL]: A, [UNKNOWN]: B })[id] ?? null,
+      });
+      store.post(TERMINAL, { sessionId: A, title: 'Plan', key: 'plan', kind: 'markdown', file: null });
+      store.prune((id) => id !== TERMINAL);
+      saves = 0;
+      const { sessionId, posts } = store.list(OTHER_TERMINAL);
+      assert.equal(sessionId, A);
+      assert.deepEqual(posts.map((p) => p.key), ['plan']);
+      assert.equal(saves, 1);
+      assert.equal(store.sessionOf(UNKNOWN), null, 'a started session with no posts stays unmapped');
+      assert.equal(saves, 1);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

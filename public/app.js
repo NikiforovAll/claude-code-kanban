@@ -14544,6 +14544,7 @@ async function endAllTerminals() {
 // stays. Nothing here runs until the terminal view shows a terminal that has posts.
 const SHOW_MSG = 'cck-show:';
 const SHOW_SIZE_KEY = 'cck-show-size-v2';
+const SHOW_VIEW_KEY = 'cck-show-view-v1';
 const SHOW_MIN_W = 280;
 const SHOW_MIN_H = 120;
 const SHOW_INSET = 8;
@@ -14624,6 +14625,8 @@ const showState = {
   path: null,
 };
 let showSize = store.readJson(SHOW_SIZE_KEY);
+// Terminal id → 'collapsed' | 'expanded'; an open card has no entry. Ids gone from the terminal list are pruned.
+const showViews = store.readJson(SHOW_VIEW_KEY, {});
 let showHostObserver = null;
 
 function showCardEl() {
@@ -14671,18 +14674,41 @@ function showCardKey(e) {
   confirmModal({ title: 'Remove post', message, okLabel: 'Remove' }).then((ok) => {
     if (!ok || showState.posts[showState.idx]?.id !== p.id) return;
     showCommand('remove');
-    focusBody();
+    focusAfterShowRemove();
   });
   return true;
+}
+
+// The removed post took the focused body or button with it.
+function focusAfterShowRemove() {
+  if (showState.posts.length) focusShowBody();
+  else focusTerminalPane();
 }
 
 function showIcon(name) {
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${SHOW_ICONS[name]}</svg>`;
 }
 
+// An empty list can be a host that has not restored its terminals yet, so it prunes nothing.
 function rememberTerminalIds(list) {
   terminalIds.clear();
   for (const t of list) if (t.terminalId) terminalIds.set(t.id, t.terminalId);
+  if (!terminalIds.size) return;
+  const live = new Set(terminalIds.values());
+  const gone = Object.keys(showViews).filter((tid) => !live.has(tid));
+  if (!gone.length) return;
+  for (const tid of gone) delete showViews[tid];
+  store.writeJson(SHOW_VIEW_KEY, showViews);
+}
+
+function saveShowView() {
+  const tid = showState.terminalId;
+  if (!tid) return;
+  const view = showState.collapsed ? 'collapsed' : showState.expanded ? 'expanded' : null;
+  if ((showViews[tid] ?? null) === view) return;
+  if (view) showViews[tid] = view;
+  else delete showViews[tid];
+  store.writeJson(SHOW_VIEW_KEY, showViews);
 }
 
 function resetShowPosts() {
@@ -14700,7 +14726,14 @@ function syncShowCard() {
   }
   const tid = pty ? (terminalIds.get(pty) ?? null) : null;
   if (tid === showState.terminalId) return;
-  Object.assign(showState, { terminalId: tid, sessionId: null, idx: 0 });
+  const view = tid ? showViews[tid] : null;
+  Object.assign(showState, {
+    terminalId: tid,
+    sessionId: null,
+    idx: 0,
+    collapsed: view === 'collapsed',
+    expanded: view === 'expanded',
+  });
   resetShowPosts();
   renderShow();
   if (tid) loadShowPosts(tid, { newest: true }).then((ok) => ok && renderShow());
@@ -14784,6 +14817,7 @@ function showTicksHtml() {
 }
 
 function renderShow({ flash = false } = {}) {
+  saveShowView();
   const card = showCardEl();
   const chip = document.getElementById('show-reopen');
   const n = showState.posts.length;
@@ -15117,6 +15151,7 @@ function initShowCard() {
     if (b) {
       if (!b.disabled) showCommand(b.dataset.show === 'remove' && e.shiftKey ? 'clear' : b.dataset.show);
       if (b.dataset.show === 'collapse' && !showState.collapsed) focusShowBody();
+      if (b.dataset.show === 'remove') focusAfterShowRemove();
       return;
     }
     const t = e.target.closest('[data-go]');
