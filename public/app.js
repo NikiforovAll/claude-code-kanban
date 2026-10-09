@@ -13725,7 +13725,8 @@ function toggleShowFocus() {
     return;
   }
   if (!wantsTerminal() || !showState.posts.length) return;
-  if (showClosed.delete(showState.terminalId) || showState.collapsed) {
+  if (showState.closed || showState.collapsed) {
+    showState.closed = false;
     showState.collapsed = false;
     renderShow();
   }
@@ -14604,12 +14605,12 @@ const SHOW_ICONS = {
 // PTY id → terminal id, from the terminal list. A terminal started after the last list read is
 // missing until a post asks for it.
 const terminalIds = new Map();
-const showClosed = new Set();
 const showState = {
   terminalId: null,
   sessionId: null,
   posts: [],
   idx: 0,
+  closed: false,
   expanded: false,
   collapsed: false,
   marked: new Set(),
@@ -14625,8 +14626,11 @@ const showState = {
   path: null,
 };
 let showSize = store.readJson(SHOW_SIZE_KEY);
-// Terminal id → 'collapsed' | 'expanded'; an open card has no entry. Ids gone from the terminal list are pruned.
+// Terminal id → { closed?, collapsed?, expanded? }; no entry when no flag is set. Ids gone from the terminal list are pruned.
 const showViews = store.readJson(SHOW_VIEW_KEY, {});
+// Older boards stored the string 'collapsed' or 'expanded'.
+for (const [tid, v] of Object.entries(showViews)) if (typeof v === 'string') showViews[tid] = { [v]: true };
+const SHOW_VIEW_FLAGS = ['closed', 'collapsed', 'expanded'];
 let showHostObserver = null;
 
 function showCardEl() {
@@ -14701,14 +14705,17 @@ function rememberTerminalIds(list) {
   store.writeJson(SHOW_VIEW_KEY, showViews);
 }
 
-function saveShowView() {
-  const tid = showState.terminalId;
-  if (!tid) return;
-  const view = showState.collapsed ? 'collapsed' : showState.expanded ? 'expanded' : null;
-  if ((showViews[tid] ?? null) === view) return;
-  if (view) showViews[tid] = view;
+function setShowView(tid, view) {
+  const set = SHOW_VIEW_FLAGS.filter((f) => view[f]);
+  const old = showViews[tid] || {};
+  if (SHOW_VIEW_FLAGS.every((f) => !!old[f] === set.includes(f))) return;
+  if (set.length) showViews[tid] = Object.fromEntries(set.map((f) => [f, true]));
   else delete showViews[tid];
   store.writeJson(SHOW_VIEW_KEY, showViews);
+}
+
+function saveShowView() {
+  if (showState.terminalId) setShowView(showState.terminalId, showState);
 }
 
 function resetShowPosts() {
@@ -14726,14 +14733,9 @@ function syncShowCard() {
   }
   const tid = pty ? (terminalIds.get(pty) ?? null) : null;
   if (tid === showState.terminalId) return;
-  const view = tid ? showViews[tid] : null;
-  Object.assign(showState, {
-    terminalId: tid,
-    sessionId: null,
-    idx: 0,
-    collapsed: view === 'collapsed',
-    expanded: view === 'expanded',
-  });
+  const view = (tid && showViews[tid]) || {};
+  Object.assign(showState, { terminalId: tid, sessionId: null, idx: 0 });
+  for (const f of SHOW_VIEW_FLAGS) showState[f] = !!view[f];
   resetShowPosts();
   renderShow();
   if (tid) loadShowPosts(tid, { newest: true }).then((ok) => ok && renderShow());
@@ -14753,6 +14755,9 @@ async function loadShowPosts(tid, { newest = false } = {}) {
 
 async function onShowPosted(d) {
   if (typeof d.terminalId !== 'string') return;
+  const view = showViews[d.terminalId];
+  if (!d.replaced && view?.closed && d.terminalId !== showState.terminalId)
+    setShowView(d.terminalId, { ...view, closed: false });
   if (!showState.terminalId) {
     if (!wantsTerminal()) return;
     if (!terminalIds.has(currentSessionId)) showState.lookup = null;
@@ -14770,7 +14775,7 @@ async function onShowPosted(d) {
     return renderShow();
   }
   showState.idx = i;
-  showClosed.delete(d.terminalId);
+  showState.closed = false;
   renderShow({ flash: true });
 }
 
@@ -14821,7 +14826,7 @@ function renderShow({ flash = false } = {}) {
   const card = showCardEl();
   const chip = document.getElementById('show-reopen');
   const n = showState.posts.length;
-  const open = n > 0 && !showClosed.has(showState.terminalId);
+  const open = n > 0 && !showState.closed;
   chip.hidden = !n || open;
   chip.querySelector('.show-reopen-n').textContent = `show · ${n}`;
   card.classList.toggle('open', open);
@@ -15111,7 +15116,7 @@ function showCommand(cmd) {
   else if (cmd === 'expand') {
     showState.expanded = !showState.expanded;
     showState.collapsed = false;
-  } else if (cmd === 'close') showClosed.add(tid);
+  } else if (cmd === 'close') showState.closed = true;
   else if (cmd === 'remove') {
     const id = showState.posts[showState.idx]?.id;
     if (!id) return;
@@ -15201,7 +15206,7 @@ function initShowCard() {
     layoutShow();
   });
   document.getElementById('show-reopen').addEventListener('click', () => {
-    showClosed.delete(showState.terminalId);
+    showState.closed = false;
     renderShow({ flash: true });
   });
 }
