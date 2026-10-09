@@ -188,19 +188,22 @@ const COMMANDS = {
       },
       group: {
         summary: 'Move a session into a group in the sidebar',
-        usage: 'claude-code-kanban session group <id> (<group> | --with <session>) [--create] [--json]',
+        usage: 'claude-code-kanban session group <id> (<group> | --with <session> | --parent <session>) [--no-parent] [--create] [--json]',
         flags: {
           '<id>': 'Full session id, or a unique prefix',
-          '<group>': 'Group name (any case) or group id, from `group list`',
+          '<group>': 'Group name (any case), path from the top (parent/child) or id, from `group list`',
           '--with <session>': 'Join the group this other session shows in (id or unique prefix)',
-          '--create': 'Make the group when none matches; with --with, it holds both sessions',
-          '--json': 'Output JSON ({group, name, created, left, rev})',
+          '--parent <session>': 'Show the session under this one, indented, when both are in the same list; alone, it also joins its group',
+          '--no-parent': 'Show the session on its own again',
+          '--create': 'Make the group, and the missing parents of a path, when none matches; with --with, it holds both sessions',
+          '--json': 'Output JSON ({group, name, path, created, left, rev})',
         },
         notes: 'The session leaves the group it was in. In a group that holds its project, it shows in that project\'s block.',
         examples: [
           'claude-code-kanban session group $CLAUDE_SESSION_ID "Auth refactor"',
-          'claude-code-kanban session group 3fa9c1 release-prep --create',
+          'claude-code-kanban session group 3fa9c1 auth-refactor/swarm-1 --create',
           'claude-code-kanban session group 3fa9c1 --with $CLAUDE_SESSION_ID --create',
+          'claude-code-kanban session group 3fa9c1 --parent $CLAUDE_SESSION_ID',
         ],
         run: runSessionGroupCli,
       },
@@ -226,7 +229,7 @@ const COMMANDS = {
         flags: {
           '--json': 'Output JSON ({rev, groups: [{id, name, parent, members: [{type, ref}]}]})',
         },
-        notes: 'Pass a name or id to `session group`. Dispatch groups are not listed: they go when their sessions end.',
+        notes: 'Pass a name, a path (parent/child) or an id to `session group`. Dispatch groups are not listed: they go when their sessions end.',
         examples: ['claude-code-kanban group list'],
         run: runGroupListCli,
       },
@@ -883,22 +886,30 @@ async function runSessionPinCli(args) {
 const postSessionGroup = (id, body, label) => cliPostJson(`/api/sessions/${encodeURIComponent(id)}/group`, body, label);
 
 async function runSessionGroupCli(args, entry) {
-  const [idArg, groupArg] = positionals(args, ['--with']);
-  const withArg = getArgValue(args, 'with');
-  if (!idArg || (!groupArg && !withArg)) {
+  const [idArg, groupArg] = positionals(args, ['--with', '--parent']);
+  const parentArg = getArgValue(args, 'parent');
+  const withFlag = getArgValue(args, 'with');
+  const noParent = args.includes('--no-parent');
+  if (!idArg || (!groupArg && !withFlag && !parentArg)) {
     printLeafHelp(entry);
     return 1;
   }
-  if (groupArg && withArg) return usageError(entry, 'Give one of <group> or --with.');
-  const [resolved, peer] = await Promise.all([idArg, withArg].map((a) => a && resolveSessionByIdOrPrefix(a)));
-  if (!resolved || (withArg && !peer)) return 1;
+  if (groupArg && withFlag) return usageError(entry, 'Give one of <group> or --with.');
+  if (parentArg && noParent) return usageError(entry, 'Give one of --parent or --no-parent.');
+  const [resolved, withPeer, parent] = await Promise.all([idArg, withFlag, parentArg].map((a) => a && resolveSessionByIdOrPrefix(a)));
+  if (!resolved || (withFlag && !withPeer) || (parentArg && !parent)) return 1;
+  // With no group, --parent also names the group to join.
+  const peer = withPeer || (!groupArg && parent);
   const create = args.includes('--create');
+  const body = peer ? { with: peer.id, create } : { group: groupArg, create };
+  if (parent) body.parent = parent.id;
+  else if (noParent) body.parent = null;
   try {
-    const out = await postSessionGroup(resolved.id, peer ? { with: peer.id, create } : { group: groupArg, create }, 'Group');
+    const out = await postSessionGroup(resolved.id, body, 'Group');
     if (!out) return 1;
-    const { group, name, created, left, rev } = out;
-    if (args.includes('--json')) console.log(JSON.stringify({ group, name, created, left, rev }, null, 2));
-    else console.log(`Session ${resolved.id.slice(0, 8)} moved to ${created ? 'new ' : ''}group "${name}" (${group})`);
+    const { group, name, path, created, left, rev } = out;
+    if (args.includes('--json')) console.log(JSON.stringify({ group, name, path, created, left, rev }, null, 2));
+    else console.log(`Session ${resolved.id.slice(0, 8)} moved to ${created ? 'new ' : ''}group "${path}" (${group})`);
     return 0;
   } catch (e) { reportCliError(e); return 1; }
 }

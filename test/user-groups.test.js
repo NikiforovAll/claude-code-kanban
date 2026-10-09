@@ -195,6 +195,39 @@ describe('user groups', () => {
     assert.deepEqual(made.groups.at(-1).members, [{ type: 'session', ref: 's1' }]);
   });
 
+  it('finds a group by path from the top, and makes the missing steps', () => {
+    const s = harness().store();
+    s.create({ id: 'a', name: 'Auth-Refactor' });
+    s.create({ id: 'x', name: 'swarm-1' });
+    assert.equal(status(() => s.groupSession('s1', { group: 'auth-refactor/swarm-1' })), 404);
+    assert.equal(status(() => s.groupSession('s1', { group: 'auth-refactor//x' })), 400);
+    assert.equal(s.state().rev, 2);
+    const made = s.groupSession('s1', { group: 'auth-refactor/swarm-1', create: true });
+    assert.deepEqual([made.created, made.name, made.path], [true, 'swarm-1', 'Auth-Refactor/swarm-1']);
+    const child = made.groups.find((g) => g.id === made.group);
+    assert.equal(child.parent, 'a');
+    const again = s.groupSession('s2', { group: 'auth-refactor/swarm-1' });
+    assert.deepEqual([again.group, again.created], [made.group, false]);
+    const deep = s.groupSession('s3', { group: 'new/one/two', create: true });
+    assert.equal(deep.path, 'new/one/two');
+    assert.equal(s.state().groups.length, 6);
+  });
+
+  it('keeps a parent session inside the group and drops it on a move out', () => {
+    const s = harness().store();
+    s.create({ id: 'a', name: 'A' });
+    s.create({ id: 'b', name: 'B' });
+    assert.equal(status(() => s.groupSession('s1', { group: 'a', parent: 's1' })), 400);
+    s.groupSession('s1', { group: 'a', parent: 'lead' });
+    s.place('a', { type: 'session', ref: 's1', loose: true });
+    assert.deepEqual(s.state().groups[0].members, [{ type: 'session', ref: 's1', loose: true, parent: 'lead' }]);
+    s.groupSession('s1', { group: 'b' });
+    assert.deepEqual(s.state().groups[1].members, [{ type: 'session', ref: 's1' }]);
+    s.groupSession('s1', { group: 'b', parent: 'lead' });
+    s.groupSession('s1', { group: 'b', parent: null });
+    assert.deepEqual(s.state().groups[1].members, [{ type: 'session', ref: 's1' }]);
+  });
+
   it('puts a session in the group another session shows in', () => {
     const s = harness().store();
     s.create({ id: 'a', name: 'A', members: [{ type: 'session', ref: 'p1' }] });

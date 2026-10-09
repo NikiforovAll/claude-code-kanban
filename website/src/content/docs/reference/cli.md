@@ -243,12 +243,16 @@ Pins the session in the sidebar. `--sticky` makes it sticky: always shown, at th
 ### session group
 
 ```bash
-claude-code-kanban session group <id> (<group> | --with <session>) [--create] [--json]
+claude-code-kanban session group <id> (<group> | --with <session> | --parent <session>) [--no-parent] [--create] [--json]
 ```
 
 Moves the session into a group in the sidebar. `<group>` is a group name, in any case, or a group id, as [`group list`](#group-list) prints them. The session leaves the group it was in. In a group that holds the session's project, the session shows in that project's block; else it shows on the group's own level. With no group of that name, the command fails and lists the groups; `--create` makes the group instead. Two groups with the same name need the group id.
 
-`--with <session>` puts the session in the group that another session shows in: the group that holds that session, else the group that holds its project, else a group named like its dispatch group. When that session is in no group, the command fails; `--create` makes a group named after it that holds both sessions. `--json` prints `{group, name, created, left, rev}`, where `left` is the name of the group the session was in.
+`<group>` can also be a path, such as `auth-refactor/swarm-1`: a top-level group, then a child group at each step. `--create` makes the steps that are missing. The sidebar shows a child group inside its parent.
+
+`--parent <session>` shows the session indented under another session, when both show in the same list of the group. Any session can be a parent; the kind of session does not matter. With no `<group>` or `--with`, the session also joins the parent's group. A move inside the group keeps the parent; a move to another group drops it. `--no-parent` drops it.
+
+`--with <session>` puts the session in the group that another session shows in: the group that holds that session, else the group that holds its project, else a group named like its dispatch group. When that session is in no group, the command fails; `--create` makes a group named after it that holds both sessions. `--json` prints `{group, name, path, created, left, rev}`, where `path` is the group's path from the top and `left` is the name of the group the session was in.
 
 ### session ungroup
 
@@ -282,7 +286,7 @@ Lists the subagents of the session with the columns `AGENT`, `STATUS`, `AGE`, `T
 claude-code-kanban group list [--json]
 ```
 
-Lists the session groups in sidebar order, with the columns `ID`, `PROJECTS`, `SESSIONS` and `NAME`. A nested group is indented under its parent. Pass a name or id from this list to `session group`. Dispatch groups are not listed, because they go when their sessions end. `--json` prints `{rev, groups}`, each group as `{id, name, parent, members}`.
+Lists the session groups in sidebar order, with the columns `ID`, `PROJECTS`, `SESSIONS` and `NAME`. A nested group is indented under its parent. Pass a name, a path or an id from this list to `session group`. Dispatch groups are not listed, because they go when their sessions end. `--json` prints `{rev, groups}`, each group as `{id, name, parent, members}`.
 
 ## task list
 

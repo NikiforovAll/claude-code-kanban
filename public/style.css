@@ -9567,6 +9567,28 @@ pre.mermaid svg {
   margin-left: 6px;
 }
 
+.session-group-sessions .session-group-sessions {
+  padding-left: 6px;
+  border-left: 1px solid var(--border);
+}
+
+.session-item.sg-child {
+  width: calc(100% - var(--sg-indent));
+  margin-left: var(--sg-indent);
+}
+
+.session-item.sg-depth-1 {
+  --sg-indent: 14px;
+}
+
+.session-item.sg-depth-2 {
+  --sg-indent: 28px;
+}
+
+.session-item.sg-depth-3 {
+  --sg-indent: 42px;
+}
+
 .session-group-sessions.collapsed,
 .sg-section-body.collapsed {
   display: none;
@@ -9615,6 +9637,23 @@ pre.mermaid svg {
 
 .session-item.sg-insert-before::after {
   top: -5px;
+}
+
+/* A drop on the top edge of a child group's header goes to its parent group. */
+.session-group-header.sg-insert-parent {
+  position: relative;
+}
+
+.session-group-header.sg-insert-parent::after {
+  content: '';
+  position: absolute;
+  top: -3px;
+  left: -8px;
+  right: 4px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+  pointer-events: none;
 }
 
 .session-item.sg-insert-after::after {

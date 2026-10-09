@@ -3790,8 +3790,38 @@ function renderSessions() {
 
   const outside = sidebarSearch.rows(zenMode ? '' : searchQuery, filteredSessions);
 
+  const childDepth = new Map();
+  const parentOf = new Map();
+  for (const g of sessionGroups) for (const m of g.members) if (m.parent) parentOf.set(m.ref, m.parent);
+  const nestChildren = (list) => {
+    if (parentOf.size === 0) return list;
+    const ids = new Set(list.map((s) => s.id));
+    const kids = new Map();
+    for (const s of list) {
+      const p = parentOf.get(s.id);
+      if (p && ids.has(p)) {
+        if (!kids.has(p)) kids.set(p, []);
+        kids.get(p).push(s);
+      }
+    }
+    if (kids.size === 0) return list;
+    const out = [];
+    const seen = new Set();
+    const add = (s, depth) => {
+      if (seen.has(s.id)) return;
+      seen.add(s.id);
+      out.push(s);
+      if (depth) childDepth.set(s.id, Math.min(depth, 3));
+      for (const k of kids.get(s.id) || []) add(k, depth + 1);
+    };
+    for (const s of list) if (!ids.has(parentOf.get(s.id))) add(s, 0);
+    // Sessions that are each other's parents have no top; show them as they came.
+    for (const s of list) add(s, 0);
+    return out;
+  };
+
   const renderSessionCard = (session) => {
-    if (session.placeholder) return renderPlaceholderCard(session);
+    if (session.placeholder) return renderPlaceholderCard(session, childDepth.get(session.id));
     const total = session.taskCount;
     const percent = total > 0 ? Math.round((session.completed / total) * 100) : 0;
     const isActive = session.id === currentSessionId && viewMode === 'session';
@@ -3830,7 +3860,7 @@ function renderSessions() {
         : '';
     const metricsHtml = progressHtml + (showCtx ? renderContextBar(session) : '');
     return `
-          <button onclick="openSession('${sid}')" draggable="true" data-session-id="${escapeHtml(session.id)}" class="session-item ${isActive ? 'active' : ''} ${sessionBarClass(session)} ${tempClass} ${idleClass} ${justFinishedClass}">
+          <button onclick="openSession('${sid}')" draggable="true" data-session-id="${escapeHtml(session.id)}" class="session-item ${isActive ? 'active' : ''} ${sessionBarClass(session)} ${tempClass} ${idleClass} ${justFinishedClass}${childDepthClass(childDepth.get(session.id))}">
             <span class="session-pin-btn${pinClass}" onclick="event.stopPropagation();toggleSessionPin('${sid}')" title="${pinTitle} session">${pinState === 'sticky' ? SESSION_STAR_SVG : SESSION_PIN_SVG}</span>
             <div class="session-name">${escapeHtml(sessionName)}</div>
             ${projectHtml ? `<div class="session-secondary">${projectHtml}</div>` : ''}
@@ -3939,11 +3969,11 @@ function renderSessions() {
   const groupPinned = store.getItem(GROUP_PINNED_KEY) !== 'false';
   const pinWeight = (s) => (isPlacedSticky(s.id) ? 2 : isInPinnedGroup(s) ? 1 : 0);
   const pinSort = (a, b) => pinWeight(b) - pinWeight(a);
-  const renderGroupSessions = (sessions, pinKey) => {
-    if (!groupPinned || pinnedSessionIds.size === 0) return sessions.map(renderSessionCard).join('');
-    const gIdlePinned = sessions.filter(isInPinnedGroup);
-    if (gIdlePinned.length === 0) return sessions.map(renderSessionCard).join('');
-    const gUnpinned = sessions.filter((s) => !isInPinnedGroup(s));
+  const renderGroupSessions = (list, pinKey) => {
+    if (!groupPinned || pinnedSessionIds.size === 0) return nestChildren(list).map(renderSessionCard).join('');
+    const gIdlePinned = nestChildren(list.filter(isInPinnedGroup));
+    if (gIdlePinned.length === 0) return nestChildren(list).map(renderSessionCard).join('');
+    const gUnpinned = nestChildren(list.filter((s) => !isInPinnedGroup(s)));
     const pinCollapsed = collapsedProjectGroups.has(pinKey);
     return (
       '<div class="pinned-sub-section">' +
@@ -4020,67 +4050,94 @@ function renderSessions() {
   // shows its drop-here state instead of vanishing.
   const sgFiltering = !!searchQuery || activityFilter.size > 0 || (!!filterProject && filterProject !== '__recent__');
 
+  // A group whose parent is gone renders at the top.
+  const sgIds = new Set(sessionGroups.map((g) => g.id));
+  const sgChildren = new Map();
+  for (const g of sessionGroups) {
+    const p = g.parent && sgIds.has(g.parent) ? g.parent : null;
+    if (!sgChildren.has(p)) sgChildren.set(p, []);
+    sgChildren.get(p).push(g);
+  }
+  const sgSubtree = new Map();
+  const sgSubtreeOf = (group) => {
+    let all = sgSubtree.get(group.id);
+    if (!all) {
+      all = [...(sgBuckets.get(group.id) || []), ...(sgChildren.get(group.id) || []).flatMap(sgSubtreeOf)];
+      sgSubtree.set(group.id, all);
+    }
+    return all;
+  };
+
   // flat = the "All sessions" view, which has no project sub-blocks.
   const sgSectionHtml = (flat) => {
     const transient = [...transientGroups.values()];
     if (sessionGroups.length === 0 && transient.length === 0) return '';
     let out = '';
-    for (const group of [...sessionGroups, ...transient]) {
-      const bucket = sgBuckets.get(group.id) || [];
-      if (bucket.length === 0 && sgFiltering) continue;
-      if (!groupPinned) bucket.sort(pinSort);
-      const collapsed = collapsedProjectGroups.has(sgKey(group.id));
-      let body = '';
-      if (flat) {
-        body = bucket.map(renderSessionCard).join('');
-      } else if (group.transient) {
-        // Each session under its own project block, so a worktree session reads as its repo's.
-        const byProject = new Map();
-        for (const s of bucket) {
-          const key = sessionProjectKey(s) || '';
-          if (!byProject.has(key)) byProject.set(key, []);
-          byProject.get(key).push(s);
-        }
-        for (const [p, arr] of byProject) {
-          body += p ? projectBlock(p, arr, true) : renderGroupSessions(arr, `__pinned_group_${group.id}__`);
-        }
-      } else {
-        const loose = [];
-        const byProject = new Map();
-        for (const s of bucket) {
-          const host = sgHostOf(group, s);
-          if (host) {
-            if (!byProject.has(host)) byProject.set(host, []);
-            byProject.get(host).push(s);
-          } else {
-            loose.push(s);
-          }
-        }
-        // Project members first (in the user's member order), then the individually placed
-        // sessions — one Pinned sub-section per group instead of one per interleaved run.
-        for (const m of group.members) {
-          if (m.type !== 'project') continue;
-          const arr = byProject.get(m.ref);
-          // A member project with nothing left in it still renders: it shows the membership, and
-          // it is the drop target for putting a session back under it.
-          if (arr?.length || !sgFiltering) body += projectBlock(m.ref, arr || [], true);
-        }
-        if (loose.length) {
-          // Individually placed sessions follow the order the user dragged them into.
-          const slot = new Map(group.members.map((m, i) => [`${m.type}:${m.ref}`, i]));
-          loose.sort((a, b) => (slot.get(`session:${a.id}`) ?? 0) - (slot.get(`session:${b.id}`) ?? 0));
-          // Label them, else a card sitting under the project blocks reads as stranded.
-          if (body) body += '<div class="sg-sub-label">Sessions</div>';
-          body += renderGroupSessions(loose, `__pinned_group_${group.id}__`);
-        }
-      }
-      if (!body) body = '<div class="sg-empty">Drop a session or a project here</div>';
-      const idAttr = group.transient ? '' : ` data-group-id="${escapeHtml(group.id)}"`;
-      out += sgHeaderHtml(group, countHtml(bucket));
-      out += `<div class="session-group-sessions${collapsed ? ' collapsed' : ''}"${idAttr}>${body}</div>`;
-    }
+    for (const group of [...(sgChildren.get(null) || []), ...transient]) out += sgGroupHtml(group, flat);
     if (!out) return '';
     return sectionHtml(SECTION_GROUPS, 'Groups', false, out);
+  };
+
+  const sgGroupHtml = (group, flat) => {
+    const bucket = sgBuckets.get(group.id) || [];
+    const subtree = group.transient ? bucket : sgSubtreeOf(group);
+    if (subtree.length === 0 && sgFiltering) return '';
+    if (!groupPinned) bucket.sort(pinSort);
+    const collapsed = collapsedProjectGroups.has(sgKey(group.id));
+    // Placed sessions follow the order the user dragged them into; a session that is here through
+    // its project takes the project's slot.
+    const slot = new Map(group.members.map((m, i) => [`${m.type}:${m.ref}`, i]));
+    const slotOf = (s) => slot.get(`session:${s.id}`) ?? slot.get(`project:${sessionProjectKey(s)}`) ?? 0;
+    const byMemberOrder = (a, b) => (groupPinned ? 0 : pinSort(a, b)) || slotOf(a) - slotOf(b);
+    let body = '';
+    if (flat) {
+      body = nestChildren([...bucket].sort(byMemberOrder))
+        .map(renderSessionCard)
+        .join('');
+    } else if (group.transient) {
+      // Each session under its own project block, so a worktree session reads as its repo's.
+      const byProject = new Map();
+      for (const s of bucket) {
+        const key = sessionProjectKey(s) || '';
+        if (!byProject.has(key)) byProject.set(key, []);
+        byProject.get(key).push(s);
+      }
+      for (const [p, arr] of byProject) {
+        body += p ? projectBlock(p, arr, true) : renderGroupSessions(arr, `__pinned_group_${group.id}__`);
+      }
+    } else {
+      const loose = [];
+      const byProject = new Map();
+      for (const s of bucket) {
+        const host = sgHostOf(group, s);
+        if (host) {
+          if (!byProject.has(host)) byProject.set(host, []);
+          byProject.get(host).push(s);
+        } else {
+          loose.push(s);
+        }
+      }
+      // Project members first (in the user's member order), then the individually placed
+      // sessions — one Pinned sub-section per group instead of one per interleaved run.
+      for (const m of group.members) {
+        if (m.type !== 'project') continue;
+        const arr = byProject.get(m.ref);
+        // A member project with nothing left in it still renders: it shows the membership, and
+        // it is the drop target for putting a session back under it.
+        if (arr?.length || !sgFiltering) body += projectBlock(m.ref, arr || [], true);
+      }
+      if (loose.length) {
+        loose.sort(byMemberOrder);
+        // Label them, else a card sitting under the project blocks reads as stranded.
+        if (body) body += '<div class="sg-sub-label">Sessions</div>';
+        body += renderGroupSessions(loose, `__pinned_group_${group.id}__`);
+      }
+    }
+    let childHtml = '';
+    if (!group.transient) for (const child of sgChildren.get(group.id) || []) childHtml += sgGroupHtml(child, flat);
+    if (!body && !childHtml) body = '<div class="sg-empty">Drop a session or a project here</div>';
+    const idAttr = group.transient ? '' : ` data-group-id="${escapeHtml(group.id)}"`;
+    return `${sgHeaderHtml(group, countHtml(subtree))}<div class="session-group-sessions${collapsed ? ' collapsed' : ''}"${idAttr}>${body}${childHtml}</div>`;
   };
 
   let html = '';
@@ -4675,6 +4732,7 @@ function sgApplyState(saved) {
           const out = { type: m.type, ref: m.ref };
           if (typeof m.under === 'string' && m.under) out.under = m.under;
           if (m.loose === true) out.loose = true;
+          if (typeof m.parent === 'string' && m.parent) out.parent = m.parent;
           return out;
         }),
     }));
@@ -4743,8 +4801,23 @@ function sgGroupById(id) {
   return sessionGroups.find((g) => g.id === id) || null;
 }
 
+// Matches MAX_DEPTH in lib/user-groups.js.
+const SG_MAX_DEPTH = 8;
+
+function sgPathOf(group) {
+  const names = [];
+  for (let g = group; g && names.length < SG_MAX_DEPTH; g = sgGroupById(g.parent)) names.unshift(g.name);
+  return names.join('/');
+}
+
 function sgGroupOf(type, ref) {
   return sessionGroups.find((g) => g.members.some((m) => m.type === type && m.ref === ref)) || null;
+}
+
+const sgMemberOf = (group, type, ref) => group?.members.find((m) => m.type === type && m.ref === ref);
+
+function sgSessionParent(id) {
+  return sgMemberOf(sgGroupOf('session', id), 'session', id)?.parent || null;
 }
 
 // An individually placed session wins over the placement of its project.
@@ -4770,6 +4843,8 @@ function sgTransientGroup(name) {
   }
   return group;
 }
+
+const childDepthClass = (depth) => (depth ? ` sg-child sg-depth-${depth}` : '');
 
 function dispatchedTitle({ parent }) {
   const starter = parent && sessions.find((s) => s.id === parent);
@@ -4817,10 +4892,12 @@ function sgHostOf(group, session) {
   return null;
 }
 // `opts.under` places the session under another project block of the group; `opts.loose` lifts it
-// out of its project block onto the group's own level.
+// out of its project block onto the group's own level. `opts.parent` follows the server's place():
+// left out, a move inside the group keeps it; null clears it.
 function sgAssign(groupId, type, ref, opts = {}) {
   const group = sgGroupById(groupId);
   if (!group) return;
+  const parent = opts.parent !== undefined ? opts.parent : sgMemberOf(group, type, ref)?.parent;
   sgDetach(type, ref);
   // Pulling a whole project in supersedes the individual placements of its sessions.
   if (type === 'project') {
@@ -4834,10 +4911,11 @@ function sgAssign(groupId, type, ref, opts = {}) {
     type === 'session' && !under && !loose && group.members.some((m) => m.type === 'project' && m.ref === own);
   // The group already holds the session's project — a separate placement would only strand
   // the card at the bottom of the group, away from its project block.
-  if (!covered) {
+  if (!covered || parent) {
     const member = { type, ref };
     if (under) member.under = under;
     if (loose) member.loose = true;
+    if (parent) member.parent = parent;
     group.members.push(member);
   }
   persistSessionGroups();
@@ -4884,13 +4962,17 @@ function sgReorderGroup(dragId, targetId) {
   persistSessionGroups();
 }
 
-// Typing a group name should surface the sessions inside it.
+// Typing a group name should surface the sessions inside it and inside its child groups.
 function sgSearchMatchIds(query) {
   const ids = new Set();
   if (!query) return ids;
-  const hits = sessionGroups.filter((g) => fuzzyMatch(g.name, query));
-  if (hits.length === 0) return ids;
-  const hitIds = new Set(hits.map((g) => g.id));
+  const hits = new Set(sessionGroups.filter((g) => fuzzyMatch(g.name, query)).map((g) => g.id));
+  if (hits.size === 0) return ids;
+  const underHit = (g) => {
+    for (let p = g, n = 0; p && n < SG_MAX_DEPTH; p = sgGroupById(p.parent), n++) if (hits.has(p.id)) return true;
+    return false;
+  };
+  const hitIds = new Set(sessionGroups.filter(underHit).map((g) => g.id));
   for (const s of sessions) {
     const group = sgGroupForSession(s);
     if (group && hitIds.has(group.id)) ids.add(s.id);
@@ -4963,7 +5045,7 @@ function sgCommitRename(input, save) {
 // At most one zone is lit, so the reference is enough - dragover fires many times a second.
 let sgLitZone = null;
 let sgDragEl = null;
-const SG_LIT_CLASSES = ['sg-drop-over', 'sg-insert-before', 'sg-insert-after'];
+const SG_LIT_CLASSES = ['sg-drop-over', 'sg-insert-before', 'sg-insert-after', 'sg-insert-parent'];
 const SG_LIT_SELECTOR = SG_LIT_CLASSES.map((c) => `.${c}`).join(', ');
 
 function sgClearDropTargets() {
@@ -4988,15 +5070,43 @@ function sgInsertHit(card, e, share) {
   return { zone: card, cls: after ? 'sg-insert-after' : 'sg-insert-before', insert: { card, after } };
 }
 
+// Outside the Active filter the sidebar sorts ungrouped cards itself, so only a group's members,
+// which keep their own order, take an insert there.
 function sgSiblingCard(target) {
-  if (sgDrag?.kind !== 'session' || sessionFilter !== 'active' || !sgDragEl) return null;
+  if (sgDrag?.kind !== 'session' || !sgDragEl) return null;
   const card = target.closest('.session-item');
-  return card && card !== sgDragEl && card.parentElement === sgDragEl.parentElement ? card : null;
+  if (!card || card === sgDragEl || card.parentElement !== sgDragEl.parentElement) return null;
+  if (sessionFilter === 'active') return card;
+  const group = sgGroupOf('session', sgDrag.ref);
+  return group && sgGroupOf('session', card.dataset.sessionId) === group ? card : null;
+}
+
+function sgDescendsFrom(id, ancestor) {
+  for (let p = sgSessionParent(id), n = 0; p && n < SG_MAX_DEPTH; p = sgSessionParent(p), n++) {
+    if (p === ancestor) return true;
+  }
+  return false;
+}
+
+// A child group's header drops into its parent group on its top edge, and wherever its own group
+// would refuse the drop. Without it a session in the child group has no way up when the parent's
+// header is off screen: the gap above is a few pixels.
+// A child group renders inside its parent's body, so that body is the parent's drop zone.
+function sgParentEdgeHit(target, e, hit) {
+  const header = sgDrag?.kind === 'group' ? null : target.closest('.session-group-header[data-group-id]');
+  const parentBody = header?.parentElement.closest('.session-group-sessions[data-group-id]');
+  if (!parentBody) return null;
+  const rect = header.getBoundingClientRect();
+  if (e.clientY - rect.top > rect.height * 0.4 && hit) return null;
+  const up = sgGroupDropZone(parentBody);
+  return up ? { ...up, zone: header, cls: 'sg-insert-parent' } : null;
 }
 
 function sgDropZone(target, e) {
-  const sibling = sgSiblingCard(target);
   const hit = sgGroupDropZone(target);
+  const edge = sgParentEdgeHit(target, e, hit);
+  if (edge) return edge;
+  const sibling = sgSiblingCard(target);
   // Where the middle of a card does nothing, the whole card is an insert target.
   return (sibling && sgInsertHit(sibling, e, hit ? 0.25 : 0.5)) || hit;
 }
@@ -5006,10 +5116,14 @@ function sgInsertSession(dragId, { card, after }) {
   const group = card.closest('.project-group-sessions') ? null : sgGroupOf('session', ref);
   if (group && sgGroupOf('session', dragId)?.id === group.id) {
     // Loose sessions in a named group follow the group's member order, not the sidebar order.
+    // A card set next to another becomes its sibling: it takes that card's parent.
+    const { parent: _old, ...moved } = sgMemberOf(group, 'session', dragId);
+    const parent = sgMemberOf(group, 'session', ref)?.parent;
+    if (parent && parent !== dragId && !sgDescendsFrom(parent, dragId)) moved.parent = parent;
     const members = insertNear(
       group.members.filter((m) => !(m.type === 'session' && m.ref === dragId)),
       (m) => m.type === 'session' && m.ref === ref,
-      { type: 'session', ref: dragId },
+      moved,
       after,
     );
     if (!members) return;
@@ -5066,8 +5180,9 @@ function sgGroupDropZone(target) {
   if (groupId) {
     if (!dragSession) return dragGroup?.id === groupId ? null : { zone, groupId };
     if (fromGroupId !== groupId) return { zone, groupId };
-    // Already in this group: its own level is a move only out of a project block.
-    return fromHost ? { zone, groupId, loose: true } : null;
+    // Already in this group: its own level is a move only out of a project block or from under
+    // a parent session.
+    return fromHost || sgSessionParent(dragSession.id) ? { zone, groupId, loose: true, parent: null } : null;
   }
   const targetSessionId = zone.dataset.sessionId;
   if (targetSessionId) {
@@ -5077,20 +5192,17 @@ function sgGroupDropZone(target) {
     const targetGroupId = targetGroup?.id || null;
     // A transient group holds no members to reorder or place under; a drop there pairs instead.
     if (targetGroup && !targetGroup.transient) {
-      // Stacking onto a card adopts that card's placement, project block included.
+      // Stacking onto a card nests the dragged session under it, in that card's placement, project
+      // block included.
+      if (sgSessionParent(sgDrag.ref) === targetSessionId && fromGroupId === targetGroupId) return null;
+      if (sgDescendsFrom(targetSessionId, sgDrag.ref)) return null;
       const targetHost = sgHostOf(targetGroup, targetSession);
-      if (targetHost) {
-        return targetHost === fromHost && fromGroupId === targetGroupId
-          ? null
-          : { zone, groupId: targetGroupId, under: targetHost };
-      }
-      // Both loose in the same group: this is a reorder, and only a member has a slot.
-      if (fromGroupId === targetGroupId && !fromHost) {
-        return sgGroupOf('session', targetSessionId)?.id === targetGroupId
-          ? { zone, groupId: targetGroupId, reorder: { type: 'session', ref: targetSessionId } }
-          : null;
-      }
-      return { zone, groupId: targetGroupId, loose: true };
+      return {
+        zone,
+        groupId: targetGroupId,
+        ...(targetHost ? { under: targetHost } : { loose: true }),
+        parent: targetSessionId,
+      };
     }
     return { zone, pairSession: targetSessionId };
   }
@@ -5176,7 +5288,11 @@ function sgOnDrop(e) {
     if (hit.reorder) sgReorderMember(hit.groupId, drag, hit.reorder);
     else if (drag.kind === 'group') sgReorderGroup(drag.ref, hit.groupId);
     else {
-      sgAssign(hit.groupId, drag.kind, drag.ref, { under: hit.under, loose: hit.loose });
+      sgAssign(hit.groupId, drag.kind, drag.ref, {
+        under: hit.under,
+        loose: hit.loose,
+        parent: hit.parent,
+      });
       // A drop shows where the card landed; a move from the context menu leaves the group as it was.
       if (collapsedProjectGroups.delete(sgKey(hit.groupId))) persistCollapsedGroups();
     }
@@ -5319,7 +5435,7 @@ function sgOpenMenu(x, y, kind, ref) {
     .filter((g) => g.id !== current?.id)
     .map(
       (g) =>
-        `<button class="sg-menu-item" role="menuitem" data-sg-move="${escapeHtml(g.id)}">${escapeHtml(g.name)}</button>`,
+        `<button class="sg-menu-item" role="menuitem" data-sg-move="${escapeHtml(g.id)}">${escapeHtml(sgPathOf(g))}</button>`,
     )
     .join('');
   const menu = document.createElement('div');
@@ -5515,7 +5631,7 @@ function getNavigableItems() {
         }
       } else if (child.classList.contains('session-item')) {
         items.push(child);
-      } else if (child.classList.contains('project-group-header')) {
+      } else if (child.classList.contains('project-group-header') || child.classList.contains('session-group-header')) {
         items.push(child);
         if (!collapsedProjectGroups.has(child.dataset.groupPath)) {
           walkGroupContainer(getGroupSessionsContainer(child));
@@ -15494,11 +15610,11 @@ function forgetPlaceholder(id) {
   return true;
 }
 
-function renderPlaceholderCard(session) {
+function renderPlaceholderCard(session, depth) {
   const isActive = session.id === currentSessionId && viewMode === 'session';
   const projectHtml = renderProjectIdentity(session);
   return `
-          <button onclick="fetchTasks('${escAttrJs(session.id)}')" data-session-id="${escapeHtml(session.id)}" class="session-item session-placeholder ${isActive ? 'active' : ''}" title="${escapeHtml(`${session.id} | ${session.project}`)}">
+          <button onclick="fetchTasks('${escAttrJs(session.id)}')" data-session-id="${escapeHtml(session.id)}" class="session-item session-placeholder ${isActive ? 'active' : ''}${childDepthClass(depth)}" title="${escapeHtml(`${session.id} | ${session.project}`)}">
             <div class="session-name">${escapeHtml(session.name)}</div>
             ${projectHtml ? `<div class="session-secondary">${projectHtml}</div>` : ''}
             <div class="session-waiting"><span class="pulse"></span>${PLACEHOLDER_HINTS[session.edit ? 'edit' : session.mode] || PLACEHOLDER_HINTS.new}</div>
