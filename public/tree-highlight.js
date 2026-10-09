@@ -123,20 +123,21 @@ const treeHighlight = (() => {
     if (row.star) cls.push('ct-focus');
     if (row.marker === '+') cls.push('ct-add');
     if (row.marker === '-') cls.push('ct-del');
-    const folds = [];
-    for (let a = row.parent; a; a = a.parent) if (a.fold) folds.push(a);
-    if (folds.some((f) => !f.open)) cls.push('ct-hidden');
-    let attrs = folds.length ? ` data-ct-in="${folds.map((f) => f.id).join(' ')}"` : '';
+    const above = [];
+    for (let a = row.parent; a; a = a.parent) above.push(a);
+    if (above.some((a) => !a.open)) cls.push('ct-hidden');
+    if (above.some((a) => a.fold)) cls.push('ct-lib');
+    let attrs = above.length ? ` data-ct-in="${above.map((a) => a.id).join(' ')}"` : '';
     let label;
     if (row.fold) {
       cls.push('ct-fold');
       label = `<span class="ct-tilde">~</span>${escapeText(row.label.slice(1))}`;
-      if (row.kids.length) {
-        cls.push('ct-has');
-        attrs += ` data-ct="${row.id}" role="button" tabindex="0" aria-expanded="${row.open}"`;
-      }
     } else {
       label = span('ct-name', row.label);
+    }
+    if (row.kids.length) {
+      cls.push('ct-has');
+      attrs += ` data-ct="${row.id}" role="button" tabindex="0" aria-expanded="${row.open}"`;
     }
     return (
       `<span class="${cls.join(' ')}"${attrs}>` +
@@ -160,7 +161,7 @@ const treeHighlight = (() => {
       const r = rows[i];
       if (r.parent && (r.star || r.marker === '+' || r.marker === '-' || r.holdsPoint)) r.parent.holdsPoint = true;
     }
-    for (const r of rows) if (r.fold) r.open = !!r.holdsPoint;
+    for (const r of rows) r.open = !r.fold || !!r.holdsPoint;
     return `<pre><code class="hljs ct">${rows.map(renderRow).join('<span class="ct-nl">\n</span>')}</code></pre>`;
   }
 
@@ -177,7 +178,17 @@ const treeHighlight = (() => {
     }
   }
 
-  return { wantsTree, highlightTree, renderTree, toggleFold };
+  // Lights the callers of `row` up to the root; null clears the block that had them.
+  let pathCode = null;
+  function markPath(row) {
+    for (const r of pathCode?.querySelectorAll('.ct-path') || []) r.classList.remove('ct-path');
+    pathCode = row?.closest('code') || null;
+    for (const id of row?.dataset.ctIn?.split(' ') || []) {
+      pathCode.querySelector(`[data-ct="${id}"]`)?.classList.add('ct-path');
+    }
+  }
+
+  return { wantsTree, highlightTree, renderTree, toggleFold, markPath };
 })();
 
 if (typeof module === 'object' && module.exports) module.exports = treeHighlight;

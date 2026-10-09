@@ -205,7 +205,7 @@ describe('renderTree', () => {
 
   it('marks the focus frame, the change rows and the notes', () => {
     const html = renderTree(STACK);
-    assert.match(rowFor(html, 'placeOrder'), /class="ct-row ct-focus"/);
+    assert.match(rowFor(html, 'placeOrder'), /class="ct-row ct-focus ct-has"/);
     assert.match(rowFor(html, 'placeOrder'), /<span class="ct-star"> \*<\/span>/);
     assert.match(rowFor(html, 'sendReceipt'), /class="ct-row ct-add"/);
     assert.match(rowFor(html, 'logOrder'), /class="ct-row ct-del"/);
@@ -221,13 +221,24 @@ describe('renderTree', () => {
     assert.match(fold, /role="button"/);
     assert.match(fold, /aria-expanded="false"/);
     const inner = rowFor(html, 'PaymentsClient.charge');
-    assert.match(inner, /class="ct-row ct-hidden"/);
-    assert.match(inner, /data-ct-in="4"/);
+    assert.match(inner, /class="ct-row ct-hidden ct-lib"/);
+    assert.match(inner, /data-ct-in="4 3 2 0"/);
+  });
+
+  it('folds any frame with callees, open at the start', () => {
+    const html = renderTree(STACK);
+    const charge = rowFor(html, 'chargeCard');
+    assert.match(charge, /class="ct-row ct-has"/);
+    assert.match(charge, /data-ct="3"/);
+    assert.match(charge, /aria-expanded="true"/);
+    assert.match(charge, /data-ct-in="2 0"/);
+    assert.doesNotMatch(rowFor(html, 'sendReceipt'), /data-ct=/);
+    assert.doesNotMatch(rowFor(html, 'chargeCard'), /ct-lib/);
   });
 
   it('leaves a ~ line with nothing under it as a note', () => {
     const fold = rowFor(renderTree('a\n  ~ 3 middleware frames\n  b'), 'middleware');
-    assert.match(fold, /^<span class="ct-row ct-fold">/);
+    assert.match(fold, /^<span class="ct-row ct-fold" data-ct-in="0">/);
   });
 
   it('opens a fold that holds the focus frame or a change', () => {
@@ -244,9 +255,9 @@ describe('renderTree', () => {
     const html = renderTree('a\n  ~ 1 SDK frame\n    b\n      ~ 1 runtime frame\n        c');
     const runtime = rowFor(html, 'runtime');
     assert.match(runtime, /data-ct="3"/);
-    assert.match(runtime, /data-ct-in="1"/);
+    assert.match(runtime, /data-ct-in="2 1 0"/);
     assert.match(runtime, /aria-expanded="false"/);
-    assert.match(rowsOf(html)[4], /data-ct-in="3 1"/);
+    assert.match(rowsOf(html)[4], /data-ct-in="3 2 1 0"/);
   });
 
   it('escapes HTML in names and notes', () => {

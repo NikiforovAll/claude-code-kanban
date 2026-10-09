@@ -15758,12 +15758,23 @@ function onCallstackFold(e) {
   if (e.type === 'keydown' && e.key !== 'Enter' && e.key !== ' ') return;
   const fold = e.target.closest?.('code.ct .ct-has');
   if (!fold) return;
+  // A drag that selects text ends in a click, and a review comment needs the selection.
+  if (e.type === 'click' && (e.target.closest('.ct-loc') || !window.getSelection().isCollapsed)) return;
   e.preventDefault();
   e.stopPropagation();
   treeHighlight.toggleFold(fold);
 }
 document.addEventListener('click', onCallstackFold, true);
 document.addEventListener('keydown', onCallstackFold, true);
+
+let callstackHoverRow = null;
+function onCallstackHover(e) {
+  const row = e.target.closest?.('code.ct .ct-row') || null;
+  if (row === callstackHoverRow) return;
+  callstackHoverRow = row;
+  treeHighlight.markPath(row);
+}
+document.addEventListener('mouseover', onCallstackHover);
 
 document.addEventListener('DOMContentLoaded', () => {
   if (typeof marked !== 'undefined' && typeof hljs !== 'undefined') {

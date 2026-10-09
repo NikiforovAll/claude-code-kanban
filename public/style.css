@@ -2489,7 +2489,7 @@ code.ct .ct-name {
   font-weight: 600;
 }
 
-code.ct [data-ct-in]:not(.ct-focus) .ct-name {
+code.ct .ct-lib:not(.ct-focus) .ct-name {
   font-weight: 400;
 }
 
@@ -2613,6 +2613,28 @@ code.ct .ct-has .ct-tilde::after {
 
 code.ct .ct-has[aria-expanded='true'] .ct-tilde::after {
   transform: rotate(90deg);
+}
+
+/* Out of flow, so the notes stay in their column: it sits in the gap after the name. */
+code.ct .ct-has[aria-expanded='false'] .ct-name {
+  position: relative;
+}
+
+code.ct .ct-has[aria-expanded='false'] .ct-name::after {
+  content: '…';
+  position: absolute;
+  left: 100%;
+  padding-left: 0.3ch;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+code.ct .ct-path:not(.ct-focus, .ct-add, .ct-del) {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+code.ct .ct-path .ct-name {
+  color: var(--accent-text);
 }
 
 .detail-desc code {
