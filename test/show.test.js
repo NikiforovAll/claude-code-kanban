@@ -205,7 +205,7 @@ describe('show routes', () => {
   it('refuses inline content and names the claim form', async () => {
     const r = await api.call('POST', showUrl(), { sessionId: A, title: 't', content: 'c' });
     assert.equal(r.status, 400);
-    assert.match(r.body.error, /call show without file to get a file/);
+    assert.match(r.body.error, /call show with only title and key to get a file/);
   });
 
   it('switches the card to a new session id and saves the map', async () => {
