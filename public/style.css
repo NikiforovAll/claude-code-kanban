@@ -1427,6 +1427,84 @@ body.booting .boot-splash {
   gap: 6px;
 }
 
+/* #region CLAWD */
+.sidebar-footer .footer-clawd {
+  display: inline-flex;
+  padding: 2px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  cursor: pointer;
+  opacity: 0.85;
+}
+
+.sidebar-footer .footer-clawd:hover {
+  background: var(--bg-hover);
+  opacity: 1;
+}
+
+.clawd-popover {
+  display: none;
+  position: fixed;
+  left: 12px;
+  bottom: 40px;
+  z-index: 900;
+  flex-direction: column;
+  width: min(460px, calc(100vw - 24px));
+  height: min(560px, calc(100vh - 60px));
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-deep);
+  box-shadow: 0 12px 40px rgb(0 0 0 / 35%);
+  overflow: hidden;
+}
+
+.clawd-popover.visible {
+  display: flex;
+}
+
+.clawd-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 6px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elevated);
+  font-size: 12px;
+}
+
+.clawd-status {
+  flex: 1;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.clawd-collapse,
+.clawd-close {
+  padding: 0 6px;
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.clawd-body {
+  flex: 1;
+  min-height: 0;
+  padding: 4px 0 0 6px;
+}
+
+.clawd-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+/* #endregion */
+
 .sidebar-footer .footer-plugin-warning {
   padding: 0;
   border: none;

@@ -231,6 +231,7 @@ function updateUrl() {
   persistLastView();
   syncTerminal();
   schedulePublishSession();
+  clawdNoteFocus();
 }
 
 const LAST_VIEW_KEY = 'lastView';
@@ -13927,12 +13928,17 @@ function loadTerminalFrame(origin, timeoutMs) {
 }
 
 function sendTerminalTheme() {
-  if (!termFrame.inited) return;
+  if (!termFrame.inited && !clawdState.inited) return;
   const options = terminalThemeOptions();
   const key = JSON.stringify(options);
-  if (key === termFrame.theme) return;
-  termFrame.theme = key;
-  postToTerminalFrame('theme', { options });
+  if (termFrame.inited && key !== termFrame.theme) {
+    termFrame.theme = key;
+    postToTerminalFrame('theme', { options });
+  }
+  if (clawdState.inited && key !== clawdState.theme) {
+    clawdState.theme = key;
+    postToClawdFrame('theme', { options });
+  }
 }
 
 // Keyed on the colors, and style is watched, because under the hub a theme change lands in two
@@ -13957,6 +13963,18 @@ window.addEventListener('message', (e) => {
     onTerminalFrameMessage(m.type.slice(TERMINAL_MSG.length), m);
 });
 
+function terminalInitOptions(themeOptions) {
+  return {
+    fontFamily:
+      appConfig.terminal.fontFamily ||
+      getComputedStyle(document.body).getPropertyValue('--font-mono').trim() ||
+      'monospace',
+    fontSize: currentTerminalFontSize(),
+    scrollback: appConfig.terminal.scrollback,
+    themeOptions,
+  };
+}
+
 function onTerminalFrameMessage(t, m) {
   const socket = termState.socket;
   const current = socket && m.socketId === socket.id;
@@ -13964,15 +13982,7 @@ function onTerminalFrameMessage(t, m) {
     // A second load is the frame reloaded (its context menu), with no terminal and no socket.
     const themeOptions = terminalThemeOptions();
     resetTerminalFrame({ reload: termFrame.reload || termFrame.inited, theme: JSON.stringify(themeOptions) });
-    postToTerminalFrame('init', {
-      fontFamily:
-        appConfig.terminal.fontFamily ||
-        getComputedStyle(document.body).getPropertyValue('--font-mono').trim() ||
-        'monospace',
-      fontSize: currentTerminalFontSize(),
-      scrollback: appConfig.terminal.scrollback,
-      themeOptions,
-    });
+    postToTerminalFrame('init', terminalInitOptions(themeOptions));
   } else if (t === 'term') {
     termFrame.inited = true;
     pushTerminalClaims();
@@ -14217,7 +14227,7 @@ function setTerminalAttached(on) {
 
 // A hidden pane stays attached, but Ctrl+W can only be meant for a terminal on screen.
 function syncCloseGuard() {
-  const on = termState.attached && termState.shown;
+  const on = (termState.attached && termState.shown) || clawdOnScreen();
   if (termState.closeGuard === on) return;
   termState.closeGuard = on;
   hub.closeGuard(on);
@@ -14531,7 +14541,7 @@ async function renderTerminalManager() {
   body.innerHTML = list
     .map((t) => {
       const session = sessions.find((s) => s.id === t.id);
-      const name = session ? sessionDisplayName(session) : t.id.slice(0, 8);
+      const name = t.clawd ? 'Clawd' : session ? sessionDisplayName(session) : t.id.slice(0, 8);
       const here = t.id === termState.sessionId ? '<span class="terminal-manager-here">this tab</span>' : '';
       const attached = t.clients ? `${t.clients} attached` : 'detached';
       return `<div class="terminal-manager-row${t.clients ? ' attached' : ''}">
@@ -14547,7 +14557,7 @@ async function renderTerminalManager() {
           </div>
         </div>
         <div class="terminal-manager-actions">
-          <button type="button" class="btn btn-secondary" data-open="${escapeHtml(t.id)}">Open</button>
+          <button type="button" class="btn btn-secondary" data-open="${escapeHtml(t.id)}"${t.clawd ? ' data-clawd' : ''}>Open</button>
           <button type="button" class="btn btn-secondary terminal-manager-end" data-end="${escapeHtml(t.id)}">End</button>
         </div>
       </div>`;
@@ -14556,7 +14566,8 @@ async function renderTerminalManager() {
   body.querySelectorAll('[data-open]').forEach((b) => {
     b.onclick = () => {
       closeTerminalManager();
-      showSessionTerminal(b.dataset.open);
+      if ('clawd' in b.dataset) toggleClawd(true);
+      else showSessionTerminal(b.dataset.open);
     };
   });
   body.querySelectorAll('[data-end]').forEach((b) => {
@@ -14579,6 +14590,164 @@ async function endAllTerminals() {
   const buttons = document.querySelectorAll('#terminal-manager-body [data-end]');
   await Promise.all([...buttons].map((b) => closeTerminalSession(b.dataset.end)));
   renderTerminalManager();
+}
+
+//#endregion
+
+//#region CLAWD
+// The board's own assistant (docs/clawd.md): a claude session the server keeps hidden from the list,
+// shown in a popover through a second terminal frame on the board terminal's frame origin.
+const CLAWD_SVG =
+  '<svg viewBox="0 0 16 13" width="16" height="13" shape-rendering="crispEdges" aria-hidden="true">' +
+  '<path fill="#d97757" d="M3 0h10v4h3v3h-3v3H3V7H0V4h3z"/>' +
+  '<path fill="#d97757" d="M4 10h1v3H4zM6 10h1v3H6zM9 10h1v3H9zM11 10h1v3h-1z"/>' +
+  '<path fill="#1f1e1d" d="M5 2h1v2H5zM10 2h1v2h-1z"/></svg>';
+const clawdState = {
+  el: null,
+  frame: null,
+  origin: null,
+  ptyId: null,
+  inited: false,
+  attached: false,
+  ended: false,
+  socketId: 0,
+  theme: null,
+  posted: undefined,
+};
+
+function clawdAvailable() {
+  return !!appConfig.clawd && terminalAvailable();
+}
+
+function clawdButton() {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'footer-clawd';
+  b.title = 'Clawd, the board assistant';
+  b.setAttribute('aria-label', b.title);
+  b.innerHTML = CLAWD_SVG;
+  b.onclick = toggleClawd;
+  return b;
+}
+
+function ensureClawdPopover() {
+  if (clawdState.el) return clawdState.el;
+  const el = document.createElement('div');
+  el.className = 'clawd-popover';
+  el.innerHTML = `<div class="clawd-head">${CLAWD_SVG}<strong>Clawd</strong><span class="clawd-status"></span><button type="button" class="clawd-collapse" aria-label="Hide" title="Hide, Clawd keeps running">–</button><button type="button" class="clawd-close" aria-label="End" title="End the session, the next open resumes the chat">×</button></div><div class="clawd-body"></div>`;
+  el.querySelector('.clawd-collapse').onclick = () => toggleClawd(false);
+  el.querySelector('.clawd-close').onclick = endClawd;
+  document.body.appendChild(el);
+  clawdState.el = el;
+  return el;
+}
+
+function setClawdStatus(text) {
+  clawdState.el.querySelector('.clawd-status').textContent = text;
+}
+
+function postToClawdFrame(t, data) {
+  clawdState.frame?.contentWindow?.postMessage({ ...data, type: TERMINAL_MSG + t }, clawdState.origin);
+}
+
+function clawdOnScreen() {
+  return clawdState.attached && !!clawdState.el?.classList.contains('visible');
+}
+
+function endClawd() {
+  const id = clawdState.ptyId;
+  toggleClawd(false);
+  clawdState.ptyId = null;
+  if (id) terminalFetch(apiPath`/api/terminals/${id}`, 'DELETE').catch(() => {});
+}
+
+function setClawdAttached(on) {
+  clawdState.attached = on;
+  syncCloseGuard();
+}
+
+function toggleClawd(force) {
+  const el = ensureClawdPopover();
+  const show = typeof force === 'boolean' ? force : !el.classList.contains('visible');
+  el.classList.toggle('visible', show);
+  if (!show) {
+    postToClawdFrame('detach');
+    setClawdAttached(false);
+    return;
+  }
+  if (!clawdState.frame) {
+    const frame = document.createElement('iframe');
+    frame.className = 'clawd-frame';
+    frame.title = 'Clawd';
+    frame.allow = 'clipboard-read; clipboard-write';
+    clawdState.origin = termFrame.sameOrigin ? location.origin : terminalFrameOrigin();
+    frame.src = `${clawdState.origin}/terminal.html#p=${encodeURIComponent(location.origin)}`;
+    clawdState.frame = frame;
+    el.querySelector('.clawd-body').appendChild(frame);
+    clawdNoteFocus();
+    return;
+  }
+  if (clawdState.inited) {
+    postToClawdFrame('refresh');
+    postToClawdFrame('focus');
+    if (!clawdState.attached) openClawd();
+  }
+}
+
+async function openClawd() {
+  setClawdStatus('starting…');
+  const res = await terminalFetch('/api/clawd/start', 'POST', {});
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return setClawdStatus(data.error || `error ${res.status}`);
+  clawdState.ended = false;
+  clawdState.ptyId = data.ptyId;
+  setClawdStatus(data.sessionId ? data.sessionId.slice(0, 8) : '');
+  postToClawdFrame('open', {
+    socketId: ++clawdState.socketId,
+    reset: true,
+    hello: { token: terminalToken, id: data.ptyId, mode: 'auto' },
+  });
+  postToClawdFrame('focus');
+}
+
+window.addEventListener('message', (e) => {
+  if (!clawdState.frame || e.source !== clawdState.frame.contentWindow || e.origin !== clawdState.origin) return;
+  const m = e.data;
+  if (typeof m?.type !== 'string' || !m.type.startsWith(TERMINAL_MSG)) return;
+  const t = m.type.slice(TERMINAL_MSG.length);
+  if (t === 'loaded') {
+    const themeOptions = terminalThemeOptions();
+    clawdState.inited = false;
+    clawdState.theme = JSON.stringify(themeOptions);
+    postToClawdFrame('init', terminalInitOptions(themeOptions));
+    return;
+  }
+  if (t === 'term') {
+    clawdState.inited = true;
+    openClawd();
+    return;
+  }
+  if (m.socketId !== clawdState.socketId) return;
+  if (t === 'ws') {
+    if (m.msg?.t === 'ready') setClawdAttached(true);
+    else if (m.msg?.t === 'exit') {
+      setClawdAttached(false);
+      clawdState.ended = true;
+      setClawdStatus('ended, reopen to resume');
+    } else if (m.msg?.t === 'error') setClawdStatus(m.msg.msg || 'error');
+  } else if (t === 'close') {
+    setClawdAttached(false);
+    if (!clawdState.ended && clawdState.el.classList.contains('visible')) setTimeout(openClawd, 1000);
+  }
+});
+
+// What "this session" means to Clawd.
+function clawdNoteFocus() {
+  if (!clawdState.frame || !appConfig.clawd) return;
+  const id = viewMode === 'project' ? null : currentSessionId;
+  if (id === clawdState.posted) return;
+  clawdState.posted = id;
+  api('/api/clawd/context', { method: 'POST', body: { sessionId: id } }).catch(() => {});
 }
 
 //#endregion
@@ -15975,13 +16144,15 @@ function makeLimitSpan(rl) {
 function renderSidebarFooter(rateLimits) {
   const el = document.getElementById('sidebar-footer');
   if (!el) return;
+  footerState.rl = rateLimits;
   const fh = rateLimits?.five_hour?.used_percentage ?? null;
   const sd = rateLimits?.seven_day?.used_percentage ?? null;
   const children = [];
   if (footerState.version) {
     const v = document.createElement('span');
     v.className = 'footer-version';
-    v.textContent = `v${footerState.version}`;
+    if (clawdAvailable()) v.append(clawdButton());
+    v.append(`v${footerState.version}`);
     const warn = pluginWarning(footerState.plugin);
     if (warn) v.append(warn);
     children.push(v);
@@ -16078,6 +16249,7 @@ if (urlState.search) {
 getJson('/api/config')
   .then((c) => {
     if (c) appConfig = c;
+    if (appConfig.clawd && footerState.version) renderSidebarFooter(footerState.rl);
   })
   .then(restorePendingSessions)
   .then(() =>

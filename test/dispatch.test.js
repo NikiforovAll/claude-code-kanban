@@ -13,6 +13,14 @@ describe('claude args pass-through', () => {
     ]);
   });
 
+  it('resumes in place of a new session id', () => {
+    const id = '0b6a3c3e-2f9e-4c55-9a3e-6c1f0d2b7a11';
+    const s = parseNewSpec({ cwd: '/a', resume: id, extraArgs: ['--agent', 'x:y'] });
+    assert.deepEqual(claudeArgsFor('new', 'pty-1', s), ['--resume', id, '--agent', 'x:y']);
+    assert.equal(parseNewSpec({ cwd: '/a', resume: 'nope' }), 'session to resume');
+    assert.equal(parseNewSpec({ resume: id, forkOf: id }), 'session to resume');
+  });
+
   it('accepts no extra args', () => {
     assert.deepEqual(spec(undefined).extraArgs, []);
   });

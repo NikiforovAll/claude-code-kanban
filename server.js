@@ -49,6 +49,7 @@ const { buildDecision, decisionFileName, isDecisionFile, approvalsFrom, boardRef
 const { getClaudeDir, getArgValue, storageNamespace, isDefaultClaudeDir } = require('./lib/claude-dir');
 const { readTerminalConfig } = require('./lib/terminal');
 const { createTerminalClient } = require('./lib/terminal-client');
+const { clawdOn, createClawd } = require('./lib/clawd');
 const { createShowStore, mountShowRoutes, showBodyParser, SHOW_PATH } = require('./lib/show');
 const { readLiveSessions, isPidAlive, isSessionLive } = require('./lib/live-sessions');
 const { createProcStats } = require('./lib/proc-stats');
@@ -320,6 +321,12 @@ function boardEventsEnabled() {
   return cachedByMtime(cckConfigCache, 'boardEvents', CCK_CONFIG_FILE,
     () => boardEventsOn(readCckConfig()), boardEventsOn(null));
 }
+function clawdEnabled() {
+  return cachedByMtime(cckConfigCache, 'clawd', CCK_CONFIG_FILE,
+    () => clawdOn(readCckConfig()), clawdOn(null));
+}
+// Clawd's transcripts all land in one project folder, which the board never lists (docs/clawd.md).
+const clawd = createClawd({ cckDir: CCK_DIR, projectsDir: PROJECTS_DIR });
 
 // approvals.json predates config.json (and was opt-in). Fold it into
 // config.json once so an existing opt-in keeps its tuning, then drop it.
@@ -934,7 +941,7 @@ function loadSessionMetadata() {
     }
 
     const projectDirs = readdirSync(PROJECTS_DIR, { withFileTypes: true })
-      .filter(d => d.isDirectory());
+      .filter(d => d.isDirectory() && !clawd.isOwnProjectDirName(d.name));
 
     for (const projectDir of projectDirs) {
       const projectPath = path.join(PROJECTS_DIR, projectDir.name);
@@ -1523,6 +1530,9 @@ app.get('/api/sessions', async (req, res) => {
         }
       } catch (_) {}
     }
+
+    // Task dirs and agent-activity name Clawd's sessions too.
+    for (const sid of sessionsMap.keys()) if (clawd.isOwnSession(sid)) sessionsMap.delete(sid);
 
     // Correlate plan sessions with their implementation sessions (same slug)
     const slugGroups = new Map();
@@ -3276,6 +3286,7 @@ app.get('/api/config', (_req, res) => {
     memoryUrl: MEMORY_URL,
     scratchAvailable: !!whichSync('scratch'),
     terminal: terminal.clientConfig(),
+    clawd: clawdEnabled(),
   });
 });
 
@@ -3285,7 +3296,7 @@ app.get('/api/config', (_req, res) => {
 // A new session may start only in a folder the user has already worked in, or one they
 // chose in the native dialog during this run. Anything else would let a page script pick
 // the directory claude runs in.
-const pickedFolders = new Set();
+const pickedFolders = new Set([clawd.cwd]);
 function isAllowedFolder(dir) {
   const known = pickedFolders.has(dir) || Object.values(loadSessionMetadata()).some((m) => m.project === dir);
   try { return known && statSync(dir).isDirectory(); } catch { return false; }
@@ -3300,7 +3311,7 @@ function resolveSessionFolder(id) {
   }
   try {
     for (const dir of readdirSync(PROJECTS_DIR, { withFileTypes: true })) {
-      if (!dir.isDirectory()) continue;
+      if (!dir.isDirectory() || clawd.isOwnProjectDirName(dir.name)) continue;
       const jsonlPath = path.join(PROJECTS_DIR, dir.name, `${id}.jsonl`);
       if (!existsSync(jsonlPath)) continue;
       let indexProject = null;
@@ -3386,7 +3397,8 @@ app.post('/api/terminal/start', terminalRoute(async (req, res) => {
 // The hub's eviction check reads this to keep a pool with live PTYs alive.
 app.get('/api/terminals', terminalRoute(async (_req, res) => {
   res.setHeader('Cache-Control', 'no-store');
-  res.json({ sessions: await terminal.sessions() });
+  const sessions = await terminal.sessions();
+  res.json({ sessions: sessions.map((t) => (t.id === clawd.ptyId ? { ...t, clawd: true } : t)) });
 }));
 
 const terminalProcStats = createProcStats();
@@ -3493,6 +3505,47 @@ app.get('/api/dispatch', (req, res) => {
   const parent = typeof req.query.parent === 'string' && req.query.parent ? req.query.parent : null;
   res.json({ running: dispatched.running(terminal.isRunning, { parent }) });
 });
+// #endregion
+
+// #region CLAWD
+function clawdRoute(fn) {
+  return terminalRoute(async (req, res) => {
+    if (!clawdEnabled()) return res.status(404).json({ error: 'clawd is turned off in .cck/config.json' });
+    return fn(req, res);
+  });
+}
+
+const clawdState = () => ({ ptyId: clawd.ptyId, sessionId: clawd.sessionId });
+
+app.post('/api/clawd/start', clawdRoute(async (req, res) => {
+  if (!terminal.authorized(req.get('x-terminal-token'))) return res.status(401).json({ error: 'invalid terminal token' });
+  if (clawd.ptyId && terminal.isRunning(clawd.ptyId)) return res.json(clawdState());
+  const started = await terminal.startNew(clawd.startSpec());
+  if (started.error) return res.status(started.status).json({ error: started.error });
+  clawd.ptyId = started.id;
+  res.status(201).json(clawdState());
+}));
+
+app.post('/api/clawd/context', clawdRoute(async (req, res) => {
+  const id = req.body?.sessionId ?? null;
+  if (id !== null && !(typeof id === 'string' && isUUID(id))) return res.status(400).json({ error: 'invalid sessionId' });
+  clawd.setFocus(id);
+  res.status(204).end();
+}));
+
+app.get('/api/clawd/context', clawdRoute(async (_req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const focus = clawd.focus;
+  if (!focus) return res.json({ sessionId: null });
+  const meta = sessionMetaFor(focus.sessionId) || {};
+  res.json({
+    ...focus,
+    project: meta.project || meta.cwd || null,
+    name: getSessionDisplayName(focus.sessionId, meta),
+    gitBranch: sessionGitBranch(meta, !!worktrees.resolve(meta.project), getGitBranch) || null,
+    transcript: meta.jsonlPath || null,
+  });
+}));
 // #endregion
 
 // #region TASK_ROUTES
@@ -4428,6 +4481,7 @@ const projectsWatcher = chokidar.watch(PROJECTS_DIR, {
 
 projectsWatcher.on('all', (event, filePath) => {
   if (event !== 'add' && event !== 'change' && event !== 'unlink') return;
+  if (clawd.isOwnPath(filePath)) return clawd.onTranscript(filePath, event);
   if (filePath.endsWith('.jsonl')) {
     if (event === 'unlink') {
       loopInfoStateByPath.delete(filePath);

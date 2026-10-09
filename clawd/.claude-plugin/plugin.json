@@ -1,0 +1,5 @@
+{
+  "name": "cck-clawd",
+  "version": "0.1.0",
+  "description": "The board's own assistant: one agent, loaded with --plugin-dir by the clawd chat. Moves into claude-code-kanban once it settles."
+}
