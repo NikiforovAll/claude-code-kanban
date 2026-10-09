@@ -28,6 +28,8 @@ This session id is `${CLAUDE_SESSION_ID}`. `--session` defaults to it through `$
 
 With no argument, run nothing on the board: show the user the table above.
 
+An argument with no command name works on this session and its files. `open` and `preview` both mean `doc preview`, and with no target they mean the file this conversation is about. `open` focuses a session only as `session open`.
+
 ## Keep the board still
 
 The user works in other windows while you run, so pick the quiet command. `doc link` and `pane add` add an entry the user opens when ready. `doc preview` is the one command that opens a modal on the user's screen: use it when the user asks to see something now.
