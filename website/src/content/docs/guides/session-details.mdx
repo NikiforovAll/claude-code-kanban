@@ -12,7 +12,7 @@ The board shows the tasks of a session. This page covers the panels and dialogs 
 
 Press <kbd>Shift+L</kbd> or click the session log button above the board to open the Session Log panel on the right.
 
-<Shot src="shots/01-board-session-log.webp" alt="The board with the Session Log panel open on the right, listing the latest tool calls and messages of the session" />
+<Shot themed="01-board-session-log" alt="The board with the Session Log panel open on the right, listing the latest tool calls and messages of the session" />
 
 The panel loads the latest 15 messages. Scroll up to load older ones. Pinned messages and agents stay in a section at the top of the panel.
 
@@ -77,7 +77,7 @@ The **Cache** row counts down until the prompt cache expires. The time starts at
 
 Click **Tool Stats** in the session info dialog. The Tool Statistics dialog shows totals for calls, unique tools, failed calls and rejected calls. A table lists each tool with its calls, successes, failures, rejections and impact. Impact is the share of all tool output, by character count. Click a column header to sort by it.
 
-<Shot src="shots/07-tool-stats.webp" alt="Tool Statistics dialog with totals and a table of tools sorted by call count" />
+<Shot themed="07-tool-stats" alt="Tool Statistics dialog with totals and a table of tools sorted by call count" />
 
 ## Plan
 
@@ -100,51 +100,7 @@ To link from a terminal or an agent, use `doc link <file|url>`. `doc preview` op
 
 ## Panes
 
-A pane is a live page or a file that shows as a tab next to Board. Use it for something you keep open while Claude works, such as a dev server, a report or a design. A session keeps up to 50 panes. The server stores them, so every browser shows the same panes.
-
-<Shot src="shots/13-panes.webp" alt="The session view with three tabs, Board, Kanagawa preview and Plan, and the Plan tab on screen: a Markdown plan with goals, a token table and steps" />
-
-- Click **+** at the end of the tab strip to add a pane. Type to search the session's linked documents, or paste a URL or a file path, then press <kbd>Enter</kbd>. A relative path starts from the session working directory. If the pane is already open, the board goes to its tab.
-- Click **Open in a pane** in the Preview dialog to move the file you are reading into a pane.
-- Click **Open in a pane** in the message dialog to keep a session log message in a pane. The pane shows that message, also after older messages leave the Session Log panel. Right-click its tab and select **Open in message dialog** to open it in the dialog again.
-- Press <kbd>[</kbd> or <kbd>]</kbd> to go to the previous or next tab.
-- Drag a tab onto another tab to move it. A line on that tab shows the side it lands on. The new order is stored with the panes, so every browser shows it.
-- To close a pane, click × on its tab, middle-click the tab, or press <kbd>Alt+W</kbd>.
-- Right-click a tab, or press <kbd>Shift+F10</kbd> or the <kbd>Menu</kbd> key for the tab that has focus, to copy its URL or path, open it in a new browser tab, rename it, reload it or close it. To rename, type the new title and press <kbd>Enter</kbd>, or press <kbd>Esc</kbd> to cancel. An empty title gives the pane its default title back. A file opens in the Preview dialog instead of a browser tab. The buttons at the right of the strip reload or open the pane on screen.
-- The menu of the Board tab has **Delete completed tasks** and **Delete all tasks**. Each asks you to confirm, and the delete cannot be undone.
-
-Claude adds panes with `pane add <url|file>`. The board does not switch to the new pane, so your view stays put. Any local server with a page works. `scratch ui <pad> --browser`, for example, prints a URL for the scratch viewer, which reloads itself when the pad changes.
-
-#### File panes
-
-A file pane shows HTML, Markdown, text, source code and images, like the Preview dialog. It reloads when the file changes and keeps its scroll position. A pane that is off screen reloads when you show it.
-
-- Select text to comment on it, as in the preview.
-- <kbd>Ctrl++</kbd> and <kbd>Ctrl+-</kbd> change the text size.
-- Drag the edge of the page to change the reading width. Double-click the edge to reset it. The width applies to every file pane.
-- In an HTML page, web links open in a new browser tab. The board keys for the sidebar, tabs and splits still work there.
-
-#### URL panes
-
-A URL pane shows the live page. Some sites refuse to load in a frame (`X-Frame-Options` or CSP `frame-ancestors`), and their pane shows an **Open in new tab** card instead. A pane cannot show the board or the hub.
-
-The page runs on another origin, so it keeps every key while it has focus. Click outside the page before you use a board or hub shortcut such as <kbd>Ctrl+`</kbd> or <kbd>Ctrl++</kbd>.
-
-### Split view
-
-Show two tabs side by side, for example the board next to a report Claude is writing.
-
-<Shot src="shots/13b-split-view.webp" alt="The session view split in two: the board with pending, in progress and completed tasks on the left, and an HTML pane with a Kanagawa theme preview on the right" />
-
-- Press <kbd>|</kbd> or click the split button at the right of the tab strip. The tab on screen and the tab before it show side by side. Press <kbd>|</kbd> again to end the split.
-- Drag a tab onto a side to show it there.
-- Drag the divider to resize the sides, or to an edge to end the split. Double-click it to reset.
-- <kbd>&#123;</kbd> and <kbd>&#125;</kbd> move focus to the left or right side. <kbd>Alt+[</kbd> and <kbd>Alt+]</kbd> change the tab in the focused side.
-- <kbd>[</kbd> and <kbd>]</kbd> treat a split as one tab.
-
-You can keep several splits. Click a tab outside a split to show it alone. The split comes back when you go to one of its tabs. Splits last until you close the browser tab, and the divider position is the same for all of them.
-
-With the board in a split, the session log opens inside the board's side, and the agent log starts collapsed. A narrow board side packs its three columns tighter. Below about 476 px, it scrolls sideways.
+To keep pages, files and messages open as tabs next to the board, and to show two of them side by side, see [Panes and split view](/claude-code-kanban/guides/panes/).
 
 ## Scratchpad
 

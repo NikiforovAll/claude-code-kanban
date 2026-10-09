@@ -31,6 +31,7 @@ export default defineConfig({
 						{ label: 'Session log and details', slug: 'guides/session-details' },
 						{ label: 'Subagents', slug: 'guides/subagents' },
 						{ label: 'Answer prompts from the board', slug: 'guides/waiting-prompts' },
+						{ label: 'Panes and split view', slug: 'guides/panes' },
 						{ label: 'Review comments', slug: 'guides/review-comments' },
 						{ label: 'Embedded terminal', slug: 'guides/embedded-terminal' },
 						{ label: 'Markdown views', slug: 'guides/markdown-views' },
@@ -38,15 +39,10 @@ export default defineConfig({
 						{ label: 'Dispatch tasks to other sessions', slug: 'guides/dispatch' },
 						{ label: 'Orchestration patterns', slug: 'guides/dispatch-patterns' },
 						{ label: 'Claude Code plugin skills', slug: 'guides/plugin-skills' },
-						{ label: 'Run inside Claude Code Hub', slug: 'guides/claude-code-hub' },
-					],
-				},
-				{
-					label: 'Show cards',
-					items: [
 						{ label: 'Show cards', slug: 'guides/show-cards' },
 						{ label: 'Use the card', slug: 'guides/show-cards-use' },
 						{ label: 'Card kinds', slug: 'guides/show-card-kinds' },
+						{ label: 'Run inside Claude Code Hub', slug: 'guides/claude-code-hub' },
 					],
 				},
 				{
