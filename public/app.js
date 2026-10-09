@@ -15713,6 +15713,18 @@ if (store.getItem(sectionCollapsedKey('sessions-filters')) === 'true') {
   document.getElementById('sessions-chevron').classList.add('rotated');
 }
 
+// Capture phase: a message preview opens its detail on any click, so a fold stops the click first.
+function onCallstackFold(e) {
+  if (e.type === 'keydown' && e.key !== 'Enter' && e.key !== ' ') return;
+  const fold = e.target.closest?.('code.ct .ct-has');
+  if (!fold) return;
+  e.preventDefault();
+  e.stopPropagation();
+  treeHighlight.toggleFold(fold);
+}
+document.addEventListener('click', onCallstackFold, true);
+document.addEventListener('keydown', onCallstackFold, true);
+
 document.addEventListener('DOMContentLoaded', () => {
   if (typeof marked !== 'undefined' && typeof hljs !== 'undefined') {
     const renderer = new marked.Renderer();
@@ -15721,7 +15733,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return `<pre class="mermaid">${escapeHtml(text)}</pre>`;
       }
       if (treeHighlight.wantsTree(lang, text)) {
-        return `<pre><code class="hljs language-tree">${treeHighlight.highlightTree(text)}</code></pre>`;
+        return treeHighlight.renderTree(text);
       }
       let highlighted;
       if (lang && hljs.getLanguage(lang)) {

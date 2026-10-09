@@ -22,17 +22,17 @@ Keep only the calls, files, props and states the point needs, with real names fr
 The board draws the tree lines, links, focus and folds from this notation:
 
 ```callstack
- handleCheckout                src/routes/checkout.ts:24
-   validateCart                throws on an empty cart
-   placeOrder *                src/orders/place.ts:40
-     chargeCard                src/payments/charge.ts:31
+ handleCheckout                  src/routes/checkout.ts:24
+   validateCart                  throws on an empty cart
+   placeOrder *                  src/orders/place.ts:40
+     chargeCard                  src/payments/charge.ts:31
        ~ 2 SDK frames
-         PaymentsClient.charge node_modules/pay-sdk/client.js:112
-         HttpClient.request    node_modules/pay-sdk/http.js:58
-+    sendReceipt               src/email/receipt.ts:9
--    logOrder                  src/orders/log.ts:5
- onPaymentWebhook              src/routes/webhooks.ts:58
-   markOrderPaid               src/orders/status.ts:22
+         PaymentsClient.charge   node_modules/pay-sdk/client.js:112
+         HttpClient.request      node_modules/pay-sdk/http.js:58
++    sendReceipt                 src/email/receipt.ts:9
+-    logOrder                    src/orders/log.ts:5
+ onPaymentWebhook                src/routes/webhooks.ts:58
+   markOrderPaid                 src/orders/status.ts:22
 ```
 
 - The fence tag is `callstack`.

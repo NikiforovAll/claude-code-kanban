@@ -11,7 +11,8 @@ const treeHighlight = (() => {
     String.raw`^([+-](?=[ \t│├└▼]|$))?([ \t]*(?:[│├└─▼↓→ \t]*[│├└─▼↓→][ \t]*)?)(${NAME})?(.*)$`,
     'su',
   );
-  const INDENT_NODE_LINE = new RegExp(String.raw`^([ \t]*)${NAME}(\([^()]*\))?( {2,}\S.*)?$`, 'u');
+  const FRAME = new RegExp(String.raw`^( *)(~.*?|${NAME}(?:\([^()]*\))?)( \*)?(?:( {2,})(\S(?:.*\S)?))?( *)$`, 'u');
+  const LOC = /^[^\s:]+:\d+(?::\d+)?$/;
 
   function escapeText(s) {
     return s
@@ -36,25 +37,61 @@ const treeHighlight = (() => {
     return false;
   }
 
-  // A call tree drawn with indentation only: every line is one name or call, with an optional
-  // note after two spaces. Prose and pseudocode have single-spaced words, so they never match.
-  function looksLikeIndentTree(text, diff) {
-    const lines = text.split('\n').filter((l) => l.trim());
-    if (lines.length < 3) return false;
-    const indents = new Set();
-    for (const raw of lines) {
-      if (diff && !/^[ +-]/.test(raw)) return false;
-      const m = (diff ? raw.slice(1) : raw).match(INDENT_NODE_LINE);
-      if (!m) return false;
-      indents.add(m[1].length);
+  // The notation of skills/show/references/explain.md: frames indented by spaces, one name or
+  // call each, an optional ` *` focus mark, a note after 2+ spaces, `~` folds, and `+`/`-` in
+  // column 1 for a change. Prose and pseudocode have single-spaced words, so they never parse.
+  function parseStack(text) {
+    const lines = text.split('\n');
+    const diff = lines.some((l) => /^[+-]/.test(l));
+    const rows = [];
+    let roots = [];
+    let stack = [];
+    for (const line of lines) {
+      if (!line.trim()) {
+        rows.push({ blank: true, text: line });
+        roots = [];
+        stack = [];
+        continue;
+      }
+      const marker = diff ? line[0] : '';
+      if (diff && !/[ +-]/.test(marker)) return null;
+      const m = line.slice(marker.length).match(FRAME);
+      if (!m) return null;
+      const [, ind, label, star = '', gap = '', note = '', tail] = m;
+      while (stack.length && stack[stack.length - 1].indent >= ind.length) stack.pop();
+      const parent = stack[stack.length - 1] || null;
+      const sibs = parent ? parent.kids : roots;
+      const row = {
+        id: rows.length,
+        marker,
+        indent: ind.length,
+        parent,
+        sibs,
+        label,
+        fold: label.startsWith('~'),
+        star,
+        gap,
+        note,
+        tail,
+        kids: [],
+      };
+      sibs.push(row);
+      stack.push(row);
+      rows.push(row);
     }
-    return indents.size >= 2;
+    return rows;
+  }
+
+  // An untagged call tree: 3 frames at least, on 2 indent levels at least.
+  function looksLikeIndentTree(text) {
+    const frames = parseStack(text)?.filter((r) => !r.blank) || [];
+    return frames.length >= 3 && new Set(frames.map((r) => r.indent)).size >= 2;
   }
 
   function wantsTree(lang, text) {
     const tag = (lang || '').trim().toLowerCase();
     if (TREE_TAGS.has(tag)) return true;
-    return PLAIN_TAGS.has(tag) && (looksLikeTree(text) || looksLikeIndentTree(text, tag === 'diff'));
+    return PLAIN_TAGS.has(tag) && (looksLikeTree(text) || looksLikeIndentTree(text));
   }
 
   function highlightLine(line) {
@@ -68,7 +105,79 @@ const treeHighlight = (() => {
     return text.split('\n').map(highlightLine).join('\n');
   }
 
-  return { wantsTree, highlightTree };
+  const isLast = (row) => row.sibs[row.sibs.length - 1] === row;
+
+  function guideCells(row) {
+    const g = Array(row.indent).fill('');
+    if (row.parent) {
+      for (let a = row.parent; a.parent; a = a.parent) if (!isLast(a)) g[a.parent.indent] = 'v';
+      g[row.parent.indent] = isLast(row) ? 'l' : 't';
+      if (row.parent.indent + 1 < row.indent) g[row.parent.indent + 1] = 'h';
+    }
+    return g.map((c) => (c ? `<span class="ct-g ct-${c}"> </span>` : ' ')).join('');
+  }
+
+  function renderRow(row) {
+    if (row.blank) return `<span class="ct-row">${row.text}</span>`;
+    const cls = ['ct-row'];
+    if (row.star) cls.push('ct-focus');
+    if (row.marker === '+') cls.push('ct-add');
+    if (row.marker === '-') cls.push('ct-del');
+    const folds = [];
+    for (let a = row.parent; a; a = a.parent) if (a.fold) folds.push(a);
+    if (folds.some((f) => !f.open)) cls.push('ct-hidden');
+    let attrs = folds.length ? ` data-ct-in="${folds.map((f) => f.id).join(' ')}"` : '';
+    let label;
+    if (row.fold) {
+      cls.push('ct-fold');
+      label = `<span class="ct-tilde">~</span>${escapeText(row.label.slice(1))}`;
+      if (row.kids.length) {
+        cls.push('ct-has');
+        attrs += ` data-ct="${row.id}" role="button" tabindex="0" aria-expanded="${row.open}"`;
+      }
+    } else {
+      label = span('ct-name', row.label);
+    }
+    return (
+      `<span class="${cls.join(' ')}"${attrs}>` +
+      span('ct-m', row.marker) +
+      guideCells(row) +
+      label +
+      span('ct-star', row.star) +
+      row.gap +
+      span(LOC.test(row.note) ? 'ct-loc' : 'ct-note', row.note) +
+      row.tail +
+      '</span>'
+    );
+  }
+
+  // Rows are blocks, so the newlines between them sit in hidden spans: the text stays
+  // byte-identical and the rows draw no blank lines.
+  function renderTree(text) {
+    const rows = parseStack(text);
+    if (!rows) return `<pre><code class="hljs language-tree">${highlightTree(text)}</code></pre>`;
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const r = rows[i];
+      if (r.parent && (r.star || r.marker === '+' || r.marker === '-' || r.holdsPoint)) r.parent.holdsPoint = true;
+    }
+    for (const r of rows) if (r.fold) r.open = !!r.holdsPoint;
+    return `<pre><code class="hljs ct">${rows.map(renderRow).join('<span class="ct-nl">\n</span>')}</code></pre>`;
+  }
+
+  function toggleFold(fold) {
+    fold.setAttribute('aria-expanded', String(fold.getAttribute('aria-expanded') !== 'true'));
+    const code = fold.closest('code');
+    const closed = new Set();
+    for (const f of code.querySelectorAll('.ct-has[aria-expanded="false"]')) closed.add(f.dataset.ct);
+    for (const r of code.querySelectorAll('[data-ct-in]')) {
+      r.classList.toggle(
+        'ct-hidden',
+        r.dataset.ctIn.split(' ').some((id) => closed.has(id)),
+      );
+    }
+  }
+
+  return { wantsTree, highlightTree, renderTree, toggleFold };
 })();
 
 if (typeof module === 'object' && module.exports) module.exports = treeHighlight;

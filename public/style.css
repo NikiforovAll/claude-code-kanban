@@ -2471,6 +2471,141 @@ code.language-tree .hljs-title {
   font-weight: 600;
 }
 
+code.ct {
+  --ct-line: color-mix(in srgb, var(--text-muted) 85%, transparent);
+}
+
+code.ct .ct-name {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+code.ct [data-ct-in]:not(.ct-focus) .ct-name {
+  font-weight: 400;
+}
+
+code.ct .ct-row {
+  display: block;
+  min-width: max-content;
+}
+
+code.ct .ct-row:empty::before {
+  content: ' ';
+}
+
+code.ct .ct-nl,
+code.ct .ct-hidden {
+  display: none;
+}
+
+code.ct .ct-g {
+  display: inline-block;
+  position: relative;
+  height: 1lh;
+  vertical-align: top;
+}
+
+code.ct .ct-g::before,
+code.ct .ct-g::after {
+  content: '';
+  position: absolute;
+}
+
+code.ct .ct-v::before,
+code.ct .ct-t::before,
+code.ct .ct-l::before {
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  border-left: 1px solid var(--ct-line);
+}
+
+code.ct .ct-l::before {
+  bottom: 50%;
+}
+
+code.ct .ct-t::after,
+code.ct .ct-l::after,
+code.ct .ct-h::after {
+  left: 50%;
+  right: 0;
+  top: 50%;
+  border-top: 1px solid var(--ct-line);
+}
+
+code.ct .ct-h::after {
+  left: 0;
+  right: 2px;
+}
+
+code.ct .ct-note,
+code.ct .ct-star {
+  color: var(--text-muted);
+}
+
+code.ct .ct-fold {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+code.ct .ct-loc {
+  color: var(--accent-text);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
+code.ct .ct-focus {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+code.ct .ct-add {
+  --ct-change: var(--success);
+}
+
+code.ct .ct-del {
+  --ct-change: var(--danger);
+}
+
+code.ct :is(.ct-add, .ct-del) {
+  background: color-mix(in srgb, var(--ct-change) 10%, transparent);
+}
+
+code.ct .ct-m {
+  color: var(--ct-change);
+  font-weight: 600;
+}
+
+code.ct .ct-has {
+  cursor: pointer;
+}
+
+code.ct .ct-has:hover,
+code.ct .ct-has:focus-visible {
+  background: color-mix(in srgb, var(--text-muted) 12%, transparent);
+  outline: none;
+}
+
+code.ct .ct-has .ct-tilde {
+  display: inline-block;
+  color: transparent;
+  position: relative;
+}
+
+code.ct .ct-has .ct-tilde::after {
+  content: '▸';
+  position: absolute;
+  inset: 0;
+  color: var(--text-muted);
+  font-style: normal;
+  text-align: center;
+  transition: transform 0.12s;
+}
+
+code.ct .ct-has[aria-expanded='true'] .ct-tilde::after {
+  transform: rotate(90deg);
+}
+
 .detail-desc code {
   background: color-mix(in srgb, var(--text-muted) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--border) 45%, transparent);

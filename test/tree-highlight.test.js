@@ -1,6 +1,6 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert');
-const { wantsTree, highlightTree } = require('../public/tree-highlight');
+const { wantsTree, highlightTree, renderTree } = require('../public/tree-highlight');
 
 const CALL_TREE = `BackgroundTaskQueueService        Channel.CreateUnbounded<IBackgroundTaskEvent>()
         │  (DocEvent, SecurityEvent, SearchEvent all go in here)
@@ -152,5 +152,106 @@ describe('highlightTree', () => {
     assert.match(lines[3], /^<span class="hljs-addition">\+<span class="hljs-punctuation">/);
     assert.equal(lines[0].includes('hljs-addition'), false);
     assert.match(lines[0], /<span class="hljs-title">Startup<\/span>$/);
+  });
+});
+
+const STACK = ` handleCheckout                  src/routes/checkout.ts:24
+   validateCart                  throws on an empty cart
+   placeOrder *                  src/orders/place.ts:40
+     chargeCard                  src/payments/charge.ts:31
+       ~ 2 SDK frames
+         PaymentsClient.charge   node_modules/pay-sdk/client.js:112
+         HttpClient.request      node_modules/pay-sdk/http.js:58
++    sendReceipt                 src/email/receipt.ts:9
+-    logOrder                    src/orders/log.ts:5
+ onPaymentWebhook                src/routes/webhooks.ts:58
+   markOrderPaid                 src/orders/status.ts:22`;
+
+function rowsOf(html) {
+  return html.replace(/^<pre><code[^>]*>|<\/code><\/pre>$/g, '').split('<span class="ct-nl">\n</span>');
+}
+
+function rowFor(html, name) {
+  return rowsOf(html).find((r) => textOf(r).includes(name));
+}
+
+describe('renderTree', () => {
+  it('draws the notation as a call stack, and falls back to the line highlight for the rest', () => {
+    const stacks = [STACK, INDENT_CALLS, INDENT_CALLS_DIFF, 'a\n  b\n\nc\n  d', 'a  note\n  b(x)  note', '~ 3 frames\n  a\n  b', ''];
+    const others = [CALL_TREE, DIFF_TREE, 'doc preview plan.md\n  run it'];
+    for (const [blocks, cls] of [
+      [stacks, 'hljs ct'],
+      [others, 'hljs language-tree'],
+    ]) {
+      for (const block of blocks) {
+        const html = renderTree(block);
+        assert.match(html, new RegExp(`^<pre><code class="${cls}">`));
+        assert.equal(textOf(html), block);
+      }
+    }
+  });
+
+  it('takes an untagged block in the notation as a tree', () => {
+    assert.equal(wantsTree('text', 'a\n  ~ 2 SDK frames\n    b *'), true);
+  });
+
+  it('draws tree lines over the indent spaces', () => {
+    const html = renderTree(STACK);
+    assert.match(rowFor(html, 'validateCart'), /<span class="ct-m"> <\/span><span class="ct-g ct-t"> <\/span><span class="ct-g ct-h"> <\/span>/);
+    assert.match(rowFor(html, 'placeOrder'), /<span class="ct-g ct-l"> <\/span><span class="ct-g ct-h"> <\/span>/);
+    assert.match(rowFor(html, 'sendReceipt'), /<span class="ct-m">\+<\/span>  <span class="ct-g ct-t">/);
+    assert.match(rowFor(html, 'chargeCard'), /<span class="ct-g ct-t">/);
+  });
+
+  it('marks the focus frame, the change rows and the notes', () => {
+    const html = renderTree(STACK);
+    assert.match(rowFor(html, 'placeOrder'), /class="ct-row ct-focus"/);
+    assert.match(rowFor(html, 'placeOrder'), /<span class="ct-star"> \*<\/span>/);
+    assert.match(rowFor(html, 'sendReceipt'), /class="ct-row ct-add"/);
+    assert.match(rowFor(html, 'logOrder'), /class="ct-row ct-del"/);
+    assert.match(rowFor(html, 'validateCart'), /<span class="ct-note">throws on an empty cart<\/span>/);
+    assert.match(rowFor(html, 'handleCheckout'), /<span class="ct-loc">src\/routes\/checkout.ts:24<\/span>/);
+  });
+
+  it('folds the frames under a ~ line', () => {
+    const html = renderTree(STACK);
+    const fold = rowFor(html, '2 SDK frames');
+    assert.match(fold, /class="ct-row ct-fold ct-has"/);
+    assert.match(fold, /data-ct="4"/);
+    assert.match(fold, /role="button"/);
+    assert.match(fold, /aria-expanded="false"/);
+    const inner = rowFor(html, 'PaymentsClient.charge');
+    assert.match(inner, /class="ct-row ct-hidden"/);
+    assert.match(inner, /data-ct-in="4"/);
+  });
+
+  it('leaves a ~ line with nothing under it as a note', () => {
+    const fold = rowFor(renderTree('a\n  ~ 3 middleware frames\n  b'), 'middleware');
+    assert.match(fold, /^<span class="ct-row ct-fold">/);
+  });
+
+  it('opens a fold that holds the focus frame or a change', () => {
+    const focus = renderTree('a\n  ~ 2 SDK frames\n    b *\n    c');
+    assert.match(rowFor(focus, '2 SDK'), /aria-expanded="true"/);
+    assert.equal(focus.includes('ct-hidden'), false);
+    const change = renderTree(' a\n   ~ 2 SDK frames\n-    b\n+    c');
+    assert.match(rowFor(change, '2 SDK'), /aria-expanded="true"/);
+    const top = renderTree('~ 2 Express frames\n  next\n    handle *');
+    assert.match(rowFor(top, 'Express'), /aria-expanded="true"/);
+  });
+
+  it('nests folds, each with its own state', () => {
+    const html = renderTree('a\n  ~ 1 SDK frame\n    b\n      ~ 1 runtime frame\n        c');
+    const runtime = rowFor(html, 'runtime');
+    assert.match(runtime, /data-ct="3"/);
+    assert.match(runtime, /data-ct-in="1"/);
+    assert.match(runtime, /aria-expanded="false"/);
+    assert.match(rowsOf(html)[4], /data-ct-in="3 1"/);
+  });
+
+  it('escapes HTML in names and notes', () => {
+    const html = renderTree('a  <img src=x>\n  b  "q"');
+    assert.equal(html.includes('<img'), false);
+    assert.match(html, /&lt;img src=x&gt;/);
   });
 });
