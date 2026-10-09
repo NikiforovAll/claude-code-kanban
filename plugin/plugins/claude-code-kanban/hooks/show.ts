@@ -90,7 +90,7 @@ export const register: Register = on => {
       await $.tool.register({
         name: 'show',
         description:
-          'Show a card in the cck overlay above this terminal. Post one when the user asks you to show, draw or visualize something, or when your answer is a comparison of 4 or more rows, a flow, or numbers over time. Pick the form that makes the point best: a table, chart, diagram, mockup, small widget or a mix. Give each card a key that names what it shows (for example latency-chart), and post again with that key to update the card in place instead of adding a new one. Without file, the tool answers with a path: write the card there with Write, and change it with Edit; the card refreshes on each save. Pass file to show a file that already exists.',
+          'Show a card in the cck overlay above this terminal. Post one when the user asks you to show, draw or visualize something, or when your answer is a comparison of 4 or more rows, a flow, or numbers over time. Pick the form that makes the point best: a table, chart, diagram, mockup, small widget or a mix. Give each card a key that names what it shows (for example latency-chart), and post again with that key to update the card in place instead of adding a new one. Without file, the tool answers with a path: write the card there with Write, and change it with Edit; the card refreshes on each save. Pass file to show a file that already exists. To explain code with a call stack or a tree, load the claude-code-kanban:show skill first for the notation. The user sees the rendered card and knows you do not; in your reply, say what the card shows, and take the render as given.',
         inputSchema: {
           type: 'object',
           properties: {

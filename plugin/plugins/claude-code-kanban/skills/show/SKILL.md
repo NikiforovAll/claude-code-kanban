@@ -1,11 +1,14 @@
 ---
 name: show
-description: Show card guide for the cck overlay. Use before a show call that posts HTML (a chart, mockup or diagram) or a mermaid diagram.
+description: Show card guide for the cck overlay. Use before a show call that posts HTML (a chart, mockup or diagram), a mermaid diagram, or explains code (a call stack or tree).
+argument-hint: '[explain|diagram|chart|mockup] [what to show]'
 ---
 
 # Show cards
 
 The `mcp__claude-code-kanban__show` tool exists only in a Claude Code session started in cck's terminal. Without it, tell the user that and stop.
+
+An argument names a card kind from [Card kinds](#card-kinds) and what to show: read that kind's guide and post the card. With no kind, pick the one that makes the point best; with no topic, show the subject of this conversation.
 
 ## HTML contract
 
@@ -30,11 +33,12 @@ This applies to the `.html` file that a `kind: "html"` post names.
 
 ## Card kinds
 
-Any HTML that helps the user see the point is a good card: a comparison table, a checklist, a before and after, a diff, a small interactive widget, a mix of these. The HTML contract above is all it needs. Three kinds have their own guide; read it before you write that kind:
+Any HTML that helps the user see the point is a good card: a comparison table, a checklist, a before and after, a diff, a small interactive widget, a mix of these. The HTML contract above is all it needs. Four kinds have their own guide; read it before you write that kind:
 
 - Chart, stat tile or meter: [references/chart.md](references/chart.md)
 - Mockup of a screen, dialog or form: [references/mockup.md](references/mockup.md)
 - Diagram in SVG of a system, flow, states or layers: [references/diagram.md](references/diagram.md)
+- Explain code (call stack, pseudocode, component or file tree, or a diff of one), in markdown: [references/explain.md](references/explain.md)
 
 ## Mermaid
 
