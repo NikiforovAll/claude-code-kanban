@@ -3801,9 +3801,12 @@ body.light .show-card {
   font-variant-numeric: tabular-nums;
 }
 
-.show-card.focused {
+.show-card.focused,
+body.light .show-card.focused {
   border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent);
+  box-shadow:
+    0 0 0 1px var(--accent),
+    0 0 10px var(--accent-glow);
 }
 
 .show-actions {
