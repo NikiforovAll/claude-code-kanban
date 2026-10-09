@@ -14695,8 +14695,11 @@ function syncShowFocus() {
   setTimeout(() => showCardEl()?.classList.toggle('focused', isShowCardFocused()));
 }
 
+// An HTML card's own keys and scroll keys reach it only inside its frame.
 function focusShowBody() {
-  showCardEl()?.querySelector('.show-body')?.focus();
+  const frame = showState.frame;
+  if (frame?.isConnected) frame.focus();
+  else showCardEl()?.querySelector('.show-body')?.focus();
 }
 
 const SHOW_KEY_COMMANDS = { 'alt+Enter': 'expand', 'alt+w': 'close' };
@@ -14747,6 +14750,13 @@ function rememberTerminalIds(list) {
   if (!gone.length) return;
   for (const tid of gone) delete showViews[tid];
   store.writeJson(SHOW_VIEW_KEY, showViews);
+}
+
+// A session resumed after its terminal ended runs under the same PTY id in a new terminal, with a
+// new terminal id, so the next view change looks it up again.
+function forgetEndedTerminals() {
+  for (const pty of terminalIds.keys()) if (!runningTerminals.has(pty)) terminalIds.delete(pty);
+  if (!runningTerminals.has(showState.lookup)) showState.lookup = null;
 }
 
 function setShowView(tid, view) {
@@ -14923,7 +14933,7 @@ async function renderShowBody(p, samePost) {
   showState.path = data && !data.waiting ? data.path : null;
   const html = data?.kind === 'html' && !data.waiting;
   // A new frame or document drops focus to the page, and Ctrl +/- then zooms the terminal.
-  const refocus = isShowCardFocused() ? () => body.focus() : () => {};
+  const refocus = isShowCardFocused() ? focusShowBody : () => {};
   card.classList.toggle('html', html);
   if (html) {
     const restoreY = samePost && showState.frame ? showState.frameY : 0;
@@ -14987,6 +14997,10 @@ function setShowReview(opts) {
 function createShowFrame(title, srcdoc) {
   const frame = createPreviewFrame('show-frame', srcdoc, 'allow-scripts');
   frame.title = title;
+  // Focus given before a document loads stays on the frame element, out of the document's keys.
+  frame.addEventListener('load', () => {
+    if (frame === document.activeElement) frame.contentWindow?.focus();
+  });
   showState.frame = frame;
   showState.frameFocused = false;
   return frame;
@@ -15417,6 +15431,8 @@ async function loadTerminals() {
 
 function setRunningTerminals(ids) {
   runningTerminals = new Set(ids);
+  forgetEndedTerminals();
+  syncShowCard();
   pushTerminalClaims();
   if (ids.some((id) => !sessions.some((s) => s.id === id))) fetchSessions(false).catch(() => {});
   else renderSessionViews();
