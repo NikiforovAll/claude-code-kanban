@@ -1,0 +1,71 @@
+---
+title: Use the card
+description: Page through show cards, expand and close them, open a card as a pane, and send review comments on a card to Claude.
+---
+
+import Shot from '../../../kit/Shot.astro';
+import Lightbox from '../../../kit/Lightbox.astro';
+
+The show card sits at the top right of the [embedded terminal](/claude-code-kanban/guides/embedded-terminal/) and keeps every post of the session in the terminal. To learn how Claude posts a card, see [Show cards](/claude-code-kanban/guides/show-cards/).
+
+<Shot themed="14d-show-mockup" alt="A show card with a dialog mockup and numbered notes, above the terminal" />
+
+## The header
+
+The header shows the title of the card on screen, the topic that Claude gave it, and its buttons:
+
+| Button | What it does |
+|---|---|
+| <kbd>‹</kbd> <kbd>›</kbd> and the count | Go to the previous or next post. |
+| Pane | Add the card's file as a pane of the session, next to Board. While the terminal covers the board, a toast says "Card added as a pane", with an Open button. |
+| Collapse | Show only the header. Click it again to open the card. |
+| Expand | Fill the terminal with the card. The card stops above the prompt, so you can still type to Claude. |
+| Remove | Delete the post on screen, after a confirm. <kbd>Shift</kbd>+click removes every post of the session. |
+| Close | Hide the card until Claude posts again. To open it before that, click **show** in the terminal bar. |
+
+Under the header, one tick stands for each post. Click a tick to go to that post. A dot on a tick means that Claude changed the post since you last saw it.
+
+Drag the card's edge to resize it. The text grows with the card's width.
+
+<Shot themed="14-show-callstack" alt="An expanded show card that fills the terminal with a call stack" />
+
+## Keys
+
+Press <kbd>Ctrl+Alt+&#96;</kbd> to move focus between the terminal and the card. A closed or collapsed card opens first. You can also click the card's header or body. While the card has focus, it has an accent outline.
+
+| Keys | Action |
+| --- | --- |
+| <kbd>[</kbd> or <kbd>]</kbd> | Previous or next post |
+| <kbd>Alt+Enter</kbd> | Fill the terminal with the card, or go back to the card size |
+| <kbd>Esc</kbd> | Go back to the card size. If the card is not expanded, collapse it and focus the terminal. |
+| <kbd>Alt+W</kbd> | Close the card until the next post, and focus the terminal |
+| <kbd>Ctrl+D</kbd> | Remove the post on screen, after a confirm |
+| <kbd>Ctrl++</kbd>, <kbd>Ctrl+-</kbd>, <kbd>Ctrl+0</kbd> | Card text size |
+
+A text field inside an HTML card keeps these keys. See [Keyboard shortcuts](/claude-code-kanban/reference/keyboard-shortcuts/#show-card).
+
+## Open a card as a pane
+
+The Pane button adds the card's file as a [pane](/claude-code-kanban/guides/session-details/) of the posting session. The pane uses the same theme colors as the card. When Claude changes the file, the pane reloads. When you remove the post, its pane goes too.
+
+Use a pane when you want the card next to the board, or when the card is too big for the terminal.
+
+## Comment on a card
+
+Select text in the card to add a [review comment](/claude-code-kanban/guides/review-comments/), as in a file preview. The comments list under the card body. Send them, and the session that posted the card gets them with the name of the card's file, so Claude knows which card you mean. Claude can then change the card, and the card shows the change.
+
+## What the card keeps
+
+- Each terminal opens the card the way you left it: collapsed, expanded or closed. This stays across a page reload.
+- A new post opens a closed card.
+- The posts belong to the session. `/clear` and a resume in the same terminal keep the card. After a board restart, the card comes back for each terminal.
+- Removed posts are gone. A post of an existing file deletes only the post, not the file.
+- Folds that you open in a call stack close again on the next render.
+
+## Posts of an existing file
+
+Claude can post a file that already exists: a markdown, HTML, text or image file, by its absolute path. An SVG file shows as a drawing. The card reads the file each time it loads, but does not watch it. To see a change, page away and back, or ask Claude to post it again.
+
+A card that Claude writes for the post is different: the board watches that file, and the card follows each change.
+
+<Lightbox />

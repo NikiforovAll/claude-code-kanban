@@ -1,0 +1,64 @@
+---
+title: Card kinds
+description: The kinds of show card that Claude can post, from markdown and mermaid to charts, mockups, SVG diagrams and call stacks.
+---
+
+import Shot from '../../../kit/Shot.astro';
+import Lightbox from '../../../kit/Lightbox.astro';
+
+A show card is markdown or HTML. Inside those two, the [show skill](/claude-code-kanban/guides/show-cards/#the-show-skill) has a guide for four kinds of card: explain code, diagram, chart and mockup. Any other HTML that makes the point is a good card too, such as a comparison table, a checklist or a small widget.
+
+Every kind takes its colors and fonts from the board's theme, so a card looks right in light and dark.
+
+## Markdown
+
+A markdown card holds text, tables, task lists, code with syntax colors and file trees. Claude can also post an image file as a card. Markdown renders as the session log and file previews do, so [call stacks and mermaid diagrams](/claude-code-kanban/guides/markdown-views/) work here too.
+
+<Shot themed="14f-show-checklist" alt="A markdown show card with a release checklist, a version table and a file tree" />
+
+## Mermaid
+
+A `mermaid` code block draws a diagram in the theme's colors. The card is narrow, so Claude keeps a diagram small: a top-down flowchart with short labels, or a sequence of messages. Claude splits a big map into several cards.
+
+<Shot themed="14e-show-mermaid" alt="A show card with a mermaid sequence diagram of a handshake and a table under it" />
+
+## Explain code
+
+An explain card makes one point about the code, in a sentence or two, then shows the smallest view that proves it:
+
+| To show | View |
+|---|---|
+| Who calls whom at run time | A [call stack](/claude-code-kanban/guides/markdown-views/#call-stacks) |
+| What a function decides | Pseudocode |
+| UI structure, state and module edges | A component tree |
+| Which file owns what | A file tree |
+| Messages between parts over time | A mermaid sequence |
+| What a change adds, removes or moves | A diff of one of the views above |
+
+A follow-up, such as the call stack after the fix, replaces the first card. You do not need the old card to compare: the call stack marks the frames that the change adds and removes.
+
+<Shot themed="14-show-callstack" alt="An explain card with a call stack: one focus frame, a fold of browser frames, and frames that a change adds and removes" />
+
+## Chart
+
+A chart card shows numbers: bars, lines, stat tiles or a meter. The title says what to see, and one accent color marks the thing to look at. Series and magnitude colors come from a palette that the board sets for each theme.
+
+<Shot themed="14b-show-chart" alt="A chart card with three stat tiles and a bar per session, one bar in the accent color" />
+
+## Diagram
+
+A diagram card is an SVG drawing of a system, a flow, states or layers. Zones group the parts, and the accent color marks the part the point is about.
+
+<Shot themed="14c-show-diagram" alt="An SVG diagram card of the hub page, four apps and the config dir, in browser, loopback and disk zones" />
+
+## Mockup
+
+A mockup card sketches a screen, a dialog or a form, with numbered notes for the open questions. Use it to agree on a UI before Claude builds it. Select a note's text to [comment on it](/claude-code-kanban/guides/show-cards-use/#comment-on-a-card).
+
+<Shot themed="14d-show-mockup" alt="A mockup card of a Remove config dir dialog with two numbered notes" />
+
+## What HTML cards can do
+
+An HTML card runs in a sandbox. Its scripts work, so a card can have tabs, a slider or a sort, but they cannot reach the board, the network or your files. A link opens in a new browser tab.
+
+<Lightbox />

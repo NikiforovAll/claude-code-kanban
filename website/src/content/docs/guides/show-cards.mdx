@@ -1,0 +1,66 @@
+---
+title: Show cards
+description: Let Claude put a chart, a diagram, a mockup or an explanation of code on a card above the embedded terminal.
+---
+
+import Shot from '../../../kit/Shot.astro';
+import Lightbox from '../../../kit/Lightbox.astro';
+
+A show card is a panel at the top right of the [embedded terminal](/claude-code-kanban/guides/embedded-terminal/). Claude Code, running in that terminal, posts to it: a chart of the numbers it found, a diagram of a system, a mockup of a screen, or a call stack that explains code. You read the card next to the conversation, and the text in the terminal stays short.
+
+<Shot themed="14b-show-chart" alt="A show card with a spend chart at the top right of the embedded terminal" />
+
+## What you need
+
+- The Claude Code Kanban plugin, installed with `claude-code-kanban --install`. See [Getting started](/claude-code-kanban/getting-started/).
+- A session that runs in the board's embedded terminal. A session in another terminal does not get the `show` tool.
+
+## Post your first card
+
+Ask for a card in plain words, in the session in the embedded terminal:
+
+```text
+Show me a diagram of how the request moves through the services.
+Put this week's test results on a chart.
+Explain the call path of the checkout handler as a call stack.
+```
+
+Claude writes the card to a file and posts it. The card shows at once. When Claude changes the file, the card follows the change.
+
+Each post is one card, and the card keeps all the posts of the session. Use the pager in the header to go back to an earlier card. A post with the same topic as an earlier card replaces that card in place, so a follow-up, such as the call stack after a fix, does not add a new one.
+
+## The show skill
+
+The plugin adds a skill that tells Claude how to write a good card:
+
+```text
+/claude-code-kanban:show [explain|diagram|chart|mockup] [what to show]
+```
+
+| Argument | Card |
+|---|---|
+| `explain` | Markdown that explains code: a call stack, pseudocode, a component or file tree, a sequence, or a diff of one of these |
+| `diagram` | An SVG diagram of a system, a flow, states or layers |
+| `chart` | A chart, stat tiles or a meter |
+| `mockup` | A mockup of a screen, a dialog or a form |
+
+With no kind, Claude picks the one that makes the point best. With no topic, it shows the subject of the conversation. Claude also loads the skill on its own when you ask for a card in plain words.
+
+Example prompts:
+
+```text
+/claude-code-kanban:show
+/claude-code-kanban:show explain the retry path in the uploader
+/claude-code-kanban:show chart token use per session today
+/claude-code-kanban:show mockup the settings dialog with the new toggle
+```
+
+The cards take their colors and fonts from the board's theme, light or dark. When you change the theme, every card changes with it.
+
+## Next steps
+
+- [Use the card](/claude-code-kanban/guides/show-cards-use/): keys, panes and review comments.
+- [Card kinds](/claude-code-kanban/guides/show-card-kinds/): what each kind of card looks like.
+- [Markdown views](/claude-code-kanban/guides/markdown-views/): call stacks and mermaid diagrams, in cards and in previews.
+
+<Lightbox />

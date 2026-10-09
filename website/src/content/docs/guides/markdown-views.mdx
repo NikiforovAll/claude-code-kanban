@@ -1,0 +1,67 @@
+---
+title: Markdown views
+description: Read call stacks as foldable trees, see mermaid diagrams in the board's theme, and open a file at a line from a call stack.
+---
+
+import Shot from '../../../kit/Shot.astro';
+import Lightbox from '../../../kit/Lightbox.astro';
+
+The board renders markdown the same way everywhere: in the session log, in message details, in file previews and panes, and on [show cards](/claude-code-kanban/guides/show-cards/). This page covers the views that go past plain markdown.
+
+## Call stacks
+
+A code block with the `callstack` tag renders as a tree of calls. Claude writes one when it explains how code runs, and the [show skill](/claude-code-kanban/guides/show-cards/#the-show-skill) teaches it the notation.
+
+<Shot themed="14-show-callstack" alt="A call stack tree with a focus frame, a fold of browser frames, and added and removed frames" />
+
+The source of a call stack:
+
+````text
+```callstack
+ handleCheckout                  src/routes/checkout.ts:24
+   validateCart                  throws on an empty cart
+   placeOrder *                  src/orders/place.ts:40
+     chargeCard                  src/payments/charge.ts:31
+       ~ 2 SDK frames
+         PaymentsClient.charge   node_modules/pay-sdk/client.js:112
+         HttpClient.request      node_modules/pay-sdk/http.js:58
++    sendReceipt                 src/email/receipt.ts:9
+-    logOrder                    src/orders/log.ts:5
+```
+````
+
+How to read it:
+
+- The caller is on top. Each callee is one level in, under its caller, and the board draws the tree lines.
+- The note on the right is a `path:line` in the project, or a few words.
+- `*` marks the frame to look at.
+- A `+` line is a frame that a change adds, in green. A `-` line is a frame that it removes, in red.
+- A `~ N <what> frames` line stands for frames you can skip, such as library or runtime code.
+
+### Folds
+
+A `~` line with frames under it is a fold. It starts closed, unless it holds the `*` frame or a frame that the change adds or removes. Click it, or press <kbd>Enter</kbd> or <kbd>Space</kbd> on it, to open or close it.
+
+Any frame with callees folds the same way. Click the frame to hide its callees, and click again to show them.
+
+### Open a file at a line
+
+Click a `path:line` note to open that file at that line:
+
+- From the session log or a show card, the file opens as a [pane](/claude-code-kanban/guides/session-details/) of the session, at that line. When the terminal covers the pane, a toast says the file was added as a pane, with an Open button.
+- <kbd>Shift</kbd>+click opens the file in the preview instead. The preview marks the line.
+- In a preview or other dialog, or with no session open, the file opens in the preview.
+
+The path is relative to the project of the session.
+
+## Mermaid diagrams
+
+A `mermaid` code block draws a diagram: a flowchart, a sequence, states and the other mermaid types. The board draws it in the colors of its theme, light or dark, so a diagram matches the page around it. When you change the theme, the diagrams change with it.
+
+<Shot themed="14e-show-mermaid" alt="A mermaid sequence diagram drawn in the board's theme colors" />
+
+## Line numbers in file previews
+
+A preview of a source or text file has a gutter of line numbers on the left. When you open a file at a line from a call stack, the preview or pane marks that line with a band and scrolls to it.
+
+<Lightbox />

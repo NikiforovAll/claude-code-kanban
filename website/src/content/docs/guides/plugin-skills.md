@@ -1,9 +1,9 @@
 ---
 title: Claude Code plugin skills
-description: Use the kanban and dispatch skills to drive the board from Claude Code, and steer a session with card moves on the board.
+description: Use the kanban, dispatch and show skills to drive the board from Claude Code, and steer a session with card moves on the board.
 ---
 
-The Claude Code Kanban plugin adds two skills to Claude Code, and it sends your board moves to the session. `claude-code-kanban --install` installs the plugin, together with its hooks. See [Getting started](/claude-code-kanban/getting-started/).
+The Claude Code Kanban plugin adds three skills to Claude Code, and it sends your board moves to the session. `claude-code-kanban --install` installs the plugin, together with its hooks. See [Getting started](/claude-code-kanban/getting-started/).
 
 In Claude Code the skills have the plugin name as a prefix:
 
@@ -11,6 +11,7 @@ In Claude Code the skills have the plugin name as a prefix:
 |---|---|---|
 | `/claude-code-kanban:kanban` | You or Claude | Runs the board's CLI: links docs, adds panes, opens and pins sessions. |
 | `/claude-code-kanban:dispatch` | You or Claude | Starts other sessions in the board's terminal. |
+| `/claude-code-kanban:show` | You or Claude | Posts a chart, diagram, mockup or explanation of code to a card above the board's terminal. |
 
 The skills need the board server. If the server is not running, a CLI command fails with `Cannot reach cck server for <dir> on port <n>`. Start the server with `claude-code-kanban`, then try again.
 
@@ -93,4 +94,20 @@ Example prompts:
 /claude-code-kanban:dispatch fix the flaky login test in ~/dev/app and message me when it is done -- --permission-mode auto
 /claude-code-kanban:dispatch update the changelog in this repo --handoff
 Dispatch two sessions in separate worktrees, one for the API and one for the UI, in a group named api-ui, and tell me when both are done.
+```
+
+## show
+
+```text
+/claude-code-kanban:show [explain|diagram|chart|mockup] [what to show]
+```
+
+This skill tells Claude how to write a show card: a chart, an SVG diagram, a mockup, or markdown that explains code. The `show` tool exists only in a session that runs in the board's embedded terminal. In any other session, Claude does not see the skill. See [Show cards](/claude-code-kanban/guides/show-cards/) for the card and [Card kinds](/claude-code-kanban/guides/show-card-kinds/) for what each kind looks like.
+
+Example prompts:
+
+```text
+/claude-code-kanban:show explain the retry path in the uploader
+/claude-code-kanban:show chart token use per session today
+Show me a diagram of how the request moves through the services.
 ```
