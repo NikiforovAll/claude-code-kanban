@@ -1,10 +1,11 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 export const SERVER = 'mcp__kanban-delm-swarm__'
-// A tool call is one $.process.run; a waiting status call holds it for up to 25 s.
-const WAIT_CAP_SECONDS = 25
 const RUNTIME_FIELDS = ['dir', 'tasksDir', 'base', 'parent', 'roster', 'actor', 'cwd']
-const STATUS_FIELDS = ['state', 'summary', 'dependency', 'finding']
+const ENDED = 'This swarm has ended.'
+export const POLL_MS = 1500
+// The session's own end: an exit, a logout, or a -p run that finished. /clear and resume go on.
+const STOP_REASONS = ['prompt_input_exit', 'logout', 'other']
 
 type Worker = { name: string; sessionId?: string }
 type Registry = { listId: string; base?: string; parent?: string; state?: string; workers?: Worker[] }
@@ -52,7 +53,7 @@ export const TOOLS: { name: string; command: string; description: string; inputS
     name: 'swarm_status',
     command: 'status',
     description:
-      'Read the compact board, or report your status. With no state, summary, dependency or finding it only reads. state is working, waiting or blocked; waiting requires a named dependency. finding shares a short free-text result for every worker: what you verified or ruled out, its scope and basis. Every response carries the board: the latest 24 tasks, publications and findings with totals; page older records with swarm_list. Pass wait (seconds, at most 25) to block until a peer adds a task, a publication or a finding after since.',
+      'Read the compact board, or report your status. With no state, summary, dependency or finding it only reads. state is working, waiting or blocked. Use waiting only when nothing is ready to advance: name the dependency, then end your turn. The swarm resumes you when that dependency is ready, new work becomes available, the request changes, or no one can produce it. Never sleep or poll to wait. finding shares a short free-text result for every worker: what you verified or ruled out, its scope and basis. Every response carries the board: the latest 24 tasks, publications and findings with totals; page older records with swarm_list.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -61,9 +62,6 @@ export const TOOLS: { name: string; command: string; description: string; inputS
         summary: bounded(2048, false),
         dependency: { ...bounded(512, true), description: 'What you wait for: task:<id> or worker:<name>. Not your own task or yourself.' },
         finding: bounded(4096, true),
-        wait: { type: 'number', description: `Seconds to wait for a peer update, at most ${WAIT_CAP_SECONDS}` },
-        since: { type: 'integer', minimum: 0, description: 'Board sequence to wait after; defaults to now' },
-        target: { ...positive, description: 'Task id; the wait ends when that task is done' },
       },
     },
   },
@@ -228,15 +226,14 @@ async function running($: EngineInterface) {
 // $.plugin.root names the folder that holds plugin.json, which is .claude-plugin/.
 export const storePath = (root: string) => `${root.replaceAll('\\', '/').replace(/\/\.claude-plugin\/?$/, '')}/scripts/store.mjs`
 
-async function run($: EngineInterface, s: Swarm, command: string, input: Record<string, unknown>) {
+type Reply = { ok?: boolean; error?: string; result?: { wake?: boolean; ended?: boolean; message?: string; changes?: number } }
+
+async function store($: EngineInterface, s: Swarm, command: string, args: Record<string, unknown>): Promise<Reply> {
   // Read again on each call: /swarm start adds a worker's session id after the dispatch returns.
   const registry = (await readRegistry($, s.dir)) ?? s.registry
-  if (registry.state === 'ended') return { deny: 'This swarm has ended.' }
+  if (registry.state === 'ended') return { ok: false, error: ENDED, result: { ended: true } }
   const id = await $.session.id()
   const name = registry.workers?.find(w => w.sessionId === id)?.name
-  const { tool: _tool, tool_use_id: _id, ...args } = input
-  const owned = RUNTIME_FIELDS.filter(f => f in args)
-  if (owned.length) return { deny: `${owned.join(', ')} ${owned.length > 1 ? 'are' : 'is'} set by the swarm, not by the call.` }
   const request = {
     ...args,
     dir: s.dir,
@@ -247,26 +244,102 @@ async function run($: EngineInterface, s: Swarm, command: string, input: Record<
     actor: { id, ...(name ? { name } : {}) },
     cwd: await $.session.cwd(),
   }
-  // The same rule as `mutates` for status in scripts/store.mjs: only a read waits.
-  const waiting = command === 'status' && Number(args.wait) > 0 && !STATUS_FIELDS.some(f => f in args)
-  const r = await $.process.run(['node', storePath($.plugin.root), command], {
-    stdin: JSON.stringify(request),
-    timeoutMs: waiting ? (WAIT_CAP_SECONDS + 4) * 1000 : 15_000,
-  })
-  let out: { ok?: boolean; error?: string } | undefined
+  const r = await $.process.run(['node', storePath($.plugin.root), command], { stdin: JSON.stringify(request), timeoutMs: 15_000 })
   try {
-    out = JSON.parse(r.stdout)
-  } catch {}
-  if (!out) return { deny: `The swarm store failed (exit ${r.exitCode}): ${(r.stderr || r.stdout).trim().slice(0, 500)}` }
-  if (!out.ok) return { deny: out.error ?? 'The swarm store refused the call.' }
-  const { ok: _ok, ...result } = out
+    return JSON.parse(r.stdout) as Reply
+  } catch {
+    return { ok: false, error: `The swarm store failed (exit ${r.exitCode}): ${(r.stderr || r.stdout).trim().slice(0, 500)}` }
+  }
+}
+
+async function run($: EngineInterface, s: Swarm, command: string, input: Record<string, unknown>) {
+  const { tool: _tool, tool_use_id: _id, ...args } = input
+  const owned = RUNTIME_FIELDS.filter(f => f in args)
+  if (owned.length) return { deny: `${owned.join(', ')} ${owned.length > 1 ? 'are' : 'is'} set by the swarm, not by the call.` }
+  const { ok, error, ...result } = await store($, s, command, args)
+  if (!ok) return { deny: error ?? 'The swarm store refused the call.' }
   return { result: JSON.stringify(result) }
+}
+
+// The worker wakes itself, as DeLM's controller resumes a waiting worker: the store reports each
+// turn's start and end, and while the session is idle, each store change asks the store whether
+// this worker should wake. The store counts its changes in CHANGES_FILE and answers the count with
+// each turn and wake, so this worker's own writes ask nothing. One store call runs at a time, in
+// the order the hooks raised them.
+export const CHANGES_FILE = 'changes'
+let idle = false
+let woke = false
+let seen = ''
+let watching = false
+let queue: Promise<unknown> = Promise.resolve()
+const serial = <T>(fn: () => Promise<T>) => {
+  const p = queue.then(fn)
+  queue = p.catch(() => {})
+  return p
+}
+
+const changes = ($: EngineInterface, dir: string) => $.fs.read(`${dir}/${CHANGES_FILE}`).then(String, () => '-')
+
+// Answers true once the swarm has ended, so the watch stops.
+function wakeIfDue($: EngineInterface, out: Reply) {
+  if (out.result?.changes !== undefined) seen = String(out.result.changes)
+  if (out.result?.wake) {
+    idle = false
+    woke = true
+    void $.prompt.submit({ text: `Swarm: ${out.result.message}` }).catch(() => {})
+  }
+  return !!out.result?.ended
+}
+
+async function watch($: EngineInterface, s: Swarm) {
+  for (;;) {
+    await $.clock.sleep(POLL_MS)
+    if (!idle) continue
+    const now = await changes($, s.dir)
+    if (now === seen) continue
+    seen = now
+    if (await serial(async () => idle && wakeIfDue($, await store($, s, 'wake', {})))) return
+  }
 }
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
-    if (await swarm($)) {
+    const s = await swarm($)
+    if (s) {
       for (const { name, description, inputSchema } of TOOLS) await $.tool.register({ name, description, inputSchema })
+      // A -p worker ends with its turn, so only a session at a prompt watches.
+      if (e.isInteractive && !watching) {
+        watching = true
+        void watch($, s).catch(() => {})
+      }
+    }
+    return next(e)
+  })
+
+  on('turn.start', async ($, e, next) => {
+    const s = await swarm($)
+    if (s) {
+      idle = false
+      // A wake already marked this turn as running.
+      if (woke) woke = false
+      else void serial(() => store($, s, 'turn', { running: true }))
+    }
+    return next(e)
+  })
+
+  on('turn.complete', async ($, e, next) => {
+    const s = await swarm($)
+    if (s && !e.agentId) {
+      idle = true
+      void serial(async () => wakeIfDue($, await store($, s, 'turn', { running: false })))
+    }
+    return next(e)
+  })
+
+  on('session.end', async ($, e, next) => {
+    const s = await swarm($)
+    if (s && STOP_REASONS.includes(e.reason)) {
+      await serial(() => store($, s, 'worker_stop', { idempotency_key: `session-end-${e.sessionId}`, reason: `its session ended (${e.reason})` })).catch(() => {})
     }
     return next(e)
   })

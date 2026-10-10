@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 
-export const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+const sleep =(ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
 
 // On Windows a rename over a file that a watcher has open fails for a moment.
 export function renameRetry(from, to) {

@@ -332,28 +332,11 @@ describe('swarm store', { skip: !hasSqlite && 'node:sqlite needs Node 22.5 or la
     assert.equal(view(w).workers.find((x) => x.worker === 'worker-b').dependency, null);
   });
 
-  it('a waiting status call wakes on a peer task after since and times out on its own writes', () => {
+  it('a status read only reads', () => {
     const w = world();
-    ok(w, 'status', a, { idempotency_key: 's', summary: 'busy' });
-    const own = ok(w, 'status', a, { wait: 0.3 });
-    assert.equal(own.woke_by, 'timeout');
-    const since = view(w).sequence;
-    create(w, b, 'new');
-    const woke = ok(w, 'status', a, { wait: 5, since });
-    assert.deepEqual([woke.woke_by, woke.woken.map((e) => [e.worker, e.kind])], ['update', [['worker-b', 'task_create']]]);
-    assert.ok(woke.waited < 1);
-    assert.equal(events(w, since).length, 1, 'a wait writes nothing');
-  });
-
-  it('a waiting status call wakes at once on a target already done', () => {
-    const w = world();
-    const id = create(w, b, 's');
-    const version = claim(w, b, 'c', id);
-    ok(w, 'task_finish', b, { idempotency_key: 'f', task_id: id, expected_version: version, summary: 'ok' });
-    const woke = ok(w, 'status', a, { wait: 5, target: id });
-    assert.equal(woke.woke_by, 'already');
-    assert.ok(woke.waited < 1);
-    assert.match(run(w, 'status', a, { wait: 1, target: String(id) }).error, /target must be a positive integer/);
+    const before = view(w).sequence;
+    assert.deepEqual(ok(w, 'status', a), { worker: 'worker-a' });
+    assert.equal(view(w).sequence, before);
   });
 
   it('immutable_publication_is_selective_and_preserves_binary_executable_and_deletion', () => {
@@ -476,7 +459,7 @@ describe('swarm store', { skip: !hasSqlite && 'node:sqlite needs Node 22.5 or la
 
   it('export and diff read the store without writing to it', () => {
     const w = world();
-    assert.deepEqual(main('export', { dir: w.dir }), { ok: true, sequence: 0, events: [] });
+    assert.deepEqual(main('export', { dir: w.dir }), { ok: true, sequence: 0, events: [], workers: [] });
     assert.equal(fs.existsSync(w.dir), false);
     const { base, wa } = workspaces(w, { 'main.txt': 'one\n' });
     fs.writeFileSync(path.join(wa, 'main.txt'), 'two\n');
@@ -484,6 +467,7 @@ describe('swarm store', { skip: !hasSqlite && 'node:sqlite needs Node 22.5 or la
     const id = publish(w, a, 'p', ['main.txt', 'logo.png'], { cwd: wa, base });
     const all = main('export', { dir: w.dir });
     assert.equal(all.events.at(-1).kind, 'publication');
+    assert.deepEqual(all.workers, [{ worker: 'worker-a', state: 'working', running: true }]);
     assert.deepEqual(main('export', { dir: w.dir, since: all.sequence }).events, []);
     const diff = main('diff', { dir: w.dir, publication_id: id, path: 'main.txt' });
     assert.equal(diff.ok, true, diff.error);
@@ -585,17 +569,95 @@ describe('swarm store', { skip: !hasSqlite && 'node:sqlite needs Node 22.5 or la
     assert.ok(base && wb);
   });
 
-  it('a waiting worker is stalled when no one can produce its dependency', () => {
+  const answer = ({ changes, ...rest }) => (assert.equal(typeof changes, 'number'), rest);
+  const turn = (t, actor, running) => answer(ok(t, 'turn', actor, { running }));
+  const wake = (t, actor) => answer(ok(t, 'wake', actor));
+
+  it('a waiting worker is stalled while no worker has a turn running, as the no-producer wake decides', () => {
     const t = team(world());
     const task = create(t, b, 'open');
-    done(t, 'status', b, { idempotency_key: 'b', summary: 'busy' });
-    done(t, 'status', a, { idempotency_key: 'wait-task', state: 'waiting', dependency: `task:${task}` });
-    assert.equal(worker(done(t, 'status', a), 'worker-a').stalled, true, 'an unclaimed task has no producer');
-    done(t, 'status', a, { idempotency_key: 'wait-b', state: 'waiting', dependency: 'worker:worker-b' });
-    assert.equal(worker(done(t, 'status', a), 'worker-a').stalled, false);
-    done(t, 'status', b, { idempotency_key: 'b-wait', state: 'waiting', dependency: 'worker:worker-a' });
-    const both = done(t, 'status', a).board;
-    assert.deepEqual([worker({ board: both }, 'worker-a').stalled, worker({ board: both }, 'worker-b').stalled], [true, true], 'two workers waiting on each other');
+    const stalled = () => worker(done(t, 'status', parent), 'worker-b').stalled;
+    done(t, 'status', a, { idempotency_key: 'wait-a', state: 'waiting', dependency: `task:${task}` });
+    done(t, 'status', b, { idempotency_key: 'wait-b', state: 'waiting', dependency: `task:${task}` });
+    assert.equal(turn(t, b, false).wake, false, 'worker-a still runs');
+    assert.equal(stalled(), false);
+    assert.equal(turn(t, a, false).reason, 'no_producer');
+    done(t, 'status', a, { idempotency_key: 'wait-a2', state: 'waiting', dependency: `task:${task}` });
+    assert.equal(turn(t, a, false).wake, false, 'worker-a was repaired in this revision');
+    assert.equal(stalled(), true, 'no turn runs and worker-b was not repaired');
+    assert.equal(wake(t, b).reason, 'no_producer');
+  });
+
+  it('the store counts its changes in a file, and a turn start on a running worker writes nothing', () => {
+    const t = team(world());
+    const count = () => Number(fs.readFileSync(path.join(t.dir, 'changes'), 'utf8'));
+    create(t, b, 'one');
+    const before = count();
+    assert.equal(ok(t, 'turn', a, { running: true }).changes, before, 'a fresh worker already runs');
+    assert.equal(count(), before);
+    const ended = ok(t, 'turn', a, { running: false });
+    assert.equal(ended.changes, count());
+    assert.ok(ended.changes > before);
+    assert.equal(ok(t, 'wake', a).changes, count(), 'a wake with nothing to do changes nothing');
+  });
+
+  it('a worker wakes on its ready dependency or new work, never while its turn runs, and once per wake', () => {
+    const t = team(world());
+    const task = create(t, b, 'storage');
+    const version = claim(t, b, 'claim', task);
+    done(t, 'status', a, { idempotency_key: 'wait', state: 'waiting', dependency: `task:${task}` });
+    assert.deepEqual(turn(t, a, false), { wake: false }, 'the producer still runs its first turn');
+    ok(t, 'task_finish', b, { idempotency_key: 'finish', task_id: task, expected_version: version, summary: 'Storage ready' });
+    const woke = wake(t, a);
+    assert.deepEqual([woke.wake, woke.reason], [true, 'ready']);
+    assert.match(woke.message, /^Shared work changed/);
+    const row = worker(done(t, 'status', b), 'worker-a');
+    assert.deepEqual([row.state, row.running, row.dependency], ['working', true, null]);
+    assert.deepEqual(wake(t, a), { wake: false }, 'a wake counts as the next turn');
+    assert.deepEqual(turn(t, a, false), { wake: false }, 'nothing new since that turn');
+    create(t, b, 'more');
+    assert.equal(wake(t, a).reason, 'ready', 'an idle worker wakes for work that became available after its turn');
+    turn(t, a, true);
+    create(t, b, 'busy');
+    assert.deepEqual(wake(t, a), { wake: false }, 'a running turn is never woken');
+    assert.deepEqual(events(t).filter((e) => e.kind === 'worker_woken').map((e) => [e.payload.worker, e.payload.reason, e.payload.state]), [
+      ['worker-a', 'ready', 'waiting'],
+      ['worker-a', 'ready', 'working'],
+    ]);
+  });
+
+  it('no producer: with no turn running, one waiter wakes, once per request revision', () => {
+    const t = team(world());
+    done(t, 'status', a, { idempotency_key: 'wait-a', state: 'waiting', dependency: 'worker:worker-b' });
+    done(t, 'status', b, { idempotency_key: 'wait-b', state: 'waiting', dependency: 'worker:worker-a' });
+    assert.deepEqual(turn(t, a, false), { wake: false }, 'worker-b still runs');
+    const first = turn(t, b, false);
+    assert.deepEqual([first.reason, first.message], ['no_producer', 'Your dependency has no active producer. Resolve available work now, or declare blocked with the concrete input needed.']);
+    assert.deepEqual(wake(t, a), { wake: false }, 'the woken worker now runs');
+    assert.deepEqual(turn(t, b, false), { wake: false });
+    assert.equal(wake(t, a).reason, 'no_producer', 'the other waiter wakes in its turn');
+    done(t, 'status', a, { idempotency_key: 'wait-a2', state: 'waiting', dependency: 'worker:worker-b' });
+    assert.deepEqual(turn(t, a, false), { wake: false }, 'only once per revision');
+    done(t, 'request', parent, { idempotency_key: 'r2', text: 'Also support dark mode' });
+    const update = wake(t, a);
+    assert.equal(update.reason, 'request');
+    assert.match(update.message, /^Request revision 2: Also support dark mode\n\nRead the board/);
+    assert.equal(done(t, 'status', a).request_updates, undefined, 'the wake delivered the change');
+    assert.match(run(t, 'turn', parent, { running: false }).error, /the parent has no turn/);
+    assert.match(run(t, 'turn', a, {}).error, /running must be true or false/);
+  });
+
+  it('nothing wakes after a complete outcome or the end, or a stopped worker', () => {
+    const t = team(world());
+    done(t, 'complete', b, { idempotency_key: 'done', outcome: 'complete', expected_revision: 1, summary: 'Goal met' });
+    create(t, b, 'late');
+    assert.deepEqual(turn(t, a, false), { wake: false });
+    done(t, 'worker_stop', a, { idempotency_key: 'stop', reason: 'session ended' });
+    done(t, 'request', parent, { idempotency_key: 'r2', text: 'More' });
+    assert.deepEqual(wake(t, a), { wake: false }, 'a stopped worker is not woken');
+    assert.equal(turn(t, b, false).reason, 'request', 'a new revision reopens the goal');
+    done(t, 'end', parent, { idempotency_key: 'end', outcome: 'complete', summary: 'Goal met' });
+    assert.deepEqual(wake(t, b), { wake: false, ended: true });
   });
 
   it('the parent adds, assigns, closes and releases tasks, and cannot do worker work', () => {

@@ -1,6 +1,6 @@
 import type { On, ToolCallArgs } from 'claude-code'
-import { expect, test } from 'claude-code/testing'
-import { configDir, SERVER, storePath, TOOLS } from '../hooks/swarm'
+import { expect, mock, test } from 'claude-code/testing'
+import { CHANGES_FILE, configDir, POLL_MS, SERVER, storePath, TOOLS } from '../hooks/swarm'
 
 const LIST = 'swarm-fix-login-3fa91c'
 const DIR = `C:/cfg/.cck/swarm/${LIST}`
@@ -8,10 +8,17 @@ const REGISTRY = { listId: LIST, base: 'abc123', parent: 'sid-p', state: 'runnin
 
 type Run = { argv: readonly string[]; input: unknown; timeoutMs?: number }
 
-function engine(on: On, env: Record<string, string>, registry: unknown = REGISTRY, reply = '{"ok":true,"won":true}') {
+type Reply = string | ((command: string) => string)
+
+function engine(on: On, env: Record<string, string>, registry: unknown = REGISTRY, reply: Reply = '{"ok":true,"won":true}') {
   const registered: string[] = []
   const runs: Run[] = []
+  const prompts: string[] = []
   const files: Record<string, string> = registry ? { [`${DIR}/swarm.json`]: JSON.stringify(registry) } : {}
+  on('prompt.submit', (_$, e) => {
+    prompts.push(e.text)
+    return { text: e.text }
+  })
   on('env.get', (_$, e) => ({ value: { CLAUDE_CONFIG_DIR: 'C:\\cfg', ...env }[e.name] }))
   on('fs.read', (_$, e) => {
     const text = files[e.path.replaceAll('\\', '/')]
@@ -21,16 +28,20 @@ function engine(on: On, env: Record<string, string>, registry: unknown = REGISTR
   on('session.id', () => ({ value: 'sid-1' }))
   on('session.cwd', () => ({ value: 'C:/wt/w1' }))
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('turn.start', (_$, e) => ({ turnId: e.turnId }))
+  on('turn.complete', (_$, e) => ({ text: e.answer }))
+  on('session.end', (_$, e) => ({ sessionId: e.sessionId }))
   on('tool.register', (_$, e) => {
     registered.push(e.name)
     return { value: { tool: `${SERVER}${e.name}` } }
   })
   on('process.run', (_$, e) => {
     runs.push({ argv: e.argv, input: JSON.parse(String(e.init?.stdin)), timeoutMs: e.init?.timeoutMs })
-    return { value: { exitCode: 0, stdout: reply, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    const stdout = typeof reply === 'string' ? reply : reply(String(e.argv.at(-1)))
+    return { value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   on('tool.call', { tool: 'TaskUpdate' }, () => ({ result: 'updated' }))
-  return { registered, runs, files }
+  return { registered, runs, files, prompts, commands:() => runs.map(r => r.argv.at(-1)) }
 }
 
 const WORKER = { CLAUDE_CODE_TASK_LIST_ID: LIST }
@@ -130,15 +141,94 @@ test('a call that sets an identity, workspace or store field is refused and runs
   expect(board.runs.length).toBe(0)
 })
 
-test('a waiting status call gets a longer timeout', async ($, on) => {
-  const board = engine(on, WORKER)
+const NO_WAKE = '{"ok":true,"result":{"wake":false}}'
+const WAKE = '{"ok":true,"result":{"wake":true,"reason":"ready","message":"Shared work changed."}}'
+const ENDED = '{"ok":true,"result":{"wake":false,"ended":true}}'
+const interactive = { ...start, surface: 'terminal', isInteractive: true } as const
+const turnEnd = { answer: '', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' } as const
+
+test('each turn reports its start and end, and a due wake at the end resumes the worker', async ($, on) => {
+  const clock = mock.clock(on)
+  const board = engine(on, WORKER, REGISTRY, command => (command === 'turn' && board.runs.length > 1 ? WAKE : NO_WAKE))
   await $.session.start(start)
-  await $.tool.call(call('swarm_status', { wait: 20 }))
-  expect(board.runs[0]!.timeoutMs).toBe(29_000)
-  await $.tool.call(call('swarm_list', { collection: 'tasks', wait: 20 }))
-  expect(board.runs[1]!.timeoutMs).toBe(15_000)
-  await $.tool.call(call('swarm_status', { idempotency_key: 'k', state: 'blocked', wait: 20 }))
-  expect(board.runs[2]!.timeoutMs).toBe(15_000)
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  await $.turn.complete(turnEnd)
+  await clock.settle()
+  expect(board.commands()).toEqual(['turn', 'turn'])
+  expect(board.runs.map(r => (r.input as { running: boolean }).running)).toEqual([true, false])
+  expect(board.prompts).toEqual(['Swarm: Shared work changed.'])
+})
+
+test("a subagent's turn end reports nothing", async ($, on) => {
+  const clock = mock.clock(on)
+  const board = engine(on, WORKER, REGISTRY, NO_WAKE)
+  await $.session.start(start)
+  await $.turn.complete({ ...turnEnd, agentId: 'a1' })
+  await clock.settle()
+  expect(board.runs).toEqual([])
+})
+
+test("an idle worker asks the store to wake it only on another's change, and stops once the swarm ends", async ($, on) => {
+  const clock = mock.clock(on)
+  const reply = (result: Record<string, unknown>) => JSON.stringify({ ok: true, result })
+  let next = reply({ wake: false, changes: 4 })
+  const board = engine(on, WORKER, REGISTRY, () => next)
+  const count = (n: number) => (board.files[`${DIR}/${CHANGES_FILE}`] = String(n))
+  count(4)
+  await $.session.start(interactive)
+  await $.turn.complete(turnEnd)
+  await clock.settle()
+  await clock.advance(POLL_MS * 3)
+  expect(board.commands()).toEqual(['turn'])
+
+  next = reply({ wake: false, changes: 5 })
+  count(5)
+  await clock.advance(POLL_MS * 3)
+  expect(board.commands()).toEqual(['turn', 'wake'])
+
+  next = reply({ wake: true, reason: 'ready', message: 'Shared work changed.', changes: 7 })
+  count(6)
+  await clock.advance(POLL_MS)
+  expect(board.prompts).toEqual(['Swarm: Shared work changed.'])
+  count(8)
+  await clock.advance(POLL_MS * 2)
+  expect(board.commands()).toEqual(['turn', 'wake', 'wake'])
+
+  next = reply({ wake: false, changes: 9 })
+  await $.turn.start({ text: 'Swarm: Shared work changed.', turnId: 't2' })
+  await $.turn.complete(turnEnd)
+  count(9)
+  await clock.advance(POLL_MS * 2)
+  expect(board.commands()).toEqual(['turn', 'wake', 'wake', 'turn'])
+
+  next = ENDED
+  count(10)
+  await clock.advance(POLL_MS)
+  count(11)
+  await clock.advance(POLL_MS * 3)
+  expect(board.commands()).toEqual(['turn', 'wake', 'wake', 'turn', 'wake'])
+})
+
+test('a -p worker does not watch the store', async ($, on) => {
+  const clock = mock.clock(on)
+  const board = engine(on, WORKER, REGISTRY, NO_WAKE)
+  await $.session.start(start)
+  await $.turn.complete(turnEnd)
+  await clock.settle()
+  board.files[`${DIR}/${CHANGES_FILE}`] = '1'
+  await clock.advance(POLL_MS * 3)
+  expect(board.commands()).toEqual(['turn'])
+})
+
+test("the session's own end stops the worker; /clear does not", async ($, on) => {
+  const board = engine(on, WORKER, REGISTRY, NO_WAKE)
+  await $.session.start(start)
+  const resume = { id: 'sid-1' }
+  await $.session.end({ reason: 'clear', sessionId: 'sid-1', resume })
+  expect(board.runs).toEqual([])
+  await $.session.end({ reason: 'prompt_input_exit', sessionId: 'sid-1', resume })
+  expect(board.commands()).toEqual(['worker_stop'])
+  expect(board.runs[0]!.input).toMatchObject({ idempotency_key: 'session-end-sid-1', reason: 'its session ended (prompt_input_exit)' })
 })
 
 test('a refused write reaches the model as an error', async ($, on) => {
