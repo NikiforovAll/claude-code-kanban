@@ -8586,6 +8586,10 @@ function isAbsolutePath(p) {
   return /^([a-zA-Z]:[\\/]|[\\/])/.test(p);
 }
 
+function isUrlRef(s) {
+  return /^[a-z][a-z0-9+.-]*:/i.test(s) || s.startsWith('//');
+}
+
 function bindPreviewRelativeLinks(bodyEl, baseOf = () => currentPreviewPath) {
   if (bodyEl.dataset.relLinkBound) return;
   bodyEl.addEventListener('click', (e) => {
@@ -8593,8 +8597,7 @@ function bindPreviewRelativeLinks(bodyEl, baseOf = () => currentPreviewPath) {
     if (!a) return;
     const href = a.getAttribute('href');
     if (!href || href.startsWith('#')) return;
-    const isAbsoluteUrl = /^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith('//');
-    if (isAbsoluteUrl) return;
+    if (isUrlRef(href)) return;
     const cleanHref = href.replace(/#.*$/, '');
     e.preventDefault();
     openPreviewByPath(cleanHref, isAbsolutePath(href) ? undefined : baseOf(a), openFileInEditor);
@@ -8646,8 +8649,35 @@ function renderPreviewContent(bodyEl, filePath, content, kind) {
     bodyEl.replaceChildren(img);
   } else {
     const { fm, body } = splitFrontmatter(content);
-    bodyEl.innerHTML = (fm ? renderFrontmatterBlock(fm) : '') + renderMarkdown(body);
+    bodyEl.innerHTML = (fm ? renderFrontmatterBlock(fm) : '') + renderMarkdownFile(body, filePath);
   }
+}
+
+// A relative src would resolve against the board's URL, and DOMPurify drops a drive path (`C:/x`
+// reads as a scheme), so the hook moves a local image to the image route before that check.
+function renderMarkdownFile(text, filePath) {
+  if (!filePath || typeof DOMPurify === 'undefined') return renderMarkdown(text);
+  DOMPurify.addHook('uponSanitizeAttribute', (node, data) => {
+    if (node.nodeName === 'IMG' && data.attrName === 'src') data.attrValue = localImageUrl(data.attrValue, filePath);
+  });
+  try {
+    return renderMarkdown(text);
+  } finally {
+    DOMPurify.removeHook('uponSanitizeAttribute');
+  }
+}
+
+function localImageUrl(src, base) {
+  const fileUrl = /^file:/i.test(src);
+  if (src.startsWith('//') || (!fileUrl && !isAbsolutePath(src) && isUrlRef(src))) return src;
+  let p = src;
+  if (!fileUrl) {
+    p = src.replace(/[?#].*$/, '');
+    try {
+      p = decodeURI(p);
+    } catch {}
+  }
+  return `/api/preview/image?${new URLSearchParams({ path: p, base })}`;
 }
 
 function openPreviewModal(filePath, content, kind) {
