@@ -1,110 +1,190 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 export const SERVER = 'mcp__kanban-delm-swarm__'
-// A tool call is one $.process.run; a waiting read holds it for up to 25 s.
+// A tool call is one $.process.run; a waiting status call holds it for up to 25 s.
 const WAIT_CAP_SECONDS = 25
 const RUNTIME_FIELDS = ['dir', 'tasksDir', 'base', 'actor', 'cwd']
+const STATUS_FIELDS = ['state', 'summary', 'dependency', 'finding']
 
 type Worker = { name: string; sessionId?: string }
 type Registry = { listId: string; base?: string; state?: string; workers?: Worker[] }
 export type Swarm = { listId: string; dir: string; tasksDir: string; registry: Registry }
 
-const files = { type: 'array', items: { type: 'string' }, description: 'Paths relative to your workspace' }
-const requestId = { type: 'string', description: 'Any unique text; resending with the same one is safe' }
-const work = {
-  type: 'object',
-  properties: { subject: { type: 'string' }, detail: { type: 'string' } },
-  required: ['subject', 'detail'],
+const paths = (description: string) => ({ type: 'array', items: { type: 'string' }, description })
+const key = {
+  type: 'string',
+  maxLength: 128,
+  description: 'Unique text for this change. Resending the same call with the same key is safe; a new change needs a new key.',
 }
-const entry = {
-  type: 'object',
-  properties: {
-    id: { type: 'string', description: 'Task id or entry id' },
-    paths: { type: 'array', items: { type: 'string' } },
-  },
-  required: ['id'],
+
+// The same limits as TASK_FIELDS in scripts/store.mjs, from DeLM's tool definitions.
+const LIMITS = { title: 256, description: 2048, interface: 2048, earliest_contribution: 1024, done_when: 1024 }
+const bounded = (limit: number, required: boolean) => ({
+  type: 'string',
+  minLength: required ? 1 : 0,
+  maxLength: limit,
+  description: `At most ${limit} UTF-8 bytes. Keep this field concise; attach detailed content as a file.`,
+})
+const positive = { type: 'integer', minimum: 1 }
+const dependencies = {
+  type: 'array',
+  maxItems: 128,
+  items: positive,
+  description:
+    'Existing publication_id values returned by swarm_publish. These are shared contributions, not task IDs, task numbers, or future prerequisites. Omit until a contribution exists.',
 }
+const taskFields = {
+  title: bounded(LIMITS.title, true),
+  description: bounded(LIMITS.description, true),
+  kind: { enum: ['implementation', 'verification', 'integration'] },
+  interface: bounded(LIMITS.interface, false),
+  dependencies,
+  earliest_contribution: bounded(LIMITS.earliest_contribution, false),
+  done_when: bounded(LIMITS.done_when, false),
+}
+const task = { type: 'object', properties: taskFields, required: ['title', 'description'], additionalProperties: false }
+const LIMITS_TEXT = `UTF-8 byte limits: ${Object.entries(LIMITS)
+  .map(([f, n]) => `${f} ${n}`)
+  .join('; ')}. dependencies must be existing publication_id values, never task numbers.`
 
 export const TOOLS: { name: string; command: string; description: string; inputSchema: Record<string, unknown> }[] = [
   {
-    name: 'swarm_read',
-    command: 'read',
+    name: 'swarm_status',
+    command: 'status',
     description:
-      'Read the shared swarm board: the open, claimed and done tasks, the notes, and what peers are doing. Shows what changed since your last read; unchanged tasks come short. Pass wait (seconds, at most 25) to block until a peer adds a task, a note or a result.',
+      'Read the compact board, or report your status. With no state, summary, dependency or finding it only reads. state is working, waiting or blocked; waiting requires a named dependency. finding shares a short free-text result for every worker: what you verified or ruled out, its scope and basis. Every response carries the board: the latest 24 tasks, publications and findings with totals; page older records with swarm_list. Pass wait (seconds, at most 25) to block until a peer adds a task, a publication or a finding after since.',
     inputSchema: {
       type: 'object',
       properties: {
-        full: { type: 'boolean', description: 'Show every task and note in full' },
+        idempotency_key: key,
+        state: { enum: ['working', 'waiting', 'blocked'] },
+        summary: bounded(2048, false),
+        dependency: bounded(512, true),
+        finding: bounded(4096, true),
         wait: { type: 'number', description: `Seconds to wait for a peer update, at most ${WAIT_CAP_SECONDS}` },
-        target: { type: 'string', description: 'Task id or entry id to wait for' },
+        since: { type: 'integer', minimum: 0, description: 'Board sequence to wait after; defaults to now' },
+        target: { ...positive, description: 'Task id; the wait ends when that task is done' },
       },
     },
   },
   {
-    name: 'swarm_add',
-    command: 'add',
+    name: 'swarm_list',
+    command: 'list',
     description:
-      'Add open tasks to the shared queue for any worker to claim. A subject that matches an existing task (case and spaces ignored) keeps that task.',
-    inputSchema: {
-      type: 'object',
-      properties: { items: { type: 'array', items: work } },
-      required: ['items'],
-    },
-  },
-  {
-    name: 'swarm_claim',
-    command: 'claim',
-    description:
-      'Claim an open task by id. The first claim wins: won=false names the owner, so pick another task. You hold one task at a time.',
-    inputSchema: { type: 'object', properties: { item: { type: 'number', description: 'Task id' } }, required: ['item'] },
-  },
-  {
-    name: 'swarm_reserve',
-    command: 'reserve',
-    description: 'Create a task and claim it in one step, for work you found and are about to do yourself.',
-    inputSchema: work,
-  },
-  {
-    name: 'swarm_done',
-    command: 'done',
-    description:
-      'Complete the task you hold with a short summary. Attach the files you changed, so peers can see the diff and apply them.',
-    inputSchema: {
-      type: 'object',
-      properties: { item: { type: 'number', description: 'Task id' }, summary: { type: 'string' }, files, requestId },
-      required: ['item', 'summary'],
-    },
-  },
-  {
-    name: 'swarm_note',
-    command: 'note',
-    description:
-      'Share a finding with every worker: FACT for something you verified, FAIL for an approach that did not work. Name the scope it applies to and the basis (the test, command or source).',
+      'Page one board collection in id order: tasks, publications or findings. Pass next_cursor to continue; a cursor keeps the records that existed at the first page. Filter tasks by task_state and owner (self or peer).',
     inputSchema: {
       type: 'object',
       properties: {
-        type: { type: 'string', enum: ['FACT', 'FAIL'] },
-        text: { type: 'string' },
-        scope: { type: 'string' },
-        basis: { type: 'string' },
-        files,
-        requestId,
+        collection: { enum: ['tasks', 'publications', 'findings'] },
+        limit: { type: 'integer', minimum: 1, maximum: 24 },
+        cursor: { type: 'string' },
+        task_state: { enum: ['available', 'claimed', 'done'] },
+        owner: { enum: ['self', 'peer'] },
       },
-      required: ['type', 'text', 'scope', 'basis'],
+      required: ['collection'],
+    },
+  },
+  {
+    name: 'swarm_task_create',
+    command: 'task_create',
+    description: `Expose a useful independent contribution for any worker to claim. ${LIMITS_TEXT} Use integration for temporary ownership of assembling the shared result, or verification for a scoped check; one integration task may be claimed at a time.`,
+    inputSchema: { type: 'object', properties: { idempotency_key: key, ...taskFields }, required: ['idempotency_key', 'title', 'description'] },
+  },
+  {
+    name: 'swarm_task_claim',
+    command: 'task_claim',
+    description:
+      'Atomically claim ready work. A task another worker holds is refused, so pick another. The returned version fences update, release, split and finish against stale ownership.',
+    inputSchema: { type: 'object', properties: { idempotency_key: key, task_id: positive }, required: ['idempotency_key', 'task_id'] },
+  },
+  {
+    name: 'swarm_task_update',
+    command: 'task_update',
+    description: `Update the boundary, interface or remaining work of your claimed task using its current version. ${LIMITS_TEXT}`,
+    inputSchema: {
+      type: 'object',
+      properties: { idempotency_key: key, task_id: positive, expected_version: positive, ...taskFields },
+      required: ['idempotency_key', 'task_id', 'expected_version'],
+    },
+  },
+  {
+    name: 'swarm_task_release',
+    command: 'task_release',
+    description:
+      'Release your claim with a concise handoff. Publish partial files first with swarm_publish and name its publication_id as the checkpoint; a peer may then claim and continue.',
+    inputSchema: {
+      type: 'object',
+      properties: { idempotency_key: key, task_id: positive, expected_version: positive, summary: bounded(2048, true), publication_id: positive },
+      required: ['idempotency_key', 'task_id', 'expected_version', 'summary'],
+    },
+  },
+  {
+    name: 'swarm_task_split',
+    command: 'task_split',
+    description:
+      'Keep a smaller remaining part of your claimed task and atomically expose 1 to 16 independent tasks to your peers. remaining and tasks use the task-create fields; remaining keeps the current task kind.',
+    inputSchema: {
+      type: 'object',
+      properties: { idempotency_key: key, task_id: positive, expected_version: positive, remaining: task, tasks: { type: 'array', minItems: 1, maxItems: 16, items: task } },
+      required: ['idempotency_key', 'task_id', 'expected_version', 'remaining', 'tasks'],
+    },
+  },
+  {
+    name: 'swarm_task_finish',
+    command: 'task_finish',
+    description:
+      'Finish your claimed task using its current version, with a short summary. Publish the files first with swarm_publish; finishing does not publish.',
+    inputSchema: {
+      type: 'object',
+      properties: { idempotency_key: key, task_id: positive, expected_version: positive, summary: bounded(2048, true) },
+      required: ['idempotency_key', 'task_id', 'expected_version', 'summary'],
+    },
+  },
+  {
+    name: 'swarm_publish',
+    command: 'publish',
+    description:
+      'Publish an immutable copy of the named files from your workspace, finished or partial, so peers can expand and apply them. A path missing from your workspace publishes its deletion; binary files and the executable bit are kept. paths may be empty to share only interfaces or unfinished work. At most 1024 files and 64 MiB; Git metadata and symlinks are refused.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        idempotency_key: key,
+        summary: bounded(2048, true),
+        paths: paths('Paths relative to your workspace'),
+        dependencies,
+        interfaces: bounded(8192, false),
+        unfinished: bounded(8192, false),
+      },
+      required: ['idempotency_key', 'summary', 'paths'],
     },
   },
   {
     name: 'swarm_expand',
     command: 'expand',
-    description: "Show the files a peer attached to a done or a note, as diffs against the original, or named files in full.",
-    inputSchema: entry,
+    description:
+      'Show one task, finding or publication in full. A publication shows its files as byte ranges: offset, and max_bytes (default 8192, at most 32768), at most 32 files and 64 KiB per call. Bytes that are not UTF-8 are not shown; apply imports the exact file.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        publication_id: positive,
+        task_id: positive,
+        finding_id: positive,
+        paths: paths('Files of the publication to show; all when omitted'),
+        offset: { type: 'integer', minimum: 0 },
+        max_bytes: { type: 'integer', minimum: 1, maximum: 32768 },
+      },
+    },
   },
   {
     name: 'swarm_apply',
     command: 'apply',
     description:
-      "Copy a peer's attached files into your workspace. Refused as a whole when one of them would overwrite your own edits.",
-    inputSchema: entry,
+      "Copy whole files of a peer's publication into your workspace, with deletions and the executable bit. Refused as a whole when a local file differs from its base and from every published version, so your unpublished edits are never overwritten.",
+    inputSchema: {
+      type: 'object',
+      properties: { idempotency_key: key, publication_id: positive, paths: paths('Files to apply; all when omitted') },
+      required: ['idempotency_key', 'publication_id'],
+    },
   },
 ]
 
@@ -165,7 +245,8 @@ async function run($: EngineInterface, s: Swarm, command: string, input: Record<
     actor: { id, ...(name ? { name } : {}) },
     cwd: await $.session.cwd(),
   }
-  const waiting = command === 'read' && Number(args.wait) > 0
+  // The same rule as `mutates` for status in scripts/store.mjs: only a read waits.
+  const waiting = command === 'status' && Number(args.wait) > 0 && !STATUS_FIELDS.some(f => f in args)
   const r = await $.process.run(['node', storePath($.plugin.root), command], {
     stdin: JSON.stringify(request),
     timeoutMs: waiting ? (WAIT_CAP_SECONDS + 4) * 1000 : 15_000,
@@ -198,7 +279,7 @@ export const register: Register = on => {
   }
 
   // The store owns the task files of the swarm's list; a direct write would fork the board from the log.
-  const DENY = "The swarm's tasks change only through the swarm tools: swarm_add, swarm_claim, swarm_done."
+  const DENY = "The swarm's tasks change only through the swarm tools: swarm_task_create, swarm_task_claim, swarm_task_finish."
   on('tool.call', { tool: 'TaskCreate' }, async ($, e, next) => ((await running($)) ? { deny: DENY } : next(e)))
   on('tool.call', { tool: 'TaskUpdate' }, async ($, e, next) => ((await running($)) ? { deny: DENY } : next(e)))
 }

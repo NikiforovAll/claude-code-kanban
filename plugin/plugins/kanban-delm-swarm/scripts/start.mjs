@@ -5,6 +5,7 @@ import { randomBytes } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { renameRetry } from './files.mjs'
 
 // DeLM's research harness runs 2 or 4 workers; its product runs 2.
 const MIN_WORKERS = 2
@@ -68,7 +69,7 @@ export function prune(config, now = Date.now()) {
 function writeJson(file, value) {
   const tmp = `${file}.${process.pid}.tmp`
   fs.writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`)
-  fs.renameSync(tmp, file)
+  renameRetry(tmp, file)
 }
 
 // CCK_CLI names a cck checkout's server.js. Else the claude-code-kanban on PATH, which on
@@ -105,11 +106,13 @@ export function workerSpec({ goal, name, listId, names, replyTo }) {
     '',
     '## How to work',
     '',
-    '1. Call swarm_read to see the queue, the notes and what your peers do.',
-    '2. Claim an open task with swarm_claim. When the goal needs work that no task covers, add it with swarm_add, or swarm_reserve to take it yourself.',
-    '3. Do the work in your own worktree. Share what you verify or rule out with swarm_note.',
-    '4. Finish with swarm_done and attach the files you changed. Then read again and claim the next task.',
-    '5. Stop when the goal is met and no task is open or claimed.',
+    '1. Call swarm_status to see the tasks, the publications, the findings and what your peers do. Page older records with swarm_list.',
+    '2. Claim an available task with swarm_task_claim. When the goal needs work that no task covers, add it with swarm_task_create, then claim it.',
+    "3. Do the work in your own worktree. Share what you verify or rule out as a finding with swarm_status. Use a peer's files with swarm_expand and swarm_apply. To hand off part of a task, use swarm_task_split or swarm_task_release.",
+    '4. Publish the files you changed with swarm_publish, then finish with swarm_task_finish, using the version from your last claim or update. Then read the board again and claim the next task.',
+    '5. Stop when the goal is met and no task is available or claimed.',
+    '',
+    'Every change takes an idempotency_key: new text for each new change, the same text when you resend the same call.',
     '',
     "The board shows the swarm's tasks. Change them only through the swarm tools.",
     ...(replyTo ? ['', `When you are done, or cannot finish, send the result to ${replyTo} with the SendMessage tool, then stop.`] : []),

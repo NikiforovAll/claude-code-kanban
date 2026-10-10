@@ -69,24 +69,42 @@ test('a worker gets every tool, and its task writes are denied', async ($, on) =
   await $.session.start(start)
   expect(board.registered).toEqual(TOOLS.map(t => t.name))
   const res = await $.tool.call({ tool: 'TaskUpdate', taskId: '1', status: 'completed' } as ToolCallArgs)
-  expect(res.deny).toContain('swarm_claim')
+  expect(res.deny).toContain('swarm_task_claim')
+})
+
+test('task tools explain size limits and reject task ids as publication dependencies', async () => {
+  for (const name of ['swarm_task_create', 'swarm_task_update', 'swarm_task_split']) {
+    const schema = TOOLS.find(t => t.name === name)!.inputSchema as any
+    const fields = name === 'swarm_task_split' ? schema.properties.tasks.items.properties : schema.properties
+    for (const [field, bound] of [['title', 256], ['description', 2048], ['interface', 2048], ['earliest_contribution', 1024], ['done_when', 1024]] as const) {
+      expect(fields[field].maxLength).toBe(bound)
+      expect(fields[field].description).toContain('UTF-8 bytes')
+    }
+    expect(fields.dependencies.description).toContain('not task IDs')
+  }
+  for (const t of TOOLS.filter(t => !['swarm_status', 'swarm_list', 'swarm_expand'].includes(t.name))) {
+    expect((t.inputSchema as any).required).toContain('idempotency_key')
+  }
+  const publish = TOOLS.find(t => t.name === 'swarm_publish')!.inputSchema as any
+  expect(publish.required).toEqual(['idempotency_key', 'summary', 'paths'])
+  expect(publish.properties.dependencies.items.type).toBe('integer')
 })
 
 test('once the swarm ends, its tools are refused and task writes run again', async ($, on) => {
   const board = engine(on, WORKER)
   await $.session.start(start)
   board.files[`${DIR}/swarm.json`] = JSON.stringify({ ...REGISTRY, state: 'ended' })
-  expect((await $.tool.call(call('swarm_read', {}))).deny).toBe('This swarm has ended.')
+  expect((await $.tool.call(call('swarm_status', {}))).deny).toBe('This swarm has ended.')
   expect((await $.tool.call({ tool: 'TaskUpdate', taskId: '1' } as ToolCallArgs)).result).toBe('updated')
 })
 
 test('a call runs the store with the identity from the session, never from the model', async ($, on) => {
   const board = engine(on, WORKER)
   await $.session.start(start)
-  const res = await $.tool.call(call('swarm_claim', { item: 3 }))
+  const res = await $.tool.call(call('swarm_task_claim', { idempotency_key: 'k', task_id: 3 }))
   expect(res.result).toBe('{"won":true}')
   expect(board.runs.length).toBe(1)
-  expect(board.runs[0]!.argv.at(-1)).toBe('claim')
+  expect(board.runs[0]!.argv.at(-1)).toBe('task_claim')
   expect(String(board.runs[0]!.argv[1]).endsWith('/scripts/store.mjs')).toBe(true)
   expect(board.runs[0]!.input).toEqual({
     dir: DIR,
@@ -94,7 +112,8 @@ test('a call runs the store with the identity from the session, never from the m
     base: 'abc123',
     actor: { id: 'sid-1', name: 'w1-3fa91c' },
     cwd: 'C:/wt/w1',
-    item: 3,
+    idempotency_key: 'k',
+    task_id: 3,
   })
   expect(board.runs[0]!.timeoutMs).toBe(15_000)
 })
@@ -102,27 +121,33 @@ test('a call runs the store with the identity from the session, never from the m
 test('a call that sets an identity, workspace or store field is refused and runs nothing', async ($, on) => {
   const board = engine(on, WORKER)
   await $.session.start(start)
-  const res = await $.tool.call(call('swarm_claim', { item: 3, actor: { id: 'sid-2', name: 'w2' }, cwd: 'C:/wt/w2' }))
+  const res = await $.tool.call(call('swarm_task_claim', { task_id: 3, actor: { id: 'sid-2', name: 'w2' }, cwd: 'C:/wt/w2' }))
   expect(res.deny).toBe('actor, cwd are set by the swarm, not by the call.')
-  expect((await $.tool.call(call('swarm_read', { dir: 'C:/other' }))).deny).toBe('dir is set by the swarm, not by the call.')
+  expect((await $.tool.call(call('swarm_status', { dir: 'C:/other' }))).deny).toBe('dir is set by the swarm, not by the call.')
   expect(board.runs.length).toBe(0)
 })
 
-test('a waiting read gets a longer timeout', async ($, on) => {
+test('a waiting status call gets a longer timeout', async ($, on) => {
   const board = engine(on, WORKER)
   await $.session.start(start)
-  await $.tool.call(call('swarm_read', { wait: 20 }))
+  await $.tool.call(call('swarm_status', { wait: 20 }))
   expect(board.runs[0]!.timeoutMs).toBe(29_000)
+  await $.tool.call(call('swarm_list', { collection: 'tasks', wait: 20 }))
+  expect(board.runs[1]!.timeoutMs).toBe(15_000)
+  await $.tool.call(call('swarm_status', { idempotency_key: 'k', state: 'blocked', wait: 20 }))
+  expect(board.runs[2]!.timeoutMs).toBe(15_000)
 })
 
 test('a refused write reaches the model as an error', async ($, on) => {
-  engine(on, WORKER, REGISTRY, '{"ok":false,"error":"you already hold an unfinished item: 1"}')
+  engine(on, WORKER, REGISTRY, '{"ok":false,"error":"task is already owned by another worker or finished"}')
   await $.session.start(start)
-  expect((await $.tool.call(call('swarm_claim', { item: 2 }))).deny).toBe('you already hold an unfinished item: 1')
+  expect((await $.tool.call(call('swarm_task_claim', { idempotency_key: 'k', task_id: 2 }))).deny).toBe(
+    'task is already owned by another worker or finished',
+  )
 })
 
 test('a store crash names the exit code', async ($, on) => {
   engine(on, WORKER, REGISTRY, '')
   await $.session.start(start)
-  expect((await $.tool.call(call('swarm_read', {}))).deny).toContain('The swarm store failed (exit 0)')
+  expect((await $.tool.call(call('swarm_status', {}))).deny).toContain('The swarm store failed (exit 0)')
 })
