@@ -12960,6 +12960,15 @@ async function loadPaneView(sid, pane, view, scroll) {
       ? `<script>addEventListener('load',()=>requestAnimationFrame(()=>scrollTo(${Number(scroll.x) || 0},${Number(scroll.y) || 0})))</script>`
       : '';
     // A show card's own zoom follows the text zoom (showBridge), so its frame is not .modal-zoomable.
+function paneMenuLabel(pane, label) {
+  const cut =
+    pane.kind !== 'url' && pane.kind !== 'message' ? Math.max(label.lastIndexOf('/'), label.lastIndexOf('\\')) + 1 : 0;
+  if (!cut || cut === label.length) {
+    return `<div class="pane-menu-label" title="${escapeHtml(label)}">${escapeHtml(label)}</div>`;
+  }
+  return `<div class="pane-menu-label pane-menu-path" title="${escapeHtml(label)}"><span class="pane-menu-dir">&lrm;${escapeHtml(label.slice(0, cut))}&lrm;</span><span class="pane-menu-name">${escapeHtml(label.slice(cut))}</span></div>`;
+}
+
     const [cls, doc] = pane.show
       ? ['pane-frame show-pane-frame', showSrcdoc(data.content, scroll?.y)]
       : ['pane-frame modal-zoomable', data.content + REVIEW_BRIDGE_TAG + restore];
@@ -13396,7 +13405,7 @@ function openPaneMenu(x, y, id) {
     y,
     pane.id,
     'Pane actions',
-    `<div class="pane-menu-label" title="${escapeHtml(label)}">${escapeHtml(label)}</div>` +
+    paneMenuLabel(pane, label) +
       (message ? '' : paneMenuItem('copy', url ? 'Copy URL' : 'Copy path')) +
       paneMenuItem('open', url ? 'Open in new tab' : message ? 'Open in message dialog' : 'Open in preview') +
       paneMenuItem('rename', 'Rename') +

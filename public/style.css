@@ -9871,3 +9871,19 @@ pre.mermaid svg {
   white-space: nowrap;
 }
 /* #endregion */
+.pane-menu-path {
+  display: flex;
+}
+.pane-menu-dir {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+}
+.pane-menu-name {
+  flex: none;
+  color: var(--text-primary);
+  font-weight: 600;
+}
