@@ -7579,11 +7579,15 @@ document.addEventListener('keydown', (e) => {
   }
   if (matchKey(e, '[', ']') && cyclePaneStrip(e.key === ']' ? 1 : -1)) {
     e.preventDefault();
+    focusActivePane();
     return;
   }
   const altOnly = e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey;
   if (altOnly && (e.code === 'BracketLeft' || e.code === 'BracketRight')) {
-    if (cyclePane(e.code === 'BracketRight' ? 1 : -1)) e.preventDefault();
+    if (cyclePane(e.code === 'BracketRight' ? 1 : -1)) {
+      e.preventDefault();
+      focusActivePane();
+    }
     return;
   }
   if (altOnly && e.code === 'KeyW' && closeFocusedPane()) {
@@ -7601,6 +7605,7 @@ document.addEventListener('keydown', (e) => {
   }
   if (plainShift && (e.key === '{' || e.key === '}') && focusPaneSide(e.key === '{' ? 'l' : 'r')) {
     e.preventDefault();
+    focusActivePane();
     return;
   }
   if (shiftOnly(e, 'KeyL')) {
@@ -7648,8 +7653,12 @@ document.addEventListener('keydown', (e) => {
 
   // Tab toggles focus zone
   if (e.key === 'Tab' && detailPanel.contains(e.target)) return;
+  // A focused pane document keeps the arrow, page and space keys for scrolling.
+  const inPane = paneViews.contains(e.target);
+  if (inPane && e.key !== 'Tab' && e.key !== 'Escape') return;
   if (e.key === 'Tab') {
     e.preventDefault();
+    if (inPane) e.target.blur();
     // The terminal replaces the board, so it takes the board's place in the Tab cycle.
     if (wantsTerminal()) {
       if (focusZone === 'sidebar') focusTerminalPane();
@@ -13163,7 +13172,9 @@ function mountPane(sid, pane) {
   view.dataset.key = key;
   paneViews.appendChild(view);
   paneFrames.set(key, view);
-  loadPaneView(sid, pane, view);
+  loadPaneView(sid, pane, view).then(() => {
+    if (paneFocusWanted === key && activePaneView() === view) focusActivePane();
+  });
   while (paneFrames.size > PANE_FRAME_LIMIT) {
     const [oldKey, oldView] = paneFrames.entries().next().value;
     paneFrames.delete(oldKey);
@@ -13224,6 +13235,10 @@ async function loadPaneView(sid, pane, view, scroll) {
       : ['pane-frame modal-zoomable', data.content + REVIEW_BRIDGE_TAG + restore];
     const frame = createPreviewFrame(cls, doc);
     frame.title = pane.title;
+    // Focus given before the document loads stays on the frame element, out of the document's keys.
+    frame.addEventListener('load', () => {
+      if (document.activeElement === frame) frame.contentWindow?.focus();
+    });
     view.appendChild(frame);
     attachPaneReview(view, sid, fileReviewOpts(data.path, data.kind, frame, frame));
     return;
@@ -13270,6 +13285,7 @@ function appendPaneDoc(view) {
   doc.className = 'pane-doc';
   const body = document.createElement('div');
   body.className = 'pane-doc-body rendered-md modal-zoomable';
+  body.tabIndex = -1;
   doc.append(body, paneDocGrip(doc));
   view.appendChild(doc);
   return body;
@@ -13345,8 +13361,11 @@ async function reloadPaneView(sid, pane, view) {
   paneReloads.delete(key);
   fresh.className = view.className;
   fresh.style.visibility = '';
+  const hadFocus = view.contains(document.activeElement);
   view.remove();
   paneFrames.set(key, fresh);
+  const target = hadFocus && paneFocusTarget(fresh);
+  if (target) focusPaneTarget(target);
   syncPaneReview();
   return true;
 }
@@ -13389,6 +13408,27 @@ function paneDocGrip(doc) {
 
 function activePaneView() {
   return wantsTerminal() ? null : paneViews.querySelector('.pane-view.on.pane-focus');
+}
+
+// A URL page is on another origin and would keep every key from the board, so it gets no focus.
+function paneFocusTarget(view) {
+  return view?.querySelector(':scope > .pane-doc > .pane-doc-body, :scope > .pane-frame:not(.pane-url-frame)');
+}
+
+let paneFocusWanted = null;
+
+// The key that switches panes also moves focus into the pane, so its content takes the scroll keys.
+function focusActivePane() {
+  const view = activePaneView();
+  const target = paneFocusTarget(view);
+  paneFocusWanted = view && !view.firstElementChild ? view.dataset.key : null;
+  if (target) focusPaneTarget(target);
+  else if (paneViews.contains(document.activeElement)) document.activeElement.blur();
+}
+
+function focusPaneTarget(target) {
+  target.focus({ preventScroll: true });
+  target.contentWindow?.focus();
 }
 
 function isPaneDocOnScreen() {
@@ -13916,7 +13956,9 @@ paneStrip.addEventListener('click', (e) => {
     return;
   }
   const tab = e.target.closest('.pane-tab');
-  if (tab) selectPane(tab.dataset.pane);
+  if (!tab) return;
+  selectPane(tab.dataset.pane);
+  focusActivePane();
 });
 paneStrip.addEventListener('auxclick', (e) => {
   const tab = e.target.closest('.pane-tab');
@@ -14286,6 +14328,7 @@ function toggleTerminal() {
   setTerminalMode(currentSessionId, !terminalModes().has(currentSessionId));
   termState.focusNext = true;
   syncTerminal();
+  if (!wantsTerminal()) focusActivePane();
 }
 
 // The show card sits in the pane but is not the terminal, so Alt+` from it goes to the terminal.

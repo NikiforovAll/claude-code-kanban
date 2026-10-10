@@ -4856,6 +4856,10 @@ body.show-resizing iframe {
   word-break: break-word;
 }
 
+.pane-doc-body:focus {
+  outline: none;
+}
+
 .pane-msg-meta {
   margin-bottom: 12px;
   font-size: 11px;
