@@ -12821,6 +12821,15 @@ function markPaneSide(el, side, focused) {
 
 const paneLabel = (p) => (p.kind === 'message' ? p.title : p.target);
 
+function paneMenuLabel(pane, label) {
+  const cut =
+    pane.kind !== 'url' && pane.kind !== 'message' ? Math.max(label.lastIndexOf('/'), label.lastIndexOf('\\')) + 1 : 0;
+  if (!cut || cut === label.length) {
+    return `<div class="pane-menu-label" title="${escapeHtml(label)}">${escapeHtml(label)}</div>`;
+  }
+  return `<div class="pane-menu-label pane-menu-path" title="${escapeHtml(label)}"><span class="pane-menu-dir">&lrm;${escapeHtml(label.slice(0, cut))}&lrm;</span><span class="pane-menu-name">${escapeHtml(label.slice(cut))}</span></div>`;
+}
+
 function renderPaneTabs(sid, layout, split) {
   // A rebuild mid-drag removes the dragged tab, and then no dragend fires. Mid-rename it drops the input.
   if (paneDragId || paneRenameId) return;
@@ -12960,15 +12969,6 @@ async function loadPaneView(sid, pane, view, scroll) {
       ? `<script>addEventListener('load',()=>requestAnimationFrame(()=>scrollTo(${Number(scroll.x) || 0},${Number(scroll.y) || 0})))</script>`
       : '';
     // A show card's own zoom follows the text zoom (showBridge), so its frame is not .modal-zoomable.
-function paneMenuLabel(pane, label) {
-  const cut =
-    pane.kind !== 'url' && pane.kind !== 'message' ? Math.max(label.lastIndexOf('/'), label.lastIndexOf('\\')) + 1 : 0;
-  if (!cut || cut === label.length) {
-    return `<div class="pane-menu-label" title="${escapeHtml(label)}">${escapeHtml(label)}</div>`;
-  }
-  return `<div class="pane-menu-label pane-menu-path" title="${escapeHtml(label)}"><span class="pane-menu-dir">&lrm;${escapeHtml(label.slice(0, cut))}&lrm;</span><span class="pane-menu-name">${escapeHtml(label.slice(cut))}</span></div>`;
-}
-
     const [cls, doc] = pane.show
       ? ['pane-frame show-pane-frame', showSrcdoc(data.content, scroll?.y)]
       : ['pane-frame modal-zoomable', data.content + REVIEW_BRIDGE_TAG + restore];
@@ -13408,11 +13408,29 @@ function openPaneMenu(x, y, id) {
     paneMenuLabel(pane, label) +
       (message ? '' : paneMenuItem('copy', url ? 'Copy URL' : 'Copy path')) +
       paneMenuItem('open', url ? 'Open in new tab' : message ? 'Open in message dialog' : 'Open in preview') +
+      (message
+        ? ''
+        : paneMenuItem('link', paneIsLinked(pane) ? 'Remove from linked documents' : 'Add to linked documents')) +
       paneMenuItem('rename', 'Rename') +
       paneMenuItem('reload', 'Reload') +
       paneMenuItem('close', 'Close pane'),
   );
   return true;
+}
+
+function paneIsLinked(pane) {
+  const key = canonicalPath(pane.target);
+  return getSessionPreviewPaths(paneSessionId()).some((p) => canonicalPath(p) === key);
+}
+
+function togglePaneLink(id) {
+  const pane = paneById(id);
+  const sid = paneSessionId();
+  if (!pane || !sid) return;
+  const unlink = paneIsLinked(pane);
+  setSessionDocLink(sid, pane.target, unlink);
+  if (unlink) forgetServerLinkedDoc(sid, pane.target);
+  showToast(unlink ? 'Unlinked from session' : 'Linked to session', 'success');
 }
 
 function showPaneMenu(x, y, id, ariaLabel, html) {
@@ -13433,6 +13451,7 @@ function showPaneMenu(x, y, id, ariaLabel, html) {
 const PANE_MENU_ACTIONS = {
   copy: copyPaneTarget,
   open: openPaneExternally,
+  link: togglePaneLink,
   rename: beginPaneRename,
   reload: reloadPane,
   close: closePane,
@@ -13553,9 +13572,6 @@ function msgDetailPaneSource() {
   if (currentMsgDetailIdx != null) return currentMessages[currentMsgDetailIdx] || null;
   const pin = currentPinDetailId && currentPins.find((p) => p.id === currentPinDetailId);
   return pin && pin.type !== 'agent' ? pin : null;
-      (message
-        ? ''
-        : paneMenuItem('link', paneIsLinked(pane) ? 'Remove from linked documents' : 'Add to linked documents')) +
 }
 
 function syncMsgDetailPaneBtn() {
@@ -13563,21 +13579,6 @@ function syncMsgDetailPaneBtn() {
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
-function paneIsLinked(pane) {
-  const key = canonicalPath(pane.target);
-  return getSessionPreviewPaths(paneSessionId()).some((p) => canonicalPath(p) === key);
-}
-
-function togglePaneLink(id) {
-  const pane = paneById(id);
-  const sid = paneSessionId();
-  if (!pane || !sid) return;
-  const unlink = paneIsLinked(pane);
-  setSessionDocLink(sid, pane.target, unlink);
-  if (unlink) forgetServerLinkedDoc(sid, pane.target);
-  showToast(unlink ? 'Unlinked from session' : 'Linked to session', 'success');
-}
-
 async function openMsgInPane() {
   const m = msgDetailPaneSource();
   if (!m?.timestamp) return;
@@ -13596,7 +13597,6 @@ function describePaneInput() {
   const doc = panePopMatches[panePopIdx];
   const t = doc ? null : paneTargetFrom(panePopInput.value);
   panePopDetect.classList.toggle('error', !!t?.error);
-  link: togglePaneLink,
   panePopDetect.textContent = doc
     ? `Enter opens ${linkedDocLabel(doc)}`
     : !t
