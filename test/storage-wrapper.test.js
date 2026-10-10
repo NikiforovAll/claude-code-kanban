@@ -41,6 +41,7 @@ function wrap(window, ns = 'cfg-1:') {
     `const STORAGE_NS = ${JSON.stringify(ns)};
      ${line('const THEME_KEY = ')}
      ${line('const COLOR_THEME_KEY = ')}
+     ${line('const FOCUS_ZONE_KEY = ')}
      ${line('const GLOBAL_KEYS = ')}
      ${line('const nsKey = ')}
      ${fn('namespacedStorage')}
@@ -56,7 +57,8 @@ describe('namespacedStorage', () => {
     assert.equal(store.setItem('a', '1'), true);
     store.setItem('theme', 'dark');
     store.setItem('color-theme', 'nord');
-    assert.deepEqual([...s.map.keys()], ['cfg-1:a', 'theme', 'color-theme']);
+    store.setItem('focus-zone', 'terminal');
+    assert.deepEqual([...s.map.keys()], ['cfg-1:a', 'theme', 'color-theme', 'focus-zone']);
     assert.equal(store.getItem('a'), '1');
     store.removeItem('a');
     assert.equal(s.getItem('cfg-1:a'), null);

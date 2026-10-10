@@ -176,6 +176,18 @@
         if (e.target !== term.textarea) forwardClaimed(e);
       });
       term.textarea.addEventListener('focus', () => up('focused'));
+      // xterm reports focus only when its textarea gains or loses it, not when an app turns focus reporting
+      // (DECSET 1004) on. After a reload xterm is focused before the replayed output sets the mode, so the
+      // app never gets a focus-in and draws its cursor as unfocused.
+      term.parser.registerCsiHandler({ prefix: '?', final: 'h' }, (params) => {
+        if (!params.includes(1004) || term.modes.sendFocusMode) return false;
+        win.queueMicrotask(() => {
+          if (term.modes.sendFocusMode && doc.hasFocus() && doc.activeElement === term.textarea) {
+            send({ t: 'in', d: '\x1b[I' });
+          }
+        });
+        return false;
+      });
       // xterm leaves OSC 10/11 color queries unanswered, so apps that pick a palette from the
       // background (Claude Code's Auto theme) assume dark even on a light theme.
       for (const [code, key] of [

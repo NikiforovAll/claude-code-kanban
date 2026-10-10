@@ -122,13 +122,20 @@ describe('createTerminalFrame', () => {
     const docListeners = {};
     const parent = { postMessage: (message, origin) => posted.push({ message, origin }) };
     const terms = [];
+    const focus = { frame: false, element: null };
+    const microtasks = [];
     class Terminal {
       constructor(options) {
         this.options = { ...options };
         this.cols = 80;
         this.rows = 24;
         this.unicode = {};
-        this.parser = { registerOscHandler() {} };
+        this.modes = { sendFocusMode: false };
+        this.csiHandlers = [];
+        this.parser = {
+          registerOscHandler() {},
+          registerCsiHandler: (id, fn) => this.csiHandlers.push({ id, fn }),
+        };
         this.textarea = { addEventListener() {} };
         terms.push(this);
       }
@@ -152,10 +159,15 @@ describe('createTerminalFrame', () => {
       document: {
         getElementById: () => ({ offsetWidth: 0, offsetHeight: 0 }),
         documentElement: { style: { setProperty() {} } },
+        hasFocus: () => focus.frame,
+        get activeElement() {
+          return focus.element;
+        },
         addEventListener: (type, fn) => {
           docListeners[type] = fn;
         },
       },
+      queueMicrotask: (fn) => microtasks.push(fn),
       addEventListener: (type, fn) => {
         listeners[type] = fn;
       },
@@ -179,7 +191,8 @@ describe('createTerminalFrame', () => {
     createTerminalFrame(win);
     const send = (data, from = {}) =>
       listeners.message({ source: from.source ?? parent, origin: from.origin ?? BOARD, data });
-    return { posted, terms, send, docListeners, win };
+    const flush = () => microtasks.splice(0).forEach((fn) => fn());
+    return { posted, terms, send, docListeners, win, focus, flush };
   }
 
   const init = { type: 'cck-term:init', fontFamily: 'mono', fontSize: 13, scrollback: 1000, themeOptions: { theme: {} } };
@@ -245,21 +258,84 @@ describe('createTerminalFrame', () => {
     assert.equal(w.posted.at(-1).message.type, 'cck-term:key');
   });
 
-  it('tells the board an open arrived before the socket connects', () => {
+  function openFrame(WebSocket, socketId = 1) {
     const w = stubWindow();
     w.send(init);
     w.terms[0].write = () => {};
     w.terms[0].buffer = { active: null };
+    w.win.WebSocket = WebSocket;
+    w.send({ type: 'cck-term:open', socketId, hello: {}, reset: false });
+    return w;
+  }
+
+  it('tells the board an open arrived before the socket connects', () => {
     const sockets = [];
-    w.win.WebSocket = class {
-      constructor(url) {
-        this.url = url;
-        sockets.push(this);
-      }
-    };
-    w.send({ type: 'cck-term:open', socketId: 7, hello: {}, reset: false });
+    const w = openFrame(
+      class {
+        constructor(url) {
+          this.url = url;
+          sockets.push(this);
+        }
+      },
+      7,
+    );
     assert.deepEqual(w.posted.at(-1).message, { type: 'cck-term:opening', socketId: 7 });
     assert.equal(sockets.length, 1);
+  });
+
+  describe('focus reporting', () => {
+    function setup() {
+      const sent = [];
+      const w = openFrame(
+        class {
+          static OPEN = 1;
+          readyState = 1;
+          send(data) {
+            sent.push(JSON.parse(data));
+          }
+        },
+      );
+      const term = w.terms[0];
+      const handler = term.csiHandlers.find((h) => h.id.prefix === '?' && h.id.final === 'h').fn;
+      const enable = (params = [1004]) => {
+        const swallowed = handler(params);
+        term.modes.sendFocusMode = params.includes(1004) || term.modes.sendFocusMode;
+        w.flush();
+        return swallowed;
+      };
+      return { w, term, sent, enable };
+    }
+
+    it('sends focus-in when the app turns reporting on while the terminal has focus', () => {
+      const { w, term, sent, enable } = setup();
+      w.focus.frame = true;
+      w.focus.element = term.textarea;
+      assert.equal(enable(), false);
+      assert.deepEqual(sent, [{ t: 'in', d: '\x1b[I' }]);
+    });
+
+    it('sends nothing when the frame or xterm does not have focus', () => {
+      const { w, term, sent, enable } = setup();
+      w.focus.frame = false;
+      w.focus.element = term.textarea;
+      enable();
+      term.modes.sendFocusMode = false;
+      w.focus.frame = true;
+      w.focus.element = {};
+      enable();
+      assert.deepEqual(sent, []);
+    });
+
+    it('sends once while reporting stays on, and ignores other modes', () => {
+      const { w, term, sent, enable } = setup();
+      w.focus.frame = true;
+      w.focus.element = term.textarea;
+      enable([25]);
+      assert.deepEqual(sent, []);
+      enable();
+      enable();
+      assert.equal(sent.length, 1);
+    });
   });
 });
 

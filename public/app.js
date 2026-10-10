@@ -4,7 +4,9 @@ const STORAGE_NS = window.__STORAGE_NS__ ? `${window.__STORAGE_NS__}:` : '';
 // Theme is hub-wide (echoed to every app via hub:theme), so it stays shared across config dirs.
 const THEME_KEY = 'theme';
 const COLOR_THEME_KEY = 'color-theme';
-const GLOBAL_KEYS = new Set([THEME_KEY, COLOR_THEME_KEY]);
+// Shared too, so after a config-dir switch the cursor goes where it was on the board just left.
+const FOCUS_ZONE_KEY = 'focus-zone';
+const GLOBAL_KEYS = new Set([THEME_KEY, COLOR_THEME_KEY, FOCUS_ZONE_KEY]);
 // localStorage names are kept as they are: renaming one drops what users saved under it.
 const MESSAGE_PANEL_OPEN_KEY = 'message-panel-open';
 const MESSAGE_PANEL_FULL_KEY = 'message-panel-full';
@@ -14130,7 +14132,6 @@ panePop.addEventListener('keydown', (e) => {
 // leaving the session view or switching sessions drops only the socket; coming back
 // reattaches and the server replays the screen.
 const TERMINAL_TOKEN_KEY = 'terminal-token';
-const TERMINAL_FOCUS_KEY = 'terminal-focus';
 const TERMINAL_TOKEN_RE = /^[0-9a-f]{64}$/;
 const TERMINAL_MODES_KEY = 'terminal-sessions';
 const TERMINAL_FONT_KEY = 'terminal-font-size';
@@ -14824,14 +14825,18 @@ window.addEventListener('focus', () => {
     }
   });
 });
+// A board with no session open passes the zone on, so a stop at an empty config dir keeps it.
 window.addEventListener('pagehide', () => {
-  if (termState.attached && termState.shown && terminalHadFocus) tabStore.setItem(TERMINAL_FOCUS_KEY, currentSessionId);
-  else tabStore.removeItem(TERMINAL_FOCUS_KEY);
+  if (termState.attached && termState.shown && terminalHadFocus) tabStore.setItem(FOCUS_ZONE_KEY, 'terminal');
+  else if (currentSessionId || focusZone === 'sidebar') tabStore.setItem(FOCUS_ZONE_KEY, focusZone);
 });
 
-function restoreTerminalFocus(sessionId) {
-  if (tabStore.getItem(TERMINAL_FOCUS_KEY) === sessionId) termState.focusNext = true;
-  tabStore.removeItem(TERMINAL_FOCUS_KEY);
+// While the hub shows another app this frame cannot take focus, so terminalHadFocus lets the
+// window focus handler finish the restore when the hub focuses this frame.
+function restoreTerminalFocus(zone, sessionId) {
+  if (zone !== 'terminal' || !wantsTerminalFor(sessionId)) return;
+  termState.focusNext = true;
+  terminalHadFocus = true;
 }
 
 // The terminal stands in for the board, so it takes the board zone however focus arrives
@@ -16915,6 +16920,7 @@ getJson('/api/config')
     ),
   )
   .then(async () => {
+    const focusZoneBeforeReload = tabStore.getItem(FOCUS_ZONE_KEY);
     if (urlState.projectView) {
       try {
         await fetchProjectView(atob(urlState.projectView));
@@ -16922,7 +16928,7 @@ getJson('/api/config')
         showNoSession();
       }
     } else if (urlState.session) {
-      restoreTerminalFocus(urlState.session);
+      restoreTerminalFocus(focusZoneBeforeReload, urlState.session);
       await fetchTasks(urlState.session);
     } else {
       const last = loadLastView();
@@ -16933,12 +16939,13 @@ getJson('/api/config')
           showNoSession();
         }
       } else if (last?.view === 'session' && last.session && sessions.some((s) => s.id === last.session)) {
-        restoreTerminalFocus(last.session);
+        restoreTerminalFocus(focusZoneBeforeReload, last.session);
         await fetchTasks(last.session);
       } else {
         showNoSession();
       }
     }
+    if (focusZoneBeforeReload === 'sidebar') setFocusZone('sidebar');
     if (urlState.messages && currentSessionId) {
       if (logAutoOpened) setMessagePanelVisible(false);
       toggleMessagePanel();
