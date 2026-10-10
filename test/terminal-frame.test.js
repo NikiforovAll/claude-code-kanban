@@ -266,13 +266,16 @@ describe('createTerminalFrame', () => {
 describe('ending a terminal from the board', () => {
   function closeWith(termSessionId) {
     const calls = [];
-    const close = appFunction('closeTerminalSession', {
+    const exitTerminalMode = appFunction('exitTerminalMode', {
       termState: { sessionId: termSessionId },
       terminalPaneFocused: () => false,
       leaveTerminalPane: () => {},
       detachTerminal: () => calls.push('detach'),
       setTerminalMode: (id, on) => calls.push(`mode ${id} ${on}`),
       syncTerminal: () => calls.push('sync'),
+    });
+    const close = appFunction('closeTerminalSession', {
+      exitTerminalMode,
       terminalFetch: async (url, method) => calls.push(`${method} ${url}`),
       dropPlaceholder: () => {},
       apiPath: appFunction('apiPath', { encodeURIComponent }),

@@ -9683,6 +9683,8 @@ function setupEventSource() {
 
       if (data.type === 'terminals-update' && Array.isArray(data.ids)) setRunningTerminals(data.ids);
 
+      if (data.type === 'terminal:ended' && typeof data.id === 'string') onTerminalEnded(data.id);
+
       if (data.type === 'dispatch-update') onDispatchUpdate();
 
       if (data.type === 'show:posted') onShowPosted(data);
@@ -15021,13 +15023,25 @@ function onTerminalMessage(sessionId, msg, tail = '') {
 // Detaching first means no exit message reaches the pane, so no Resume prompt shows before the board.
 // Terminal mode must go too: left on, opening the session again reconnects in 'auto' and resumes claude.
 async function closeTerminalSession(id = termState.sessionId) {
+  exitTerminalMode(id);
+  await terminalFetch(apiPath`/api/terminals/${id}`, 'DELETE').catch(() => {});
+  dropPlaceholder(id);
+}
+
+function exitTerminalMode(id) {
   if (id === termState.sessionId) {
     if (terminalPaneFocused()) leaveTerminalPane();
     detachTerminal();
   }
   setTerminalMode(id, false);
   syncTerminal();
-  await terminalFetch(apiPath`/api/terminals/${id}`, 'DELETE').catch(() => {});
+}
+
+// An end from another tab or `dispatch end` must clear terminal mode here too, or focusing the
+// session reconnects in 'auto' and resumes claude. The mode set is shared by same-origin tabs, so the
+// tab that ended it may have cleared it already while this tab still shows its pane.
+function onTerminalEnded(id) {
+  if (id === termState.sessionId || terminalModes().has(id)) exitTerminalMode(id);
   dropPlaceholder(id);
 }
 

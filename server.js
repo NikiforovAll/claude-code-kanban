@@ -3416,6 +3416,7 @@ app.delete('/api/terminals/:id', terminalRoute(async (req, res) => {
   if (err === 'auth') return res.status(401).json({ error: 'invalid terminal token' });
   if (err === 'not-found') return res.status(404).json({ error: 'no such terminal' });
   res.status(204).end();
+  broadcast({ type: 'terminal:ended', id: req.params.id });
 }));
 
 const show = createShowStore({
