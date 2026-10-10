@@ -333,6 +333,22 @@ describe('ptyEnv', () => {
     assert.equal(env.PORT, undefined);
   });
 
+  it('sets TERM_PROGRAM to the hub or the board, replacing an inherited one', () => {
+    const saved = { hub: process.env.CLAUDE_HUB, tp: process.env.TERM_PROGRAM };
+    process.env.TERM_PROGRAM = 'vscode';
+    try {
+      delete process.env.CLAUDE_HUB;
+      assert.equal(ptyEnv({ claudeDir: '/c', isDefaultDir: true }).TERM_PROGRAM, 'claude-code-kanban');
+      process.env.CLAUDE_HUB = '1';
+      assert.equal(ptyEnv({ claudeDir: '/c', isDefaultDir: true }).TERM_PROGRAM, 'claude-code-hub');
+    } finally {
+      for (const [k, v] of [['CLAUDE_HUB', saved.hub], ['TERM_PROGRAM', saved.tp]]) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  });
+
   it('names the terminal with CCK_TERMINAL_ID and drops an inherited one', () => {
     const TID = 'dddddddd-0000-0000-0000-000000000001';
     assert.equal(ptyEnv({ claudeDir: '/c', isDefaultDir: true, cckUrl: 'http://127.0.0.1:1', terminalId: TID }).CCK_TERMINAL_ID, TID);
