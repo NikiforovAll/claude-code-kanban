@@ -49,7 +49,9 @@ async function withBoard(fn, { groups = GROUPS, sessions = SESSIONS } = {}) {
         .filter((s) => !active || s.active || keep.has(s.id))
         .filter((s) => !project || s.project === project || s.worktree?.repo === project || include.has(s.id))
         .map((s) => ({ ...s, pin: pins[s.id] || null }));
-      return res.end(JSON.stringify(rows));
+      const limit = Number(url.searchParams.get('limit'));
+      res.setHeader('X-Total-Count', String(rows.length));
+      return res.end(JSON.stringify(limit ? rows.filter((s, i) => i < limit || s.pin || include.has(s.id)) : rows));
     }
     res.statusCode = 404;
     res.end('{}');
@@ -108,13 +110,25 @@ describe('session list', () => {
     });
   });
 
-  it('--active is an alias that does nothing', async () => {
-    await withBoard(async (run) => {
-      const a = await run(['session', 'list', '--json']);
-      const b = await run(['session', 'list', '--active', '--json']);
-      assert.equal(b.code, 0);
-      assert.deepEqual(JSON.parse(b.stdout).map((s) => s.id), JSON.parse(a.stdout).map((s) => s.id));
+  it('sends no limit for the active view and 20 with --all', async () => {
+    await withBoard(async (run, hits) => {
+      await run(['session', 'list', '--json']);
+      await run(['session', 'list', '--all', '--json']);
+      assert.deepEqual(sessionHits(hits).map((u) => u.searchParams.get('limit')), ['all', '20']);
     });
+  });
+
+  it('says how many rows a limit cut, on stderr with --json', async () => {
+    const many = Array.from({ length: 5 }, (_, i) => ({ ...SESSIONS[0], id: `eeeeeeee-0000-0000-0000-00000000000${i}`, name: `row ${i}` }));
+    await withBoard(async (run) => {
+      const json = await run(['session', 'list', '--limit', '2', '--json']);
+      assert.equal(JSON.parse(json.stdout).length, 2);
+      assert.match(json.stderr, /^2 of 6 shown; --limit all shows every row/m);
+      const text = await run(['session', 'list', '--limit', '2']);
+      assert.match(text.stdout, /2 of 6 shown/);
+      const whole = await run(['session', 'list']);
+      assert.doesNotMatch(whole.stdout + whole.stderr, /shown;/);
+    }, { sessions: [...many, SESSIONS[2]] });
   });
 
   it("takes STATUS from the board's badge rule, not the visibility flag", async () => {

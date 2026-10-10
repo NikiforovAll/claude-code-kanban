@@ -1636,6 +1636,7 @@ app.get('/api/sessions', async (req, res) => {
     const paged = limit !== null && limit > 0;
     // The sidebar loads the next page on scroll while this is true. A header, so the body stays a plain array.
     res.setHeader('X-Has-More', String(paged && sessions.length > limit));
+    res.setHeader('X-Total-Count', String(sessions.length));
     // Apply limit if specified, but always include pinned sessions
     if (paged) {
       const top = sessions.slice(0, limit);
@@ -4063,6 +4064,17 @@ app.post('/api/groups/release', groupRoute((b) => userGroups.release(b.ids)));
 app.patch('/api/groups/:id', groupRoute((b, p) => userGroups.update(p.id, b)));
 app.delete('/api/groups/:id', groupRoute((_b, p) => userGroups.remove(p.id)));
 app.put('/api/groups/:id/members', groupRoute((b, p) => userGroups.place(p.id, b)));
+app.post('/api/groups/path', groupRoute((b) => userGroups.createPath(b.path)));
+app.post('/api/groups/rename', groupRoute((b) => userGroups.rename(b.group, b.name)));
+app.post('/api/groups/remove', groupRoute((b) => userGroups.removeByKey(b.group)));
+app.post('/api/groups/prune', groupRoute((b) => userGroups.prune({ dryRun: b.dryRun === true, isLive: liveGroupMember() })));
+
+// A session that runs in the terminal or is still starting has no transcript yet.
+function liveGroupMember() {
+  const known = loadSessionMetadata();
+  const running = new Set([...terminal.ids(), ...dispatchGroups.snapshot().keys()]);
+  return (m) => m.type !== 'session' || !!known[m.ref] || running.has(m.ref);
+}
 // `with` names another session; its project is keyed as the board keys it, by the worktree's repo.
 function groupPeer(id) {
   const meta = loadSessionMetadata()[id];

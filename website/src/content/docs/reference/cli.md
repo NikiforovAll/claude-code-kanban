@@ -204,11 +204,11 @@ Lists the active sessions, the same ones the sidebar's Active view shows. The se
 | `--all` | Every session, active or not. |
 | `--days <n>` | Only sessions changed in the last `n` days. Fractions work, for example `0.5`. |
 | `--project <name>` | Only sessions of matching projects. An absolute path selects that one project. Other text matches any part of the project path. The match ignores case, and `\` and `/` are the same. |
-| `--limit <n\|all>` | Maximum rows. Default 10. `all` removes the limit. |
+| `--limit <n\|all>` | Maximum rows. By default the active view has no limit, and `--all` shows 20. `all` removes the limit. |
 | `--no-pins` | Treats pinned sessions like other sessions. |
 | `--json` | Prints JSON. Each entry has a `pinState` field. |
 
-By default pinned and sticky sessions are always in the list, even when they are not active, past the limit or outside `--days`. `--project` still removes them. Sticky sessions come first. The table has the columns `ID`, `PIN`, `STATUS` (`idle`, `active`, `busy` or `wait`), `AGE`, `TASKS`, `PROJECT` and `TITLE`. The command accepts `--active` from older scripts and ignores it.
+By default pinned and sticky sessions are always in the list, even when they are not active, past the limit or outside `--days`. `--project` still removes them. Sticky sessions come first. The table has the columns `ID`, `PIN`, `STATUS` (`idle`, `active`, `busy` or `wait`), `AGE`, `TASKS`, `PROJECT` and `TITLE`. When the limit cuts the list, the last line says `<n> of <total> shown; --limit all shows every row`. With `--json` that line goes to stderr, and stdout stays an array.
 
 ### session search
 
@@ -292,7 +292,41 @@ Lists the session groups in sidebar order, each with the members the sidebar's A
 
 A session started with `dispatch start --group` shows in its dispatch group, as in the sidebar: after the user groups, with `(dispatch)` after the name and `-` as the ID. A user group that holds the session or its project keeps it, and a user group with the same name, in any case, takes it in. A session removed from its dispatch group in the sidebar does not show there. A dispatch group goes when its sessions end.
 
-`--json` prints `{rev, groups}`, each group as `{id, name, parent, visible, total, members}`. A dispatch group has `dispatch: true` and the id `dispatch:<name>`, which `session group` does not take. A session member has `title`, `branch`, `status`, `pinned` and `age`, so you do not need `session list` to describe it. A session member whose session is gone has `missing: true`. A project member has `sessions`, the count of its sessions shown.
+`--json` prints `{rev, groups}`, each group as `{id, name, parent, visible, total, members}`. A dispatch group has `dispatch: true` and the id `dispatch:<name>`. A `<group>` argument of `dispatch:<name>` names the user group `<name>`, and `session group` creates it, so the sessions stay in it after they end. A session member has `title`, `branch`, `status`, `pinned` and `age`, so you do not need `session list` to describe it. A session member whose session is gone has `missing: true`. A project member has `sessions`, the count of its sessions shown.
+
+## group create
+
+```bash
+claude-code-kanban group create <name|path> [--json]
+```
+
+Makes a group. A path, such as `auth-refactor/swarm-1`, also makes the parents that are missing. The command fails when the group exists. `--json` prints `{group, name, path, rev}`.
+
+## group rename
+
+```bash
+claude-code-kanban group rename <group> <new name> [--json]
+```
+
+Renames a group. It keeps its place, its parent and its members. `<group>` is a name, a path or an id, as for `session group`. `--json` prints `{group, name, path, rev}`.
+
+## group rm
+
+```bash
+claude-code-kanban group rm <group> [--json]
+```
+
+Removes a group, as Delete on the board does. Its sessions show where they would show with no group: in their project's group, their dispatch group or the top level. Its child groups move up one level. `--json` prints `{removed: {id, name, path}, ungrouped, rev}`.
+
+`rename` and `rm` do not take `dispatch:<name>`: a dispatch group goes when its sessions end, and `session ungroup` takes a session out.
+
+## group prune
+
+```bash
+claude-code-kanban group prune [--dry-run] [--json]
+```
+
+Removes every empty group. A group is empty when no member is live and every child group is empty, so a parent that holds only empty groups goes too. A session member is live while its transcript exists, its terminal runs or its dispatch starts; a project member is always live. `--dry-run` lists the groups and changes nothing. `--json` prints `{removed: [{id, name, path}], dryRun, rev}`.
 
 ## task list
 

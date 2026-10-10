@@ -253,6 +253,63 @@ describe('user groups', () => {
     assert.equal(s.state().groups.length, 6);
   });
 
+  it('creates a group by path and refuses one that exists', () => {
+    const s = harness().store();
+    const made = s.createPath('ops/swarm-1');
+    assert.deepEqual([made.name, made.path, made.rev], ['swarm-1', 'ops/swarm-1', 1]);
+    assert.equal(s.state().groups.length, 2);
+    assert.equal(status(() => s.createPath('OPS/swarm-1')), 400);
+    assert.equal(status(() => s.createPath('ops')), 400);
+    assert.equal(s.createPath('dispatch:auth').name, 'auth');
+  });
+
+  it('renames a group by name or path and keeps its place', () => {
+    const s = harness().store();
+    s.createPath('ops/swarm-1');
+    const byPath = s.rename('ops/swarm-1', 'swarm-2');
+    assert.deepEqual([byPath.name, byPath.path], ['swarm-2', 'ops/swarm-2']);
+    const byName = s.rename('OPS', 'infra');
+    assert.equal(byName.path, 'infra');
+    assert.equal(s.state().groups.find((g) => g.name === 'swarm-2').parent, byName.group);
+  });
+
+  it('removes a group by key, ungroups its members and lifts its children', () => {
+    const s = harness().store();
+    s.createPath('ops/swarm-1');
+    s.groupSession('s1', { group: 'ops' });
+    const out = s.removeByKey('ops');
+    assert.deepEqual([out.removed.name, out.removed.path, out.ungrouped], ['ops', 'ops', 1]);
+    assert.deepEqual(s.state().groups.map((g) => [g.name, g.parent]), [['swarm-1', null]]);
+  });
+
+  it('refuses a dispatch key for rename and rm', () => {
+    const s = harness().store();
+    s.createPath('auth');
+    assert.equal(status(() => s.rename('dispatch:auth', 'x')), 400);
+    assert.equal(status(() => s.removeByKey('dispatch:auth')), 400);
+    assert.equal(s.state().groups[0].name, 'auth');
+    const joined = s.groupSession('s1', { group: 'dispatch:ops' });
+    assert.deepEqual([joined.name, joined.created], ['ops', true]);
+  });
+
+  it('prunes empty groups from the bottom up and counts gone sessions as empty', () => {
+    const s = harness().store();
+    s.createPath('a/b/c');
+    s.createPath('keep/empty');
+    s.groupSession('gone', { group: 'a/b' });
+    s.groupSession('live', { group: 'keep' });
+    const isLive = (m) => m.ref !== 'gone';
+    const rev = s.state().rev;
+    const dry = s.prune({ dryRun: true, isLive });
+    assert.deepEqual(dry.removed.map((g) => g.path).sort(), ['a', 'a/b', 'a/b/c', 'keep/empty']);
+    assert.equal(s.state().rev, rev);
+    const out = s.prune({ isLive });
+    assert.deepEqual(s.state().groups.map((g) => g.name), ['keep']);
+    assert.equal(out.rev, rev + 1);
+    assert.deepEqual(s.prune({ isLive }).removed, []);
+    assert.equal(s.state().rev, rev + 1);
+  });
+
   it('keeps a parent session inside the group and drops it on a move out', () => {
     const s = harness().store();
     s.create({ id: 'a', name: 'A' });

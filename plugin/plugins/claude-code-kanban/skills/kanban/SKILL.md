@@ -17,7 +17,7 @@ This session id is `${CLAUDE_SESSION_ID}`. `--session` defaults to it through `$
 | `doc` | `link`, `unlink` a file or URL to the session · `list` its links · `preview` a file in a modal |
 | `pane` | `add` a URL or a local file as a background tab · `rm` · `list` |
 | `session` | `list` · `search <text>` · `open <id>` focuses it · `view <id>` stats and transcript path · `plan <id>` · `agents <id>` · `pin <id>` · `group <id> <group>`, `ungroup <id>` in the sidebar |
-| `group` | `list` the sidebar groups, by name and id |
+| `group` | `list` the sidebar groups, by name and id · `create <name>` · `rename <group> <name>` · `rm <group>` · `prune` the empty ones |
 | `task` | `list` for a session, a project or the whole board |
 | `project` | `list` |
 | `dispatch` | `start`, `list`, `end` — run `/claude-code-kanban:dispatch` instead |

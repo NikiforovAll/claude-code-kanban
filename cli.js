@@ -4,7 +4,7 @@ const { getClaudeDir, displayPath } = require('./lib/claude-dir');
 const { isGroupName, suggestGroupName } = require('./lib/dispatch-groups');
 const { linkUrl } = require('./public/link-url');
 const { sessionProjectKey } = require('./public/project-match');
-const { placeSession } = require('./lib/user-groups');
+const { DISPATCH_PREFIX, placeSession } = require('./lib/user-groups');
 // Help is auto-generated from this table — keep flags/usage in sync with `run` behavior.
 const SESSION_FLAG = '--session <id>';
 const SESSION_FLAG_HELP = 'Session, full id or unique prefix (default: $PREVIEW_SESSION, else $CLAUDE_CODE_SESSION_ID)';
@@ -110,14 +110,14 @@ const COMMANDS = {
           '--all': 'Every session, active or not',
           '--days <n>': 'Only sessions modified within the last N days (fractional ok, e.g. 0.5)',
           '--project <name>': 'Filter by project: an absolute path selects one project, other text matches a part of the path',
-          '--limit <n|all>': 'Max rows to display (default: 10). Use "all" for no cap.',
+          '--limit <n|all>': 'Max rows to display (default: every active row; 20 with --all). Pinned sessions are kept past it.',
           '--no-pins': 'Disable always-include and sticky-first ordering for pinned sessions',
           '--json': 'Output JSON instead of a table',
         },
-        notes: 'Active: running in the terminal, or with messages and open tasks, live agents, a wait on the user or recent activity. STATUS is idle, active, busy (a task in progress) or wait. --active is accepted and does nothing.',
+        notes: 'Active: running in the terminal, or with messages and open tasks, live agents, a wait on the user or recent activity. STATUS is idle, active, busy (a task in progress) or wait. When --limit cuts the list, a last line says how many rows it shows of how many (on stderr with --json).',
         examples: [
           'claude-code-kanban session list',
-          'claude-code-kanban session list --all --days 0.5 --limit all --project my-repo',
+          'claude-code-kanban session list --all --days 0.5 --limit 20 --project my-repo',
         ],
         run: runSessionListCli,
       },
@@ -224,7 +224,7 @@ const COMMANDS = {
     },
   },
   group: {
-    summary: 'Read the session groups in the sidebar',
+    summary: 'Read and change the session groups in the sidebar',
     verbs: {
       list: {
         summary: 'List the groups in sidebar order, nested groups under their parent, with the members the sidebar\'s Active view shows (active, pinned or sticky)',
@@ -233,9 +233,53 @@ const COMMANDS = {
           '--all': 'Every member, active or not',
           '--json': 'Output JSON ({rev, groups: [{id, name, parent, visible, total, members}]}); a dispatch group has dispatch: true and id dispatch:<name>; a session member has title, branch, status, pinned and age, or missing: true; a project member has sessions (its shown sessions)',
         },
-        notes: 'A project member shows when it has a session the Active view shows. visible/total counts the members shown. A session started with `dispatch start --group` shows in that dispatch group, marked (dispatch) and listed after the user groups, unless a user group holds it or its project; a user group with the same name takes it in. Dispatch groups go when their sessions end. Pass a user group\'s name, path (parent/child) or id to `session group`.',
+        notes: 'A project member shows when it has a session the Active view shows. visible/total counts the members shown. A session started with `dispatch start --group` shows in that dispatch group, marked (dispatch) and listed after the user groups, unless a user group holds it or its project; a user group with the same name takes it in. Dispatch groups go when their sessions end. Pass a user group\'s name, path (parent/child) or id to `session group`; dispatch:<name> there makes the user group <name>, which keeps the sessions after they end.',
         examples: ['claude-code-kanban group list', 'claude-code-kanban group list --all --json'],
         run: runGroupListCli,
+      },
+      create: {
+        summary: 'Make a group, and the missing parents of a path',
+        usage: 'claude-code-kanban group create <name|path> [--json]',
+        flags: {
+          '<name|path>': 'Name of a new top-level group, or a path from the top (parent/child); dispatch:<name> makes a user group that takes in that dispatch group',
+          '--json': 'Output JSON ({group, name, path, rev})',
+        },
+        notes: 'Fails when the group exists.',
+        examples: ['claude-code-kanban group create "Auth refactor"', 'claude-code-kanban group create auth-refactor/swarm-1'],
+        run: runGroupCreateCli,
+      },
+      rename: {
+        summary: 'Rename a group; it keeps its place, parent and members',
+        usage: 'claude-code-kanban group rename <group> <new name> [--json]',
+        flags: {
+          '<group>': 'Group name (any case), path from the top (parent/child) or id, from `group list`',
+          '<new name>': 'The new name',
+          '--json': 'Output JSON ({group, name, path, rev})',
+        },
+        examples: ['claude-code-kanban group rename auth-refactor "Auth v2"'],
+        run: runGroupRenameCli,
+      },
+      rm: {
+        summary: 'Remove a group, as Delete on the board does',
+        usage: 'claude-code-kanban group rm <group> [--json]',
+        flags: {
+          '<group>': 'Group name (any case), path from the top (parent/child) or id, from `group list`',
+          '--json': 'Output JSON ({removed: {id, name, path}, ungrouped, rev})',
+        },
+        notes: 'Its members leave the group and show as with no group: in their project\'s group, their dispatch group or the top level. Its child groups move up one level. A dispatch group cannot be removed: it goes when its sessions end.',
+        examples: ['claude-code-kanban group rm presales-cloud'],
+        run: runGroupRmCli,
+      },
+      prune: {
+        summary: 'Remove every empty group',
+        usage: 'claude-code-kanban group prune [--dry-run] [--json]',
+        flags: {
+          '--dry-run': 'List the groups it would remove, and remove none',
+          '--json': 'Output JSON ({removed: [{id, name, path}], dryRun, rev})',
+        },
+        notes: 'Empty: no session whose transcript still exists, no project, and no child group that is not empty. It checks every member, not only the ones the Active view shows.',
+        examples: ['claude-code-kanban group prune --dry-run', 'claude-code-kanban group prune'],
+        run: runGroupPruneCli,
       },
     },
   },
@@ -744,15 +788,17 @@ function parseLimit(args, { fallback, allowAll = false }) {
 }
 
 // `lite` leaves out the fields that can read a whole transcript (loopInfo).
-function fetchSessionsList({ limit, noPins = false, include = [], project = null, activeOnly = false, lite = false }, label = 'Session list') {
+function sessionsListPath({ limit, noPins = false, include = [], project = null, activeOnly = false, lite = false }) {
   const q = limit === null ? 'all' : String(limit);
   const pinsQ = noPins ? '&pins=off' : '';
   const includeQ = include.length ? `&include=${include.map(encodeURIComponent).join(',')}` : '';
   const projectQ = project ? `&project=${encodeURIComponent(project)}` : '';
   const filterQ = activeOnly ? '&filter=active' : '';
   const liteQ = lite ? '&lite=1' : '';
-  return cliGetJson(`/api/sessions?limit=${q}${pinsQ}${includeQ}${projectQ}${filterQ}${liteQ}`, label);
+  return `/api/sessions?limit=${q}${pinsQ}${includeQ}${projectQ}${filterQ}${liteQ}`;
 }
+
+const fetchSessionsList = (opts, label = 'Session list') => cliGetJson(sessionsListPath(opts), label);
 
 const uniqueById = (list) => [...new Map(list.map((s) => [s.id, s])).values()];
 
@@ -800,13 +846,18 @@ async function runSessionListCli(args) {
   if (daysArg !== null && (Number.isNaN(days) || days <= 0)) {
     return usageError(COMMANDS.session.verbs.list, `Invalid --days value: ${daysArg}`);
   }
-  const parsed = parseLimit(args, { fallback: 10, allowAll: true });
+  // The Active view is short, so it has no cap. The server reads a whole transcript for some
+  // fields of each row it sends, so --all keeps one.
+  const parsed = parseLimit(args, { fallback: activeOnly ? null : 20, allowAll: true });
   if (!parsed.ok) return usageError(COMMANDS.session.verbs.list, parsed.error);
   const limit = parsed.limit;
   const asJson = args.includes('--json');
   let list;
+  let total;
   try {
-    list = await fetchSessionsList({ limit: days !== null ? null : limit, noPins, project: projectFilter, activeOnly });
+    const res = await cliGet(sessionsListPath({ limit: days !== null ? null : limit, noPins, project: projectFilter, activeOnly, lite: !asJson }), 'Session list');
+    list = await res.json();
+    total = Number(res.headers.get('x-total-count')) || list.length;
   } catch (e) {
     reportCliError(e);
     return 1;
@@ -814,6 +865,7 @@ async function runSessionListCli(args) {
   if (days !== null) {
     const cutoff = Date.now() - days * 86_400_000;
     list = list.filter(s => s.pin || (s.modifiedAt && new Date(s.modifiedAt).getTime() >= cutoff));
+    total = list.length;
   }
   const pinRank = s => s.pin === 'sticky' ? 0 : s.pin === 'pinned' ? 1 : 2;
   list.sort((a, b) => {
@@ -827,8 +879,10 @@ async function runSessionListCli(args) {
     const extraPinned = list.filter(s => s.pin && !topIds.has(s.id));
     list = [...top, ...extraPinned];
   }
+  const cut = list.length < total ? `${list.length} of ${total} shown; --limit all shows every row` : null;
   if (asJson) {
     console.log(JSON.stringify(list.map(({ pin, ...s }) => ({ ...s, pinState: pin || null })), null, 2));
+    if (cut) console.error(cut);
     return 0;
   }
   if (!list.length) {
@@ -856,6 +910,7 @@ async function runSessionListCli(args) {
   for (const r of rows) {
     console.log(`${r.id.padEnd(w.id)}  ${r.pin.padEnd(w.pin)}  ${r.status.padEnd(w.status)}  ${r.age.padEnd(w.age)}  ${r.tasks.padEnd(w.tasks)}  ${r.project.padEnd(w.project)}  ${r.title}`);
   }
+  if (cut) console.log(cut);
   return 0;
 }
 
@@ -953,6 +1008,51 @@ async function runSessionUngroupCli(args, entry) {
   } catch (e) { reportCliError(e); return 1; }
 }
 
+async function groupVerb(args, urlPath, body, label, line) {
+  try {
+    const out = await cliPostJson(urlPath, body, label);
+    if (!out) return 1;
+    console.log(args.includes('--json') ? JSON.stringify(out, null, 2) : line(out));
+    return 0;
+  } catch (e) { reportCliError(e); return 1; }
+}
+
+async function runGroupCreateCli(args, entry) {
+  const [pathArg] = positionals(args, []);
+  if (!pathArg) {
+    printLeafHelp(entry);
+    return 1;
+  }
+  return groupVerb(args, '/api/groups/path', { path: pathArg }, 'Create', (r) => `Created group "${r.path}" (${r.group})`);
+}
+
+async function runGroupRenameCli(args, entry) {
+  const [groupArg, nameArg] = positionals(args, []);
+  if (!groupArg || !nameArg) {
+    printLeafHelp(entry);
+    return 1;
+  }
+  return groupVerb(args, '/api/groups/rename', { group: groupArg, name: nameArg }, 'Rename', (r) => `Renamed group to "${r.path}" (${r.group})`);
+}
+
+async function runGroupRmCli(args, entry) {
+  const [groupArg] = positionals(args, []);
+  if (!groupArg) {
+    printLeafHelp(entry);
+    return 1;
+  }
+  return groupVerb(args, '/api/groups/remove', { group: groupArg }, 'Remove', (r) =>
+    `Removed group "${r.removed.path}" (${r.removed.id})${r.ungrouped ? `; ${r.ungrouped} member${r.ungrouped === 1 ? '' : 's'} left it` : ''}`);
+}
+
+async function runGroupPruneCli(args) {
+  const dryRun = args.includes('--dry-run');
+  return groupVerb(args, '/api/groups/prune', { dryRun }, 'Prune', (r) => {
+    if (!r.removed.length) return 'No empty groups.';
+    return r.removed.map((g) => `${dryRun ? 'Would remove' : 'Removed'} "${g.path}" (${g.id})`).join('\n');
+  });
+}
+
 // A session member carries the session's metadata; a project member carries the count of its
 // sessions that are shown. With activeOnly, a member is shown when the sidebar's Active view
 // shows it: an active or pinned session, a project with one. A project counts the sessions the
@@ -996,7 +1096,7 @@ function placeDispatched(groups, sessions, released = []) {
     if (!s.dispatchGroup) continue;
     const { named, dispatch } = placeSession(groups, released, { ref: s.id, project: sessionProjectKey(s), dispatchGroup: s.dispatchGroup });
     if (dispatch && !dispatchGroups.has(dispatch)) {
-      dispatchGroups.set(dispatch, { id: `dispatch:${dispatch}`, name: dispatch, parent: null, dispatch: true, members: [] });
+      dispatchGroups.set(dispatch, { id: `${DISPATCH_PREFIX}${dispatch}`, name: dispatch, parent: null, dispatch: true, members: [] });
     }
     (named || dispatchGroups.get(dispatch))?.members.push({ type: 'session', ref: s.id });
   }
@@ -1118,11 +1218,13 @@ function printTable(header, rows) {
 
 const ageOf = (iso) => (iso ? formatAge(Date.now() - new Date(iso).getTime()) : '-');
 
-async function cliGetJson(urlPath, label) {
+async function cliGet(urlPath, label) {
   const res = await cliFetch(urlPath);
   if (!res.ok) throw new Error(`${label} failed (${res.status}): ${await res.text()}`);
-  return res.json();
+  return res;
 }
+
+const cliGetJson = async (urlPath, label) => (await cliGet(urlPath, label)).json();
 
 async function runSessionSearchCli(args) {
   const entry = COMMANDS.session.verbs.search;
@@ -1345,6 +1447,7 @@ async function runDispatchStartCli(argv) {
     if (!out) return 1;
     if (args.includes('--json')) console.log(JSON.stringify(out, null, 2));
     else console.log(`Started session ${out.session} in ${out.cwd}${out.group ? ` [${out.group}]` : ''}`);
+    if (out.group) await noteJoinedGroup(out.session, out.group);
     return 0;
   } catch (e) { reportCliError(e); return 1; }
 }
@@ -1353,6 +1456,15 @@ async function fetchDispatches(all) {
   const q = new URLSearchParams();
   if (!all && process.env.CLAUDE_CODE_SESSION_ID) q.set('parent', process.env.CLAUDE_CODE_SESSION_ID);
   return (await cliGetJson(`/api/dispatch?${q}`, 'Dispatch list')).running.sort((a, b) => b.startedAt - a.startedAt);
+}
+
+// A user group named like the dispatch group takes the session in; say so, or the board looks wrong.
+async function noteJoinedGroup(session, dispatchGroup) {
+  try {
+    const { groups, released } = await cliGetJson('/api/groups', 'Group list');
+    const { named } = placeSession(groups, released, { ref: session, dispatchGroup });
+    if (named) console.error(`Joins user group "${named.name}" (${named.id}), which has the same name.`);
+  } catch (_) { /* the session started; the note is optional */ }
 }
 
 const dispatchLine = (r) => `${r.session}${r.name ? `  ${r.name}` : ''}${r.group ? `  [${r.group}]` : ''}`;
