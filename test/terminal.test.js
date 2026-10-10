@@ -456,12 +456,13 @@ describe('terminal endpoint', { skip: !ptyAvailable }, () => {
     const got = await session(port, { id: SESSION, mode: 'resume' }, (g) => g.closeCode !== null);
     assert.equal(got.closeCode, 4004);
   });
-  it('refuses a new session in a folder it does not know', async () => {
-    const got = await session(port, { id: SESSION, mode: 'new', cwd: os.tmpdir() }, (g) => g.closeCode !== null);
+  const missingDir = path.join(os.tmpdir(), 'cck-no-such-folder');
+  it('refuses a new session in a folder that does not exist', async () => {
+    const got = await session(port, { id: SESSION, mode: 'new', cwd: missingDir }, (g) => g.closeCode !== null);
     assert.equal(got.closeCode, 4004);
   });
-  it('refuses a resume picker in a folder it does not know', async () => {
-    const got = await session(port, { id: SESSION, mode: 'pick', cwd: os.tmpdir() }, (g) => g.closeCode !== null);
+  it('refuses a resume picker in a folder that does not exist', async () => {
+    const got = await session(port, { id: SESSION, mode: 'pick', cwd: missingDir }, (g) => g.closeCode !== null);
     assert.equal(got.closeCode, 4004);
   });
   it('refuses a new session with a bad name', async () => {

@@ -3287,13 +3287,10 @@ app.get('/api/config', (_req, res) => {
 // #endregion
 
 // #region TERMINAL
-// A new session may start only in a folder the user has already worked in, or one they
-// chose in the native dialog during this run. Anything else would let a page script pick
-// the directory claude runs in.
-const pickedFolders = new Set([kanbot.cwd]);
+// Any existing folder is allowed: the terminal token already opens a shell PTY, so a folder
+// list would block valid use without protecting anything.
 function isAllowedFolder(dir) {
-  const known = pickedFolders.has(dir) || Object.values(loadSessionMetadata()).some((m) => m.project === dir);
-  try { return known && statSync(dir).isDirectory(); } catch { return false; }
+  try { return statSync(dir).isDirectory(); } catch { return false; }
 }
 
 // Restore runs before the first full metadata scan, so until that scan has run a session's
@@ -3370,7 +3367,6 @@ app.post('/api/terminal/pick-folder', async (req, res) => {
   folderDialogOpen = true;
   try {
     const dir = await pickFolder(whichSync, { start: req.body?.start });
-    if (dir) pickedFolders.add(dir);
     res.json({ path: dir });
   } catch (e) {
     res.status(501).json({ error: e.message });

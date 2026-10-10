@@ -95,13 +95,13 @@ PORT=8080 claude-code-kanban
 
 **Fix.** Start the server with `--enable-terminal` for the same config dir, then run the command again.
 
-### 403: folder is not a known project
+### 404: folder does not exist
 
-**Symptom.** A new session or `dispatch start` fails with `folder is not a known project or a folder picked in this run`.
+**Symptom.** A new session or `dispatch start` fails with `folder does not exist`.
 
-**Cause.** A new session can start only in a folder where a Claude Code session already ran, or in a folder you picked with **Browse…** in the New session dialog since the server started.
+**Cause.** The `--cwd` folder is not a folder on this machine.
 
-**Fix.** Run Claude Code once in that folder, or pick it with **Browse…**. Then try again.
+**Fix.** Create the folder, or correct the path. Then try again.
 
 ### 429: too many terminals
 

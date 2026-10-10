@@ -31,7 +31,7 @@ Without `--json`, the command prints the session id, the folder and the group:
 Started session 5f0c... in /home/me/src/my-app [auth-refactor]
 ```
 
-The `--cwd` folder must be a known project, which is a folder where a Claude Code session already ran, or a folder you picked with **Browse…** during this server run. For this and the other refusals, see [dispatch start](/claude-code-kanban/reference/cli/#dispatch-start) and [Dispatch errors](/claude-code-kanban/troubleshooting/#dispatch-errors).
+The `--cwd` folder can be any folder that exists, also a new empty one. For this and the other refusals, see [dispatch start](/claude-code-kanban/reference/cli/#dispatch-start) and [Dispatch errors](/claude-code-kanban/troubleshooting/#dispatch-errors).
 
 ## Pass claude flags
 

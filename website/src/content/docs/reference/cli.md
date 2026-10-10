@@ -322,7 +322,7 @@ claude-code-kanban dispatch start --cwd <dir> (--spec <text> | --spec-file <path
 
 | Flag | What it does |
 | --- | --- |
-| `--cwd <dir>` | Folder to run in. Default is the current folder. It must be a known project (a folder where a session already ran) or a folder picked in the New session dialog during this server run. |
+| `--cwd <dir>` | Folder to run in. Default is the current folder. It can be any folder that exists. |
 | `--spec <text>` | The task. Write it so that it makes sense with no other context. |
 | `--spec-file <path>` | Reads the task from a file. |
 | `--name <n>` | Session name: up to 80 letters, digits, spaces, `.`, `_` and `-`. The first character must be a letter or a digit. It is also the session's peer name for `SendMessage`. |
@@ -343,7 +343,7 @@ cck sends no report back. Say in the spec how the session reports, for example w
 
 `dispatch start` reads the terminal token from `<config-dir>/.cck/terminal-tokens/<port>.json`, where `<port>` is the port of the board it reaches. The server writes that file only when the terminal is on. Without it the command fails with `No terminal token for <dir> at <board-url>. The cck server must be running with the terminal enabled.` Other refusals:
 
-- `403 folder is not a known project or a folder picked in this run` when the folder is not a known project.
+- `404 folder does not exist` when the folder does not exist.
 - `429 30 terminals are open; end one first` when all terminals are in use (30 by default).
 - `400 invalid name`, `invalid worktree name`, `invalid task list id`, `invalid model` or `invalid prompt` when a value is not valid or the spec is longer than 32 KB.
 - A group name that is not kebab-case. The CLI suggests a fixed name, for example `try --group auth-refactor`.

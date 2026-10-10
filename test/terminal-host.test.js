@@ -97,7 +97,7 @@ describe('terminal host process', { skip: !ptyAvailable }, () => {
 
   it('asks cck for the folder and refuses what cck refuses', async () => {
     const started = await terminal.startNew({ cwd: os.tmpdir(), prompt: 'hi' });
-    assert.equal(started.status, 403);
+    assert.equal(started.status, 404);
     assert.equal(events.asks.length, 1);
     assert.equal(await terminal.end('00000000-0000-4000-8000-000000000000', TOKEN), 'not-found');
     assert.equal(await terminal.end(SHELL_ID, 'nope'), 'auth');

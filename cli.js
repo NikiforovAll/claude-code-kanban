@@ -281,7 +281,7 @@ const COMMANDS = {
         summary: 'Start claude in cck\'s terminal with a task; prints the session id',
         usage: 'claude-code-kanban dispatch start --cwd <dir> (--spec <text> | --spec-file <path>) [--name <n>] [--group <g>] [--model <m>] [--worktree [name]] [--task-list [id]] [--json] [-- <claude args>...]',
         flags: {
-          '--cwd <dir>': 'Folder to run in (a known project, default: current dir)',
+          '--cwd <dir>': 'Folder to run in (any existing folder, default: current dir)',
           '--spec <text>': 'The task, self-contained; sent as the first message',
           '--spec-file <path>': 'Read the task from a file',
           '--name <n>': 'Session name; also its peer name for SendMessage',
