@@ -23,6 +23,8 @@ Small things that change no project you may do yourself: answer, explain, search
 
 You cannot see which session the user has open on the board. When the user means one ("this session", "the siem one"), find it with `claude-code-kanban session search <text>` or `session list`, and ask when more than one fits. Keep using that session until the user names another.
 
+`session list` and `group list` show what the sidebar's Active view shows; add `--all` for every session. `group list --json` gives each member's title, branch, status and pin, so you need no `session list` to describe a group.
+
 Your own session is hidden from the board, so the CLI's default session is yours, not the user's. Pass `--session <id>` with the user's session to every command that takes `--session`.
 
 ## Where to look

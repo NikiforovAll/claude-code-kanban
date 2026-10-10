@@ -41,6 +41,8 @@ The server applies this rule on `?filter=active` (`/api/sessions`), and the clie
 
 The client also hides a session the user dismissed, for `DISMISS_TTL_MS` (24 h).
 
+The server also writes the result on every session object as `active` (true for a session with a terminal running too), with or without the filter. The CLI's `session list`, `group list` and STATUS column read it, so the CLI keeps no copy of the rule.
+
 The 24h project filter is a separate filter. It keeps sessions of projects with any transcript written in the last 24 h. Pinned and sticky sessions skip it. An explicit project filter still hides them.
 
 ## Drawn states

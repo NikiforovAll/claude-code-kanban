@@ -102,19 +102,20 @@ const COMMANDS = {
     summary: 'List, search, open, inspect and group Claude Code sessions',
     verbs: {
       list: {
-        summary: 'List sessions (pinned/sticky always included)',
-        usage: 'claude-code-kanban session list [--active] [--days <n>] [--project <name>] [--limit <n|all>] [--no-pins] [--json]',
+        summary: 'List the active sessions, as the sidebar\'s Active view shows them (pinned/sticky always included)',
+        usage: 'claude-code-kanban session list [--all] [--days <n>] [--project <name>] [--limit <n|all>] [--no-pins] [--json]',
         flags: {
-          '--active': 'Only sessions with recent activity (sidebar-style filter)',
+          '--all': 'Every session, active or not',
           '--days <n>': 'Only sessions modified within the last N days (fractional ok, e.g. 0.5)',
           '--project <name>': 'Filter by project: an absolute path selects one project, other text matches a part of the path',
           '--limit <n|all>': 'Max rows to display (default: 10). Use "all" for no cap.',
           '--no-pins': 'Disable always-include and sticky-first ordering for pinned sessions',
           '--json': 'Output JSON instead of a table',
         },
+        notes: 'Active: running in the terminal, or with messages and open tasks, live agents, a wait on the user or recent activity. STATUS is idle, active, busy (a task in progress) or wait. --active is accepted and does nothing.',
         examples: [
-          'claude-code-kanban session list --active',
-          'claude-code-kanban session list --days 0.5 --limit all --project my-repo',
+          'claude-code-kanban session list',
+          'claude-code-kanban session list --all --days 0.5 --limit all --project my-repo',
         ],
         run: runSessionListCli,
       },
@@ -224,13 +225,14 @@ const COMMANDS = {
     summary: 'Read the session groups in the sidebar',
     verbs: {
       list: {
-        summary: 'List the groups, nested groups under their parent, in sidebar order',
-        usage: 'claude-code-kanban group list [--json]',
+        summary: 'List the groups and their active members, nested groups under their parent, in sidebar order',
+        usage: 'claude-code-kanban group list [--all] [--json]',
         flags: {
-          '--json': 'Output JSON ({rev, groups: [{id, name, parent, members: [{type, ref}]}]})',
+          '--all': 'Every member, active or not',
+          '--json': 'Output JSON ({rev, groups: [{id, name, parent, visible, total, members}]}); a session member has title, branch, status, pinned and age, or missing: true; a project member has sessions (its shown sessions)',
         },
-        notes: 'Pass a name, a path (parent/child) or an id to `session group`. Dispatch groups are not listed: they go when their sessions end.',
-        examples: ['claude-code-kanban group list'],
+        notes: 'A member shows as in the sidebar\'s Active view: an active or pinned session, a project with one. visible/total counts the members shown. Pass a name, a path (parent/child) or an id to `session group`. Dispatch groups are not listed: they go when their sessions end.',
+        examples: ['claude-code-kanban group list', 'claude-code-kanban group list --all --json'],
         run: runGroupListCli,
       },
     },
@@ -718,13 +720,8 @@ async function printLinkedDocs(sessionId, asJson) {
   } catch (e) { reportCliError(e); return 1; }
 }
 
-// Mirror of `isSessionActive` in public/app.js — keep in sync (different runtimes, no shared module).
-function isSessionActive(s) {
-  return s.hasRecentLog || s.inProgress > 0 || s.hasActiveAgents || s.hasWaitingForUser;
-}
-
 function sessionStatus(s) {
-  if (!isSessionActive(s)) return 'idle';
+  if (!s.active) return 'idle';
   if (s.hasWaitingForUser) return 'wait';
   if (s.inProgress > 0) return 'busy';
   return 'active';
@@ -739,11 +736,13 @@ function parseLimit(args, { fallback, allowAll = false }) {
   return { ok: true, limit: n };
 }
 
-async function fetchSessionsList(limit, pinnedIds = [], project = null) {
+function fetchSessionsList({ limit, pinnedIds = [], include = [], project = null, activeOnly = false }, label = 'Session list') {
   const q = limit === null ? 'all' : String(limit);
-  const pinnedQ = pinnedIds.length ? `&pinned=${pinnedIds.join(',')}` : '';
+  const pinnedQ = pinnedIds.length ? `&pinned=${pinnedIds.map(encodeURIComponent).join(',')}` : '';
+  const includeQ = include.length ? `&include=${include.map(encodeURIComponent).join(',')}` : '';
   const projectQ = project ? `&project=${encodeURIComponent(project)}` : '';
-  return cliGetJson(`/api/sessions?limit=${q}${pinnedQ}${projectQ}`, 'Session list');
+  const filterQ = activeOnly ? '&filter=active' : '';
+  return cliGetJson(`/api/sessions?limit=${q}${pinnedQ}${includeQ}${projectQ}${filterQ}`, label);
 }
 
 function fetchSessionsByIds(ids, label) {
@@ -785,7 +784,7 @@ async function resolveSessionByIdOrPrefix(idArg) {
 }
 
 async function runSessionListCli(args) {
-  const activeOnly = args.includes('--active');
+  const activeOnly = !args.includes('--all');
   const noPins = args.includes('--no-pins');
   const projectFilter = getArgValue(args, 'project');
   const daysArg = getArgValue(args, 'days');
@@ -799,16 +798,14 @@ async function runSessionListCli(args) {
   const asJson = args.includes('--json');
   const pinsMap = noPins ? {} : await fetchPinsMap();
   const pinnedIds = Object.keys(pinsMap);
-  const hasClientFilter = activeOnly || days !== null;
   let list;
   try {
-    list = await fetchSessionsList(hasClientFilter ? null : limit, pinnedIds, projectFilter);
+    list = await fetchSessionsList({ limit: days !== null ? null : limit, pinnedIds, project: projectFilter, activeOnly });
   } catch (e) {
     reportCliError(e);
     return 1;
   }
   const pinOf = id => pinsMap[id] || null;
-  if (activeOnly) list = list.filter(s => pinOf(s.id) || isSessionActive(s));
   if (days !== null) {
     const cutoff = Date.now() - days * 86_400_000;
     list = list.filter(s => pinOf(s.id) || (s.modifiedAt && new Date(s.modifiedAt).getTime() >= cutoff));
@@ -951,12 +948,53 @@ async function runSessionUngroupCli(args, entry) {
   } catch (e) { reportCliError(e); return 1; }
 }
 
+// A session member carries the session's metadata; a project member carries the count of its
+// sessions that are shown. With activeOnly, a member is shown when the sidebar's Active view
+// shows it: an active or pinned session, a project with one.
+function describeGroupMembers(groups, sessions, pinsMap, activeOnly) {
+  const byId = new Map(sessions.map((s) => [s.id, s]));
+  const shown = (s) => !activeOnly || s.active || !!pinsMap[s.id];
+  const shownByProject = new Map();
+  for (const s of sessions) {
+    if (!shown(s)) continue;
+    for (const p of new Set([s.project, s.worktree?.repo].filter(Boolean))) shownByProject.set(p, (shownByProject.get(p) || 0) + 1);
+  }
+  const describe = (m) => {
+    if (m.type === 'project') {
+      const count = shownByProject.get(m.ref) || 0;
+      return [!activeOnly || count > 0, { ...m, sessions: count }];
+    }
+    const s = byId.get(m.ref);
+    if (!s) return [!activeOnly, { ...m, missing: true }];
+    return [shown(s), {
+      ...m,
+      title: s.customTitle || s.name || s.slug || '',
+      branch: s.gitBranch || null,
+      status: sessionStatus(s),
+      pinned: pinsMap[s.id] || null,
+      age: ageOf(s.modifiedAt),
+    }];
+  };
+  return groups.map((g) => {
+    const members = g.members.map(describe).filter(([visible]) => visible).map(([, m]) => m);
+    return { ...g, visible: members.length, total: g.members.length, members };
+  });
+}
+
 async function runGroupListCli(args) {
-  let state;
+  const activeOnly = !args.includes('--all');
+  let rev;
+  let groups;
   try {
-    state = await cliGetJson('/api/groups', 'Group list');
+    ({ rev, groups } = await cliGetJson('/api/groups', 'Group list'));
+    const pinsMap = await fetchPinsMap();
+    const sessionRefs = [...new Set(groups.flatMap((g) => g.members.filter((m) => m.type === 'session').map((m) => m.ref)))];
+    const hasProjects = groups.some((g) => g.members.some((m) => m.type === 'project'));
+    const sessions = sessionRefs.length || hasProjects
+      ? await fetchSessionsList({ limit: hasProjects ? null : 1, pinnedIds: Object.keys(pinsMap), include: sessionRefs, activeOnly: hasProjects && activeOnly }, 'Group list')
+      : [];
+    groups = describeGroupMembers(groups, sessions, pinsMap, activeOnly);
   } catch (e) { reportCliError(e); return 1; }
-  const { rev, groups } = state;
   if (args.includes('--json')) {
     console.log(JSON.stringify({ rev, groups }, null, 2));
     return 0;
@@ -967,14 +1005,19 @@ async function runGroupListCli(args) {
   }
   const rows = [];
   const add = (parent, depth) => {
+    const pad = '  '.repeat(depth);
     for (const g of groups.filter((x) => x.parent === parent)) {
-      const count = (type) => g.members.filter((m) => m.type === type).length;
-      rows.push([g.id, count('project'), count('session'), `${'  '.repeat(depth)}${g.name}`]);
+      rows.push([g.id, '', '', '', `${pad}${g.name} (${g.visible}/${g.total})`]);
+      for (const m of g.members) {
+        if (m.type === 'project') rows.push(['project', '', '', '', `${pad}  ${m.ref} (${m.sessions} sessions)`]);
+        else if (m.missing) rows.push([m.ref.slice(0, 8), 'gone', '-', '', `${pad}  (no such session)`]);
+        else rows.push([m.ref.slice(0, 8), m.status, m.age, m.pinned || '', `${pad}  ${m.title}`]);
+      }
       add(g.id, depth + 1);
     }
   };
   add(null, 0);
-  printTable(['ID', 'PROJECTS', 'SESSIONS', 'NAME'], rows);
+  printTable(['ID', 'STATUS', 'AGE', 'PIN', 'NAME'], rows);
   return 0;
 }
 

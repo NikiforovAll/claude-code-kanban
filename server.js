@@ -1282,7 +1282,7 @@ app.get('/api/sessions', async (req, res) => {
     const pinnedIds = pinnedParam ? new Set(pinnedParam.split(',').filter(Boolean)) : new Set();
     for (const id of includeIds) pinnedIds.add(id);
     const activeFilter = req.query.filter === 'active';
-    const terminalIds = activeFilter ? new Set(terminal.ids()) : new Set();
+    const terminalIds = new Set(terminal.ids());
 
     const metadata = loadSessionMetadata();
     const sessionsMap = new Map();
@@ -1606,20 +1606,16 @@ app.get('/api/sessions', async (req, res) => {
       }));
     }
 
-    // Server-side activity filter (mirrors the client predicate in public/app.js).
-    // Pinned IDs bypass — they should always be in the response.
-    if (activeFilter) {
-      const isActive = (s) =>
-        s.hasMessages && (
-          (!s.sharedTaskList && (s.pending > 0 || s.inProgress > 0))
-          || s.hasActiveAgents
-          || s.hasWaitingForUser
-          || s.hasRecentActivity
-        );
-      for (const [id, s] of sessionsMap) {
-        if (pinnedIds.has(id) || terminalIds.has(id)) continue;
-        if (!isActive(s)) sessionsMap.delete(id);
-      }
+    // The sidebar's Active rule (getFilteredSessions in public/app.js); the CLI reads `active`
+    // instead of keeping its own copy. Pinned IDs bypass the filter.
+    for (const [id, s] of sessionsMap) {
+      s.active = terminalIds.has(id) || !!(s.hasMessages && (
+        (!s.sharedTaskList && (s.pending > 0 || s.inProgress > 0))
+        || s.hasActiveAgents
+        || s.hasWaitingForUser
+        || s.hasRecentActivity
+      ));
+      if (activeFilter && !s.active && !pinnedIds.has(id)) sessionsMap.delete(id);
     }
 
     // Convert map to array and sort by most recently modified
