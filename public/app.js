@@ -326,8 +326,8 @@ async function fetchSessions(includeTasks = true, focusId = currentSessionId) {
     // The focused session must come back whatever the filters say: renderSession and the
     // info modal both look it up in `sessions` and bail when it is absent, so a session
     // opened from outside the current filter would leave the view on the previous one.
-    // The server adds the pinned sessions itself.
-    const include = [focusId, revealedPlanSessionId, revealedStorageSessionId].filter(Boolean);
+    // The server adds the pinned sessions itself; the ones `session open` showed are this page's.
+    const include = [focusId, revealedPlanSessionId, revealedStorageSessionId, ...openedStickyIds].filter(Boolean);
     const recent = filterProject === '__recent__';
     const res = await api('/api/sessions', {
       query: {
@@ -2125,19 +2125,16 @@ const deferredPinPlacement = new Set();
 const openedStickyIds = new Set();
 
 // The server keeps the pins (`/api/session/pins`, lib/session-pins.js); the two sets are only the
-// page's copy. The localStorage lists are from before that: the first board to load imports them,
-// and every board deletes them.
+// page's copy. The localStorage lists are from before that. Each origin has its own (the hub's
+// proxied port, the standalone board), so each one merges its lists into the server's once, then
+// deletes them.
 async function syncSessionPins() {
   try {
-    let res = await api('/api/session/pins');
+    const body = { pinned: readStoredList(PINNED_SESSIONS_KEY), sticky: readStoredList(STICKY_SESSIONS_KEY) };
+    const local = body.pinned.length || body.sticky.length;
+    const res = await (local ? api('/api/session/pins/import', { method: 'POST', body }) : api('/api/session/pins'));
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    let data = await res.json();
-    if (!data.pinsMigratedAt) {
-      const body = { pinned: readStoredList(PINNED_SESSIONS_KEY), sticky: readStoredList(STICKY_SESSIONS_KEY) };
-      res = await api('/api/session/pins/import', { method: 'POST', body });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      data = await res.json();
-    }
+    const data = await res.json();
     store.removeItem(PINNED_SESSIONS_KEY);
     store.removeItem(STICKY_SESSIONS_KEY);
     applyServerPins(data.pins);
@@ -2155,7 +2152,10 @@ function applyServerPins(pins) {
   stickySessionIds = new Set(openedStickyIds);
   for (const [id, state] of Object.entries(pins || {})) {
     pinnedSessionIds.add(id);
-    if (state === 'sticky') stickySessionIds.add(id);
+    if (state === 'sticky') {
+      stickySessionIds.add(id);
+      openedStickyIds.delete(id);
+    }
   }
   for (const id of deferredPinPlacement) if (!isAnyPinned(id)) deferredPinPlacement.delete(id);
   const first = !pinsApplied;
@@ -2175,15 +2175,22 @@ function showPinnedSessions(added) {
   else renderSessions();
 }
 
-// One session per request, so the last write for a session wins. A failed save re-reads the server
-// so the page shows what is saved.
-async function sendPinChange(sessionId) {
+// The pin the user set. A sticky that `session open` added is only this page's and is not saved.
+function savedPinState(sessionId) {
+  if (!pinnedSessionIds.has(sessionId)) return 'none';
+  return stickySessionIds.has(sessionId) && !openedStickyIds.has(sessionId) ? 'sticky' : 'pinned';
+}
+
+function sendPinChange(sessionId) {
+  return postPins({ id: sessionId, state: savedPinState(sessionId) });
+}
+
+// A write names only its sessions, so the last write for a session wins. A failed save re-reads the
+// server so the page shows what is saved.
+async function postPins(body) {
   let error;
   try {
-    const res = await api('/api/session/pin', {
-      method: 'POST',
-      body: { id: sessionId, state: getSessionPinState(sessionId) },
-    });
+    const res = await api('/api/session/pin', { method: 'POST', body });
     if (res.ok) return;
     error = (await res.json().catch(() => null))?.error || `HTTP ${res.status}`;
   } catch (e) {
@@ -2227,8 +2234,9 @@ function toggleSessionSticky(sessionId) {
   renderSessions();
 }
 
+// The echo of this page's own change is a no-op, so the selected session keeps its deferred place.
 function handleSessionPinEvent({ id, state }) {
-  if (!id) return;
+  if (!id || savedPinState(id) === state) return;
   clearSessionPin(id);
   if (state === 'pinned') pinnedSessionIds.add(id);
   if (state === 'sticky') {
@@ -7267,13 +7275,10 @@ async function cleanupOrphanedStorage() {
   const orphaned = _findOrphanedKeys(known);
   const unpinned = new Set();
   for (const key of orphaned) {
-    if (key.startsWith('__pinned__')) {
-      const id = key.slice('__pinned__'.length);
-      pinnedSessionIds.delete(id);
-      unpinned.add(id);
-    } else if (key.startsWith('__sticky__')) {
-      const id = key.slice('__sticky__'.length);
-      stickySessionIds.delete(id);
+    const pin = /^__(pinned|sticky)__/.exec(key);
+    if (pin) {
+      const id = key.slice(pin[0].length);
+      clearSessionPin(id);
       unpinned.add(id);
     } else {
       store.removeItem(key);
@@ -7281,7 +7286,7 @@ async function cleanupOrphanedStorage() {
       if (key.startsWith(PREVIEW_STORAGE_PREFIX)) forgetServerLinkedDoc(key.slice(PREVIEW_STORAGE_PREFIX.length));
     }
   }
-  for (const id of unpinned) sendPinChange(id);
+  if (unpinned.size) postPins({ ids: [...unpinned], state: 'none' });
   const removed = orphaned.length;
 
   showToast(removed ? `Cleaned ${removed} orphaned item${removed > 1 ? 's' : ''}` : 'No orphaned items found');
@@ -15179,6 +15184,8 @@ window.addEventListener('message', (e) => {
     kanbotState.inited = true;
     const claims = keyClaims();
     sendFrameClaims(kanbotState, claims, JSON.stringify(claims), postToKanbotFrame);
+    // The first show created the frame after its focus call, so the frame takes focus once it is up.
+    if (kanbotState.el.classList.contains('visible')) kanbotState.frame.focus();
     openKanbot();
     return;
   }

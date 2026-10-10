@@ -198,7 +198,10 @@ const jsonFile = (file) => ({
   save: (data) => writeJsonAtomicOrLog(file, data),
 });
 
-// `load` answers undefined while the file's mtime and size are the ones last read or written.
+// `load` answers undefined while the file's mtime and size are the ones last read or written, and
+// null when there is no file. A file that cannot be read or parsed (a hand edit, a cut-off write,
+// EBUSY while another board renames over it) throws and keeps the old stamp, so the next load
+// tries again. `save` throws when the write fails.
 const stampedJsonFile = (file) => {
   const stampOf = () => {
     try {
@@ -213,11 +216,12 @@ const stampedJsonFile = (file) => {
     load: () => {
       const next = stampOf();
       if (next === stamp) return undefined;
+      const data = next === null ? null : JSON.parse(readFileSync(file, 'utf8'));
       stamp = next;
-      return readJsonOrNull(file);
+      return data;
     },
     save: (data) => {
-      writeJsonAtomicOrLog(file, data);
+      writeJsonAtomic(file, data);
       stamp = stampOf();
     },
   };
@@ -1668,11 +1672,14 @@ app.get('/api/sessions', async (req, res) => {
       sessions = [...top, ...missingPinned];
     }
 
-    // Loop info can mean a full read of the transcript, so only the rows sent pay for it.
+    // Loop info can mean a full read of the transcript, so only the rows sent pay for it, and
+    // `lite=1` (the CLI's group list, which only counts and names sessions) skips it.
     // Same for autoCompact: up to 3 settings stats per call.
+    const lite = req.query.lite === '1';
     const autoCompactByProject = new Map();
     for (const s of sessions) {
       s.pin = pins[s.id] || null;
+      if (lite) continue;
       s.loopInfo = getLoopInfoSummary(s);
       if (!s.contextStatus) continue;
       if (!autoCompactByProject.has(s.project)) autoCompactByProject.set(s.project, getAutoCompact(CLAUDE_DIR, s.project));
@@ -4032,14 +4039,17 @@ function pinRoute(fn) {
     try {
       res.json(fn(req.body || {}));
     } catch (e) {
+      // The page shows the message: a pins.json that cannot be read or written is for the user to fix.
+      if (e.status === 503) return res.status(503).json({ error: e.message });
       next(e);
     }
   };
 }
 
-app.post('/api/session/pin', pinRoute(({ id, state }) => {
-  broadcastPins(sessionPins.set(id, state));
-  return { success: true, id, state };
+// `ids` changes several sessions in one write, for the board's Clean Orphaned.
+app.post('/api/session/pin', pinRoute(({ id, ids, state }) => {
+  broadcastPins(sessionPins.set(ids ?? id, state));
+  return { success: true, id, ids, state };
 }));
 
 app.post('/api/session/pins/import', pinRoute((b) => {
@@ -4071,6 +4081,7 @@ function groupRoute(fn) {
       out = fn(req.body || {}, req.params);
     } catch (e) {
       if (e.status === 409) return res.status(409).json({ error: e.message, ...userGroups.state() });
+      if (e.status === 503) return res.status(503).json({ error: e.message });
       return next(e);
     }
     res.json(out);

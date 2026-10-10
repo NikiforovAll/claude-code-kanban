@@ -726,8 +726,9 @@ function sessionTitle(s) {
   return s.customTitle || s.name || s.slug || '';
 }
 
+// The board's badge rule (docs/session-states.md). `active` is a wider rule, for which rows show.
 function sessionStatus(s) {
-  if (!s.active) return 'idle';
+  if (!(s.hasRecentLog || s.inProgress > 0 || s.hasActiveAgents || s.hasWaitingForUser)) return 'idle';
   if (s.hasWaitingForUser) return 'wait';
   if (s.inProgress > 0) return 'busy';
   return 'active';
@@ -742,17 +743,27 @@ function parseLimit(args, { fallback, allowAll = false }) {
   return { ok: true, limit: n };
 }
 
-function fetchSessionsList({ limit, noPins = false, include = [], project = null, activeOnly = false }, label = 'Session list') {
+// `lite` leaves out the fields that can read a whole transcript (loopInfo).
+function fetchSessionsList({ limit, noPins = false, include = [], project = null, activeOnly = false, lite = false }, label = 'Session list') {
   const q = limit === null ? 'all' : String(limit);
   const pinsQ = noPins ? '&pins=off' : '';
   const includeQ = include.length ? `&include=${include.map(encodeURIComponent).join(',')}` : '';
   const projectQ = project ? `&project=${encodeURIComponent(project)}` : '';
   const filterQ = activeOnly ? '&filter=active' : '';
-  return cliGetJson(`/api/sessions?limit=${q}${pinsQ}${includeQ}${projectQ}${filterQ}`, label);
+  const liteQ = lite ? '&lite=1' : '';
+  return cliGetJson(`/api/sessions?limit=${q}${pinsQ}${includeQ}${projectQ}${filterQ}${liteQ}`, label);
 }
 
-function fetchSessionsByIds(ids, label) {
-  return cliGetJson(`/api/sessions?limit=1&include=${ids.map(encodeURIComponent).join(',')}`, label);
+const uniqueById = (list) => [...new Map(list.map((s) => [s.id, s])).values()];
+
+// The server refuses a request line above about 16 KB (431), about 430 ids, so the ids go in batches.
+const IDS_PER_REQUEST = 100;
+
+async function fetchSessionsByIds(ids, label, { lite = false } = {}) {
+  const batches = [];
+  for (let i = 0; i < ids.length; i += IDS_PER_REQUEST) batches.push(ids.slice(i, i + IDS_PER_REQUEST));
+  const lists = await Promise.all(batches.map((include) => fetchSessionsList({ limit: 1, include, lite }, label)));
+  return uniqueById(lists.flat());
 }
 
 async function resolveSessionByIdOrPrefix(idArg) {
@@ -817,7 +828,7 @@ async function runSessionListCli(args) {
     list = [...top, ...extraPinned];
   }
   if (asJson) {
-    console.log(JSON.stringify(list.map(s => ({ ...s, pinState: s.pin || null })), null, 2));
+    console.log(JSON.stringify(list.map(({ pin, ...s }) => ({ ...s, pinState: pin || null })), null, 2));
     return 0;
   }
   if (!list.length) {
@@ -944,14 +955,17 @@ async function runSessionUngroupCli(args, entry) {
 
 // A session member carries the session's metadata; a project member carries the count of its
 // sessions that are shown. With activeOnly, a member is shown when the sidebar's Active view
-// shows it: an active or pinned session, a project with one.
+// shows it: an active or pinned session, a project with one. A project counts the sessions the
+// sidebar puts under it: keyed as the board keys them, without those a group holds by id.
 function describeGroupMembers(groups, sessions, activeOnly) {
   const byId = new Map(sessions.map((s) => [s.id, s]));
   const shown = (s) => !activeOnly || s.active || !!s.pin;
+  const heldById = new Set(groups.flatMap((g) => g.members.filter((m) => m.type === 'session').map((m) => m.ref)));
   const shownByProject = new Map();
   for (const s of sessions) {
-    if (!shown(s)) continue;
-    for (const p of new Set([s.project, s.worktree?.repo].filter(Boolean))) shownByProject.set(p, (shownByProject.get(p) || 0) + 1);
+    const key = sessionProjectKey(s);
+    if (!shown(s) || !key || heldById.has(s.id)) continue;
+    shownByProject.set(key, (shownByProject.get(key) || 0) + 1);
   }
   const describe = (m) => {
     if (m.type === 'project') {
@@ -999,10 +1013,12 @@ async function runGroupListCli(args) {
     ({ rev, groups, released, dispatch } = await cliGetJson('/api/groups?dispatch=1', 'Group list'));
     const memberRefs = groups.flatMap((g) => g.members.filter((m) => m.type === 'session').map((m) => m.ref));
     const sessionRefs = [...new Set([...memberRefs, ...Object.keys(dispatch || {})])];
-    const hasProjects = groups.some((g) => g.members.some((m) => m.type === 'project'));
-    const sessions = sessionRefs.length || hasProjects
-      ? await fetchSessionsList({ limit: hasProjects ? null : 1, include: sessionRefs, activeOnly: hasProjects && activeOnly }, 'Group list')
-      : [];
+    const projects = [...new Set(groups.flatMap((g) => g.members.filter((m) => m.type === 'project').map((m) => m.ref)))];
+    const lists = await Promise.all([
+      fetchSessionsByIds(sessionRefs, 'Group list', { lite: true }),
+      ...projects.map((project) => fetchSessionsList({ limit: null, project, activeOnly, lite: true }, 'Group list')),
+    ]);
+    const sessions = uniqueById(lists.flat());
     groups = describeGroupMembers(placeDispatched(groups, sessions, released), sessions, activeOnly);
   } catch (e) { reportCliError(e); return 1; }
   if (args.includes('--json')) {

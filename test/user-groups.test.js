@@ -28,6 +28,56 @@ const status = (fn) => {
   assert.fail('expected a GroupError');
 };
 
+describe('user groups file errors', () => {
+  it('keeps the last good groups and writes nothing while the file cannot be read', () => {
+    const { disk, store } = harness();
+    const s = store();
+    s.create({ name: 'Work' });
+    const good = JSON.parse(JSON.stringify(s.state()));
+    const saves = disk.saves;
+    let broken = new SyntaxError('Unexpected end of JSON input');
+    const flaky = createUserGroupStore({
+      load: () => {
+        if (broken) throw broken;
+        return disk.data;
+      },
+      save: (data) => {
+        disk.data = JSON.parse(JSON.stringify(data));
+        disk.saves++;
+      },
+    });
+    assert.deepEqual(flaky.state().groups, [], 'a failed first read starts empty');
+    broken = null;
+    flaky.reload();
+    broken = new Error('EBUSY');
+    assert.equal(flaky.reload(), false);
+    assert.deepEqual(flaky.state(), good);
+    assert.equal(status(() => flaky.create({ name: 'Home' })), 503);
+    assert.deepEqual(flaky.state(), good, 'the refused change is undone in memory');
+    assert.equal(disk.saves, saves);
+    broken = null;
+    flaky.reload();
+    assert.equal(flaky.create({ name: 'Home' }).rev, 2);
+  });
+
+  it('a failed save answers 503 and leaves memory as it was', () => {
+    let fail = false;
+    const flaky = createUserGroupStore({
+      load: () => null,
+      save: () => {
+        if (fail) throw new Error('EPERM');
+      },
+      newId: () => 'g1',
+    });
+    flaky.create({ name: 'Work' });
+    const before = JSON.parse(JSON.stringify(flaky.state()));
+    fail = true;
+    assert.equal(status(() => flaky.update('g1', { name: 'Home' })), 503);
+    assert.equal(status(() => flaky.place('g1', { type: 'project', ref: '/p' })), 503);
+    assert.deepEqual(flaky.state(), before);
+  });
+});
+
 describe('user groups', () => {
   it('creates, renames and survives a restart', () => {
     const { disk, store } = harness();

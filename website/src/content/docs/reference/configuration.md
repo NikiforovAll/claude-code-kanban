@@ -169,7 +169,7 @@ The server, the plugin and the installer keep their state in `<config-dir>/.cck/
 | `agent-activity/<sessionId>/_*` | Plugin mod, server | Markers for a waiting prompt and a finished turn, the board's answers to prompts, and team member name-to-id maps |
 | `agent-activity/_task-maps/<task list id>.json` | Plugin mod | Sessions that share a task list through `CLAUDE_CODE_TASK_LIST_ID` |
 | `context-status/<sessionId>.json` | Plugin mod (`context.ts`) | Context use, cost and model for each session |
-| `pins.json` | Server | Session pins (`{sessionId: "pinned" \| "sticky"}`, at most 1000) and `pinsMigratedAt`, the time a board copied its browser pins here. Every board on the config dir reads it. |
+| `pins.json` | Server | Session pins (`{sessionId: "pinned" \| "sticky"}`, at most 1000) and `pinsMigratedAt`, the time a board first copied its browser pins here. Every board on the config dir reads it. |
 | `linked-docs.json` | Server | Docs linked with `doc link`, so a link sent while no board is open is not lost |
 | `dispatched.json` | Server | Sessions started with `dispatch start` |
 | `groups.json` | Server | Session groups you make on the board |
