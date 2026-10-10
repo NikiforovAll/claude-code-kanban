@@ -5578,6 +5578,10 @@ body.show-resizing iframe {
   margin: 0.8em 0;
   border-color: var(--border);
 }
+.rendered-md img {
+  max-width: 100%;
+  height: auto;
+}
 .msg-detail-pre {
   white-space: pre-wrap;
   word-break: break-all;
