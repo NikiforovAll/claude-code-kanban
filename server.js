@@ -3959,6 +3959,9 @@ app.get('/api/session/resolve', (req, res) => {
       const m = metadata[idArg];
       return res.json({ id: idArg, customTitle: m?.customTitle || null });
     }
+    // A session cck just dispatched has no transcript yet, and its starter groups it at once.
+    const started = dispatched.get(idArg);
+    if (started) return res.json({ id: idArg, customTitle: started.name || null });
     const matches = ids.filter(id => id.startsWith(idArg));
     if (matches.length === 0) return res.status(404).json({ matches: [] });
     if (matches.length > 1) {
