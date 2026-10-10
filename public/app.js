@@ -5918,6 +5918,7 @@ function activateSelectedSession(items) {
 }
 
 function setFocusZone(zone, target) {
+  passTerminalZoneOn = false;
   clearKbSelection();
   clearTaskSelection();
 
@@ -14847,6 +14848,7 @@ window.addEventListener('beforeunload', (e) => {
 // The hub's palette takes focus first and clears activeElement here, so the last focus inside this
 // page is tracked instead; focus leaving the frame keeps it.
 let terminalHadFocus = false;
+let passTerminalZoneOn = false;
 document.addEventListener('focusin', () => {
   terminalHadFocus = terminalPaneFocused();
 });
@@ -14863,7 +14865,14 @@ document.addEventListener('focusout', (e) => {
 // Chrome fires this before focusin when a click or a focus() call in this page takes focus from the
 // frame, so it waits a task and gives way to whatever took focus.
 let boardPointerDown = false;
-document.addEventListener('pointerdown', () => (boardPointerDown = true), true);
+document.addEventListener(
+  'pointerdown',
+  () => {
+    boardPointerDown = true;
+    passTerminalZoneOn = false;
+  },
+  true,
+);
 for (const type of ['pointerup', 'pointercancel']) {
   document.addEventListener(type, () => (boardPointerDown = false), true);
 }
@@ -14876,16 +14885,22 @@ window.addEventListener('focus', () => {
     }
   });
 });
-// A board with no session open passes the zone on, so a stop at an empty config dir keeps it.
+// A board with no session open passes the zone on, so a stop at an empty config dir keeps it. So does a
+// board whose session has no terminal for an inherited terminal zone, until the user picks a zone here.
 window.addEventListener('pagehide', () => {
   if (termState.attached && termState.shown && terminalHadFocus) tabStore.setItem(FOCUS_ZONE_KEY, 'terminal');
+  else if (passTerminalZoneOn) return;
   else if (currentSessionId || focusZone === 'sidebar') tabStore.setItem(FOCUS_ZONE_KEY, focusZone);
 });
 
 // While the hub shows another app this frame cannot take focus, so terminalHadFocus lets the
 // window focus handler finish the restore when the hub focuses this frame.
 function restoreTerminalFocus(zone, sessionId) {
-  if (zone !== 'terminal' || !wantsTerminalFor(sessionId)) return;
+  if (zone !== 'terminal') return;
+  if (!wantsTerminalFor(sessionId)) {
+    passTerminalZoneOn = true;
+    return;
+  }
   termState.focusNext = true;
   terminalHadFocus = true;
 }
