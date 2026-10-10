@@ -23,6 +23,8 @@ function parseEvent(e) {
       return { ...base, kind: 'request', revision: p.revision ?? base.revision, text: p.text };
     case 'end':
       return { ...base, kind: 'end', outcome: p.outcome, summary: p.summary ?? '' };
+    case 'worker_woken':
+      return { ...base, kind: 'woken', reason: p.reason, from: p.state, dependency: p.dependency ?? null };
     case 'task_claim':
       return { ...base, kind: 'claim', taskId: p.task_id };
     case 'task_update':
@@ -47,6 +49,12 @@ function parseEvent(e) {
       return null;
   }
 }
+
+const WAKE_REASONS = {
+  request: 'a new request',
+  ready: 'work is ready',
+  no_producer: 'no running worker can produce its dependency',
+};
 
 const cut = (s, n = 160) => {
   const t = String(s ?? '').replace(/\s+/g, ' ').trim();
@@ -92,6 +100,8 @@ function describeEvent(e, label = (id) => id) {
       return `request revision ${p.revision}: ${cut(p.text)}`;
     case 'end':
       return `ended the swarm (${p.outcome}): ${cut(p.summary)}`;
+    case 'worker_woken':
+      return `woke up, ${WAKE_REASONS[p.reason] ?? p.reason}; was ${p.state}${p.dependency ? ` for ${cut(p.dependency, 60)}` : ''}`;
     default:
       return cut(JSON.stringify(p));
   }
@@ -103,6 +113,7 @@ const GROUPS = {
   finding: 'finding',
   status: 'status',
   outcome: 'status',
+  worker_woken: 'status',
   claim_lost: 'lost',
   task_owner_stopped: 'lost',
   worker_stopped: 'lost',
@@ -124,9 +135,12 @@ function logRow(e, names) {
   return { seq: e.seq, t: ms(e.ts), who: label(e.actor), revision: e.revision ?? 1, kind: e.kind, group: groupOf(e.kind), text: describeEvent(e, label), payload: e.payload };
 }
 
+// `running` is store state, not an event: true while the worker's turn runs. Null when the export
+// does not carry the workers.
 function parseExport(result) {
   const raw = result.events ?? [];
-  return { events: raw.map(parseEvent).filter(Boolean), raw, sequence: result.sequence ?? 0 };
+  const running = Array.isArray(result.workers) ? new Map(result.workers.map((w) => [w.worker, !!w.running])) : null;
+  return { events: raw.map(parseEvent).filter(Boolean), raw, sequence: result.sequence ?? 0, running };
 }
 
 module.exports = { parseExport, describeEvent, nameMap, logRow, ms };

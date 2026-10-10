@@ -84,7 +84,7 @@ const stats = { exports: 0, exportMs: 0, lastExportMs: 0, polls: 0 };
 const watched = new Map();
 
 function entry(dir) {
-  if (!watched.has(dir)) watched.set(dir, { dir, key: null, store: null, sequence: 0, events: [], log: [], model: null, clients: new Set(), timer: null, lastSent: 0, loading: null });
+  if (!watched.has(dir)) watched.set(dir, { dir, key: null, store: null, sequence: 0, events: [], log: [], running: null, model: null, clients: new Set(), timer: null, lastSent: 0, loading: null });
   return watched.get(dir);
 }
 
@@ -142,7 +142,7 @@ async function refresh(w) {
   w.events.push(...next.events);
   const names = nameMap(w.events, registry);
   w.log.push(...next.raw.map((e) => logRow(e, names)));
-  Object.assign(w, { key, sequence: next.sequence, model: buildModel(w.events, registry) });
+  Object.assign(w, { key, sequence: next.sequence, running: next.running, model: buildModel(w.events, registry, Date.now(), next.running) });
   return w;
 }
 
@@ -156,7 +156,7 @@ async function push(w) {
   const changed = w.key !== before;
   const stale = w.model.swarm.state === 'running' && Date.now() - w.lastSent >= RUNNING_RESEND_MS;
   if (!changed && !stale) return;
-  if (!changed) w.model = buildModel(w.events, registryOf(w.dir));
+  if (!changed) w.model = buildModel(w.events, registryOf(w.dir), Date.now(), w.running);
   w.lastSent = Date.now();
   const data = frame('swarm', w.model);
   for (const res of w.clients) res.write(data);

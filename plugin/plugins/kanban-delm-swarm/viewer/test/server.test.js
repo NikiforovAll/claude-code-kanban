@@ -157,13 +157,13 @@ describe('viewer server, run alone', () => {
 
   it('serves the log as rows, all or after a sequence', async () => {
     const all = (await json(port, `/api/log?swarm=${ENDED}`)).body;
-    assert.equal(all.length, 69);
+    assert.equal(all.length, 71);
     assert.deepEqual(Object.keys(all[0]).sort(), ['group', 'kind', 'payload', 'revision', 'seq', 't', 'text', 'who']);
-    const tail = (await json(port, `/api/log?swarm=${ENDED}&since=66`)).body;
+    const tail = (await json(port, `/api/log?swarm=${ENDED}&since=68`)).body;
     assert.deepEqual(tail.map((r) => [r.seq, r.kind]), [
-      [67, 'outcome'],
-      [68, 'outcome'],
-      [69, 'end'],
+      [69, 'outcome'],
+      [70, 'outcome'],
+      [71, 'end'],
     ]);
   });
 

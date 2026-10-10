@@ -104,6 +104,8 @@ export async function build({ out, store = path.join(here, '..', '..', '..', 'sc
   const publish = (actor, summary, paths) => call('publish', actor, { summary, paths }).publication_id
   const finding = (actor, text) => call('status', actor, { finding: text })
   const look = (actor) => call('status', actor, {})
+  const wakes = []
+  const endTurn = (actor) => `${actor.name.slice(0, 2)}:${call('turn', actor, { running: false }).reason ?? 'none'}`
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
   async function at(m, fn) {
@@ -171,6 +173,7 @@ export async function build({ out, store = path.join(here, '..', '..', '..', 'sc
     call('request', parent, { text: 'Also measure the export on a 1M-line file and keep the bench script.' })
     ids.json = create(parent, 'Add JSON export', '--format json, one object per record.')
   })
+  await at(31.5, () => wakes.push(endTurn(w2)))
   await at(32, () => call('task_close', parent, { task_id: ids.json, reason: 'JSON export is out of scope for this request.' }))
   await at(33, () => call('status', w3, { summary: 'wiring --format csv' }))
   await at(34, () => {
@@ -224,6 +227,10 @@ export async function build({ out, store = path.join(here, '..', '..', '..', 'sc
     finish(w2, 5, 'CSV and parser tests pass (5 cases).')
   })
   await at(53, () => call('status', w2, { state: 'waiting', dependency: `task:${ids.bench}`, summary: 'all my tasks are done' }))
+  await at(54, () => {
+    wakes.push(endTurn(w1))
+    wakes.push(endTurn(w2))
+  })
   await at(58, () => {
     put(wt[w1.name], 'bench/results.txt', 'csv export, 1,000,000 lines\nrun1 3.2 s  run2 3.0 s  run3 3.1 s\npeak rss 210 MB\n')
     finding(w1, 'Buffered CSV export of 1M lines takes about 3.1 s with 210 MB peak memory (bench/csv.bench.js, three runs).')
@@ -249,7 +256,7 @@ export async function build({ out, store = path.join(here, '..', '..', '..', 'sc
   const count = d.prepare('SELECT COUNT(*) AS n FROM events').get().n
   d.close()
   fs.rmSync(work, { recursive: true, force: true })
-  return { dir, count, lost, base }
+  return { dir, count, lost, wakes, base }
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
@@ -259,5 +266,5 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.a
     stepMs: Number(arg('step-ms', 0)),
     running: process.argv.includes('--running'),
   })
-  console.log(`fixture: ${r.count} events in ${r.dir}, lost claims ${r.lost.join(' ') || 'none'}, base ${r.base.slice(0, 7)}`)
+  console.log(`fixture: ${r.count} events in ${r.dir}, lost claims ${r.lost.join(' ') || 'none'}, wakes ${r.wakes.join(' ')}, base ${r.base.slice(0, 7)}`)
 }

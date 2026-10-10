@@ -86,6 +86,48 @@ describe('buildModel on the fixture swarm, built through the real store', () => 
     assert.ok(m.timeline['w3-a3f9c2'].some((x) => x.type === 'stopped'));
     assert.ok(m.timeline['w1-a3f9c2'].some((x) => x.type === 'outcome'));
   });
+
+  it('marks each wake with its reason and the state before it', () => {
+    const wakes = m.timeline['w2-a3f9c2'].filter((x) => x.type === 'woken');
+    assert.deepEqual(
+      wakes.map((x) => [x.reason, x.from, x.dependency]),
+      [
+        ['request', 'working', null],
+        ['no_producer', 'waiting', 'task:9'],
+      ],
+    );
+  });
+});
+
+describe('buildModel on a running swarm with a stalled waiter', () => {
+  let config;
+  let m;
+
+  before(async () => {
+    config = configDir();
+    const { dir } = await buildSwarm(config, undefined, { running: true });
+    const { main } = await store();
+    const { events, running } = parseExport(main('export', { dir, since: 0 }));
+    m = buildModel(events, { listId: path.basename(dir), ...registry(dir) }, Date.now(), running);
+  });
+
+  after(() => fs.rmSync(config, { recursive: true, force: true }));
+
+  it('shows the waiter as working again after a no-producer wake, and remembers why', () => {
+    const w2 = m.workers.find((w) => w.name === 'w2-a3f9c2');
+    assert.deepEqual([w2.status.state, w2.status.woken, w2.status.wokeFor], ['working', 'no_producer', 'task:9']);
+  });
+
+  it('reads from the store whose turn runs: the woken worker runs, the one that ended its turn sleeps', () => {
+    assert.deepEqual(
+      m.workers.map((w) => [w.name, w.running, w.health]),
+      [
+        ['w1-a3f9c2', false, 'idle'],
+        ['w2-a3f9c2', true, 'quiet'],
+        ['w3-a3f9c2', true, 'stopped'],
+      ],
+    );
+  });
 });
 
 describe('buildModel on a running swarm', () => {
@@ -99,5 +141,26 @@ describe('buildModel on a running swarm', () => {
     const health = (now) => Object.fromEntries(buildModel(events, { state: 'running' }, now).workers.map((w) => [w.name, w.health]));
     assert.deepEqual(health(t(3)), { w1: 'working', w2: 'waiting' });
     assert.deepEqual(health(t(30)), { w1: 'stuck', w2: 'quiet' });
+  });
+
+  it('does not call a worker quiet while it sleeps between turns', () => {
+    const t = (min) => Date.parse('2026-10-10T09:00:00Z') + min * 60_000;
+    const events = [
+      { seq: 1, t: t(0), actor: 'a', name: 'w1', kind: 'task', taskId: 1, title: 'x' },
+      { seq: 2, t: t(1), actor: 'a', name: 'w1', kind: 'claim', taskId: 1 },
+      { seq: 3, t: t(2), actor: 'b', name: 'w2', kind: 'status', state: 'waiting', summary: '', dependency: 'task:1' },
+      { seq: 4, t: t(2), actor: 'c', name: 'w3', kind: 'status', state: 'working', summary: '' },
+    ];
+    const at = (running) => buildModel(events, { state: 'running' }, t(30), running).workers.map((w) => [w.name, w.health, w.running]);
+    assert.deepEqual(at(new Map([['w1', false], ['w2', false], ['w3', false]])), [
+      ['w1', 'stuck', false],
+      ['w2', 'waiting', false],
+      ['w3', 'idle', false],
+    ]);
+    assert.deepEqual(at(new Map([['w2', true]])), [
+      ['w1', 'stuck', null],
+      ['w2', 'quiet', true],
+      ['w3', 'quiet', null],
+    ]);
   });
 });

@@ -7,7 +7,8 @@ const QUIET_MS = 10 * 60_000;
 const GAP_MS = 8 * 60_000;
 const OUTCOME_STATE = { waiting: 'waiting', blocked: 'blocked' };
 
-function buildModel(events, registry = {}, now = Date.now()) {
+// `running` maps a worker name to whether its turn runs now (parseExport), or is null when unknown.
+function buildModel(events, registry = {}, now = Date.now(), running = null) {
   const names = nameMap(events, registry);
   const label = (id) => names.get(id) ?? id;
 
@@ -94,6 +95,10 @@ function buildModel(events, registry = {}, now = Date.now()) {
         statuses[who] = { state: OUTCOME_STATE[e.outcome] ?? 'working', outcome: e.outcome, summary: e.summary, dependency: e.dependency, t };
         mark('outcome', { outcome: e.outcome, summary: e.summary });
         break;
+      case 'woken':
+        statuses[who] = { state: 'working', summary: statuses[who]?.summary ?? '', dependency: null, woken: e.reason, wokeFor: e.dependency, t };
+        mark('woken', { reason: e.reason, from: e.from, dependency: e.dependency });
+        break;
       case 'request':
         requests.push({ revision: e.revision, text: e.text, who, t });
         break;
@@ -130,10 +135,13 @@ function buildModel(events, registry = {}, now = Date.now()) {
       if (mine[k].t - mine[k - 1].t >= GAP_MS) gaps.push({ from: mine[k - 1].t, to: mine[k].t });
     }
     const silence = lastT == null ? null : ref - lastT;
+    const turn = running?.get(name) ?? null;
     let health;
     if (status?.state === 'stopped') health = 'stopped';
     else if (status?.outcome === 'complete') health = 'finished';
     else if (silence == null) health = 'not started';
+    // A worker between turns sleeps until the store wakes it, so its silence alone is no alarm.
+    else if (turn === false && !(holding && silence >= QUIET_MS)) health = status?.state === 'blocked' || status?.state === 'waiting' ? status.state : 'idle';
     else if (silence >= QUIET_MS) health = holding ? 'stuck' : 'quiet';
     else if (status?.state === 'blocked') health = 'blocked';
     else if (status?.state === 'waiting') health = 'waiting';
@@ -143,6 +151,7 @@ function buildModel(events, registry = {}, now = Date.now()) {
       id,
       name,
       health,
+      running: turn,
       lastT,
       silence,
       holding: holding ? { id: holding.id, subject: holding.subject, since: holding.claimedAt } : null,

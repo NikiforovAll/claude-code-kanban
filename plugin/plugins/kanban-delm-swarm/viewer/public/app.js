@@ -425,6 +425,13 @@ const HEALTH = {
   'not started': ['', 'not started'],
 };
 const healthChip = (h) => `<span class="chip ${HEALTH[h]?.[0] ?? ''}">${esc(HEALTH[h]?.[1] ?? h)}</span>`;
+const turnChip = (running) =>
+  running == null
+    ? ''
+    : running
+      ? ' <span class="chip ok" title="Its turn runs now">running</span>'
+      : ' <span class="chip" title="Between turns; the store wakes it when there is work">asleep</span>';
+const WAKE_REASONS = { request: 'a new request', ready: 'work is ready', no_producer: 'no running worker can produce its dependency' };
 
 function renderPicker() {
   const pick = $('swarmPick');
@@ -511,6 +518,8 @@ function summaryView() {
       alerts.push(['warn', 'check', `${who(w.name)} is blocked: ${hl(w.status.summary) || 'no reason given'}`]);
     if (w.health === 'waiting')
       alerts.push(['info', 'info', `${who(w.name)} waits for ${hl(w.status.dependency)}`]);
+    if (w.status?.woken === 'no_producer' && w.health !== 'stopped' && w.health !== 'finished')
+      alerts.push(['warn', 'stall', `${who(w.name)} was woken because no running worker can produce ${hl(w.status.wokeFor) || 'its dependency'}.`]);
   }
   if (races.length)
     alerts.push([
@@ -551,7 +560,7 @@ function summaryView() {
         .map(
           (w) => `<div class="worker-row">
           ${who(w.name)}
-          <span>${healthChip(w.health)}</span>
+          <span>${healthChip(w.health)}${w.health === 'stopped' ? '' : turnChip(w.running)}</span>
           <span class="sub">${w.lastT ? `seen ${dur(w.silence)} ago` : ''}</span>
           <div class="doing">${w.holding ? `#${w.holding.id} ${esc(w.holding.subject)} <span class="muted">· ${dur(s.ref - w.holding.since)}</span>` : (hl(w.status?.summary) || '—')}</div>
         </div>`,
@@ -701,6 +710,7 @@ function timelineView() {
       <span>${swatch('border-left:2px dashed var(--text-tertiary)')}status</span>
       <span>${swatch('border-left:2px solid var(--success)')}outcome</span>
       <span><b style="color:var(--error)">■</b> stopped</span>
+      <span><b style="color:var(--team)">↑</b> woken <b style="color:var(--warning)">↑</b> stall</span>
       <span>${swatch('background:repeating-linear-gradient(45deg,var(--hatch) 0 2px,transparent 2px 5px)')}no board event ≥ 8 min</span>
       <span>${swatch('background:repeating-linear-gradient(45deg,var(--hatch-bad) 0 2px,transparent 2px 5px)')}quiet ≥ 10 min</span>
     </div>
@@ -723,6 +733,11 @@ function marker(m, cx, y, laneH) {
   }
   if (m.type === 'stopped')
     return `<text data-tip="${esc(`stopped ${at}\n${m.reason}`)}" x="${cx}" y="${y + laneH / 2 + 4}" text-anchor="middle" style="fill:var(--error);font-weight:600;font-size:12px">■</text>`;
+  if (m.type === 'woken') {
+    const tip = `woke up ${at}: ${WAKE_REASONS[m.reason] ?? m.reason}\nwas ${m.from}${m.dependency ? ` for ${m.dependency}` : ''}`;
+    const color = m.reason === 'no_producer' ? 'var(--warning)' : 'var(--team)';
+    return `<text data-tip="${esc(tip)}" x="${cx}" y="${y + laneH - 3}" text-anchor="middle" style="fill:${color};font-weight:600;font-size:12px">↑</text>`;
+  }
   if (m.type === 'outcome')
     return `<line data-tip="${esc(`outcome ${m.outcome} ${at}\n${m.summary}`)}" x1="${cx}" x2="${cx}" y1="${y + 4}" y2="${y + laneH - 4}" style="stroke:var(--success);stroke-width:2"></line>`;
   if (m.type === 'status') {

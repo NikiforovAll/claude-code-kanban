@@ -21,17 +21,29 @@ const RAW = [
   ev(11, 'task_close', { task_id: 1, summary: 'Closed: not needed' }, 'id-p', 'parent'),
   ev(12, 'outcome', { worker: 'w2', outcome: 'complete', summary: 'all done', dependency: null }, 'id-w2', 'w2'),
   ev(13, 'end', { outcome: 'complete', summary: 'shipped' }, 'id-p', 'parent'),
-  ev(14, 'something_new', { x: 1 }),
+  ev(14, 'worker_woken', { worker: 'w2', reason: 'no_producer', state: 'waiting', dependency: 'task:1' }, 'id-w2', 'w2'),
+  ev(15, 'something_new', { x: 1 }),
 ];
 
 describe('parseExport', () => {
-  const { events, raw, sequence } = parseExport({ sequence: 14, events: RAW });
+  const { events, raw, sequence, running } = parseExport({ sequence: 15, events: RAW });
 
   it('keeps the raw rows and the sequence, and drops kinds it does not know', () => {
-    assert.equal(sequence, 14);
-    assert.equal(raw.length, 14);
-    assert.equal(events.length, 13);
-    assert.ok(!events.some((e) => e.seq === 14));
+    assert.equal(sequence, 15);
+    assert.equal(raw.length, 15);
+    assert.equal(events.length, 14);
+    assert.ok(!events.some((e) => e.seq === 15));
+  });
+
+  it('reads which worker turns run when the export carries the workers, else none', () => {
+    assert.equal(running, null);
+    const r = parseExport({ sequence: 0, events: [], workers: [{ worker: 'w1', running: true }, { worker: 'w2', running: false }] }).running;
+    assert.deepEqual([...r], [['w1', true], ['w2', false]]);
+  });
+
+  it('keeps the reason and the state before a wake', () => {
+    const w = events.find((e) => e.kind === 'woken');
+    assert.deepEqual([w.reason, w.from, w.dependency], ['no_producer', 'waiting', 'task:1']);
   });
 
   it('reads timestamps without a zone as UTC', () => {
@@ -41,7 +53,7 @@ describe('parseExport', () => {
   it('maps each store kind to one model kind', () => {
     assert.deepEqual(
       events.map((e) => e.kind),
-      ['task', 'claim', 'lost', 'publish', 'finding', 'apply', 'release', 'request', 'release', 'stopped', 'close', 'outcome', 'end'],
+      ['task', 'claim', 'lost', 'publish', 'finding', 'apply', 'release', 'request', 'release', 'stopped', 'close', 'outcome', 'end', 'woken'],
     );
   });
 
@@ -69,6 +81,7 @@ describe('describeEvent', () => {
     assert.equal(text(11), 'closed #1: not needed');
     assert.equal(text(8), 'request revision 2: also bench');
     assert.equal(text(13), 'ended the swarm (complete): shipped');
+    assert.equal(text(14), 'woke up, no running worker can produce its dependency; was waiting for task:1');
   });
 
   it('keeps #N for tasks only, so the page can link every #N to a task', () => {
@@ -76,7 +89,7 @@ describe('describeEvent', () => {
   });
 
   it('falls back to the payload for an unknown kind', () => {
-    assert.equal(text(14), '{"x":1}');
+    assert.equal(text(15), '{"x":1}');
   });
 });
 
@@ -97,6 +110,7 @@ describe('nameMap and logRow', () => {
     assert.equal(logRow(RAW[2], names).group, 'lost');
     assert.equal(logRow(RAW[11], names).group, 'status');
     assert.equal(logRow(RAW[0], names).group, 'task');
-    assert.equal(logRow(RAW[13], names).group, 'other');
+    assert.equal(logRow(RAW[13], names).group, 'status');
+    assert.equal(logRow(RAW[14], names).group, 'other');
   });
 });

@@ -20,3 +20,5 @@ The swarm runs in cck's embedded terminal, so the cck server must run with the t
 3. Report the output to the user: the swarm id (`listId`), its group and each worker's name and session id. On an error, report it as it is and stop.
 
 The script claims a folder and a task list unique to this start, writes `swarm.json`, dispatches the workers with cck and puts them in a group under yours.
+
+To watch the swarm, run the viewer and add it as a cck pane or a hub app. See [references/swarm-viewer.md](references/swarm-viewer.md).
