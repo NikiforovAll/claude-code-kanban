@@ -2146,8 +2146,11 @@ async function syncSessionPins() {
   }
 }
 
+// The first apply needs no fetch: `/api/sessions` adds the pinned sessions itself.
+let pinsApplied = false;
+
 function applyServerPins(pins) {
-  const before = new Set(pinnedSessionIds);
+  const before = new Map([...pinnedSessionIds].map((id) => [id, getSessionPinState(id)]));
   pinnedSessionIds = new Set();
   stickySessionIds = new Set(openedStickyIds);
   for (const [id, state] of Object.entries(pins || {})) {
@@ -2155,7 +2158,12 @@ function applyServerPins(pins) {
     if (state === 'sticky') stickySessionIds.add(id);
   }
   for (const id of deferredPinPlacement) if (!isAnyPinned(id)) deferredPinPlacement.delete(id);
-  const added = [...pinnedSessionIds].filter((id) => !before.has(id));
+  const first = !pinsApplied;
+  pinsApplied = true;
+  const unchanged =
+    before.size === pinnedSessionIds.size && [...before].every(([id, s]) => getSessionPinState(id) === s);
+  if (unchanged && !first) return;
+  const added = first ? [] : [...pinnedSessionIds].filter((id) => !before.has(id));
   for (const id of added) expandPinnedFor(id);
   showPinnedSessions(added);
 }
@@ -14476,13 +14484,16 @@ function pushTerminalClaims() {
     if (!termFrame.inited && !kanbotState.inited && !bridged.length) return;
     const claims = keyClaims();
     sendBridgeClaimsAll(bridged, claims);
-    sendKanbotClaims(claims);
-    if (!termFrame.inited) return;
     const sig = JSON.stringify(claims);
-    if (sig === termFrame.claims) return;
-    termFrame.claims = sig;
-    terminalFrameSend('claims', claims);
+    sendFrameClaims(kanbotState, claims, sig, postToKanbotFrame);
+    sendFrameClaims(termFrame, claims, sig, terminalFrameSend);
   });
+}
+
+function sendFrameClaims(frameState, claims, sig, send) {
+  if (!frameState.inited || sig === frameState.claims) return;
+  frameState.claims = sig;
+  send('claims', claims);
 }
 
 function terminalTheme() {
@@ -15005,14 +15016,6 @@ const kanbotState = {
   returnFocus: null,
 };
 
-function sendKanbotClaims(claims) {
-  if (!kanbotState.inited) return;
-  const sig = JSON.stringify(claims);
-  if (sig === kanbotState.claims) return;
-  kanbotState.claims = sig;
-  postToKanbotFrame('claims', claims);
-}
-
 function kanbotFocused() {
   return !!kanbotState.el?.contains(document.activeElement);
 }
@@ -15174,7 +15177,8 @@ window.addEventListener('message', (e) => {
   }
   if (t === 'term') {
     kanbotState.inited = true;
-    sendKanbotClaims(keyClaims());
+    const claims = keyClaims();
+    sendFrameClaims(kanbotState, claims, JSON.stringify(claims), postToKanbotFrame);
     openKanbot();
     return;
   }

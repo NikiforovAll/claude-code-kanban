@@ -720,6 +720,10 @@ async function printLinkedDocs(sessionId, asJson) {
   } catch (e) { reportCliError(e); return 1; }
 }
 
+function sessionTitle(s) {
+  return s.customTitle || s.name || s.slug || '';
+}
+
 function sessionStatus(s) {
   if (!s.active) return 'idle';
   if (s.hasWaitingForUser) return 'wait';
@@ -794,26 +798,24 @@ async function runSessionListCli(args) {
     reportCliError(e);
     return 1;
   }
-  const pins = Object.fromEntries(list.map(s => [s.id, noPins ? null : s.pin]));
-  const pinOf = id => pins[id] || null;
   if (days !== null) {
     const cutoff = Date.now() - days * 86_400_000;
-    list = list.filter(s => pinOf(s.id) || (s.modifiedAt && new Date(s.modifiedAt).getTime() >= cutoff));
+    list = list.filter(s => s.pin || (s.modifiedAt && new Date(s.modifiedAt).getTime() >= cutoff));
   }
-  const pinRank = id => pinOf(id) === 'sticky' ? 0 : pinOf(id) === 'pinned' ? 1 : 2;
+  const pinRank = s => s.pin === 'sticky' ? 0 : s.pin === 'pinned' ? 1 : 2;
   list.sort((a, b) => {
-    const r = pinRank(a.id) - pinRank(b.id);
+    const r = pinRank(a) - pinRank(b);
     if (r !== 0) return r;
     return new Date(b.modifiedAt || 0) - new Date(a.modifiedAt || 0);
   });
   if (limit !== null && list.length > limit) {
     const top = list.slice(0, limit);
     const topIds = new Set(top.map(s => s.id));
-    const extraPinned = list.filter(s => pinOf(s.id) && !topIds.has(s.id));
+    const extraPinned = list.filter(s => s.pin && !topIds.has(s.id));
     list = [...top, ...extraPinned];
   }
   if (asJson) {
-    console.log(JSON.stringify(list.map(s => ({ ...s, pinState: pinOf(s.id) })), null, 2));
+    console.log(JSON.stringify(list.map(s => ({ ...s, pinState: s.pin || null })), null, 2));
     return 0;
   }
   if (!list.length) {
@@ -822,12 +824,12 @@ async function runSessionListCli(args) {
   }
   const rows = list.map(s => ({
     id: s.id.slice(0, 8),
-    pin: pinOf(s.id) || '',
+    pin: s.pin || '',
     status: sessionStatus(s),
     age: s.modifiedAt ? formatAge(Date.now() - new Date(s.modifiedAt).getTime()) : '-',
     tasks: `${s.completed}/${s.taskCount}`,
     project: path.basename(s.project || ''),
-    title: s.customTitle || s.name || s.slug || '',
+    title: sessionTitle(s),
   }));
   const w = {
     id: 8,
@@ -958,7 +960,7 @@ function describeGroupMembers(groups, sessions, activeOnly) {
     if (!s) return [!activeOnly, { ...m, missing: true }];
     return [shown(s), {
       ...m,
-      title: s.customTitle || s.name || s.slug || '',
+      title: sessionTitle(s),
       branch: s.gitBranch || null,
       status: sessionStatus(s),
       pinned: s.pin || null,
@@ -1034,7 +1036,7 @@ async function runSessionViewCli(args) {
     return 0;
   }
   const status = sessionStatus(s);
-  const title = s.customTitle || s.name || s.slug || '';
+  const title = sessionTitle(s);
   const age = s.modifiedAt ? formatAge(Date.now() - new Date(s.modifiedAt).getTime()) : '-';
   const fmtTok = (n) => typeof n === 'number' ? (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n)) : '-';
   const fmtCost = (n) => typeof n === 'number' ? `$${n.toFixed(2)}` : '-';
@@ -1115,7 +1117,7 @@ async function runSessionSearchCli(args) {
       byId.has(s.id) ? sessionStatus(s) : '-',
       ageOf(s.modifiedAt),
       path.basename(s.project || ''),
-      s.customTitle || s.name || s.slug || '',
+      sessionTitle(s),
     ]));
     return 0;
   } catch (e) { reportCliError(e); return 1; }

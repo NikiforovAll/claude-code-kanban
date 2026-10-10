@@ -140,7 +140,7 @@ function makePage(local = {}) {
   vm.runInNewContext(
     [
       "const PINNED_SESSIONS_KEY = 'pinned-sessions', STICKY_SESSIONS_KEY = 'sticky-sessions';",
-      'var pinnedSessionIds = new Set(), stickySessionIds = new Set(), currentSessionId = null;',
+      'var pinnedSessionIds = new Set(), stickySessionIds = new Set(), currentSessionId = null, pinsApplied = false;',
       ...[
         'syncSessionPins',
         'applyServerPins',
@@ -169,7 +169,8 @@ describe('board pins', () => {
     assert.deepEqual(page.server.pins, { a: 'sticky', z: 'pinned' });
     assert.deepEqual(page.ctx.pins(), { pinned: ['a', 'z'], sticky: ['a'] });
     assert.equal(page.ls.size, 0);
-    assert.equal(page.ctx.fetched, 1, 'z is not in the list, so the sessions are fetched with it');
+    assert.equal(page.ctx.fetched, 0, 'the first session list brings the pinned sessions itself');
+    assert.equal(page.ctx.rendered, 1);
 
     const other = makePage({ 'pinned-sessions': ['b'] });
     Object.assign(other.server, page.server, { imports: 0 });
@@ -185,6 +186,20 @@ describe('board pins', () => {
     await page.ctx.syncSessionPins();
     assert.deepEqual(page.ctx.pins(), { pinned: ['b'], sticky: [] });
     assert.equal(page.server.imports, 0);
+  });
+
+  it('a re-read renders only when the pins changed, and fetches a pinned session it lacks', async () => {
+    const page = makePage();
+    Object.assign(page.server, { pins: { a: 'pinned' }, pinsMigratedAt: 'then' });
+    await page.ctx.syncSessionPins();
+    await page.ctx.syncSessionPins();
+    assert.equal(page.ctx.rendered, 1);
+    page.server.pins.a = 'sticky';
+    await page.ctx.syncSessionPins();
+    assert.equal(page.ctx.rendered, 2);
+    page.server.pins.z = 'pinned';
+    await page.ctx.syncSessionPins();
+    assert.equal(page.ctx.fetched, 1);
   });
 
   it('saves a pin and an unpin, one session per request', async () => {

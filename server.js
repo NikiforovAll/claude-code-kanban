@@ -4032,15 +4032,14 @@ function pinRoute(fn) {
     try {
       res.json(fn(req.body || {}));
     } catch (e) {
-      if (e.status) return res.status(e.status).json({ error: e.message });
-      return next(e);
+      next(e);
     }
   };
 }
 
 app.post('/api/session/pin', pinRoute(({ id, state }) => {
   broadcastPins(sessionPins.set(id, state));
-  return { success: true, id, state, ...pinsReply() };
+  return { success: true, id, state };
 }));
 
 app.post('/api/session/pins/import', pinRoute((b) => {
