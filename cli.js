@@ -3,6 +3,8 @@ const path = require('node:path');
 const { getClaudeDir, displayPath } = require('./lib/claude-dir');
 const { isGroupName, suggestGroupName } = require('./lib/dispatch-groups');
 const { linkUrl } = require('./public/link-url');
+const { sessionProjectKey } = require('./public/project-match');
+const { placeSession } = require('./lib/user-groups');
 // Help is auto-generated from this table — keep flags/usage in sync with `run` behavior.
 const SESSION_FLAG = '--session <id>';
 const SESSION_FLAG_HELP = 'Session, full id or unique prefix (default: $PREVIEW_SESSION, else $CLAUDE_CODE_SESSION_ID)';
@@ -973,26 +975,18 @@ function describeGroupMembers(groups, sessions, activeOnly) {
   });
 }
 
-// As the board's sgGroupForSession: a user group that holds the session or its project keeps it;
-// else an unreleased dispatched session joins the user group named like its dispatch group, else
-// that dispatch group, listed after the user groups as in the sidebar.
-function placeDispatched(groups, sessions, released) {
-  const releasedIds = new Set(released || []);
-  const held = new Set(groups.flatMap((g) => g.members.map((m) => `${m.type}:${m.ref}`)));
-  const dispatch = new Map();
+// Dispatch groups are listed after the user groups, as in the sidebar.
+function placeDispatched(groups, sessions, released = []) {
+  const dispatchGroups = new Map();
   for (const s of sessions) {
-    const name = s.dispatchGroup;
-    if (!name || releasedIds.has(s.id) || held.has(`session:${s.id}`)) continue;
-    const project = s.worktree?.repo || s.project;
-    if (project && held.has(`project:${project}`)) continue;
-    let group = groups.find((g) => g.name.toLowerCase() === name) || dispatch.get(name);
-    if (!group) {
-      group = { id: `dispatch:${name}`, name, parent: null, dispatch: true, members: [] };
-      dispatch.set(name, group);
+    if (!s.dispatchGroup) continue;
+    const { named, dispatch } = placeSession(groups, released, { ref: s.id, project: sessionProjectKey(s), dispatchGroup: s.dispatchGroup });
+    if (dispatch && !dispatchGroups.has(dispatch)) {
+      dispatchGroups.set(dispatch, { id: `dispatch:${dispatch}`, name: dispatch, parent: null, dispatch: true, members: [] });
     }
-    group.members.push({ type: 'session', ref: s.id });
+    (named || dispatchGroups.get(dispatch))?.members.push({ type: 'session', ref: s.id });
   }
-  return [...groups, ...dispatch.values()];
+  return [...groups, ...dispatchGroups.values()];
 }
 
 async function runGroupListCli(args) {
@@ -1002,7 +996,7 @@ async function runGroupListCli(args) {
   try {
     let released;
     let dispatch;
-    ({ rev, groups, released, dispatch } = await cliGetJson('/api/groups', 'Group list'));
+    ({ rev, groups, released, dispatch } = await cliGetJson('/api/groups?dispatch=1', 'Group list'));
     const memberRefs = groups.flatMap((g) => g.members.filter((m) => m.type === 'session').map((m) => m.ref));
     const sessionRefs = [...new Set([...memberRefs, ...Object.keys(dispatch || {})])];
     const hasProjects = groups.some((g) => g.members.some((m) => m.type === 'project'));

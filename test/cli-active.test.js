@@ -166,6 +166,7 @@ describe('group list with dispatch groups', () => {
         ['dispatch:cli-active-pins', 'cli-active-pins', true, 1, 2],
       ]);
       assert.deepEqual(groups[1].members.map((m) => [m.ref, m.title]), [[at(1), 'worker one']]);
+      assert.equal(hits.find((u) => u.pathname === '/api/groups').searchParams.get('dispatch'), '1');
       const include = sessionHits(hits)[0].searchParams.get('include').split(',');
       assert.ok([at(1), at(2)].every((id) => include.includes(id)), 'asks for the dispatched sessions');
       const all = await run(['group', 'list', '--all']);
