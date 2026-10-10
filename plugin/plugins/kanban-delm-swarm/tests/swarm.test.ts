@@ -99,6 +99,15 @@ test('a call runs the store with the identity from the session, never from the m
   expect(board.runs[0]!.timeoutMs).toBe(15_000)
 })
 
+test('a call that sets an identity, workspace or store field is refused and runs nothing', async ($, on) => {
+  const board = engine(on, WORKER)
+  await $.session.start(start)
+  const res = await $.tool.call(call('swarm_claim', { item: 3, actor: { id: 'sid-2', name: 'w2' }, cwd: 'C:/wt/w2' }))
+  expect(res.deny).toBe('actor, cwd are set by the swarm, not by the call.')
+  expect((await $.tool.call(call('swarm_read', { dir: 'C:/other' }))).deny).toBe('dir is set by the swarm, not by the call.')
+  expect(board.runs.length).toBe(0)
+})
+
 test('a waiting read gets a longer timeout', async ($, on) => {
   const board = engine(on, WORKER)
   await $.session.start(start)

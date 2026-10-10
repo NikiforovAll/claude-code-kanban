@@ -1,6 +1,7 @@
 // The swarm's shared store: one append-only event log in SQLite, written by every worker's
 // tool calls, each one a short `node store.mjs <command>` process with the request on stdin.
 // The queue is derived by replaying the log. Ported from DeLM's board/shared_context.py.
+import { isUtf8 } from 'node:buffer'
 import { execFileSync } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import fs from 'node:fs'
@@ -224,7 +225,7 @@ class Store {
 
   published(target) {
     return this.events('done', 'body', 'note').some(({ payload }) =>
-      [payload.item, payload.id, payload.publicationId].includes(target),
+      [payload.item, payload.id, payload.publicationId].some((v) => v != null && String(v) === String(target)),
     )
   }
 
@@ -311,6 +312,8 @@ class Store {
       if (total > FILE_LIMITS.totalBytes) {
         throw new BoardError(`attached files total more than ${FILE_LIMITS.totalBytes} bytes`)
       }
+      // Files are kept as text, so bytes that are not UTF-8 would come back changed on apply.
+      if (!isUtf8(data)) throw new BoardError(`${p} is not UTF-8 text; attach text files only`)
       const mode = fs.statSync(full).mode & 0o111 ? 'x' : '-'
       const hash = sha256(data)
       const orig = this.original(cwd, p)

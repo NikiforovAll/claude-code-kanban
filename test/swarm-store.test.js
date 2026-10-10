@@ -120,6 +120,16 @@ describe('swarm store', { skip: !hasSqlite && 'node:sqlite needs Node 22.5 or la
     assert.ok(woke.waited < 1);
   });
 
+  it('wakes at once on a target already done, given as the text the tool schema sends', () => {
+    const w = world();
+    run(w, 'reserve', b, { subject: 's', detail: 'd' });
+    run(w, 'done', b, { item: 1, summary: 'ok' });
+    run(w, 'read', a);
+    const woke = run(w, 'read', a, { wait: 5, target: '1' });
+    assert.equal(woke.wokeBy, 'already');
+    assert.ok(woke.waited < 1);
+  });
+
   it('attaches files with their originals and applies them without overwriting own work', () => {
     const w = world();
     const repo = path.join(w.root, 'repo');
@@ -154,6 +164,8 @@ describe('swarm store', { skip: !hasSqlite && 'node:sqlite needs Node 22.5 or la
     assert.deepEqual([refused.applied, refused.decisions], [false, { 'f.txt': 'conflict' }]);
     assert.equal(fs.readFileSync(path.join(wb, 'f.txt'), 'utf8'), 'mine\n');
     assert.match(run(w, 'note', a, { type: 'FACT', text: 't', scope: 's', basis: 'b', files: ['../x'], cwd: wa }).error, /\.\./);
+    fs.writeFileSync(path.join(wa, 'logo.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0xff, 0x00]));
+    assert.match(run(w, 'note', a, { type: 'FACT', text: 't', scope: 's', basis: 'b', files: ['logo.png'], cwd: wa }).error, /not UTF-8/);
   });
 
   it('lets exactly one of many concurrent processes claim an item', async () => {

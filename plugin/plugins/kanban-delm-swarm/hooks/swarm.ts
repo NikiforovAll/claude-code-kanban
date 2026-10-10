@@ -3,6 +3,7 @@ import type { EngineInterface, Register } from 'claude-code'
 export const SERVER = 'mcp__kanban-delm-swarm__'
 // A tool call is one $.process.run; a waiting read holds it for up to 25 s.
 const WAIT_CAP_SECONDS = 25
+const RUNTIME_FIELDS = ['dir', 'tasksDir', 'base', 'actor', 'cwd']
 
 type Worker = { name: string; sessionId?: string }
 type Registry = { listId: string; base?: string; state?: string; workers?: Worker[] }
@@ -154,13 +155,15 @@ async function run($: EngineInterface, s: Swarm, command: string, input: Record<
   const id = await $.session.id()
   const name = registry.workers?.find(w => w.sessionId === id)?.name
   const { tool: _tool, tool_use_id: _id, ...args } = input
+  const owned = RUNTIME_FIELDS.filter(f => f in args)
+  if (owned.length) return { deny: `${owned.join(', ')} ${owned.length > 1 ? 'are' : 'is'} set by the swarm, not by the call.` }
   const request = {
+    ...args,
     dir: s.dir,
     tasksDir: s.tasksDir,
     base: registry.base,
     actor: { id, ...(name ? { name } : {}) },
     cwd: await $.session.cwd(),
-    ...args,
   }
   const waiting = command === 'read' && Number(args.wait) > 0
   const r = await $.process.run(['node', storePath($.plugin.root), command], {
