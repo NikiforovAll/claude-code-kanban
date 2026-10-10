@@ -11231,22 +11231,22 @@ function initSidebarResize() {
 }
 
 function initPanelResize(panelId, handleId, cssVar) {
-  const panel = document.getElementById(panelId);
-  const handle = document.getElementById(handleId);
-  let startWidth;
+  initResize(document.getElementById(panelId), document.getElementById(handleId), cssVar, panelWidthKey(panelId), 200);
+}
 
+function initResize(panel, handle, cssVar, key, min) {
+  let startWidth;
   _initDragResize(handle, {
     onStart() {
       startWidth = panel.offsetWidth;
       panel.classList.add('resizing');
     },
     onMove(dx) {
-      const w = Math.max(200, startWidth - dx);
-      panel.style.setProperty(cssVar, `${w}px`);
+      panel.style.setProperty(cssVar, `${Math.max(min, startWidth - dx)}px`);
     },
     onEnd() {
       panel.classList.remove('resizing');
-      store.setItem(panelWidthKey(panelId), panel.style.getPropertyValue(cssVar));
+      store.setItem(key, panel.style.getPropertyValue(cssVar));
     },
   });
 }
@@ -14244,12 +14244,16 @@ function loadTerminalFrame(origin, timeoutMs) {
 }
 
 function sendTerminalTheme() {
-  if (!termFrame.inited) return;
   const options = terminalThemeOptions();
   const key = JSON.stringify(options);
-  if (key === termFrame.theme) return;
-  termFrame.theme = key;
-  postToTerminalFrame('theme', { options });
+  for (const [frame, post] of [
+    [termFrame, postToTerminalFrame],
+    [kanbotState, postToKanbotFrame],
+  ]) {
+    if (!frame.inited || key === frame.theme) continue;
+    frame.theme = key;
+    post('theme', { options });
+  }
 }
 
 // Keyed on the colors, and style is watched, because under the hub a theme change lands in two
@@ -14274,6 +14278,18 @@ window.addEventListener('message', (e) => {
     onTerminalFrameMessage(m.type.slice(TERMINAL_MSG.length), m);
 });
 
+function terminalInitOptions(themeOptions) {
+  return {
+    fontFamily:
+      appConfig.terminal.fontFamily ||
+      getComputedStyle(document.body).getPropertyValue('--font-mono').trim() ||
+      'monospace',
+    fontSize: currentTerminalFontSize(),
+    scrollback: appConfig.terminal.scrollback,
+    themeOptions,
+  };
+}
+
 function onTerminalFrameMessage(t, m) {
   const socket = termState.socket;
   const current = socket && m.socketId === socket.id;
@@ -14281,15 +14297,7 @@ function onTerminalFrameMessage(t, m) {
     // A second load is the frame reloaded (its context menu), with no terminal and no socket.
     const themeOptions = terminalThemeOptions();
     resetTerminalFrame({ reload: termFrame.reload || termFrame.inited, theme: JSON.stringify(themeOptions) });
-    postToTerminalFrame('init', {
-      fontFamily:
-        appConfig.terminal.fontFamily ||
-        getComputedStyle(document.body).getPropertyValue('--font-mono').trim() ||
-        'monospace',
-      fontSize: currentTerminalFontSize(),
-      scrollback: appConfig.terminal.scrollback,
-      themeOptions,
-    });
+    postToTerminalFrame('init', terminalInitOptions(themeOptions));
   } else if (t === 'term') {
     termFrame.inited = true;
     pushTerminalClaims();
@@ -14534,7 +14542,7 @@ function setTerminalAttached(on) {
 
 // A hidden pane stays attached, but Ctrl+W can only be meant for a terminal on screen.
 function syncCloseGuard() {
-  const on = termState.attached && termState.shown;
+  const on = (termState.attached && termState.shown) || kanbotOnScreen();
   if (termState.closeGuard === on) return;
   termState.closeGuard = on;
   hub.closeGuard(on);
@@ -14848,7 +14856,7 @@ async function renderTerminalManager() {
   body.innerHTML = list
     .map((t) => {
       const session = sessions.find((s) => s.id === t.id);
-      const name = session ? sessionDisplayName(session) : t.id.slice(0, 8);
+      const name = t.kanbot ? 'Kanbot' : session ? sessionDisplayName(session) : t.id.slice(0, 8);
       const here = t.id === termState.sessionId ? '<span class="terminal-manager-here">this tab</span>' : '';
       const attached = t.clients ? `${t.clients} attached` : 'detached';
       return `<div class="terminal-manager-row${t.clients ? ' attached' : ''}">
@@ -14864,7 +14872,7 @@ async function renderTerminalManager() {
           </div>
         </div>
         <div class="terminal-manager-actions">
-          <button type="button" class="btn btn-secondary" data-open="${escapeHtml(t.id)}">Open</button>
+          <button type="button" class="btn btn-secondary" data-open="${escapeHtml(t.id)}"${t.kanbot ? ' data-kanbot' : ''}>Open</button>
           <button type="button" class="btn btn-secondary terminal-manager-end" data-end="${escapeHtml(t.id)}">End</button>
         </div>
       </div>`;
@@ -14873,7 +14881,8 @@ async function renderTerminalManager() {
   body.querySelectorAll('[data-open]').forEach((b) => {
     b.onclick = () => {
       closeTerminalManager();
-      showSessionTerminal(b.dataset.open);
+      if ('kanbot' in b.dataset) toggleKanbot(true);
+      else showSessionTerminal(b.dataset.open);
     };
   });
   body.querySelectorAll('[data-end]').forEach((b) => {
@@ -14897,6 +14906,190 @@ async function endAllTerminals() {
   await Promise.all([...buttons].map((b) => closeTerminalSession(b.dataset.end)));
   renderTerminalManager();
 }
+
+//#endregion
+
+//#region KANBOT
+// The board's own assistant (docs/kanbot.md): a claude session the server keeps hidden from the list,
+// shown in a popover through a second terminal frame on the board terminal's frame origin.
+const KANBOT_SVG =
+  '<svg viewBox="0 0 16 13" width="16" height="13" shape-rendering="crispEdges" aria-hidden="true">' +
+  '<path fill="#d97757" d="M3 0h10v4h3v3h-3v3H3V7H0V4h3z"/>' +
+  '<path fill="#d97757" d="M4 10h1v3H4zM6 10h1v3H6zM9 10h1v3H9zM11 10h1v3h-1z"/>' +
+  '<path fill="#1f1e1d" d="M5 2h1v2H5zM10 2h1v2h-1z"/></svg>';
+const KANBOT_LAYOUT_KEY = 'cck-kanbot-layout';
+const KANBOT_WIDTH_KEY = 'cck-kanbot-width';
+const kanbotState = {
+  el: null,
+  frame: null,
+  origin: null,
+  ptyId: null,
+  inited: false,
+  attached: false,
+  ended: false,
+  socketId: 0,
+  theme: null,
+};
+
+function kanbotAvailable() {
+  return !!appConfig.kanbot && terminalAvailable();
+}
+
+function kanbotButton() {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'footer-kanbot';
+  b.title = 'Kanbot, the board assistant';
+  b.setAttribute('aria-label', b.title);
+  b.innerHTML = KANBOT_SVG;
+  b.onclick = toggleKanbot;
+  return b;
+}
+
+function ensureKanbotPopover() {
+  if (kanbotState.el) return kanbotState.el;
+  const el = document.createElement('div');
+  el.className = 'kanbot-popover';
+  el.innerHTML = `<div class="kanbot-head">${KANBOT_SVG}<strong>Kanbot</strong><span class="kanbot-status"></span><button type="button" class="kanbot-collapse" aria-label="Hide" title="Hide, Kanbot keeps running">–</button><button type="button" class="kanbot-dock">${showIcon('dock')}</button><button type="button" class="kanbot-expand"></button><button type="button" class="kanbot-close" aria-label="End" title="End the session, the next open resumes the chat">×</button></div><div class="kanbot-body"></div><div class="panel-resize-handle kanbot-resize"></div>`;
+  el.querySelector('.kanbot-dock').onclick = () => setKanbotLayout(el.classList.contains('docked') ? '' : 'docked');
+  el.querySelector('.kanbot-expand').onclick = () =>
+    setKanbotLayout(el.classList.contains('expanded') ? '' : 'expanded');
+  el.querySelector('.kanbot-collapse').onclick = () => toggleKanbot(false);
+  el.querySelector('.kanbot-close').onclick = endKanbot;
+  const width = store.getItem(KANBOT_WIDTH_KEY);
+  if (width) el.style.setProperty('--kanbot-width', width);
+  initResize(el, el.querySelector('.kanbot-resize'), '--kanbot-width', KANBOT_WIDTH_KEY, 320);
+  document.body.appendChild(el);
+  kanbotState.el = el;
+  setKanbotLayout(store.getItem(KANBOT_LAYOUT_KEY) || '');
+  return el;
+}
+
+function setKanbotLayout(layout) {
+  const el = kanbotState.el;
+  const docked = layout === 'docked';
+  const expanded = layout === 'expanded';
+  el.classList.toggle('docked', docked);
+  el.classList.toggle('expanded', expanded);
+  const dock = el.querySelector('.kanbot-dock');
+  dock.classList.toggle('active', docked);
+  dock.title = docked ? 'Undock' : 'Dock to the right';
+  dock.setAttribute('aria-label', dock.title);
+  dock.setAttribute('aria-pressed', String(docked));
+  const expand = el.querySelector('.kanbot-expand');
+  expand.innerHTML = showIcon(expanded ? 'restore' : 'expand');
+  expand.title = expanded ? 'Restore' : 'Expand';
+  expand.setAttribute('aria-label', expand.title);
+  store.setItem(KANBOT_LAYOUT_KEY, layout);
+  postToKanbotFrame('focus');
+}
+
+function setKanbotStatus(text) {
+  kanbotState.el.querySelector('.kanbot-status').textContent = text;
+}
+
+function postToKanbotFrame(t, data) {
+  kanbotState.frame?.contentWindow?.postMessage({ ...data, type: TERMINAL_MSG + t }, kanbotState.origin);
+}
+
+function kanbotOnScreen() {
+  return kanbotState.attached && !!kanbotState.el?.classList.contains('visible');
+}
+
+function endKanbot() {
+  const id = kanbotState.ptyId;
+  toggleKanbot(false);
+  kanbotState.ptyId = null;
+  if (id) terminalFetch(apiPath`/api/terminals/${id}`, 'DELETE').catch(() => {});
+}
+
+function setKanbotAttached(on) {
+  kanbotState.attached = on;
+  syncCloseGuard();
+}
+
+function toggleKanbot(force) {
+  const el = ensureKanbotPopover();
+  const show = typeof force === 'boolean' ? force : !el.classList.contains('visible');
+  el.classList.toggle('visible', show);
+  if (!show) {
+    postToKanbotFrame('detach');
+    setKanbotAttached(false);
+    return;
+  }
+  if (!kanbotState.frame) {
+    const frame = document.createElement('iframe');
+    frame.className = 'kanbot-frame';
+    frame.title = 'Kanbot';
+    frame.allow = 'clipboard-read; clipboard-write';
+    kanbotState.origin = termFrame.sameOrigin ? location.origin : terminalFrameOrigin();
+    frame.src = `${kanbotState.origin}/terminal.html#p=${encodeURIComponent(location.origin)}`;
+    kanbotState.frame = frame;
+    el.querySelector('.kanbot-body').appendChild(frame);
+    return;
+  }
+  if (kanbotState.inited) {
+    postToKanbotFrame('refresh');
+    postToKanbotFrame('focus');
+    if (!kanbotState.attached) openKanbot();
+  }
+}
+
+async function openKanbot() {
+  setKanbotStatus('starting…');
+  let res;
+  try {
+    res = await terminalFetch('/api/kanbot/start', 'POST', {});
+  } catch {
+    setKanbotStatus('board unreachable, retrying…');
+    setTimeout(() => {
+      if (kanbotState.el.classList.contains('visible') && !kanbotState.attached) openKanbot();
+    }, 3000);
+    return;
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return setKanbotStatus(data.error || `error ${res.status}`);
+  kanbotState.ended = false;
+  kanbotState.ptyId = data.ptyId;
+  setKanbotStatus(data.sessionId ? data.sessionId.slice(0, 8) : '');
+  postToKanbotFrame('open', {
+    socketId: ++kanbotState.socketId,
+    reset: true,
+    hello: { token: terminalToken, id: data.ptyId, mode: 'auto' },
+  });
+  postToKanbotFrame('focus');
+}
+
+window.addEventListener('message', (e) => {
+  if (!kanbotState.frame || e.source !== kanbotState.frame.contentWindow || e.origin !== kanbotState.origin) return;
+  const m = e.data;
+  if (typeof m?.type !== 'string' || !m.type.startsWith(TERMINAL_MSG)) return;
+  const t = m.type.slice(TERMINAL_MSG.length);
+  if (t === 'loaded') {
+    const themeOptions = terminalThemeOptions();
+    kanbotState.inited = false;
+    kanbotState.theme = JSON.stringify(themeOptions);
+    postToKanbotFrame('init', terminalInitOptions(themeOptions));
+    return;
+  }
+  if (t === 'term') {
+    kanbotState.inited = true;
+    openKanbot();
+    return;
+  }
+  if (m.socketId !== kanbotState.socketId) return;
+  if (t === 'ws') {
+    if (m.msg?.t === 'ready') setKanbotAttached(true);
+    else if (m.msg?.t === 'exit') {
+      setKanbotAttached(false);
+      kanbotState.ended = true;
+      setKanbotStatus('ended, reopen to resume');
+    } else if (m.msg?.t === 'error') setKanbotStatus(m.msg.msg || 'error');
+  } else if (t === 'close') {
+    setKanbotAttached(false);
+    if (!kanbotState.ended && kanbotState.el.classList.contains('visible')) setTimeout(openKanbot, 1000);
+  }
+});
 
 //#endregion
 
@@ -14959,6 +15152,7 @@ const SHOW_ICONS = {
   uncollapse: '<path d="M6 9l6 6 6-6"/>',
   expand: '<path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>',
   restore: '<path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/>',
+  dock: '<path d="M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM15 3v18"/>',
   clear: '<path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>',
   close: '<path d="M18 6L6 18M6 6l12 12"/>',
   pane: '<use href="#icon-pane"/>',
@@ -16297,13 +16491,15 @@ function makeLimitSpan(rl) {
 function renderSidebarFooter(rateLimits) {
   const el = document.getElementById('sidebar-footer');
   if (!el) return;
+  footerState.rl = rateLimits;
   const fh = rateLimits?.five_hour?.used_percentage ?? null;
   const sd = rateLimits?.seven_day?.used_percentage ?? null;
   const children = [];
   if (footerState.version) {
     const v = document.createElement('span');
     v.className = 'footer-version';
-    v.textContent = `v${footerState.version}`;
+    if (kanbotAvailable()) v.append(kanbotButton());
+    v.append(`v${footerState.version}`);
     const warn = pluginWarning(footerState.plugin);
     if (warn) v.append(warn);
     children.push(v);
@@ -16400,6 +16596,7 @@ if (urlState.search) {
 getJson('/api/config')
   .then((c) => {
     if (c) appConfig = c;
+    if (appConfig.kanbot && footerState.version) renderSidebarFooter(footerState.rl);
   })
   .then(restorePendingSessions)
   .then(() =>

@@ -1,0 +1,5 @@
+{
+  "name": "cck-kanbot",
+  "version": "0.1.0",
+  "description": "The board's own assistant: one agent, loaded with --plugin-dir by the kanbot chat. Moves into claude-code-kanban once it settles."
+}

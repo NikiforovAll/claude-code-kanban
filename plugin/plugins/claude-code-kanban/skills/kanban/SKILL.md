@@ -1,7 +1,7 @@
 ---
 name: kanban
 description: Kanban board CLI — show the user a file or page, link a doc or PR, add a pane, open or pin a session, find a session's transcript, list tasks.
-argument-hint: '[doc|pane|session|task|project|dispatch] <subcommand> [target]'
+argument-hint: '[doc|pane|session|task|project|dispatch|terminal] <subcommand> [target]'
 ---
 
 # Kanban Skill
@@ -21,6 +21,7 @@ This session id is `${CLAUDE_SESSION_ID}`. `--session` defaults to it through `$
 | `task` | `list` for a session, a project or the whole board |
 | `project` | `list` |
 | `dispatch` | `start`, `list`, `end` — run `/claude-code-kanban:dispatch` instead |
+| `terminal` | `list` every terminal in cck, read-only |
 
 ## Run a command
 

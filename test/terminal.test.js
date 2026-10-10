@@ -616,6 +616,36 @@ describe('terminal restore', () => {
     assert.deepEqual(store.data.sessions, [B]);
   });
 
+  it('does not save a terminal started with restore off', async () => {
+    const { t, store } = service(true, null);
+    const FRESH = 'aaaaaaaa-0000-0000-0000-000000000005';
+    assert.equal((await t.startNew({ id: UNKNOWN, cwd: os.tmpdir(), restore: false })).id, UNKNOWN);
+    assert.equal((await t.startNew({ id: FRESH, cwd: os.tmpdir() })).id, FRESH);
+    await until(() => store.data?.sessions?.length === 1);
+    assert.deepEqual(store.data.sessions, [FRESH]);
+    t.shutdown();
+  });
+
+  it('finds a resumed claude by the transcript id and marks the terminal when claude exits', async () => {
+    const FRESH = 'aaaaaaaa-0000-0000-0000-000000000006';
+    const live = [{ pid: 4242, sessionId: B, startedAt: Date.now() + 1000 }];
+    const { t } = service(false, null, { live });
+    assert.equal((await t.startNew({ id: FRESH, cwd: os.tmpdir(), resume: B })).id, FRESH);
+    await until(() => t.claudePids()[FRESH] === 4242, 'claude pid');
+    assert.equal(t.list()[0].claudeExited, false);
+    live.length = 0;
+    await until(() => t.list()[0].claudeExited, 'claude exit');
+    t.shutdown();
+  });
+
+  it('refuses to resume a session running in another terminal', async () => {
+    const { t, pty } = service(false, null);
+    const r = await t.startNew({ cwd: os.tmpdir(), resume: ELSEWHERE });
+    assert.equal(r.status, 409);
+    assert.equal(pty.spawned.length, 0);
+    t.shutdown();
+  });
+
   it('resumes a terminal with the task list it was saved with, and saves only valid ones', async () => {
     const { t, pty, store } = service(true, { sessions: [A, B], taskLists: { [A]: 'shared-list', [B]: '../up', [UNKNOWN]: 'x' } });
     t.restore();

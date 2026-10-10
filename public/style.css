@@ -1427,6 +1427,135 @@ body.booting .boot-splash {
   gap: 6px;
 }
 
+/* #region KANBOT */
+.sidebar-footer .footer-kanbot {
+  display: inline-flex;
+  padding: 2px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  cursor: pointer;
+  opacity: 0.85;
+}
+
+.sidebar-footer .footer-kanbot:hover {
+  background: var(--bg-hover);
+  opacity: 1;
+}
+
+.kanbot-popover {
+  display: none;
+  position: fixed;
+  left: 12px;
+  bottom: 40px;
+  z-index: 900;
+  flex-direction: column;
+  width: min(460px, calc(100vw - 24px));
+  height: min(560px, calc(100vh - 60px));
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-deep);
+  box-shadow: 0 12px 40px rgb(0 0 0 / 35%);
+  overflow: hidden;
+}
+
+.kanbot-popover.visible {
+  display: flex;
+}
+
+.kanbot-popover.expanded {
+  left: 50%;
+  top: 50%;
+  bottom: auto;
+  width: min(1200px, calc(100vw - 48px));
+  height: calc(100vh - 96px);
+  transform: translate(-50%, -50%);
+}
+
+.kanbot-popover.docked {
+  left: auto;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: min(var(--kanbot-width, 540px), 100vw);
+  height: auto;
+  border-width: 0 0 0 1px;
+  border-radius: 0;
+}
+
+.kanbot-resize {
+  display: none;
+}
+
+.kanbot-popover.docked .kanbot-resize {
+  display: block;
+}
+
+.kanbot-popover.resizing .kanbot-frame {
+  pointer-events: none;
+}
+
+.kanbot-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 6px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elevated);
+  font-size: 12px;
+}
+
+.kanbot-status {
+  flex: 1;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.kanbot-dock,
+.kanbot-expand,
+.kanbot-collapse,
+.kanbot-close {
+  padding: 0 6px;
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.kanbot-dock,
+.kanbot-expand {
+  display: inline-flex;
+  align-items: center;
+  align-self: stretch;
+}
+
+.kanbot-dock svg,
+.kanbot-expand svg {
+  width: 13px;
+  height: 13px;
+}
+
+.kanbot-dock.active {
+  color: var(--accent);
+}
+
+.kanbot-body {
+  flex: 1;
+  min-height: 0;
+  padding: 4px 0 0 6px;
+}
+
+.kanbot-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+/* #endregion */
+
 .sidebar-footer .footer-plugin-warning {
   padding: 0;
   border: none;

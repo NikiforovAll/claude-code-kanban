@@ -318,6 +318,20 @@ const COMMANDS = {
       },
     },
   },
+  terminal: {
+    summary: 'Read the terminals running in cck',
+    verbs: {
+      list: {
+        summary: 'List every terminal in cck: dispatched, opened by hand, and Kanbot',
+        usage: 'claude-code-kanban terminal list [--json]',
+        flags: {
+          '--json': 'Output JSON',
+        },
+        notes: 'Read-only. `dispatch end` ends a terminal this session dispatched; the user ends the others from the board.',
+        run: runTerminalListCli,
+      },
+    },
+  },
   skills: {
     summary: 'Print a skill guide bundled with this version',
     verbs: {
@@ -406,26 +420,30 @@ const SERVER_FLAGS = [
   ['--yes', '', 'With --install: no prompt'],
 ];
 
-function printTopHelp() {
-  console.log('Usage: claude-code-kanban <command> [args] [--flags]\n');
-  console.log('Commands:');
+function topHelp() {
+  const lines = ['Usage: claude-code-kanban <command> [args] [--flags]\n', 'Commands:'];
   for (const [name, cmd] of Object.entries(COMMANDS)) {
     const verbs = cmd.verbs ? ` (${Object.keys(cmd.verbs).join(', ')})` : '';
-    console.log(`  ${name.padEnd(20)}${cmd.summary}${verbs}`);
+    lines.push(`  ${name.padEnd(20)}${cmd.summary}${verbs}`);
   }
-  console.log(`  ${'help'.padEnd(20)}Show help for a command (claude-code-kanban help <command>)`);
-  console.log('\nFlags:');
-  console.log('  --help, -h            Show help (top-level, noun-level, or leaf-level)');
-  console.log('  --version, -v         Print version and exit');
-  console.log('\nServer (no command; a flag wins over its env var):');
+  lines.push(`  ${'help'.padEnd(20)}Show help for a command (claude-code-kanban help <command>)`);
+  lines.push('\nFlags:');
+  lines.push('  --help, -h            Show help (top-level, noun-level, or leaf-level)');
+  lines.push('  --version, -v         Print version and exit');
+  lines.push('\nServer (no command; a flag wins over its env var):');
   const flagPad = Math.max(...SERVER_FLAGS.map(([flag]) => flag.length)) + 2;
   const envPad = Math.max(...SERVER_FLAGS.map(([, env]) => env.length)) + 2;
-  for (const [flag, env, desc] of SERVER_FLAGS) console.log(`  ${flag.padEnd(flagPad)}${env.padEnd(envPad)}${desc}`);
-  console.log('\nCommand env:');
-  console.log('  CCK_URL               Server base URL, e.g. http://127.0.0.1:4795 (wins over PORT)');
-  console.log('  PORT                  Server port (default: the one this config dir\'s server reports, else 3541)');
-  console.log('  CLAUDE_CONFIG_DIR     Claude config dir whose board to use');
-  console.log('\nRun `claude-code-kanban help <command>` for its subcommands, and `help <command> <subcommand>` for flags and examples.');
+  for (const [flag, env, desc] of SERVER_FLAGS) lines.push(`  ${flag.padEnd(flagPad)}${env.padEnd(envPad)}${desc}`);
+  lines.push('\nCommand env:');
+  lines.push('  CCK_URL               Server base URL, e.g. http://127.0.0.1:4795 (wins over PORT)');
+  lines.push('  PORT                  Server port (default: the one this config dir\'s server reports, else 3541)');
+  lines.push('  CLAUDE_CONFIG_DIR     Claude config dir whose board to use');
+  lines.push('\nRun `claude-code-kanban help <command>` for its subcommands, and `help <command> <subcommand>` for flags and examples.');
+  return lines.join('\n');
+}
+
+function printTopHelp() {
+  console.log(topHelp());
 }
 
 function printNounHelp(noun) {
@@ -1310,6 +1328,33 @@ async function runDispatchEndCli(args) {
   } catch (e) { reportCliError(e); return 1; }
 }
 
+function terminalKind(t, self) {
+  if (t.kanbot) return 'kanbot';
+  if (t.dispatched) return self && t.dispatched.parent === self ? 'dispatch (yours)' : 'dispatch';
+  return t.mode === 'shell' ? 'shell' : 'claude';
+}
+
+async function runTerminalListCli(args) {
+  let rows;
+  try {
+    rows = (await cliGetJson('/api/terminals', 'Terminal list')).sessions.sort((a, b) => b.startedAt - a.startedAt);
+  } catch (e) { reportCliError(e); return 1; }
+  if (args.includes('--json')) {
+    console.log(JSON.stringify(rows, null, 2));
+    return 0;
+  }
+  if (!rows.length) {
+    console.log('No terminals.');
+    return 0;
+  }
+  const self = process.env.CLAUDE_CODE_SESSION_ID;
+  printTable(['SESSION', 'AGE', 'KIND', 'NAME', 'CWD'], rows.map(t => [t.id, ageOf(t.startedAt), terminalKind(t, self), t.name || '-', t.cwd || '-']));
+  if (rows.some(t => self && t.dispatched?.parent === self)) {
+    console.log('\nEnd one of yours with `claude-code-kanban dispatch end <session>`. The user ends the others from the board.');
+  }
+  return 0;
+}
+
 async function runSkillsGetCli(args) {
   const name = args.find(a => !a.startsWith('--'));
   const file = name && /^[a-z][a-z-]*$/.test(name) ? path.join(__dirname, 'skill-guides', `${name}.md`) : null;
@@ -1321,4 +1366,4 @@ async function runSkillsGetCli(args) {
   return 0;
 }
 
-module.exports = { runCli, COMMANDS, SERVER_FLAGS };
+module.exports = { runCli, topHelp, COMMANDS, SERVER_FLAGS };

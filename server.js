@@ -48,6 +48,7 @@ const { buildDecision, decisionFileName, isDecisionFile, approvalsFrom, boardRef
 const { getClaudeDir, getArgValue, storageNamespace, isDefaultClaudeDir } = require('./lib/claude-dir');
 const { readTerminalConfig } = require('./lib/terminal');
 const { createTerminalClient } = require('./lib/terminal-client');
+const { kanbotOn, kanbotModel, createKanbot } = require('./lib/kanbot');
 const { createShowStore, mountShowRoutes, showBodyParser, SHOW_PATH } = require('./lib/show');
 const { readLiveSessions, isPidAlive, isSessionLive } = require('./lib/live-sessions');
 const { createProcStats } = require('./lib/proc-stats');
@@ -323,6 +324,16 @@ function boardEventsEnabled() {
   return cachedByMtime(cckConfigCache, 'boardEvents', CCK_CONFIG_FILE,
     () => boardEventsOn(readCckConfig()), boardEventsOn(null));
 }
+function kanbotEnabled() {
+  return cachedByMtime(cckConfigCache, 'kanbot', CCK_CONFIG_FILE,
+    () => kanbotOn(readCckConfig()), kanbotOn(null));
+}
+function kanbotModelSetting() {
+  return cachedByMtime(cckConfigCache, 'kanbotModel', CCK_CONFIG_FILE,
+    () => kanbotModel(readCckConfig()), kanbotModel(null));
+}
+// Kanbot's transcripts all land in one project folder, which the board never lists (docs/kanbot.md).
+const kanbot = createKanbot({ cckDir: CCK_DIR, projectsDir: PROJECTS_DIR });
 
 // approvals.json predates config.json (and was opt-in). Fold it into
 // config.json once so an existing opt-in keeps its tuning, then drop it.
@@ -937,7 +948,7 @@ function loadSessionMetadata() {
     }
 
     const projectDirs = readdirSync(PROJECTS_DIR, { withFileTypes: true })
-      .filter(d => d.isDirectory());
+      .filter(d => d.isDirectory() && !kanbot.isOwnProjectDirName(d.name));
 
     for (const projectDir of projectDirs) {
       const projectPath = path.join(PROJECTS_DIR, projectDir.name);
@@ -1527,6 +1538,9 @@ app.get('/api/sessions', async (req, res) => {
       } catch (_) {}
     }
 
+    // Task dirs and agent-activity name Kanbot's sessions too.
+    for (const sid of sessionsMap.keys()) if (kanbot.isOwnSession(sid)) sessionsMap.delete(sid);
+
     // Correlate plan sessions with their implementation sessions (same slug)
     const slugGroups = new Map();
     for (const [_sid, session] of sessionsMap) {
@@ -1690,7 +1704,7 @@ app.get('/api/sessions/known', (_req, res) => {
       known.set(id, { id, project: meta.project || null, name: getSessionDisplayName(id, meta) });
     }
     const add = (id, project = null) => {
-      if (!known.has(id)) known.set(id, { id, project, name: null });
+      if (!known.has(id) && !kanbot.isOwnSession(id)) known.set(id, { id, project, name: null });
     };
     for (const dir of [TASKS_DIR, AGENT_ACTIVITY_DIR]) {
       if (!existsSync(dir)) continue;
@@ -3274,6 +3288,7 @@ app.get('/api/config', (_req, res) => {
     memoryUrl: MEMORY_URL,
     scratchAvailable: !!whichSync('scratch'),
     terminal: terminal.clientConfig(),
+    kanbot: kanbotEnabled(),
   });
 });
 
@@ -3283,7 +3298,7 @@ app.get('/api/config', (_req, res) => {
 // A new session may start only in a folder the user has already worked in, or one they
 // chose in the native dialog during this run. Anything else would let a page script pick
 // the directory claude runs in.
-const pickedFolders = new Set();
+const pickedFolders = new Set([kanbot.cwd]);
 function isAllowedFolder(dir) {
   const known = pickedFolders.has(dir) || Object.values(loadSessionMetadata()).some((m) => m.project === dir);
   try { return known && statSync(dir).isDirectory(); } catch { return false; }
@@ -3298,7 +3313,7 @@ function resolveSessionFolder(id) {
   }
   try {
     for (const dir of readdirSync(PROJECTS_DIR, { withFileTypes: true })) {
-      if (!dir.isDirectory()) continue;
+      if (!dir.isDirectory() || kanbot.isOwnProjectDirName(dir.name)) continue;
       const jsonlPath = path.join(PROJECTS_DIR, dir.name, `${id}.jsonl`);
       if (!existsSync(jsonlPath)) continue;
       let indexProject = null;
@@ -3384,7 +3399,14 @@ app.post('/api/terminal/start', terminalRoute(async (req, res) => {
 // The hub's eviction check reads this to keep a pool with live PTYs alive.
 app.get('/api/terminals', terminalRoute(async (_req, res) => {
   res.setHeader('Cache-Control', 'no-store');
-  res.json({ sessions: await terminal.sessions() });
+  const sessions = await terminal.sessions();
+  res.json({
+    sessions: sessions.map((t) => {
+      if (t.id === kanbot.ptyId) return { ...t, kanbot: true };
+      const marker = dispatched.get(t.id);
+      return marker ? { ...t, dispatched: { parent: marker.parent || null } } : t;
+    }),
+  });
 }));
 
 const terminalProcStats = createProcStats();
@@ -3491,6 +3513,45 @@ app.get('/api/dispatch', (req, res) => {
   const parent = typeof req.query.parent === 'string' && req.query.parent ? req.query.parent : null;
   res.json({ running: dispatched.running(terminal.isRunning, { parent }) });
 });
+// #endregion
+
+// #region KANBOT
+function kanbotRoute(fn) {
+  return terminalRoute(async (req, res) => {
+    if (!kanbotEnabled()) return res.status(404).json({ error: 'kanbot is turned off in .cck/config.json' });
+    return fn(req, res);
+  });
+}
+
+const kanbotState = () => ({ ptyId: kanbot.ptyId, sessionId: kanbot.sessionId });
+
+// After /exit the PTY lives on as a plain shell, so it is ended and the chat resumed in a new one.
+async function ensureKanbot() {
+  if (kanbot.ptyId && terminal.isRunning(kanbot.ptyId)) {
+    const row = (await terminal.sessions()).find((t) => t.id === kanbot.ptyId);
+    if (row && !row.claudeExited) return null;
+    if (row) await terminal.end(kanbot.ptyId, terminal.token);
+  }
+  const started = await terminal.startNew(kanbot.startSpec({
+    model: kanbotModelSetting(),
+    boardUrl: `http://127.0.0.1:${boardPort}`,
+  }));
+  if (started.error) return started;
+  kanbot.ptyId = started.id;
+  kanbot.own(started.id);
+  return null;
+}
+
+// Two opens at once would start two claude processes on the same transcript.
+let kanbotStarting = null;
+
+app.post('/api/kanbot/start', kanbotRoute(async (req, res) => {
+  if (!terminal.authorized(req.get('x-terminal-token'))) return res.status(401).json({ error: 'invalid terminal token' });
+  kanbotStarting ||= ensureKanbot().finally(() => { kanbotStarting = null; });
+  const failed = await kanbotStarting;
+  if (failed) return res.status(failed.status).json({ error: failed.error });
+  res.json(kanbotState());
+}));
 // #endregion
 
 // #region TASK_ROUTES
@@ -4534,6 +4595,7 @@ const projectsWatcher = chokidar.watch(PROJECTS_DIR, {
 
 projectsWatcher.on('all', (event, filePath) => {
   if (event !== 'add' && event !== 'change' && event !== 'unlink') return;
+  if (kanbot.isOwnPath(filePath)) return kanbot.onTranscript(filePath, event);
   if (filePath.endsWith('.jsonl')) {
     if (event === 'unlink') {
       loopInfoStateByPath.delete(filePath);
