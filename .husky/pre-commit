@@ -1,2 +1,3 @@
-npx @biomejs/biome check --error-on-warnings
-npm test
+out=$(npx @biomejs/biome check --error-on-warnings 2>&1) || { echo "$out"; exit 1; }
+# Not `npm test`: the reporter flag must come before the files, so keep this in step with the "test" script
+out=$(node --test --test-reporter=dot test/*.test.js 2>&1) || { echo "$out"; exit 1; }
