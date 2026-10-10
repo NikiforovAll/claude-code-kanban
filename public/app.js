@@ -14720,7 +14720,16 @@ function toggleKanbot(force) {
 
 async function openKanbot() {
   setKanbotStatus('starting…');
-  const res = await terminalFetch('/api/kanbot/start', 'POST', {});
+  let res;
+  try {
+    res = await terminalFetch('/api/kanbot/start', 'POST', {});
+  } catch {
+    setKanbotStatus('board unreachable, retrying…');
+    setTimeout(() => {
+      if (kanbotState.el.classList.contains('visible') && !kanbotState.attached) openKanbot();
+    }, 3000);
+    return;
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) return setKanbotStatus(data.error || `error ${res.status}`);
   kanbotState.ended = false;

@@ -1701,7 +1701,7 @@ app.get('/api/sessions/known', (_req, res) => {
       known.set(id, { id, project: meta.project || null, name: getSessionDisplayName(id, meta) });
     }
     const add = (id, project = null) => {
-      if (!known.has(id)) known.set(id, { id, project, name: null });
+      if (!known.has(id) && !kanbot.isOwnSession(id)) known.set(id, { id, project, name: null });
     };
     for (const dir of [TASKS_DIR, AGENT_ACTIVITY_DIR]) {
       if (!existsSync(dir)) continue;
@@ -3527,16 +3527,32 @@ function kanbotRoute(fn) {
 
 const kanbotState = () => ({ ptyId: kanbot.ptyId, sessionId: kanbot.sessionId });
 
-app.post('/api/kanbot/start', kanbotRoute(async (req, res) => {
-  if (!terminal.authorized(req.get('x-terminal-token'))) return res.status(401).json({ error: 'invalid terminal token' });
-  if (kanbot.ptyId && terminal.isRunning(kanbot.ptyId)) return res.json(kanbotState());
+// After /exit the PTY lives on as a plain shell, so it is ended and the chat resumed in a new one.
+async function ensureKanbot() {
+  if (kanbot.ptyId && terminal.isRunning(kanbot.ptyId)) {
+    const row = (await terminal.sessions()).find((t) => t.id === kanbot.ptyId);
+    if (row && !row.claudeExited) return null;
+    if (row) await terminal.end(kanbot.ptyId, terminal.token);
+  }
   const started = await terminal.startNew(kanbot.startSpec({
     model: kanbotModelSetting(),
     boardUrl: `http://127.0.0.1:${boardPort}`,
   }));
-  if (started.error) return res.status(started.status).json({ error: started.error });
+  if (started.error) return started;
   kanbot.ptyId = started.id;
-  res.status(201).json(kanbotState());
+  kanbot.own(started.id);
+  return null;
+}
+
+// Two opens at once would start two claude processes on the same transcript.
+let kanbotStarting = null;
+
+app.post('/api/kanbot/start', kanbotRoute(async (req, res) => {
+  if (!terminal.authorized(req.get('x-terminal-token'))) return res.status(401).json({ error: 'invalid terminal token' });
+  kanbotStarting ||= ensureKanbot().finally(() => { kanbotStarting = null; });
+  const failed = await kanbotStarting;
+  if (failed) return res.status(failed.status).json({ error: failed.error });
+  res.json(kanbotState());
 }));
 // #endregion
 

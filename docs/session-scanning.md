@@ -13,7 +13,7 @@ All defined in `server.js`. Each watcher emits an SSE event to connected clients
 | `watcher` | `TASKS_DIR` | 2 | `*.json` add/change/unlink | `update` |
 | `taskMapsWatcher` | `TASK_MAPS_DIR` | — | any | invalidates task-map cache |
 | `teamsWatcher` | `TEAMS_DIR` | — | config change | team reload |
-| `projectsWatcher` | `PROJECTS_DIR` | 2 | `*.jsonl` add/change/unlink | `metadata-update` (invalidates session metadata cache) |
+| `projectsWatcher` | `PROJECTS_DIR` | 2 | `*.jsonl` add/change/unlink | `metadata-update` (invalidates session metadata cache); a file in Kanbot's project folder only updates Kanbot's session id and emits nothing |
 | `plansWatcher` | `PLANS_DIR` | 0 | `*.md` add/change/unlink | `metadata-update`, `plan-update` |
 | `agentActivityWatcher` | `AGENT_ACTIVITY_DIR` | 2 | `*.jsonl` / `_waiting.json` / `_stop.json` | `agent-update` (with team-leader fan-out; `unreadOnly` for `_stop.json`, which refreshes the list but not the message log) |
 | `contextStatusWatcher` | `CONTEXT_STATUS_DIR` | 0 | `*.json` | context status broadcast |
@@ -23,6 +23,8 @@ Notable options:
 - `contextStatusWatcher` has `ignoreInitial: false` (others ignore initial scan). It fills `contextStatusCache`, which has no entry cap: it mirrors the files, which the retention sweep bounds. It broadcasts nothing during the initial scan and one `context-update` on `ready`.
 
 Session discovery proper happens via `projectsWatcher` on `~/.claude/projects/**/*.jsonl`.
+
+Kanbot's sessions never reach the list (see `docs/kanbot.md`). `loadSessionMetadata()` and `resolveSessionFolder()` (a terminal's folder before the first full scan) skip its project folder by name, and `/api/sessions` and `/api/sessions/known` drop the ids `kanbot.isOwnSession` names: its transcripts' ids, plus the PTY id of a fresh start, whose hooks write task and agent-activity folders before claude writes a transcript.
 
 ### 2. On-demand scans with TTL caches
 
@@ -44,7 +46,7 @@ These run only when an API request is served (no background timer).
 | `getWorkflowInfoSummary()` (Workflow-tool script badge) | `workflowIndexCache` (`Map<sessionId, scripts[]>`) | `WORKFLOW_INDEX_TTL_MS = 5000` ms | `server.js` |
 | `readWorkflowJournal()` / `getWorkflowMeta()` (workflow run + live views) | `workflowJournalCache` / `workflowMetaCache` | `cachedByMtime`, keyed by file path | `server.js` |
 
-> `GET /api/sessions/known` returns `{id, project, name}` for each key of `loadSessionMetadata()` plus each folder in the tasks and agent-activity dirs and each session mapped to a custom task list, with no file reads per session. The Storage manager groups saved data by project and finds orphans against it, because the client's `sessions` holds only the sidebar's loaded, filtered page.
+> `GET /api/sessions/known` returns `{id, project, name}` for each key of `loadSessionMetadata()` plus each folder in the tasks and agent-activity dirs and each session mapped to a custom task list, less Kanbot's, with no file reads per session. The Storage manager groups saved data by project and finds orphans against it, because the client's `sessions` holds only the sidebar's loaded, filtered page.
 
 > `extractAgentResultFromTranscript()` fills the response of a subagent whose `lastMessage` is empty: the last `SubagentHandback` message or formatted `StructuredOutput` input in a 1 MB tail read of its transcript, else its last assistant text. The text fallback is the usual path today, because the plugin's mod gets an empty `turn.complete` answer for a subagent; it stops running once that answer is filled.
 

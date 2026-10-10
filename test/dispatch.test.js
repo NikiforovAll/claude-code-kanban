@@ -1,6 +1,6 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const { claudeArgsFor, parseNewSpec } = require('../lib/terminal');
+const { claudeArgsFor, claudeCommand, parseNewSpec } = require('../lib/terminal');
 
 describe('claude args pass-through', () => {
   const spec = (extraArgs) => parseNewSpec({ cwd: '/a', name: 'x', model: 'sonnet', extraArgs });
@@ -32,12 +32,20 @@ describe('claude args pass-through', () => {
   });
 
   it('refuses values that could leave the quotes', () => {
-    for (const bad of ["it's", 'a"b', '%PATH%', 'a\nb', '\x1b[2J']) assert.match(spec([bad]), /no quotes/, JSON.stringify(bad));
+    for (const bad of ['a"b', '%PATH%', 'a\nb', '\x1b[2J']) assert.match(spec([bad]), /no double quotes/, JSON.stringify(bad));
+  });
+
+  it("keeps a ' inside its argument in every shell", () => {
+    const arg = "C:\\Users\\O'Brien\\.claude";
+    assert.deepEqual(spec([arg]).extraArgs, [arg]);
+    assert.equal(claudeCommand('bash', [arg]), "claude 'C:\\Users\\O'\\''Brien\\.claude'");
+    assert.equal(claudeCommand('pwsh', [arg]), "claude 'C:\\Users\\O''Brien\\.claude'");
+    assert.equal(claudeCommand('cmd.exe', [arg]), `claude "${arg}"`);
   });
 
   it('refuses a non-list or too many args', () => {
     assert.match(spec('--verbose'), /claude args/);
     assert.match(spec(Array(65).fill('-v')), /claude args/);
-    assert.match(spec([7]), /no quotes/);
+    assert.match(spec([7]), /no double quotes/);
   });
 });

@@ -75,5 +75,8 @@ describe('kanbot', () => {
     assert.equal(c.sessionId, A);
     assert.ok(c.isOwnSession(A));
     assert.ok(c.isOwnProjectDirName(path.basename(ownDir())));
+    assert.ok(!c.isOwnSession(B));
+    c.own(B);
+    assert.ok(c.isOwnSession(B));
   });
 });
