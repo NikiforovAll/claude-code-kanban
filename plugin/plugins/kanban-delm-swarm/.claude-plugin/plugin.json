@@ -1,0 +1,5 @@
+{
+  "name": "kanban-delm-swarm",
+  "version": "0.1.0",
+  "description": "Kanban DeLM Swarm: run several Claude Code sessions on one goal, coordinating through a shared task queue and log of findings, shown on the claude-code-kanban board"
+}

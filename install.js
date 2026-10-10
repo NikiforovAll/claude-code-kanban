@@ -5,7 +5,7 @@ const path = require('node:path');
 const readline = require('node:readline');
 const { execSync } = require('node:child_process');
 const { getClaudeDir, claudeCliEnv, displayPath } = require('./lib/claude-dir');
-const { PLUGIN_ID } = require('./lib/plugin-status');
+const { PLUGIN_ID, SWARM_PLUGIN_ID, isInstalled } = require('./lib/plugin-status');
 
 const CLAUDE_DIR = getClaudeDir();
 const CLI_ENV = claudeCliEnv(CLAUDE_DIR);
@@ -163,15 +163,10 @@ async function runInstall({ yes = false } = {}) {
     // on stdout — so a re-copied plugin keeps running from the old cached version
     // until `update` pulls the new one in. That is how a config dir ends up serving
     // a plugin older than the board it talks to.
-    if (alreadyInstalled) {
-      const upgrade = runCLI('claude plugin update claude-code-kanban', ['already at the latest']);
-      if (upgrade.ok) {
-        const line = (upgrade.output || '').split('\n').find(l => l.includes('updated from'));
-        console.log(`    ${green('✓')} ${line ? line.replace(/^[^A-Za-z]*/, '') : 'Already at the latest version'}`);
-      } else {
-        console.log(`    ${yellow('⚠')} Plugin update failed: ${upgrade.error}`);
-      }
-    }
+    if (alreadyInstalled) updatePlugin(PLUGIN_ID, 'Plugin');
+
+    // The swarm plugin ships in the same copy but is opt-in, so it is only updated, never installed here.
+    if (isInstalled(CLAUDE_DIR, SWARM_PLUGIN_ID)) updatePlugin(SWARM_PLUGIN_ID, 'kanban-delm-swarm');
   } else {
     console.log(`    ${dim('Skipped')}`);
   }
@@ -179,6 +174,16 @@ async function runInstall({ yes = false } = {}) {
   console.log('');
   removeContextSpy();
   printSummary(failed);
+}
+
+function updatePlugin(id, label) {
+  const upgrade = runCLI(`claude plugin update ${id}`, ['already at the latest']);
+  if (upgrade.ok) {
+    const line = (upgrade.output || '').split('\n').find(l => l.includes('updated from'));
+    console.log(`    ${green('✓')} ${label}: ${line ? line.replace(/^[^A-Za-z]*/, '') : 'already at the latest version'}`);
+  } else {
+    console.log(`    ${yellow('⚠')} ${label} update failed: ${upgrade.error}`);
+  }
 }
 
 function printSummary(failed = false) {
@@ -193,7 +198,12 @@ async function runUninstall() {
   console.log(`\n  ${bold('claude-code-kanban')} — Uninstaller\n`);
   console.log(`  Claude config dir: ${dim(displayPath(CLAUDE_DIR))}\n`);
 
-  // 1. Uninstall plugin via Claude CLI
+  // 1. Uninstall plugins via Claude CLI; the swarm plugin would be orphaned once its marketplace goes
+  if (isInstalled(CLAUDE_DIR, SWARM_PLUGIN_ID)) {
+    process.stdout.write('  Removing kanban-delm-swarm... ');
+    const swarm = runCLI(`claude plugin uninstall ${SWARM_PLUGIN_ID}`, ['not found', 'not installed']);
+    console.log(swarm.ok ? green('✓ Removed') : yellow(`⚠ ${swarm.error}`));
+  }
   process.stdout.write('  Removing plugin... ');
   const uninst = runCLI('claude plugin uninstall claude-code-kanban', ['not found', 'not installed']);
   if (uninst.ok) {
