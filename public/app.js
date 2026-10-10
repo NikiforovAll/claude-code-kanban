@@ -13553,6 +13553,9 @@ function msgDetailPaneSource() {
   if (currentMsgDetailIdx != null) return currentMessages[currentMsgDetailIdx] || null;
   const pin = currentPinDetailId && currentPins.find((p) => p.id === currentPinDetailId);
   return pin && pin.type !== 'agent' ? pin : null;
+      (message
+        ? ''
+        : paneMenuItem('link', paneIsLinked(pane) ? 'Remove from linked documents' : 'Add to linked documents')) +
 }
 
 function syncMsgDetailPaneBtn() {
@@ -13560,6 +13563,21 @@ function syncMsgDetailPaneBtn() {
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
+function paneIsLinked(pane) {
+  const key = canonicalPath(pane.target);
+  return getSessionPreviewPaths(paneSessionId()).some((p) => canonicalPath(p) === key);
+}
+
+function togglePaneLink(id) {
+  const pane = paneById(id);
+  const sid = paneSessionId();
+  if (!pane || !sid) return;
+  const unlink = paneIsLinked(pane);
+  setSessionDocLink(sid, pane.target, unlink);
+  if (unlink) forgetServerLinkedDoc(sid, pane.target);
+  showToast(unlink ? 'Unlinked from session' : 'Linked to session', 'success');
+}
+
 async function openMsgInPane() {
   const m = msgDetailPaneSource();
   if (!m?.timestamp) return;
@@ -13578,6 +13596,7 @@ function describePaneInput() {
   const doc = panePopMatches[panePopIdx];
   const t = doc ? null : paneTargetFrom(panePopInput.value);
   panePopDetect.classList.toggle('error', !!t?.error);
+  link: togglePaneLink,
   panePopDetect.textContent = doc
     ? `Enter opens ${linkedDocLabel(doc)}`
     : !t
