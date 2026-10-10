@@ -288,9 +288,11 @@ Lists the subagents of the session with the columns `AGENT`, `STATUS`, `AGE`, `T
 claude-code-kanban group list [--all] [--json]
 ```
 
-Lists the session groups in sidebar order, each with the members the sidebar's Active view shows: active or pinned sessions, and projects that have one. Each group line ends with `visible/total`, the members shown and all members. `--all` shows every member. The table has the columns `ID`, `STATUS`, `AGE`, `PIN` and `NAME`. A nested group is indented under its parent, and its members under it. Pass a name, a path or an id from this list to `session group`. Dispatch groups are not listed, because they go when their sessions end.
+Lists the session groups in sidebar order, each with the members the sidebar's Active view shows (active, pinned or sticky), and the projects that have such a session. Each group line ends with `visible/total`, the members shown and all members. `--all` shows every member. The table has the columns `ID`, `STATUS`, `AGE`, `PIN` and `NAME`. A nested group is indented under its parent, and its members under it. Pass a name, a path or an id from this list to `session group`.
 
-`--json` prints `{rev, groups}`, each group as `{id, name, parent, visible, total, members}`. A session member has `title`, `branch`, `status`, `pinned` and `age`, so you do not need `session list` to describe it. A session member whose session is gone has `missing: true`. A project member has `sessions`, the count of its sessions shown.
+A session started with `dispatch start --group` shows in its dispatch group, as in the sidebar: after the user groups, with `(dispatch)` after the name and `-` as the ID. A user group that holds the session or its project keeps it, and a user group with the same name, in any case, takes it in. A session removed from its dispatch group in the sidebar does not show there. A dispatch group goes when its sessions end.
+
+`--json` prints `{rev, groups}`, each group as `{id, name, parent, visible, total, members}`. A dispatch group has `dispatch: true` and the id `dispatch:<name>`, which `session group` does not take. A session member has `title`, `branch`, `status`, `pinned` and `age`, so you do not need `session list` to describe it. A session member whose session is gone has `missing: true`. A project member has `sessions`, the count of its sessions shown.
 
 ## task list
 

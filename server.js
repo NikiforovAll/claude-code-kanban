@@ -4081,7 +4081,7 @@ function groupRoute(fn) {
 app.get('/api/groups', (_req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   userGroups.reload();
-  res.json(userGroups.state());
+  res.json({ ...userGroups.state(), dispatch: Object.fromEntries(dispatchGroups.snapshot()) });
 });
 app.post('/api/groups', groupRoute((b) => userGroups.create(b)));
 app.put('/api/groups', groupRoute((b) => userGroups.replace(b)));

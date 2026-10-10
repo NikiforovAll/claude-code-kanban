@@ -225,13 +225,13 @@ const COMMANDS = {
     summary: 'Read the session groups in the sidebar',
     verbs: {
       list: {
-        summary: 'List the groups and their active members, nested groups under their parent, in sidebar order',
+        summary: 'List the groups in sidebar order, nested groups under their parent, with the members the sidebar\'s Active view shows (active, pinned or sticky)',
         usage: 'claude-code-kanban group list [--all] [--json]',
         flags: {
           '--all': 'Every member, active or not',
-          '--json': 'Output JSON ({rev, groups: [{id, name, parent, visible, total, members}]}); a session member has title, branch, status, pinned and age, or missing: true; a project member has sessions (its shown sessions)',
+          '--json': 'Output JSON ({rev, groups: [{id, name, parent, visible, total, members}]}); a dispatch group has dispatch: true and id dispatch:<name>; a session member has title, branch, status, pinned and age, or missing: true; a project member has sessions (its shown sessions)',
         },
-        notes: 'A member shows as in the sidebar\'s Active view: an active or pinned session, a project with one. visible/total counts the members shown. Pass a name, a path (parent/child) or an id to `session group`. Dispatch groups are not listed: they go when their sessions end.',
+        notes: 'A project member shows when it has a session the Active view shows. visible/total counts the members shown. A session started with `dispatch start --group` shows in that dispatch group, marked (dispatch) and listed after the user groups, unless a user group holds it or its project; a user group with the same name takes it in. Dispatch groups go when their sessions end. Pass a user group\'s name, path (parent/child) or id to `session group`.',
         examples: ['claude-code-kanban group list', 'claude-code-kanban group list --all --json'],
         run: runGroupListCli,
       },
@@ -973,18 +973,43 @@ function describeGroupMembers(groups, sessions, activeOnly) {
   });
 }
 
+// As the board's sgGroupForSession: a user group that holds the session or its project keeps it;
+// else an unreleased dispatched session joins the user group named like its dispatch group, else
+// that dispatch group, listed after the user groups as in the sidebar.
+function placeDispatched(groups, sessions, released) {
+  const releasedIds = new Set(released || []);
+  const held = new Set(groups.flatMap((g) => g.members.map((m) => `${m.type}:${m.ref}`)));
+  const dispatch = new Map();
+  for (const s of sessions) {
+    const name = s.dispatchGroup;
+    if (!name || releasedIds.has(s.id) || held.has(`session:${s.id}`)) continue;
+    const project = s.worktree?.repo || s.project;
+    if (project && held.has(`project:${project}`)) continue;
+    let group = groups.find((g) => g.name.toLowerCase() === name) || dispatch.get(name);
+    if (!group) {
+      group = { id: `dispatch:${name}`, name, parent: null, dispatch: true, members: [] };
+      dispatch.set(name, group);
+    }
+    group.members.push({ type: 'session', ref: s.id });
+  }
+  return [...groups, ...dispatch.values()];
+}
+
 async function runGroupListCli(args) {
   const activeOnly = !args.includes('--all');
   let rev;
   let groups;
   try {
-    ({ rev, groups } = await cliGetJson('/api/groups', 'Group list'));
-    const sessionRefs = [...new Set(groups.flatMap((g) => g.members.filter((m) => m.type === 'session').map((m) => m.ref)))];
+    let released;
+    let dispatch;
+    ({ rev, groups, released, dispatch } = await cliGetJson('/api/groups', 'Group list'));
+    const memberRefs = groups.flatMap((g) => g.members.filter((m) => m.type === 'session').map((m) => m.ref));
+    const sessionRefs = [...new Set([...memberRefs, ...Object.keys(dispatch || {})])];
     const hasProjects = groups.some((g) => g.members.some((m) => m.type === 'project'));
     const sessions = sessionRefs.length || hasProjects
       ? await fetchSessionsList({ limit: hasProjects ? null : 1, include: sessionRefs, activeOnly: hasProjects && activeOnly }, 'Group list')
       : [];
-    groups = describeGroupMembers(groups, sessions, activeOnly);
+    groups = describeGroupMembers(placeDispatched(groups, sessions, released), sessions, activeOnly);
   } catch (e) { reportCliError(e); return 1; }
   if (args.includes('--json')) {
     console.log(JSON.stringify({ rev, groups }, null, 2));
@@ -998,7 +1023,7 @@ async function runGroupListCli(args) {
   const add = (parent, depth) => {
     const pad = '  '.repeat(depth);
     for (const g of groups.filter((x) => x.parent === parent)) {
-      rows.push([g.id, '', '', '', `${pad}${g.name} (${g.visible}/${g.total})`]);
+      rows.push([g.dispatch ? '-' : g.id, '', '', '', `${pad}${g.name}${g.dispatch ? ' (dispatch)' : ''} (${g.visible}/${g.total})`]);
       for (const m of g.members) {
         if (m.type === 'project') rows.push(['project', '', '', '', `${pad}  ${m.ref} (${m.sessions} sessions)`]);
         else if (m.missing) rows.push([m.ref.slice(0, 8), 'gone', '-', '', `${pad}  (no such session)`]);

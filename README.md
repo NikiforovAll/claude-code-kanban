@@ -108,7 +108,7 @@ Run `claude` in any project. You do not configure anything per project. Claude C
 With no subcommand, `claude-code-kanban` starts the server. Subcommands talk to a server that already runs:
 
 - `session list|search|open|view|plan|agents|pin|group|ungroup` to read, focus and group sessions. `session list` shows the active sessions, as the sidebar's Active view does; `--all` shows every session.
-- `group list` to list the session groups with their active members (`--all` for every member).
+- `group list` to list the session groups, dispatch groups included, with the members the sidebar's Active view shows (active, pinned or sticky); `--all` for every member.
 - `task list` and `project list` to read tasks and projects.
 - `doc link|unlink|list|preview` to link a file or URL to a session, or show it in the preview.
 - `pane add|rm|list` to add live panes to a session's view.
