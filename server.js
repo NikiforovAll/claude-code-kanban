@@ -54,6 +54,7 @@ const { readLiveSessions, isPidAlive, isSessionLive } = require('./lib/live-sess
 const { createProcStats } = require('./lib/proc-stats');
 const { createGroupStore, isGroupName, suggestGroupName } = require('./lib/dispatch-groups');
 const { createUserGroupStore } = require('./lib/user-groups');
+const { ownerLinks, moveRecipients } = require('./lib/owner-routing');
 const { createDispatchedStore, scanTranscripts, pruneSessionDirs, pruneContextStatus, pruneTaskMaps, retentionMs } = require('./lib/retention');
 const { freshRateLimits } = require('./lib/rate-limits');
 const { createWorktreeStore } = require('./lib/worktrees');
@@ -1751,24 +1752,19 @@ app.get('/api/projects', (_req, res) => {
   res.json(projects);
 });
 
+const ownerRoutingInputs = () => ({
+  dispatched,
+  listToSessions: loadAllTaskMaps().listToSessions,
+  metadata: loadSessionMetadata,
+});
+
 // API: Get tasks for a session
-// A card's owner links to the session of that name that the list's session dispatched.
-// A name two of its dispatched sessions share gets no link.
 function addOwnerSessions(tasks, listIdOf) {
   const lists = new Set(tasks.filter((t) => t.owner).map(listIdOf));
   if (!lists.size) return;
-  const childIds = [...dispatched.entries()].filter(([, e]) => lists.has(e.parent));
-  if (!childIds.length) return;
-  const metadata = loadSessionMetadata();
-  const children = new Map();
-  for (const [id, { parent }] of childIds) {
-    const name = metadata[id]?.agentName;
-    if (!name) continue;
-    const key = `${parent}\n${name}`;
-    children.set(key, children.has(key) ? null : id);
-  }
+  const linkOf = ownerLinks(lists, ownerRoutingInputs());
   for (const t of tasks) {
-    const id = t.owner && children.get(`${listIdOf(t)}\n${t.owner}`);
+    const id = t.owner && linkOf(listIdOf(t), t.owner);
     if (id) t.ownerSessionId = id;
   }
 }
@@ -3625,7 +3621,9 @@ app.put('/api/tasks/:sessionId/:taskId', async (req, res) => {
       // not a session id -- and the doorbell polls with its own session id, so an unresolved
       // name would queue the line where nobody drains it.
       const line = formatTaskMoved(taskId, prevStatus, task);
-      for (const sid of resolveSessionsForTaskDir(sessionId)) enqueueSessionEvent(sid, line);
+      const recipients =
+        moveRecipients(sessionId, task.owner, ownerRoutingInputs()) ?? resolveSessionsForTaskDir(sessionId);
+      for (const sid of recipients) enqueueSessionEvent(sid, line);
     }
 
     res.json({ success: true, task });

@@ -49,7 +49,7 @@ claude-code-kanban dispatch start --cwd . --spec-file spec.md --name docs-audit 
 
 Cards for dispatched work are optional. To get them, ask Claude to track the dispatch on the board.
 
-A card's owner can link to the session that does the work. Set the card's `owner` to the started session's `--name`, and the owner badge shows the send icon; a click opens that session. The badge links only to a session that the list's session started. When two of its started sessions share the name, the badge shows no link.
+A card's owner can link to the session that does the work. Set the card's `owner` to the started session's `--name`, and the owner badge shows the send icon; a click opens that session. The badge links to a session that the list's session started, or to a session that uses the same list. When two of these sessions share the name, the badge shows no link.
 
 The `dispatch` skill has the session that dispatches assign the card, because it creates the card and knows the name. Right after `dispatch start`, it sets the card's `owner` and moves it to `in_progress`, then sets it to `completed` when the started session reports. You can also assign cards yourself, for example in your prompt.
 
@@ -65,6 +65,14 @@ claude-code-kanban dispatch start --cwd . --spec-file spec.md --name api-worker 
 - cck sets `CLAUDE_CODE_TASK_LIST_ID` in the session's terminal, not on the command line. A terminal never inherits the variable from the server, so a list is shared only when you pass the flag.
 - The setting survives a server restart: a restored terminal resumes with the same list.
 - Assign the cards as in [Track dispatches as cards](#track-dispatches-as-cards). In the spec, name the session's card and tell it to set the card to `completed` when done.
+
+When you move a card, the board tells the sessions about it:
+
+| List | Who gets the move |
+|---|---|
+| A session's own list, also with `--task-list` and no value | That session, also for a card that a started session owns |
+| `--task-list <id>`, the card has an owner that links | The owner only |
+| `--task-list <id>`, no owner or no link | The session that started the list's sessions. If they were started by more than one session, or by none, no session gets the move |
 
 ## Groups
 
