@@ -563,6 +563,12 @@ code {
 /* #endregion LAYOUT */
 
 /* #region SUMMARY */
+.outcome {
+  margin: 8px 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
 .goal {
   margin-bottom: 8px;
   font: 500 22px / 1.25 var(--font-serif);
@@ -1022,6 +1028,11 @@ code.path {
 
 .kind.k-status {
   color: var(--text-muted);
+}
+
+.kind.k-parent {
+  font-weight: 600;
+  color: var(--warning);
 }
 /* #endregion CHANGES */
 

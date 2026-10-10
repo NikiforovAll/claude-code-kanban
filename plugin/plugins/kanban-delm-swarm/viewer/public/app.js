@@ -366,7 +366,7 @@ function markup() {
   for (const p of m?.publications ?? []) for (const f of p.files) fileIn.set(f.path, p.id);
   const whoRe = names.length ? `(?<who>\\b(?:${names.map(reEsc).join('|')})\\b)|` : '';
   const re = new RegExp(
-    `${whoRe}\`(?<code>[^\`\\n]+)\`|(?<pub>\\b(?:publication|pub) #?(?<pubId>\\d+))|(?<task>(?:\\btask #?|#)(?<taskId>\\d+)\\b)|(?<path>\\b(?:[\\w.-]+\\/)+[\\w.-]*[\\w/]|\\b[\\w-]+\\.(?:${EXT})\\b)`,
+    `${whoRe}\`(?<code>[^\`\\n]+)\`|(?<pub>\\b(?:publication|pub) #?(?<pubId>\\d+))|(?<task>(?:\\btask[: ]#?|#)(?<taskId>\\d+)\\b)|(?<path>\\b(?:[\\w.-]+\\/)+[\\w.-]*[\\w/]|\\b[\\w-]+\\.(?:${EXT})\\b)`,
     'g',
   );
   marks = { key, re, fileIn, cache: new Map(), rows: new Map() };
@@ -421,6 +421,7 @@ const HEALTH = {
   finished: ['ok', 'finished'],
   quiet: ['warn', 'quiet'],
   stuck: ['bad', 'stuck on a claim'],
+  stopped: ['', 'stopped'],
   'not started': ['', 'not started'],
 };
 const healthChip = (h) => `<span class="chip ${HEALTH[h]?.[0] ?? ''}">${esc(HEALTH[h]?.[1] ?? h)}</span>`;
@@ -453,7 +454,9 @@ function renderTopbar() {
     ? ['ok', 'goal reached']
     : s.state === 'running'
       ? ['ok', 'running']
-      : [s.state === 'ended' ? '' : 'warn', s.state];
+      : s.outcome
+        ? ['', `ended · ${s.outcome.outcome}`]
+        : [s.state === 'ended' ? '' : 'warn', s.state];
   el.className = `state ${kind}`;
   el.textContent = text;
 }
@@ -526,12 +529,21 @@ function summaryView() {
       <span>started ${clock(s.startedAt)}</span>
       <span>${s.endedAt ? `ran ${dur(s.endedAt - s.startedAt)}` : `running for ${dur(s.ref - s.startedAt)}`}</span>
       <span>${plural(s.events, 'event')}</span>
+      ${s.revision > 1 ? `<span>request revision ${s.revision}</span>` : ''}
     </div>
+    ${s.outcome ? `<p class="outcome"><span class="chip ${s.outcome.outcome === 'complete' ? 'ok' : 'warn'}">${esc(s.outcome.outcome)}</span> ${hl(s.outcome.summary)}</p>` : ''}
     <div class="progress" title="${p.done} done, ${p.claimed} claimed, ${p.open} open">
       <span class="done" style="width:${pct(p.done)}%"></span><span class="claimed" style="width:${pct(p.claimed)}%"></span>
     </div>
-    <div class="sub">${p.done} of ${p.total} tasks done · ${p.claimed} claimed · ${p.open} open</div>
+    <div class="sub">${p.done} of ${p.total} tasks done${p.closed ? ` (${p.closed} closed)` : ''} · ${p.claimed} claimed · ${p.open} open</div>
   </div>
+  ${
+    state.model.requests.length
+      ? `<div class="card"><div class="section-title"><span>Request changes</span><span>${state.model.requests.length}</span></div>${state.model.requests
+          .map((r) => `<div class="note"><div><div class="text">${hl(r.text)}</div><div class="sub">revision ${r.revision} · ${clock(r.t)}</div></div></div>`)
+          .join('')}</div>`
+      : ''
+  }
   <div class="grid cols-2">
     <div class="card">
       <div class="section-title"><span>Workers</span><span>${workers.length}</span></div>
@@ -579,7 +591,8 @@ function taskCard(t, s) {
   if (t.owner) meta.push(who(t.owner));
   if (t.state === 'open') meta.push(`waiting ${dur(s.ref - t.createdAt)}`);
   if (t.state === 'claimed') meta.push(`held ${dur(s.ref - t.claimedAt)}`);
-  if (t.state === 'done') meta.push(`took ${dur(t.doneAt - t.claimedAt)}`, `done ${clock(t.doneAt)}`);
+  if (t.closed) meta.push(`<span class="chip">closed</span> ${clock(t.doneAt)}`);
+  else if (t.state === 'done') meta.push(`took ${dur(t.doneAt - t.claimedAt)}`, `done ${clock(t.doneAt)}`);
   meta.push(`<span class="muted">added by ${esc(t.createdBy)}</span>`);
   const races = t.races.map(
     (r) =>
@@ -686,6 +699,8 @@ function timelineView() {
       <span><b style="color:var(--warning)">↩</b> release</span>
       <span><b style="color:var(--error)">×</b> lost claim</span>
       <span>${swatch('border-left:2px dashed var(--text-tertiary)')}status</span>
+      <span>${swatch('border-left:2px solid var(--success)')}outcome</span>
+      <span><b style="color:var(--error)">■</b> stopped</span>
       <span>${swatch('background:repeating-linear-gradient(45deg,var(--hatch) 0 2px,transparent 2px 5px)')}no board event ≥ 8 min</span>
       <span>${swatch('background:repeating-linear-gradient(45deg,var(--hatch-bad) 0 2px,transparent 2px 5px)')}quiet ≥ 10 min</span>
     </div>
@@ -706,6 +721,10 @@ function marker(m, cx, y, laneH) {
     const tip = `lost the claim on #${m.item} ${at}${m.owner ? `, held by ${m.owner}` : ''}`;
     return `<text data-tip="${esc(tip)}" x="${cx}" y="${y + 10}" text-anchor="middle" style="fill:var(--error);font-weight:600;font-size:13px">×</text>`;
   }
+  if (m.type === 'stopped')
+    return `<text data-tip="${esc(`stopped ${at}\n${m.reason}`)}" x="${cx}" y="${y + laneH / 2 + 4}" text-anchor="middle" style="fill:var(--error);font-weight:600;font-size:12px">■</text>`;
+  if (m.type === 'outcome')
+    return `<line data-tip="${esc(`outcome ${m.outcome} ${at}\n${m.summary}`)}" x1="${cx}" x2="${cx}" y1="${y + 4}" y2="${y + laneH - 4}" style="stroke:var(--success);stroke-width:2"></line>`;
   if (m.type === 'status') {
     const tip = `${m.state}${m.dependency ? ` for ${m.dependency}` : ''}${m.summary ? `: ${m.summary}` : ''} ${at}`;
     return `<line data-tip="${esc(tip)}" x1="${cx}" x2="${cx}" y1="${y + 4}" y2="${y + laneH - 4}" style="stroke:var(--text-tertiary);stroke-width:2;stroke-dasharray:2 2"></line>`;

@@ -6,7 +6,7 @@ const { configDir } = require('../../scripts/start.mjs');
 
 const swarmRoot = (env = process.env) => `${configDir(env)}/.cck/swarm`;
 
-const ID_RE = /^[\w.-]+$/;
+const ID_RE = /^\w[\w.-]*$/;
 
 function readRegistry(dir) {
   try {

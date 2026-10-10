@@ -1,4 +1,4 @@
-// Builds the test swarm by driving the real store through one simulated hour: 3 workers, 8 tasks.
+// Builds the test swarm by driving the real store through one simulated hour: a parent, 3 workers, 9 tasks.
 // node test/fixture/build.mjs [--out <dir>] [--store <store.mjs>] [--step-ms <n>] [--running]
 // --step-ms waits n ms between steps, so a running viewer shows the swarm grow live.
 // --running leaves swarm.json in the running state, as a swarm that has not ended.
@@ -19,7 +19,7 @@ export const LIST_ID = `swarm-add-csv-export-to-the-${SUFFIX}`
 const T0 = Date.parse('2026-10-10T09:00:00Z')
 const GOAL = 'Add CSV export to the logview CLI: `logview --format csv <file>` writes one RFC 4180 row per log record, with tests and README usage.'
 
-export async function build({ out, store = path.join(here, '..', '..', '..', 'scripts', 'store.mjs'), stepMs = 0, running = false }) {
+export async function build({ out, store = path.join(here, '..', '..', '..', 'scripts', 'store.mjs'), stepMs = 0, running = false, listId = LIST_ID }) {
   const { main } = await import(pathToFileURL(path.resolve(store)).href)
   const dir = path.resolve(out)
   for (const key of Object.keys(process.env)) if (key.startsWith('GIT_')) delete process.env[key]
@@ -56,6 +56,7 @@ export async function build({ out, store = path.join(here, '..', '..', '..', 'sc
     git(repo, 'worktree', 'add', '-q', '-b', w.name, wt[w.name])
   }
   const [w1, w2, w3] = workers.map((w) => ({ id: w.sessionId, name: w.name }))
+  const parent = { id: '00000000-pare-4e00-8000-000000000000', name: 'parent' }
 
   const db = () => new DatabaseSync(path.join(dir, 'swarm.db'))
   let lastSeq = 0
@@ -76,7 +77,7 @@ export async function build({ out, store = path.join(here, '..', '..', '..', 'sc
   }
 
   function attempt(command, actor, args = {}) {
-    const r = main(command, { dir, base, actor, cwd: wt[actor.name], idempotency_key: `k${++keys}`, ...args })
+    const r = main(command, { dir, base, parent: parent.id, roster: workers, actor, cwd: wt[actor.name], idempotency_key: `k${++keys}`, ...args })
     stamp()
     return r
   }
@@ -111,20 +112,21 @@ export async function build({ out, store = path.join(here, '..', '..', '..', 'sc
     if (stepMs) await sleep(stepMs)
   }
 
-  const registry = { listId: LIST_ID, group: `logview/${LIST_ID}`, goal: GOAL, parent: '00000000-pare-4e00-8000-000000000000', base, workers, state: 'running', startedAt: new Date(T0).toISOString() }
+  const registry = { listId, group: `logview/${listId}`, goal: GOAL, parent: parent.id, base, workers, state: 'running', startedAt: new Date(T0).toISOString() }
   const writeRegistry = () => fs.writeFileSync(path.join(dir, 'swarm.json'), `${JSON.stringify(registry, null, 2)}\n`)
   writeRegistry()
 
   const pubs = {}
+  const ids = {}
 
   await at(0, () => look(w1))
   await at(0.5, () => {
-    create(w1, 'Parse log lines into records', 'Messages may contain spaces and quotes; keep ts, level, message.')
-    create(w1, 'Add CSV writer', 'src/csv.js: rows of records to RFC 4180 text.')
-    create(w1, 'Wire --format csv flag into CLI', 'src/cli.js picks the writer from --format.')
-    create(w1, 'Escape commas and quotes in CSV fields', 'Quote fields with comma, quote or newline; double inner quotes.')
-    create(w1, 'Add tests for CSV export', 'test/csv.test.js plus a parser case for quoted messages.')
-    create(w1, 'Update README usage', 'Document --format csv with an example.')
+    create(parent, 'Parse log lines into records', 'Messages may contain spaces and quotes; keep ts, level, message.')
+    create(parent, 'Add CSV writer', 'src/csv.js: rows of records to RFC 4180 text.')
+    create(parent, 'Wire --format csv flag into CLI', 'src/cli.js picks the writer from --format.')
+    create(parent, 'Escape commas and quotes in CSV fields', 'Quote fields with comma, quote or newline; double inner quotes.')
+    create(parent, 'Add tests for CSV export', 'test/csv.test.js plus a parser case for quoted messages.')
+    create(parent, 'Update README usage', 'Document --format csv with an example.')
   })
   await at(1, () => {
     look(w2)
@@ -165,6 +167,11 @@ export async function build({ out, store = path.join(here, '..', '..', '..', 'sc
     call('apply', w1, { publication_id: pubs.csv })
   })
   await at(30, () => finding(w3, 'Ruled out: writing each row with process.stdout.write. A 1M-line file takes 41 s per row vs 3 s buffered.'))
+  await at(31, () => {
+    call('request', parent, { text: 'Also measure the export on a 1M-line file and keep the bench script.' })
+    ids.json = create(parent, 'Add JSON export', '--format json, one object per record.')
+  })
+  await at(32, () => call('task_close', parent, { task_id: ids.json, reason: 'JSON export is out of scope for this request.' }))
   await at(33, () => call('status', w3, { summary: 'wiring --format csv' }))
   await at(34, () => {
     put(wt[w1.name], 'src/csv.js', "const field = (v) => (/[\",\\r\\n]/.test(String(v)) ? `\"${String(v).replaceAll('\"', '\"\"')}\"` : String(v))\nexports.toCsv = (records) => ['ts,level,message', ...records.map((r) => [r.ts, r.level, r.message].map(field).join(','))].join('\\r\\n') + '\\r\\n'\n")
@@ -181,8 +188,9 @@ export async function build({ out, store = path.join(here, '..', '..', '..', 'sc
     put(wt[w3.name], 'src/cli.js', "#!/usr/bin/env node\nconst minimist = require('minimist')\nconst { parse } = require('./parser')\nconst { toCsv } = require('./csv')\nconst args = minimist(process.argv.slice(2), { string: ['format'] })\nconst records = parse(require('fs').readFileSync(args._[0], 'utf8'))\nif (args.format === 'csv') process.stdout.write(toCsv(records))\nelse for (const r of records) console.log(r.ts, r.level, r.message)\n")
     pubs.cli = publish(w3, '--format csv writes the buffered CSV in one call.', ['src/cli.js'])
     finish(w3, 3, '--format csv writes the buffered CSV in one call.')
-    create(w3, 'Benchmark CSV export on 1M lines', 'Record time and peak memory; keep the bench script.')
+    ids.bench = create(w3, 'Benchmark CSV export on 1M lines', 'Record time and peak memory; keep the bench script.')
   })
+  await at(39, () => claim(w3, ids.bench))
   await at(40, () => {
     claim(w2, 5)
     attempt('apply', w2, { publication_id: pubs.escape })
@@ -199,14 +207,15 @@ export async function build({ out, store = path.join(here, '..', '..', '..', 'sc
   })
   await at(44, () => finding(w1, 'There is no docs site; README is the only user doc.'))
   await at(45, () => claim(w1, 6))
+  await at(46, () => call('worker_stop', w3, { reason: 'context limit reached' }))
   await at(47, () => {
     put(wt[w1.name], 'README.md', `${BASE_FILES['README.md']}\n## CSV\n\n    logview --format csv app.log > app.csv\n\nOne row per record: ts, level, message (RFC 4180).\n`)
     pubs.readme = publish(w1, 'README documents --format csv.', ['README.md'])
     finish(w1, 6, 'README documents --format csv.')
   })
   await at(48, () => {
-    claim(w1, 8)
-    claim(w2, 8)
+    claim(w1, ids.bench)
+    claim(w2, ids.bench)
   })
   await at(52, () => {
     put(wt[w2.name], 'test/csv.test.js', "const test = require('node:test')\nconst assert = require('node:assert')\nconst { toCsv } = require('../src/csv')\ntest('quotes commas', () => assert.match(toCsv([{ ts: 't', level: 'INFO', message: 'a,b' }]), /\"a,b\"/))\ntest('empty input', () => assert.equal(toCsv([]), 'ts,level,message\\r\\n'))\n")
@@ -214,7 +223,7 @@ export async function build({ out, store = path.join(here, '..', '..', '..', 'sc
     pubs.tests = publish(w2, 'CSV and parser tests pass (5 cases).', ['test/csv.test.js', 'test/parser.test.js'])
     finish(w2, 5, 'CSV and parser tests pass (5 cases).')
   })
-  await at(53, () => call('status', w2, { state: 'waiting', dependency: 'task 8: the benchmark', summary: 'all my tasks are done' }))
+  await at(53, () => call('status', w2, { state: 'waiting', dependency: `task:${ids.bench}`, summary: 'all my tasks are done' }))
   await at(58, () => {
     put(wt[w1.name], 'bench/results.txt', 'csv export, 1,000,000 lines\nrun1 3.2 s  run2 3.0 s  run3 3.1 s\npeak rss 210 MB\n')
     finding(w1, 'Buffered CSV export of 1M lines takes about 3.1 s with 210 MB peak memory (bench/csv.bench.js, three runs).')
@@ -222,12 +231,12 @@ export async function build({ out, store = path.join(here, '..', '..', '..', 'sc
   await at(59, () => {
     put(wt[w1.name], 'bench/csv.bench.js', "const { toCsv } = require('../src/csv')\nconst rows = Array.from({ length: 1e6 }, (_, i) => ({ ts: String(i), level: 'INFO', message: `line ${i}` }))\nconsole.time('csv'); toCsv(rows); console.timeEnd('csv')\n")
     pubs.bench = publish(w1, '1M lines in 3.1 s; script and results in bench/.', ['bench/csv.bench.js', 'bench/results.txt'])
-    finish(w1, 8, '1M lines in 3.1 s; script in bench/.')
+    finish(w1, ids.bench, '1M lines in 3.1 s; script in bench/.')
   })
   if (!running) {
     await at(60, () => {
-      call('status', w1, { state: 'working', summary: 'goal met: all tasks done' })
-      call('status', w2, { state: 'working', summary: 'goal met: all tasks done' })
+      for (const w of [w1, w2]) call('complete', w, { outcome: 'complete', expected_revision: 2, summary: 'All tasks done; CSV export, tests, README and bench are published.' })
+      call('end', parent, { outcome: 'complete', summary: 'CSV export shipped with tests, README usage and a 1M-line benchmark.' })
     })
     registry.state = 'ended'
     registry.endedAt = new Date(T0 + 60 * 60_000).toISOString()

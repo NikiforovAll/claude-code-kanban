@@ -7,10 +7,22 @@ const ms = (ts) => Date.parse(ts.endsWith('Z') ? ts : `${ts}Z`);
 
 function parseEvent(e) {
   const p = e.payload ?? {};
-  const base = { seq: e.seq, t: ms(e.ts), actor: e.actor, name: e.name ?? null };
+  const base = { seq: e.seq, t: ms(e.ts), actor: e.actor, name: e.name ?? null, revision: e.revision ?? 1 };
   switch (e.kind) {
     case 'task_create':
       return { ...base, kind: 'task', taskId: p.task_id, title: p.title, description: p.description, taskKind: p.kind };
+    case 'task_close':
+      return { ...base, kind: 'close', taskId: p.task_id, summary: p.summary };
+    case 'task_owner_stopped':
+      return { ...base, kind: 'release', taskId: p.task_id, handoff: `Owner stopped: ${p.reason}`, checkpoint: null };
+    case 'worker_stopped':
+      return { ...base, kind: 'stopped', worker: p.worker, reason: p.reason, released: p.released ?? [] };
+    case 'outcome':
+      return { ...base, kind: 'outcome', outcome: p.outcome, summary: p.summary ?? '', dependency: p.dependency ?? null };
+    case 'request':
+      return { ...base, kind: 'request', revision: p.revision ?? base.revision, text: p.text };
+    case 'end':
+      return { ...base, kind: 'end', outcome: p.outcome, summary: p.summary ?? '' };
     case 'task_claim':
       return { ...base, kind: 'claim', taskId: p.task_id };
     case 'task_update':
@@ -68,12 +80,35 @@ function describeEvent(e, label = (id) => id) {
       return `${p.state}${p.dependency ? ` for ${cut(p.dependency, 60)}` : ''}${p.summary ? `: ${cut(p.summary, 100)}` : ''}`;
     case 'apply':
       return `applied publication ${p.publication_id}: ${(p.paths ?? []).join(', ')}`;
+    case 'task_close':
+      return `closed #${p.task_id}: ${cut(String(p.summary ?? '').replace(/^Closed: /, ''))}`;
+    case 'task_owner_stopped':
+      return `released #${p.task_id} because ${label(p.owner)} stopped: ${cut(p.reason, 100)}`;
+    case 'worker_stopped':
+      return `${label(p.worker)} stopped: ${cut(p.reason, 100)}${p.released?.length ? `; released ${p.released.map((i) => `#${i}`).join(', ')}` : ''}`;
+    case 'outcome':
+      return `outcome ${p.outcome}${p.dependency ? ` for ${cut(p.dependency, 60)}` : ''}: ${cut(p.summary, 120)}`;
+    case 'request':
+      return `request revision ${p.revision}: ${cut(p.text)}`;
+    case 'end':
+      return `ended the swarm (${p.outcome}): ${cut(p.summary)}`;
     default:
       return cut(JSON.stringify(p));
   }
 }
 
-const GROUPS = { publication: 'change', apply: 'change', finding: 'finding', status: 'status', claim_lost: 'lost' };
+const GROUPS = {
+  publication: 'change',
+  apply: 'change',
+  finding: 'finding',
+  status: 'status',
+  outcome: 'status',
+  claim_lost: 'lost',
+  task_owner_stopped: 'lost',
+  worker_stopped: 'lost',
+  request: 'parent',
+  end: 'parent',
+};
 const groupOf = (kind) => GROUPS[kind] ?? (kind.startsWith('task_') ? 'task' : 'other');
 
 // Worker names: the name an event carries wins over the registry's.
@@ -86,7 +121,7 @@ function nameMap(events, registry = {}) {
 
 function logRow(e, names) {
   const label = (id) => names.get(id) ?? id;
-  return { seq: e.seq, t: ms(e.ts), who: label(e.actor), kind: e.kind, group: groupOf(e.kind), text: describeEvent(e, label), payload: e.payload };
+  return { seq: e.seq, t: ms(e.ts), who: label(e.actor), revision: e.revision ?? 1, kind: e.kind, group: groupOf(e.kind), text: describeEvent(e, label), payload: e.payload };
 }
 
 function parseExport(result) {

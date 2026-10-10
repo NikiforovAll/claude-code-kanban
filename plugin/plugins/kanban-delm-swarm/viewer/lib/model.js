@@ -5,6 +5,7 @@ const { ms, nameMap } = require('./events');
 // Turns the parsed event log (lib/events.js) plus swarm.json into what the views draw.
 const QUIET_MS = 10 * 60_000;
 const GAP_MS = 8 * 60_000;
+const OUTCOME_STATE = { waiting: 'waiting', blocked: 'blocked' };
 
 function buildModel(events, registry = {}, now = Date.now()) {
   const names = nameMap(events, registry);
@@ -16,17 +17,19 @@ function buildModel(events, registry = {}, now = Date.now()) {
   const applies = [];
   const races = [];
   const releases = [];
+  const requests = [];
   const statuses = {};
   const timeline = {};
-  const lane = (id) => {
-    timeline[label(id)] ??= [];
-    return timeline[label(id)];
+  let end = null;
+  const lane = (name) => {
+    timeline[name] ??= [];
+    return timeline[name];
   };
 
   for (const e of events) {
     const { t } = e;
     const who = label(e.actor);
-    const mark = (type, extra = {}) => lane(e.actor).push({ type, t, seq: e.seq, ...extra });
+    const mark = (type, extra = {}, name = who) => lane(name).push({ type, t, seq: e.seq, ...extra });
     const task = tasks.get(e.taskId);
     switch (e.kind) {
       case 'task':
@@ -80,18 +83,36 @@ function buildModel(events, registry = {}, now = Date.now()) {
         applies.push({ actor: who, t, id: e.publicationId, paths: e.paths, author: publications.get(e.publicationId)?.author });
         mark('apply', { id: e.publicationId, paths: e.paths });
         break;
+      case 'close':
+        if (task) Object.assign(task, { state: 'done', closed: true, owner: null, doneAt: t, summary: e.summary });
+        break;
+      case 'stopped':
+        statuses[e.worker] = { state: 'stopped', summary: e.reason, dependency: null, t };
+        mark('stopped', { reason: e.reason }, e.worker);
+        break;
+      case 'outcome':
+        statuses[who] = { state: OUTCOME_STATE[e.outcome] ?? 'working', outcome: e.outcome, summary: e.summary, dependency: e.dependency, t };
+        mark('outcome', { outcome: e.outcome, summary: e.summary });
+        break;
+      case 'request':
+        requests.push({ revision: e.revision, text: e.text, who, t });
+        break;
+      case 'end':
+        end = { outcome: e.outcome, summary: e.summary, who, t };
+        break;
     }
   }
 
   const first = events.length ? events[0].t : now;
   const last = events.length ? events.at(-1).t : now;
-  const ended = registry.state === 'ended';
+  const ended = !!end || registry.state === 'ended';
   const ref = ended ? Math.max(last, registry.endedAt ? ms(registry.endedAt) : 0) : now;
   const start = registry.startedAt ? Math.min(ms(registry.startedAt), first) : first;
 
+  const isParent = (id) => id === registry.parent || names.get(id) === 'parent';
   const actorIds = [
     ...new Set([...(registry.workers ?? []).map((w) => w.sessionId).filter(Boolean), ...events.map((e) => e.actor)]),
-  ];
+  ].filter((id) => !isParent(id));
   const taskList = [...tasks.values()];
   const byActor = new Map();
   for (const e of events) {
@@ -110,7 +131,8 @@ function buildModel(events, registry = {}, now = Date.now()) {
     }
     const silence = lastT == null ? null : ref - lastT;
     let health;
-    if (/^goal met/i.test(status?.summary ?? '')) health = 'finished';
+    if (status?.state === 'stopped') health = 'stopped';
+    else if (status?.outcome === 'complete') health = 'finished';
     else if (silence == null) health = 'not started';
     else if (silence >= QUIET_MS) health = holding ? 'stuck' : 'quiet';
     else if (status?.state === 'blocked') health = 'blocked';
@@ -143,16 +165,20 @@ function buildModel(events, registry = {}, now = Date.now()) {
       ref,
       events: events.length,
       seq: events.length ? events.at(-1).seq : 0,
+      revision: requests.at(-1)?.revision ?? 1,
+      outcome: end,
     },
     progress: {
       total: taskList.length,
       open: taskList.filter((x) => x.state === 'open').length,
       claimed: taskList.filter((x) => x.state === 'claimed').length,
       done,
-      goalReached: ended && taskList.length > 0 && done === taskList.length,
+      closed: taskList.filter((x) => x.closed).length,
+      goalReached: end ? end.outcome === 'complete' : ended && taskList.length > 0 && done === taskList.length,
     },
     workers,
     tasks: taskList,
+    requests,
     races,
     releases,
     findings,
