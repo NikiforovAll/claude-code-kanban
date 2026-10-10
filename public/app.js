@@ -5822,9 +5822,10 @@ function expandActiveGroups({ onlyNew = false } = {}) {
 function uncollapseFor(session) {
   const group = sgGroupForSession(session);
   const keys = [
-    sessionProjectKey(session) || '__ungrouped__',
     ...pinnedCollapseKeys(session),
-    ...(group ? [sgKey(group.id), sgHostOf(group, session), SECTION_GROUPS] : [SECTION_PROJECTS, SECTION_SESSIONS]),
+    ...(group
+      ? [sgKey(group.id), sgHostOf(group, session), SECTION_GROUPS]
+      : [sessionProjectKey(session) || '__ungrouped__', SECTION_PROJECTS, SECTION_SESSIONS]),
   ];
   let changed = false;
   for (const key of keys) {
@@ -5836,12 +5837,9 @@ function uncollapseFor(session) {
 function pinnedCollapseKeys(session) {
   if (!isInPinnedGroup(session)) return [];
   const group = sgGroupForSession(session);
+  if (!group) return [pinKey(sessionProjectKey(session) || '__ungrouped__')];
   const host = sgHostOf(group, session);
-  return [
-    pinKey(sessionProjectKey(session) || '__ungrouped__'),
-    host && pinKey(host),
-    group && `__pinned_group_${group.id}__`,
-  ];
+  return [host ? pinKey(host) : `__pinned_group_${group.id}__`];
 }
 
 // A card that moves into a collapsed Pinned sub-section would vanish from under the click.
