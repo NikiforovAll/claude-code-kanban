@@ -11,7 +11,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { fileURLToPath } from 'node:url'
 import { renameRetry, sleep } from './files.mjs'
 
-const SCHEMA_VERSION = 2
+const SCHEMA_VERSION = 3
 const MAX_ARGUMENT_BYTES = 128 * 1024
 // A tool call is one $.process.run, which gives up at 30 s.
 const WAIT_CAP_SECONDS = 25
@@ -21,6 +21,10 @@ const LIST_LIMIT = 12
 const KINDS = ['implementation', 'verification', 'integration']
 const TASK_STATES = ['available', 'claimed', 'done']
 const WORKER_STATES = ['working', 'waiting', 'blocked']
+const OUTCOMES = ['complete', 'partial', 'blocked', 'waiting']
+const END_OUTCOMES = ['complete', 'partial', 'stopped']
+// A waiting worker's dependency has no producer when no one works on it.
+const IDLE_STATES = ['stopped', 'blocked', 'waiting']
 // The same limits as LIMITS in hooks/swarm.ts, from DeLM's tool definitions.
 const TASK_FIELDS = {
   title: { max: 256, required: true },
@@ -31,6 +35,9 @@ const TASK_FIELDS = {
 }
 const KEY = { max: 128, required: true }
 const SUMMARY = { max: 2048, required: true }
+const NAME = { max: 256, required: true }
+const DEPENDENCY = { max: 512, required: true }
+const REVISION = '(SELECT revision FROM context WHERE id = 1)'
 const PUBLISH_FIELDS = { interfaces: { max: 8192 }, unfinished: { max: 8192 } }
 const STATUS_FIELDS = ['state', 'summary', 'dependency', 'finding']
 // DeLM's limits for a publication without large_artifact.
@@ -38,17 +45,25 @@ const PUBLISH_LIMITS = { files: 1024, bytes: 64 * 1024 * 1024 }
 const EXPAND_LIMITS = { files: 32, maxBytes: 8192, maxBytesCap: 32768, total: 65536 }
 const MAX_DEPENDENCIES = 128
 const MAX_SPLIT = 16
-const TASK_EVENTS = ['task_create', 'task_claim', 'task_update', 'task_release', 'task_split', 'task_finish']
+const TASK_EVENTS = ['task_create', 'task_claim', 'task_update', 'task_release', 'task_split', 'task_finish', 'task_close', 'task_owner_stopped']
 // Events that give a peer something new to act on, so they end a waiting status call.
-const WAKE_EVENTS = ['task_create', 'task_release', 'task_finish', 'publication', 'finding']
+const WAKE_EVENTS = ['task_create', 'task_release', 'task_finish', 'task_owner_stopped', 'publication', 'finding', 'request', 'end']
+// DeLM's wait_ready (src/board/mod.rs): a task became available after the cursor, or an
+// integration task is available and another integration task finished after it, unless an
+// integration task is claimed.
+const READY_SQL = `SELECT EXISTS(SELECT 1 FROM tasks t WHERE t.state = 'available'
+  AND (t.version > ?1 OR (json_extract(t.body, '$.kind') = 'integration' AND EXISTS(
+    SELECT 1 FROM tasks d WHERE d.state = 'done' AND d.version > ?1 AND json_extract(d.body, '$.kind') = 'integration')))
+  AND (json_extract(t.body, '$.kind') != 'integration' OR NOT EXISTS(
+    SELECT 1 FROM tasks c WHERE c.state = 'claimed' AND json_extract(c.body, '$.kind') = 'integration'))) AS ready`
 
 class BoardError extends Error {}
 
 // The board's two shared collections as rows of the same shape, for the view, the totals and list.
 const SOURCES = {
   publications:
-    "SELECT id, actor, json_extract(body, '$.summary') AS summary, json_extract(body, '$.unfinished') AS unfinished, json_extract(body, '$.dependencies') AS dependencies, json_array_length(body, '$.files') AS files FROM publications",
-  findings: "SELECT seq AS id, actor, json_extract(payload, '$.text') AS text FROM events WHERE kind = 'finding'",
+    "SELECT id, actor, (SELECT revision FROM events WHERE seq = publications.id) AS revision, json_extract(body, '$.summary') AS summary, json_extract(body, '$.unfinished') AS unfinished, json_extract(body, '$.dependencies') AS dependencies, json_array_length(body, '$.files') AS files FROM publications",
+  findings: "SELECT seq AS id, actor, revision, json_extract(payload, '$.text') AS text FROM events WHERE kind = 'finding'",
 }
 
 const display = (actor) => actor.name ?? actor.id
@@ -166,10 +181,13 @@ function selectFiles(files, paths) {
 class Store {
   // tasksDir: the Claude Code task list the store mirrors the tasks into.
   // base: the commit the workers' worktrees start from; the base version of a published file.
-  constructor({ dir, tasksDir, base, readOnly = false } = {}) {
+  // parent: the session that started the swarm; roster: the registry's workers, [{name, sessionId}].
+  constructor({ dir, tasksDir, base, parent, roster, readOnly = false } = {}) {
     this.dir = dir
     this.tasksDir = tasksDir
     this.base = base
+    this.parent = parent
+    this.roster = Array.isArray(roster) ? roster.filter((w) => w?.sessionId && w.name) : []
     const file = path.join(dir, 'swarm.db')
     if (readOnly) {
       if (!fs.existsSync(file)) throw new BoardError('no swarm store in this folder')
@@ -190,10 +208,13 @@ class Store {
     this.db.exec(`BEGIN IMMEDIATE;
     CREATE TABLE IF NOT EXISTS events (
       seq INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-      actor TEXT NOT NULL, name TEXT, kind TEXT NOT NULL, payload TEXT NOT NULL);
+      actor TEXT NOT NULL, name TEXT, kind TEXT NOT NULL, payload TEXT NOT NULL, revision INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS context (
+      id INTEGER PRIMARY KEY CHECK(id = 1), revision INTEGER NOT NULL, state TEXT NOT NULL DEFAULT 'running', outcome TEXT);
+    INSERT OR IGNORE INTO context(id, revision) VALUES (1, 1);
     CREATE TABLE IF NOT EXISTS workers (
       actor TEXT PRIMARY KEY, name TEXT, state TEXT NOT NULL DEFAULT 'working', summary TEXT NOT NULL DEFAULT '',
-      dependency TEXT, updated INTEGER NOT NULL);
+      dependency TEXT, wait_seq INTEGER, acked INTEGER NOT NULL DEFAULT 1, updated INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS tasks (
       id INTEGER PRIMARY KEY, created INTEGER NOT NULL, author TEXT NOT NULL, owner TEXT,
       state TEXT NOT NULL CHECK(state IN ('available','claimed','done')), body TEXT NOT NULL, version INTEGER NOT NULL);
@@ -220,6 +241,8 @@ class Store {
     this.touched = new Set()
     this.diskTop = null
     try {
+      const seed = this.db.prepare('INSERT OR IGNORE INTO workers(actor, name, updated) VALUES (?, ?, 0)')
+      for (const w of this.roster) seed.run(w.sessionId, w.name)
       const result = fn()
       // Written under the write lock, so two workers' files cannot land out of order.
       // A COMMIT that fails after this leaves a file ahead of the log until the next write to that task.
@@ -232,14 +255,20 @@ class Store {
     }
   }
 
+  // A worker's change acknowledges the request revision it was made under: the response that
+  // carries it also carries the request changes the worker had not seen.
   append(actor, kind, payload) {
     const r = this.db
-      .prepare('INSERT INTO events(actor, name, kind, payload) VALUES (?, ?, ?, ?)')
+      .prepare(`INSERT INTO events(actor, name, kind, payload, revision) VALUES (?, ?, ?, ?, ${REVISION})`)
       .run(actor.id, actor.name ?? null, kind, JSON.stringify(payload))
     const seq = Number(r.lastInsertRowid)
-    this.db
-      .prepare('INSERT INTO workers(actor, name, updated) VALUES (?, ?, ?) ON CONFLICT(actor) DO UPDATE SET name = COALESCE(excluded.name, workers.name)')
-      .run(actor.id, actor.name ?? null, seq)
+    if (!actor.parent) {
+      this.db
+        .prepare(
+          `INSERT INTO workers(actor, name, updated, acked) VALUES (?, ?, ?, ${REVISION}) ON CONFLICT(actor) DO UPDATE SET name = COALESCE(excluded.name, workers.name), acked = excluded.acked`,
+        )
+        .run(actor.id, actor.name ?? null, seq)
+    }
     if (actor.name && this.nameCache) this.nameCache[actor.id] = actor.name
     if (TASK_EVENTS.includes(kind)) this.touched.add(payload.task_id)
     return seq
@@ -247,6 +276,7 @@ class Store {
 
   label(actorId) {
     if (actorId == null) return null
+    if (actorId === this.parent) return 'parent'
     this.nameCache ??= Object.fromEntries(this.db.prepare('SELECT actor, name FROM workers WHERE name IS NOT NULL').all().map((r) => [r.actor, r.name]))
     return this.nameCache[actorId] ?? actorId
   }
@@ -315,6 +345,7 @@ class Store {
     return {
       publication_id: r.id,
       author: this.label(r.actor),
+      revision: r.revision,
       summary: compact(r.summary, summaryChars),
       files: r.files,
       dependencies: JSON.parse(r.dependencies),
@@ -323,7 +354,68 @@ class Store {
   }
 
   findingRow(r) {
-    return { finding_id: r.id, author: this.label(r.actor), text: compact(r.text, 1024) }
+    return { finding_id: r.id, author: this.label(r.actor), revision: r.revision, text: compact(r.text, 1024) }
+  }
+
+  context() {
+    return this.db.prepare('SELECT revision, state, outcome FROM context WHERE id = 1').get()
+  }
+
+  workerId(name) {
+    return this.roster.find((w) => w.name === name)?.sessionId ?? this.db.prepare('SELECT actor FROM workers WHERE name = ?').get(name)?.actor ?? null
+  }
+
+  // A dependency is `task:<id>` or `worker:<name>`, DeLM's `task:<id>` or `worker:<1|2>`.
+  parseDependency(dependency) {
+    const m = /^(task|worker):(.+)$/s.exec(dependency ?? '')
+    if (!m) throw new BoardError('waiting dependency must be task:<id> or worker:<name>')
+    if (m[1] === 'task') {
+      if (!/^\d+$/.test(m[2]) || Number(m[2]) < 1) throw new BoardError('invalid waiting dependency ID')
+      const t = this.db.prepare('SELECT id, owner, state FROM tasks WHERE id = ?').get(Number(m[2]))
+      if (!t) throw new BoardError('unknown waiting task')
+      return { task: t.id, owner: t.owner, state: t.state }
+    }
+    const id = this.workerId(m[2])
+    if (!id) throw new BoardError('unknown waiting worker')
+    return { worker: id, owner: id }
+  }
+
+  checkWait(actor, dependency) {
+    if (!dependency) throw new BoardError('waiting requires a named dependency')
+    const d = this.parseDependency(dependency)
+    if (d.owner === actor.id) throw new BoardError('waiting dependency belongs to this worker; continue that work instead')
+    if (d.state === 'done') throw new BoardError(`task ${d.task} is already finished; read its contribution instead of waiting`)
+    return dependency
+  }
+
+  // DeLM's wait_ready: new available work, the named task finished, or the named worker
+  // published under the current request revision, all after the worker started waiting.
+  ready(w, d) {
+    if (this.db.prepare(READY_SQL).get(w.wait_seq).ready) return true
+    if (d.task) return !!this.db.prepare("SELECT 1 FROM tasks WHERE id = ? AND state = 'done' AND version > ?").get(d.task, w.wait_seq)
+    return !!this.db.prepare(`SELECT 1 FROM publications p JOIN events e ON e.seq = p.id WHERE p.actor = ? AND p.id > ? AND e.revision = ${REVISION}`).get(d.worker, w.wait_seq)
+  }
+
+  // DeLM resumes a waiter once when no one can produce what it waits for: an unclaimed task,
+  // or an owner or worker that is itself stopped, blocked or waiting.
+  stalled(d, states) {
+    const idle = (id) => id == null || IDLE_STATES.includes(states.get(id) ?? 'stopped')
+    return d.task ? d.state !== 'done' && idle(d.owner) : idle(d.worker)
+  }
+
+  setWorker(actorId, state, summary, dependency, seq) {
+    this.db
+      .prepare('UPDATE workers SET state = ?, summary = ?, dependency = ?, wait_seq = ?, updated = ? WHERE actor = ?')
+      .run(state, summary, dependency, state === 'waiting' ? seq : null, seq, actorId)
+  }
+
+  // The request revisions after the last one this worker acknowledged.
+  requestUpdates(actorId) {
+    const acked = this.db.prepare('SELECT acked FROM workers WHERE actor = ?').get(actorId)?.acked ?? 1
+    return this.db
+      .prepare("SELECT revision, json_extract(payload, '$.text') AS text FROM events WHERE kind = 'request' AND revision > ? ORDER BY seq")
+      .all(acked)
+      .map(({ revision, text }) => ({ revision, text }))
   }
 
   counts() {
@@ -333,13 +425,23 @@ class Store {
   }
 
   // The compact board every response carries: the latest records of each collection, with totals.
+  // A waiting worker shows whether it is ready to resume and whether its dependency has no producer.
   view() {
+    const { revision, state, outcome } = this.context()
+    const workers = this.db.prepare('SELECT * FROM workers ORDER BY rowid').all()
+    const states = new Map(workers.map((w) => [w.actor, w.state]))
     return {
       sequence: this.lastSeq(),
-      workers: this.db
-        .prepare('SELECT * FROM workers ORDER BY rowid')
-        .all()
-        .map((w) => ({ worker: w.name ?? w.actor, state: w.state, summary: w.summary, dependency: w.dependency, sequence: w.updated })),
+      request_revision: revision,
+      state,
+      outcome: outcome && JSON.parse(outcome),
+      workers: workers.map((w) => {
+        const row = { worker: w.name ?? w.actor, state: w.state, summary: w.summary, dependency: w.dependency, sequence: w.updated }
+        if (w.state !== 'waiting') return row
+        const d = this.parseDependency(w.dependency)
+        const ready = this.ready(w, d)
+        return { ...row, ready, stalled: !ready && this.stalled(d, states) }
+      }),
       tasks: this.db
         .prepare("SELECT * FROM tasks ORDER BY (state = 'done'), version DESC LIMIT ?")
         .all(VIEW_LIMIT)
@@ -473,14 +575,19 @@ class Store {
       if (row.state === 'done') return JSON.parse(row.response)
       return this.reconcileApply(actor, key, cwd, JSON.parse(row.detail))
     }
+    const ended = () => {
+      if (this.context().state === 'ended') throw new BoardError('This swarm has ended.')
+    }
     const replay = prior()
     if (replay) return replay
+    ended()
     if (command === 'apply') return this.apply(actor, key, digest, args)
     const captured = command === 'publish' ? this.freeze(cwd, args) : null
     try {
       return this.tx(() => {
         const again = prior()
         if (again) return again
+        ended()
         const result = this[command](actor, args, captured)
         this.db
           .prepare("INSERT INTO requests(actor, key, name, digest, state, response) VALUES (?, ?, ?, ?, 'done', ?)")
@@ -539,14 +646,33 @@ class Store {
     return t
   }
 
+  // The parent may name an assignee: the task is then created claimed by that worker.
   task_create(actor, args) {
     const body = this.taskBody(args)
+    let owner = null
+    if (args.assignee !== undefined) {
+      if (!actor.parent) throw new BoardError('only the parent assigns a task; create it open, then claim it')
+      owner = this.workerId(text(args, 'assignee', NAME))
+      if (!owner) throw new BoardError('unknown assignee')
+    }
+    const state = owner ? 'claimed' : 'available'
     const id = this.nextTaskId()
-    const version = this.append(actor, 'task_create', { task_id: id, ...body })
+    const version = this.append(actor, 'task_create', { task_id: id, ...body, ...(owner ? { assignee: this.label(owner) } : {}) })
     this.db
-      .prepare("INSERT INTO tasks(id, created, author, owner, state, body, version) VALUES (?, ?, ?, NULL, 'available', ?, ?)")
-      .run(id, version, actor.id, JSON.stringify(body), version)
-    return { task_id: id, state: 'available', version }
+      .prepare('INSERT INTO tasks(id, created, author, owner, state, body, version) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(id, version, actor.id, owner, state, JSON.stringify(body), version)
+    return { task_id: id, state, ...(owner ? { owner: this.label(owner) } : {}), version }
+  }
+
+  task_close(actor, args) {
+    const t = this.task(positiveId(args, 'task_id'))
+    if (t.state !== 'available') {
+      throw new BoardError(`task ${t.task_id} is ${t.state === 'done' ? 'already finished' : `claimed by ${this.label(t.owner)}; release it first`}`)
+    }
+    const summary = `Closed: ${text(args, 'reason', SUMMARY)}`
+    const version = this.append(actor, 'task_close', { task_id: t.task_id, summary })
+    this.setTask(t, { state: 'done', summary, closed: true }, version)
+    return { task_id: t.task_id, state: 'done', closed: true, version }
   }
 
   task_claim(actor, args) {
@@ -581,18 +707,27 @@ class Store {
     return this.claimed(actor, t, version)
   }
 
+  // The parent releases any claimed task with no version: the new version makes the owner's
+  // next change fail as stale.
   task_release(actor, args) {
-    const t = this.owned(actor, args)
-    const changes = { handoff: text(args, 'summary', SUMMARY), owner: null, state: 'available' }
+    const t = actor.parent ? this.task(positiveId(args, 'task_id')) : this.owned(actor, args)
+    if (t.state !== 'claimed') throw new BoardError(`task ${t.task_id} is not claimed`)
+    const changes = { handoff: text(args, 'summary', SUMMARY) }
     if (args.publication_id !== undefined) {
       const pub = this.publication(positiveId(args, 'publication_id'))
       if (!pub) throw new BoardError('unknown checkpoint publication')
       if (pub.actor !== actor.id) throw new BoardError('release checkpoint must be published by the releasing worker')
       changes.checkpoint = pub.id
     }
-    const version = this.append(actor, 'task_release', { task_id: t.task_id, handoff: changes.handoff, checkpoint: changes.checkpoint ?? null })
-    this.setTask(t, changes, version)
+    const payload = { handoff: changes.handoff, checkpoint: changes.checkpoint ?? null, ...(actor.parent && { owner: this.label(t.owner) }) }
+    const version = this.release(actor, t, 'task_release', payload, changes)
     return { task_id: t.task_id, state: 'available', version }
+  }
+
+  release(actor, t, kind, payload, changes) {
+    const version = this.append(actor, kind, { task_id: t.task_id, ...payload })
+    this.setTask(t, { ...changes, owner: null, state: 'available' }, version)
+    return version
   }
 
   // Keeps a smaller part of the claimed task and exposes the rest as new tasks, all in one
@@ -657,15 +792,68 @@ class Store {
     const state = args.state ?? current.state
     if (!WORKER_STATES.includes(state)) throw new BoardError('invalid worker status')
     const summary = args.summary !== undefined ? text(args, 'summary', { max: 2048 }) : current.summary
-    let dependency = args.dependency !== undefined ? text(args, 'dependency', { max: 512, required: true }) : current.dependency
-    if (state === 'waiting' && !dependency) throw new BoardError('waiting requires a named dependency')
-    if (state !== 'waiting') dependency = null
+    const given = args.dependency !== undefined ? text(args, 'dependency', DEPENDENCY) : current.dependency
+    const dependency = state === 'waiting' ? this.checkWait(actor, given) : null
     const finding = args.finding !== undefined ? text(args, 'finding', { max: 4096, required: true }) : null
     const body = { worker: display(actor), state, summary, dependency }
     const seq = this.append(actor, 'status', body)
-    this.db.prepare('UPDATE workers SET state = ?, summary = ?, dependency = ?, updated = ? WHERE actor = ?').run(state, summary, dependency, seq, actor.id)
+    this.setWorker(actor.id, state, summary, dependency, seq)
     if (finding) body.finding_id = this.append(actor, 'finding', { text: finding })
     return body
+  }
+
+  // DeLM's delm_complete: the worker's outcome for the whole request, made under the current
+  // request revision. `complete` is the goal-met claim the parent checks before it ends the swarm.
+  complete(actor, args) {
+    const { revision } = this.context()
+    if (args.expected_revision !== revision) {
+      throw new BoardError('completion must acknowledge the current board request_revision; this declaration is stale')
+    }
+    const { outcome } = args
+    if (!OUTCOMES.includes(outcome)) throw new BoardError('invalid completion outcome')
+    const summary = text(args, 'summary', { max: 4096, required: true })
+    const dependency = outcome === 'waiting' ? this.checkWait(actor, args.dependency === undefined ? null : text(args, 'dependency', DEPENDENCY)) : null
+    const body = { worker: display(actor), outcome, summary, dependency, expected_revision: revision }
+    const seq = this.append(actor, 'outcome', body)
+    this.setWorker(actor.id, { waiting: 'waiting', blocked: 'blocked' }[outcome] ?? 'working', summary, dependency, seq)
+    return body
+  }
+
+  // Parent only: a new revision of the request, for every worker's next response.
+  request(actor, args) {
+    const change = text(args, 'text', { max: 8192, required: true })
+    const revision = this.context().revision + 1
+    this.db.prepare('UPDATE context SET revision = ? WHERE id = 1').run(revision)
+    this.append(actor, 'request', { revision, text: change })
+    return { request_revision: revision }
+  }
+
+  // DeLM's release_worker_claims, for a worker whose session stopped: its claimed tasks become
+  // available with a handoff. A worker stops itself; the parent names the worker.
+  worker_stop(actor, args) {
+    if (!actor.parent && args.worker !== undefined) throw new BoardError('a worker stops only itself')
+    const target = actor.parent ? this.workerId(text(args, 'worker', NAME)) : actor.id
+    if (!target) throw new BoardError('unknown worker')
+    const reason = text(args, 'reason', SUMMARY)
+    const handoff = `Owner stopped: ${reason}. Reuse published contributions; unpublished files have not been imported.`
+    const released = []
+    for (const r of this.db.prepare("SELECT * FROM tasks WHERE owner = ? AND state = 'claimed' ORDER BY id").all(target)) {
+      const t = Store.row(r)
+      this.release(actor, t, 'task_owner_stopped', { owner: this.label(target), reason }, { handoff })
+      released.push(t.task_id)
+    }
+    const seq = this.append(actor, 'worker_stopped', { worker: this.label(target), reason, released })
+    this.setWorker(target, 'stopped', reason, null, seq)
+    return { worker: this.label(target), state: 'stopped', released }
+  }
+
+  // Parent only. After the end, every change is refused; reads still work.
+  end(actor, args) {
+    if (!END_OUTCOMES.includes(args.outcome)) throw new BoardError(`outcome must be ${END_OUTCOMES.join(', ')}`)
+    const body = { outcome: args.outcome, summary: text(args, 'summary', SUMMARY) }
+    const sequence = this.append(actor, 'end', body)
+    this.db.prepare("UPDATE context SET state = 'ended', outcome = ? WHERE id = 1").run(JSON.stringify({ ...body, sequence }))
+    return { ...body, sequence }
   }
 
   // The board now, or as soon as a peer posts work after `since` (`wait` seconds, at most 25).
@@ -707,6 +895,7 @@ class Store {
     if (owner != null && owner !== 'self' && owner !== 'peer') throw new BoardError('owner filter must be self or peer')
     if (collection !== 'tasks' && (taskState || owner)) throw new BoardError('task filters only apply to tasks')
     const sequence = this.lastSeq()
+    const { revision } = this.context()
     let prior = null
     if (args.cursor !== undefined) {
       try {
@@ -721,6 +910,7 @@ class Store {
       if (!Number.isInteger(prior.after) || !Number.isInteger(prior.through) || prior.after < 0 || prior.through > sequence) {
         throw new BoardError('invalid list cursor boundary')
       }
+      if (prior.revision !== revision) throw new BoardError('The request changed; restart swarm_list without a cursor')
     }
     const through = prior?.through ?? sequence
     const after = prior?.after ?? 0
@@ -752,7 +942,7 @@ class Store {
     const more = rows.length > limit
     rows = rows.slice(0, limit)
     const next = more
-      ? JSON.stringify({ v: 1, collection, actor: actor.id, through, after: rows.at(-1).id, task_state: taskState, owner, task_sequence: taskSequence })
+      ? JSON.stringify({ v: 1, collection, actor: actor.id, revision, through, after: rows.at(-1).id, task_state: taskState, owner, task_sequence: taskSequence })
       : null
     const row = { tasks: (r) => this.summarize(Store.row(r)), publications: (r) => this.publicationRow(r, 512), findings: (r) => this.findingRow(r) }[collection]
     return {
@@ -762,6 +952,7 @@ class Store {
       next_cursor: next,
       through_sequence: through,
       observed_sequence: sequence,
+      request_revision: revision,
       new_events_available: sequence > through,
     }
   }
@@ -898,35 +1089,50 @@ function unifiedDiff(before, after, a, b) {
 }
 
 const always = () => true
+const changes = (role, names) => names.map((c) => [c, { mutates: always, role }])
+// role: who may make the change; a command with no role is open to the parent and the workers.
 const COMMANDS = {
-  ...Object.fromEntries(['task_create', 'task_claim', 'task_update', 'task_release', 'task_split', 'task_finish', 'publish', 'apply'].map((c) => [c, { mutates: always }])),
-  status: { mutates: (args) => STATUS_FIELDS.some((k) => args[k] !== undefined), read: 'look' },
+  ...Object.fromEntries([
+    ...changes(undefined, ['task_create', 'task_release', 'worker_stop']),
+    ...changes('worker', ['task_claim', 'task_update', 'task_split', 'task_finish', 'publish', 'apply', 'complete']),
+    ...changes('parent', ['task_close', 'request', 'end']),
+  ]),
+  status: { mutates: (args) => STATUS_FIELDS.some((k) => args[k] !== undefined), role: 'worker', read: 'look' },
   list: {},
   expand: {},
   export: { readOnly: true },
   diff: { readOnly: true },
 }
+const PARENT_CHANGES = Object.keys(COMMANDS).filter((c) => COMMANDS[c].mutates && COMMANDS[c].role !== 'worker')
 
-// node store.mjs <command>, with {dir, tasksDir, base, actor: {id, name}, cwd, ...args} on stdin.
-// Prints {ok: true, ...} or {ok: false, error}; a rejected call is not a crash, so it exits 0.
-// A tool command answers {result, board}. `export` and `diff` are for viewers: they open the
-// store read-only, need no actor and write nothing.
+// node store.mjs <command>, with {dir, tasksDir, base, parent, roster, actor: {id, name}, cwd, ...args}
+// on stdin. Prints {ok: true, ...} or {ok: false, error}; a rejected call is not a crash, so it exits 0.
+// A tool command answers {result, board}, plus request_updates for a worker that has not seen the
+// latest request revisions. `export` and `diff` are for viewers: they open the store read-only,
+// need no actor and write nothing.
 export function main(command, request) {
   if (!Object.hasOwn(COMMANDS, command)) return { ok: false, error: `unknown command: ${command}` }
   const spec = COMMANDS[command]
-  const { dir, tasksDir, base, actor, ...args } = request
+  const { dir, tasksDir, base, parent, roster, actor: caller, ...args } = request
   if (!dir) return { ok: false, error: 'dir is required' }
   if (command === 'export' && !fs.existsSync(path.join(dir, 'swarm.db'))) return { ok: true, sequence: 0, events: [] }
-  if (!spec.readOnly && !actor?.id) return { ok: false, error: 'actor.id is required' }
+  if (!spec.readOnly && !caller?.id) return { ok: false, error: 'actor.id is required' }
   if (Buffer.byteLength(JSON.stringify(args)) > MAX_ARGUMENT_BYTES) {
     return { ok: false, error: 'the call exceeds 128 KiB; publish files and expand them selectively' }
   }
+  const actor = parent && caller?.id === parent ? { id: caller.id, name: 'parent', parent: true } : caller
+  const mutates = !!spec.mutates?.(args)
+  if (mutates && spec.role === 'worker' && actor.parent) {
+    return { ok: false, error: `the parent cannot ${command}; it acts with ${PARENT_CHANGES.join(', ')}` }
+  }
+  if (mutates && spec.role === 'parent' && !actor.parent) return { ok: false, error: `only the parent can ${command}` }
   let store
   try {
-    store = new Store({ dir, tasksDir, base, readOnly: !!spec.readOnly })
+    store = new Store({ dir, tasksDir, base, parent, roster, readOnly: !!spec.readOnly })
     if (spec.readOnly) return { ok: true, ...store[command](args) }
-    const result = spec.mutates?.(args) ? store.mutate(actor, command, args) : store[spec.read ?? command](actor, args)
-    return { ok: true, result, board: store.view() }
+    const updates = actor.parent ? [] : store.requestUpdates(actor.id)
+    const result = mutates ? store.mutate(actor, command, args) : store[spec.read ?? command](actor, args)
+    return { ok: true, result, board: store.view(), ...(updates.length ? { request_updates: updates } : {}) }
   } catch (err) {
     if (err instanceof BoardError) return { ok: false, error: err.message }
     throw err

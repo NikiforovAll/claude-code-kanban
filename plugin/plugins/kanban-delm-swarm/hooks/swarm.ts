@@ -3,11 +3,11 @@ import type { EngineInterface, Register } from 'claude-code'
 export const SERVER = 'mcp__kanban-delm-swarm__'
 // A tool call is one $.process.run; a waiting status call holds it for up to 25 s.
 const WAIT_CAP_SECONDS = 25
-const RUNTIME_FIELDS = ['dir', 'tasksDir', 'base', 'actor', 'cwd']
+const RUNTIME_FIELDS = ['dir', 'tasksDir', 'base', 'parent', 'roster', 'actor', 'cwd']
 const STATUS_FIELDS = ['state', 'summary', 'dependency', 'finding']
 
 type Worker = { name: string; sessionId?: string }
-type Registry = { listId: string; base?: string; state?: string; workers?: Worker[] }
+type Registry = { listId: string; base?: string; parent?: string; state?: string; workers?: Worker[] }
 export type Swarm = { listId: string; dir: string; tasksDir: string; registry: Registry }
 
 const paths = (description: string) => ({ type: 'array', items: { type: 'string' }, description })
@@ -59,7 +59,7 @@ export const TOOLS: { name: string; command: string; description: string; inputS
         idempotency_key: key,
         state: { enum: ['working', 'waiting', 'blocked'] },
         summary: bounded(2048, false),
-        dependency: bounded(512, true),
+        dependency: { ...bounded(512, true), description: 'What you wait for: task:<id> or worker:<name>. Not your own task or yourself.' },
         finding: bounded(4096, true),
         wait: { type: 'number', description: `Seconds to wait for a peer update, at most ${WAIT_CAP_SECONDS}` },
         since: { type: 'integer', minimum: 0, description: 'Board sequence to wait after; defaults to now' },
@@ -242,6 +242,8 @@ async function run($: EngineInterface, s: Swarm, command: string, input: Record<
     dir: s.dir,
     tasksDir: s.tasksDir,
     base: registry.base,
+    parent: registry.parent,
+    roster: registry.workers,
     actor: { id, ...(name ? { name } : {}) },
     cwd: await $.session.cwd(),
   }

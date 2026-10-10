@@ -4,7 +4,7 @@ import { configDir, SERVER, storePath, TOOLS } from '../hooks/swarm'
 
 const LIST = 'swarm-fix-login-3fa91c'
 const DIR = `C:/cfg/.cck/swarm/${LIST}`
-const REGISTRY = { listId: LIST, base: 'abc123', state: 'running', workers: [{ name: 'w1-3fa91c', sessionId: 'sid-1' }] }
+const REGISTRY = { listId: LIST, base: 'abc123', parent: 'sid-p', state: 'running', workers: [{ name: 'w1-3fa91c', sessionId: 'sid-1' }] }
 
 type Run = { argv: readonly string[]; input: unknown; timeoutMs?: number }
 
@@ -110,6 +110,8 @@ test('a call runs the store with the identity from the session, never from the m
     dir: DIR,
     tasksDir: `C:/cfg/tasks/${LIST}`,
     base: 'abc123',
+    parent: 'sid-p',
+    roster: REGISTRY.workers,
     actor: { id: 'sid-1', name: 'w1-3fa91c' },
     cwd: 'C:/wt/w1',
     idempotency_key: 'k',
@@ -124,6 +126,7 @@ test('a call that sets an identity, workspace or store field is refused and runs
   const res = await $.tool.call(call('swarm_task_claim', { task_id: 3, actor: { id: 'sid-2', name: 'w2' }, cwd: 'C:/wt/w2' }))
   expect(res.deny).toBe('actor, cwd are set by the swarm, not by the call.')
   expect((await $.tool.call(call('swarm_status', { dir: 'C:/other' }))).deny).toBe('dir is set by the swarm, not by the call.')
+  expect((await $.tool.call(call('swarm_status', { parent: 'sid-1' }))).deny).toBe('parent is set by the swarm, not by the call.')
   expect(board.runs.length).toBe(0)
 })
 

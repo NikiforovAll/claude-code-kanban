@@ -59,7 +59,7 @@ describe('swarm store', { skip: !hasSqlite && 'node:sqlite needs Node 22.5 or la
     ({ main } = await import(pathToFileURL(STORE).href));
   });
 
-  const run = (w, command, actor, args = {}) => main(command, { dir: w.dir, tasksDir: w.tasksDir, actor, ...args });
+  const run = (w, command, actor, args = {}) => main(command, { dir: w.dir, tasksDir: w.tasksDir, actor, ...w.extra, ...args });
   const ok = (w, command, actor, args) => {
     const out = run(w, command, actor, args);
     assert.equal(out.ok, true, out.error);
@@ -321,12 +321,12 @@ describe('swarm store', { skip: !hasSqlite && 'node:sqlite needs Node 22.5 or la
     const w = world();
     assert.match(run(w, 'status', a, { idempotency_key: 'wait', state: 'waiting' }).error, /waiting requires a named dependency/);
     const first = run(w, 'status', a, { idempotency_key: 'one', finding: 'Interface uses stable IDs' });
-    ok(w, 'status', b, { idempotency_key: 'two', state: 'waiting', dependency: 'persistence publication', finding: 'Reload needs migration' });
+    ok(w, 'status', b, { idempotency_key: 'two', state: 'waiting', dependency: 'worker:worker-a', finding: 'Reload needs migration' });
     assert.deepEqual(run(w, 'status', a, { idempotency_key: 'one', finding: 'Interface uses stable IDs' }).result, first.result);
     const board = view(w);
     assert.equal(board.findings.length, 2);
     assert.deepEqual(board.findings.map((f) => [f.author, f.text]), [['worker-b', 'Reload needs migration'], ['worker-a', 'Interface uses stable IDs']]);
-    assert.deepEqual(board.workers.find((x) => x.worker === 'worker-b').dependency, 'persistence publication');
+    assert.deepEqual(board.workers.find((x) => x.worker === 'worker-b').dependency, 'worker:worker-a');
     assert.equal(ok(w, 'expand', b, { finding_id: first.result.finding_id }).text, 'Interface uses stable IDs');
     ok(w, 'status', b, { idempotency_key: 'three', state: 'working' });
     assert.equal(view(w).workers.find((x) => x.worker === 'worker-b').dependency, null);
@@ -491,5 +491,167 @@ describe('swarm store', { skip: !hasSqlite && 'node:sqlite needs Node 22.5 or la
     assert.equal(main('diff', { dir: w.dir, publication_id: id, path: 'logo.png' }).binary, true);
     assert.match(main('diff', { dir: w.dir, publication_id: id, path: 'none.txt' }).error, /not in publication/);
     assert.equal(main('export', { dir: w.dir }).sequence, all.sequence);
+  });
+
+  const parent = { id: 'sid-p' };
+  const roster = [
+    { name: 'worker-a', sessionId: a.id },
+    { name: 'worker-b', sessionId: b.id },
+  ];
+  const team = (w) => ({ ...w, extra: { parent: parent.id, roster } });
+  const done = (t, command, actor, args) => {
+    const out = run(t, command, actor, args);
+    assert.equal(out.ok, true, out.error);
+    return out;
+  };
+  const worker = (out, name) => out.board.workers.find((x) => x.worker === name);
+
+  it('completion_requires_current_observed_revision, and a worker gets each request change once', () => {
+    const t = team(world());
+    done(t, 'status', a, { idempotency_key: 'start', summary: 'reading' });
+    assert.deepEqual(done(t, 'request', parent, { idempotency_key: 'r2', text: 'Also support dark mode' }).result, { request_revision: 2 });
+    const read = done(t, 'status', a);
+    assert.equal(read.board.request_revision, 2);
+    assert.deepEqual(read.request_updates, [{ revision: 2, text: 'Also support dark mode' }]);
+    const stale = run(t,'complete', a, { idempotency_key: 'old', outcome: 'complete', expected_revision: 1, summary: 'Done' });
+    assert.match(stale.error, /stale/);
+    const current = done(t, 'complete', a, { idempotency_key: 'new', outcome: 'complete', expected_revision: 2, summary: 'Done' });
+    assert.equal(current.result.expected_revision, 2);
+    assert.deepEqual(current.request_updates, [{ revision: 2, text: 'Also support dark mode' }], 'the acknowledging call still shows the change');
+    assert.equal(done(t, 'status', a).request_updates, undefined);
+    assert.equal(done(t, 'status', b).request_updates.length, 1, 'a worker that never acted sees every change');
+    assert.equal(events(t).find((e) => e.kind === 'outcome').revision, 2);
+  });
+
+  it('a list cursor from an older request revision is refused', () => {
+    const t = team(world());
+    for (let i = 0; i < 3; i++) create(t, a, `t${i}`);
+    const page = done(t, 'list', a, { collection: 'tasks', limit: 1 }).result;
+    assert.equal(page.request_revision, 1);
+    done(t, 'request', parent, { idempotency_key: 'r2', text: 'Change' });
+    assert.match(run(t,'list', a, { collection: 'tasks', limit: 1, cursor: page.next_cursor }).error, /request changed/);
+  });
+
+  it('waiting_dependencies_bind_to_real_peer_work', () => {
+    const t = team(world());
+    const task = create(t, b, 'storage');
+    claim(t, b, 'claim', task);
+    const wait = { outcome: 'waiting', expected_revision: 1, summary: 'Integrate peer storage' };
+    done(t, 'complete', a, { idempotency_key: 'wait', ...wait, dependency: `task:${task}` });
+    const mine = create(t, a, 'mine');
+    claim(t, a, 'claim-mine', mine);
+    for (const [i, dependency] of ['worker:worker-a', 'worker:worker-c', 'task:99999', 'storage publication', `task:${mine}`, undefined].entries()) {
+      assert.equal(run(t,'complete', a, { idempotency_key: `bad-${i}`, ...wait, dependency }).ok, false, String(dependency));
+    }
+    const fin = create(t, b, 'fin');
+    const v = claim(t, b, 'claim-fin', fin);
+    ok(t, 'task_finish', b, { idempotency_key: 'fin-done', task_id: fin, expected_version: v, summary: 'ok' });
+    assert.match(run(t,'status', a, { idempotency_key: 'late', state: 'waiting', dependency: `task:${fin}` }).error, /already finished/);
+    assert.equal(worker(done(t, 'status', a, { idempotency_key: 'peer', state: 'waiting', dependency: 'worker:worker-b' }), 'worker-a').dependency, 'worker:worker-b');
+  });
+
+  it('wait_ready: a peer publication does not finish the named task, and its finish does', () => {
+    const t = team(world());
+    const { base, wb } = workspaces(t, { 'source.txt': 'one' });
+    const task = create(t, b, 'storage');
+    const version = claim(t, b, 'claim', task);
+    done(t, 'complete', a, { idempotency_key: 'wait', outcome: 'waiting', expected_revision: 1, summary: 'Waiting for storage', dependency: `task:${task}` });
+    const waiting = worker(done(t, 'status', a), 'worker-a');
+    assert.deepEqual([waiting.state, waiting.ready, waiting.stalled], ['waiting', false, false]);
+    fs.writeFileSync(path.join(wb, 'source.txt'), 'two');
+    publish(t, b, 'unrelated', ['source.txt'], { cwd: wb, base });
+    assert.equal(worker(done(t, 'status', a), 'worker-a').ready, false, 'a peer publication does not finish the named task');
+    ok(t, 'task_finish', b, { idempotency_key: 'finish', task_id: task, expected_version: version, summary: 'Storage ready' });
+    assert.equal(worker(done(t, 'status', a), 'worker-a').ready, true);
+  });
+
+  it('newly_available_work_wakes_but_already_claimed_work_does_not; a worker dependency wakes on its publication', () => {
+    const t = team(world());
+    const { base, wb } = workspaces(t, { 'api.txt': 'one' });
+    create(t, b, 'old');
+    done(t, 'status', a, { idempotency_key: 'wait', state: 'waiting', dependency: 'worker:worker-b' });
+    assert.equal(worker(done(t, 'status', a), 'worker-a').ready, false, 'work available before the wait does not wake it');
+    const task = create(t, b, 'new');
+    assert.equal(worker(done(t, 'status', a), 'worker-a').ready, true);
+    claim(t, b, 'claim', task);
+    assert.equal(worker(done(t, 'status', a), 'worker-a').ready, false, 'already claimed work does not wake, and the old task predates the wait');
+    const t2 = team(world());
+    const ws = workspaces(t2, { 'api.txt': 'one' });
+    done(t2, 'status', b, { idempotency_key: 'b', summary: 'building' });
+    done(t2, 'status', a, { idempotency_key: 'wait', state: 'waiting', dependency: 'worker:worker-b' });
+    fs.writeFileSync(path.join(ws.wb, 'api.txt'), 'two');
+    publish(t2, b, 'api', ['api.txt'], { cwd: ws.wb, base: ws.base });
+    assert.equal(worker(done(t2, 'status', a), 'worker-a').ready, true);
+    assert.ok(base && wb);
+  });
+
+  it('a waiting worker is stalled when no one can produce its dependency', () => {
+    const t = team(world());
+    const task = create(t, b, 'open');
+    done(t, 'status', b, { idempotency_key: 'b', summary: 'busy' });
+    done(t, 'status', a, { idempotency_key: 'wait-task', state: 'waiting', dependency: `task:${task}` });
+    assert.equal(worker(done(t, 'status', a), 'worker-a').stalled, true, 'an unclaimed task has no producer');
+    done(t, 'status', a, { idempotency_key: 'wait-b', state: 'waiting', dependency: 'worker:worker-b' });
+    assert.equal(worker(done(t, 'status', a), 'worker-a').stalled, false);
+    done(t, 'status', b, { idempotency_key: 'b-wait', state: 'waiting', dependency: 'worker:worker-a' });
+    const both = done(t, 'status', a).board;
+    assert.deepEqual([worker({ board: both }, 'worker-a').stalled, worker({ board: both }, 'worker-b').stalled], [true, true], 'two workers waiting on each other');
+  });
+
+  it('the parent adds, assigns, closes and releases tasks, and cannot do worker work', () => {
+    const t = team(world());
+    const open = done(t, 'task_create', parent, { idempotency_key: 'open', title: 'Open', description: 'Anyone' }).result;
+    assert.deepEqual([open.state, open.owner], ['available', undefined]);
+    const assigned = done(t, 'task_create', parent, { idempotency_key: 'assigned', title: 'Mine', description: 'For a', assignee: 'worker-a' }).result;
+    assert.deepEqual([assigned.state, assigned.owner], ['claimed', 'worker-a']);
+    assert.equal(taskFile(t, assigned.task_id).owner, 'worker-a');
+    assert.equal(events(t).find((e) => e.kind === 'task_create').name, 'parent');
+    assert.match(run(t,'task_create', a, { idempotency_key: 'x', title: 'X', description: 'X', assignee: 'worker-b' }).error, /only the parent assigns/);
+    assert.match(run(t,'task_create', parent, { idempotency_key: 'y', title: 'Y', description: 'Y', assignee: 'worker-z' }).error, /unknown assignee/);
+    const update = { task_id: assigned.task_id, expected_version: assigned.version, title: 'Renamed' };
+    const updated = done(t, 'task_update', a, { idempotency_key: 'u1', ...update }).result;
+    done(t, 'task_release', parent, { idempotency_key: 'take', task_id: assigned.task_id, summary: 'Scope changed' });
+    assert.match(run(t,'task_update', a, { idempotency_key: 'u2', ...update, expected_version: updated.version }).error, /only the current owner/);
+    assert.equal(run(t,'task_close', parent, { idempotency_key: 'close-claimed', task_id: open.task_id, reason: 'x' }).ok, true);
+    assert.equal(ok(t, 'expand', a, { task_id: open.task_id }).summary, 'Closed: x');
+    assert.match(run(t,'task_close', parent, { idempotency_key: 'again', task_id: open.task_id, reason: 'x' }).error, /already finished/);
+    claim(t, b, 'c', assigned.task_id);
+    assert.match(run(t,'task_close', parent, { idempotency_key: 'busy', task_id: assigned.task_id, reason: 'x' }).error, /release it first/);
+    assert.match(run(t,'task_close', a, { idempotency_key: 'w', task_id: assigned.task_id, reason: 'x' }).error, /only the parent/);
+    assert.match(run(t,'task_claim', parent, { idempotency_key: 'p', task_id: open.task_id }).error, /the parent cannot task_claim/);
+    assert.match(run(t,'status', parent, { idempotency_key: 'p', state: 'working' }).error, /the parent cannot status/);
+    assert.equal(done(t, 'status', parent).result.worker, 'parent');
+    assert.equal(done(t, 'status', parent).board.workers.some((x) => x.worker === 'parent'), false);
+  });
+
+  it('a stopped worker releases its claims with a handoff (release_worker_claims)', () => {
+    const t = team(world());
+    const one = create(t, a, 'one');
+    const two = create(t, a, 'two');
+    claim(t, a, 'c1', one);
+    claim(t, a, 'c2', two);
+    assert.match(run(t,'worker_stop', a, { idempotency_key: 's', worker: 'worker-b', reason: 'x' }).error, /stops only itself/);
+    const stopped = done(t, 'worker_stop', parent, { idempotency_key: 'stop', worker: 'worker-a', reason: 'session exited' });
+    assert.deepEqual(stopped.result, { worker: 'worker-a', state: 'stopped', released: [one, two] });
+    assert.equal(worker(stopped, 'worker-a').state, 'stopped');
+    const task = ok(t, 'expand', b, { task_id: one });
+    assert.deepEqual([task.state, task.owner], ['available', null]);
+    assert.match(task.handoff, /^Owner stopped: session exited\. Reuse published contributions/);
+    assert.equal(taskFile(t, one).status, 'pending');
+    assert.deepEqual(events(t).filter((e) => e.kind === 'task_owner_stopped').map((e) => e.payload.task_id), [one, two]);
+    assert.deepEqual(done(t, 'worker_stop', b, { idempotency_key: 'self', reason: 'done' }).result, { worker: 'worker-b', state: 'stopped', released: [] });
+  });
+
+  it('the end records an outcome and refuses every later change', () => {
+    const t = team(world());
+    const id = create(t, a, 'one');
+    assert.match(run(t,'end', a, { idempotency_key: 'e', outcome: 'complete', summary: 'x' }).error, /only the parent/);
+    assert.match(run(t,'end', parent, { idempotency_key: 'bad', outcome: 'done', summary: 'x' }).error, /outcome must be/);
+    const end = done(t, 'end', parent, { idempotency_key: 'end', outcome: 'complete', summary: 'Goal met' });
+    assert.deepEqual([end.board.state, end.board.outcome.outcome, end.board.outcome.summary], ['ended', 'complete', 'Goal met']);
+    assert.deepEqual(done(t, 'end', parent, { idempotency_key: 'end', outcome: 'complete', summary: 'Goal met' }).result, end.result, 'a resent end replays');
+    assert.match(run(t,'task_claim', b, { idempotency_key: 'late', task_id: id }).error, /This swarm has ended/);
+    assert.equal(done(t, 'status', b).board.state, 'ended', 'reads still work');
+    assert.equal(events(t).at(-1).kind, 'end');
   });
 });
