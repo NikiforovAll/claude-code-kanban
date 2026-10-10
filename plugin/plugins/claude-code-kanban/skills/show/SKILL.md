@@ -1,6 +1,6 @@
 ---
 name: show
-description: Show card guide for the cck overlay. Use before a show call that posts HTML (a chart, mockup or diagram), a mermaid diagram, or explains code (a call stack or tree).
+description: Show card guide for the cck overlay. Cards can be a table, chart, diagram, mermaid, mockup, call stack, code tree, diff, widget, or buttons and forms that take the user's answer.
 argument-hint: '[explain|diagram|chart|mockup] [what to show]'
 ---
 
