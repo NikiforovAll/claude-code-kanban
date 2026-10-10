@@ -178,7 +178,7 @@ describe('group list with dispatch groups', () => {
       ]);
       assert.deepEqual(groups[1].members.map((m) => [m.ref, m.title]), [[at(1), 'worker one']]);
       assert.equal(hits.find((u) => u.pathname === '/api/groups').searchParams.get('dispatch'), '1');
-      const include = sessionHits(hits)[0].searchParams.get('include').split(',');
+      const include = sessionHits(hits).find((u) => u.searchParams.get('include')).searchParams.get('include').split(',');
       assert.ok([at(1), at(2)].every((id) => include.includes(id)), 'asks for the dispatched sessions');
       const all = await run(['group', 'list', '--all']);
       assert.match(all.stdout, /-\s+cli-active-pins \(dispatch\) \(2\/2\)/);
@@ -197,7 +197,7 @@ describe('group list with dispatch groups', () => {
     }, board([GROUPS.groups[0], named]));
   });
 
-  it('counts a project member as the sidebar does, from per-project lite requests', async () => {
+  it('counts a project member as the sidebar does, from one lite request', async () => {
     const sid = (n) => `99999999-0000-0000-0000-00000000000${n}`;
     const repoSessions = [
       { id: sid(1), name: 'held elsewhere', project: '/repo/wt', worktree: { repo: '/repo' }, modifiedAt: now, active: true },
@@ -212,9 +212,12 @@ describe('group list with dispatch groups', () => {
     await withBoard(async (run, hits) => {
       const { stdout } = await run(['group', 'list', '--all', '--json']);
       assert.equal(JSON.parse(stdout).groups[0].members[0].sessions, 2, 'plain and worktree; not one held by id or keyed by another repo');
-      const projectHits = sessionHits(hits).filter((u) => u.searchParams.get('project'));
-      assert.deepEqual(projectHits.map((u) => [u.searchParams.get('project'), u.searchParams.get('lite')]), [['/repo', '1']]);
-      assert.ok(sessionHits(hits).every((u) => u.searchParams.get('project') || u.searchParams.get('limit') !== 'all'), 'no request for every session');
+      assert.deepEqual(sessionHits(hits).map((u) => [u.searchParams.get('limit'), u.searchParams.get('lite'), u.searchParams.get('include')]), [['all', '1', null]]);
+      hits.length = 0;
+      const active = await run(['group', 'list', '--json']);
+      assert.equal(JSON.parse(active.stdout).groups[0].members[0].sessions, 2);
+      assert.ok(sessionHits(hits).every((u) => u.searchParams.get('lite') === '1'));
+      assert.equal(sessionHits(hits).find((u) => u.searchParams.get('limit') === 'all').searchParams.get('filter'), 'active');
     }, { sessions: [...SESSIONS, ...repoSessions], groups: { rev: 1, groups } });
   });
 
@@ -222,10 +225,10 @@ describe('group list with dispatch groups', () => {
     const ids = Array.from({ length: 450 }, (_, i) => `abcdef00-0000-0000-0000-${String(i).padStart(12, '0')}`);
     const groups = [{ id: 'big', name: 'Big', parent: null, members: ids.map((ref) => ({ type: 'session', ref })) }];
     await withBoard(async (run, hits) => {
-      const { code, stdout } = await run(['group', 'list', '--all', '--json']);
+      const { code, stdout } = await run(['group', 'list', '--json']);
       assert.equal(code, 0);
       assert.equal(JSON.parse(stdout).groups[0].total, 450);
-      const batches = sessionHits(hits).map((u) => u.searchParams.get('include').split(','));
+      const batches = sessionHits(hits).filter((u) => u.searchParams.get('include')).map((u) => u.searchParams.get('include').split(','));
       assert.ok(batches.every((b) => b.length <= 100));
       assert.equal(new Set(batches.flat()).size, 450);
     }, { groups: { rev: 1, groups } });

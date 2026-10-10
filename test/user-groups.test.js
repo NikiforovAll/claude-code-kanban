@@ -1,6 +1,11 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
+const { mkdtempSync, readFileSync, writeFileSync } = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const { createUserGroupStore } = require('../lib/user-groups');
+const { stampedJsonFile } = require('../lib/stamped-json-file');
+const { httpError } = require('../lib/http-error');
 
 function harness(initial = null) {
   const disk = { data: initial, saves: 0 };
@@ -30,42 +35,27 @@ const status = (fn) => {
 
 describe('user groups file errors', () => {
   it('keeps the last good groups and writes nothing while the file cannot be read', () => {
-    const { disk, store } = harness();
-    const s = store();
+    const file = path.join(mkdtempSync(path.join(os.tmpdir(), 'cck-groups-')), 'groups.json');
+    const s = createUserGroupStore(stampedJsonFile(file, (f, data) => writeFileSync(f, JSON.stringify(data))));
     s.create({ name: 'Work' });
     const good = JSON.parse(JSON.stringify(s.state()));
-    const saves = disk.saves;
-    let broken = new SyntaxError('Unexpected end of JSON input');
-    const flaky = createUserGroupStore({
-      load: () => {
-        if (broken) throw broken;
-        return disk.data;
-      },
-      save: (data) => {
-        disk.data = JSON.parse(JSON.stringify(data));
-        disk.saves++;
-      },
-    });
-    assert.deepEqual(flaky.state().groups, [], 'a failed first read starts empty');
-    broken = null;
-    flaky.reload();
-    broken = new Error('EBUSY');
-    assert.equal(flaky.reload(), false);
-    assert.deepEqual(flaky.state(), good);
-    assert.equal(status(() => flaky.create({ name: 'Home' })), 503);
-    assert.deepEqual(flaky.state(), good, 'the refused change is undone in memory');
-    assert.equal(disk.saves, saves);
-    broken = null;
-    flaky.reload();
-    assert.equal(flaky.create({ name: 'Home' }).rev, 2);
+    writeFileSync(file, '{"rev":');
+    assert.equal(s.reload(), false);
+    assert.deepEqual(s.state(), good);
+    assert.equal(status(() => s.create({ name: 'Home' })), 503);
+    assert.deepEqual(JSON.parse(JSON.stringify(s.state())), good, 'the refused change is undone in memory');
+    assert.equal(readFileSync(file, 'utf8'), '{"rev":');
+    writeFileSync(file, JSON.stringify(good));
+    s.reload();
+    assert.equal(s.create({ name: 'Home' }).rev, 2);
   });
 
-  it('a failed save answers 503 and leaves memory as it was', () => {
+  it('a refused save leaves memory as it was', () => {
     let fail = false;
     const flaky = createUserGroupStore({
       load: () => null,
       save: () => {
-        if (fail) throw new Error('EPERM');
+        if (fail) throw httpError(503, 'groups.json not saved (EPERM)');
       },
       newId: () => 'g1',
     });

@@ -1,9 +1,12 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const { readFileSync } = require('node:fs');
+const { mkdtempSync, readFileSync, writeFileSync } = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const vm = require('node:vm');
 const { createSessionPinStore } = require('../lib/session-pins');
+const { stampedJsonFile } = require('../lib/stamped-json-file');
+const { httpError } = require('../lib/http-error');
 
 function harness(initial = null) {
   const disk = { data: initial, saves: 0, changed: true };
@@ -18,7 +21,6 @@ function harness(initial = null) {
         disk.data = JSON.parse(JSON.stringify(data));
         disk.saves++;
       },
-      now: () => '2026-10-10T00:00:00.000Z',
     });
   const write = (data) => {
     disk.data = data;
@@ -41,34 +43,31 @@ describe('session pin store', () => {
   it('keeps a flat map on disk and survives a restart', () => {
     const { disk, store } = harness();
     const s = store();
-    assert.deepEqual(s.set('a', 'pinned'), [{ id: 'a', state: 'pinned' }]);
-    s.set('b', 'sticky');
-    assert.deepEqual(s.set('a', 'none'), [{ id: 'a', state: 'none' }]);
+    assert.deepEqual(s.set(['a'], 'pinned'), [{ id: 'a', state: 'pinned' }]);
+    s.set(['b'], 'sticky');
+    assert.deepEqual(s.set(['a'], 'none'), [{ id: 'a', state: 'none' }]);
     assert.deepEqual(disk.data, { b: 'sticky' });
-    assert.deepEqual(harness(disk.data).store().state(), { pins: { b: 'sticky' }, pinsMigratedAt: null });
+    assert.deepEqual(harness(disk.data).store().state(), { pins: { b: 'sticky' } });
   });
 
   it('refuses a bad change', () => {
     const s = harness().store();
-    assert.equal(status(() => s.set('a', 'up')), 400);
-    assert.equal(status(() => s.set('', 'pinned')), 400);
-    assert.equal(status(() => s.set('pinsMigratedAt', 'pinned')), 400);
+    assert.equal(status(() => s.set(['a'], 'up')), 400);
+    assert.equal(status(() => s.set([''], 'pinned')), 400);
+    assert.equal(status(() => s.set('a', 'pinned')), 400, 'ids is a list');
   });
 
   it('merges every import and keeps what the server holds', () => {
-    const { disk, store } = harness({ a: 'pinned' });
+    const { disk, store } = harness({ a: 'pinned', pinsMigratedAt: '2026-10-01' });
     const s = store();
-    const first = s.importLocal({ pinned: ['a', 'b', 'c'], sticky: ['a', 'c'] });
-    assert.equal(first.imported, true);
-    assert.deepEqual(first.changed, [
+    assert.deepEqual(s.importLocal({ pinned: ['a', 'b', 'c'], sticky: ['a', 'c'] }), [
       { id: 'c', state: 'sticky' },
       { id: 'b', state: 'pinned' },
     ]);
-    assert.deepEqual(disk.data, { a: 'pinned', c: 'sticky', b: 'pinned', pinsMigratedAt: '2026-10-10T00:00:00.000Z' });
-    const other = harness({ ...disk.data, pinsMigratedAt: 'then' }).store();
-    const second = other.importLocal({ pinned: ['d', 'c'] });
-    assert.deepEqual(second, { imported: true, changed: [{ id: 'd', state: 'pinned' }] });
-    assert.deepEqual(other.state(), { pins: { a: 'pinned', c: 'sticky', b: 'pinned', d: 'pinned' }, pinsMigratedAt: 'then' });
+    assert.deepEqual(disk.data, { a: 'pinned', c: 'sticky', b: 'pinned' }, 'an old file key is dropped');
+    const other = harness(disk.data).store();
+    assert.deepEqual(other.importLocal({ pinned: ['d', 'c'] }), [{ id: 'd', state: 'pinned' }]);
+    assert.deepEqual(other.state(), { pins: { a: 'pinned', c: 'sticky', b: 'pinned', d: 'pinned' } });
   });
 
   it('changes several sessions in one write', () => {
@@ -84,62 +83,80 @@ describe('session pin store', () => {
     assert.equal(status(() => s.set(['a', ''], 'none')), 400);
   });
 
-  it('keeps the last good pins and writes nothing while the file cannot be read', () => {
-    const { disk, write } = harness({ a: 'pinned', pinsMigratedAt: 'then' });
-    let broken = new SyntaxError('Unexpected token } in JSON');
-    const flaky = createSessionPinStore({
-      load: () => {
-        if (broken) throw broken;
-        return disk.data;
-      },
-      save: (data) => {
-        disk.data = data;
-        disk.saves++;
-      },
-    });
-    assert.deepEqual(flaky.state().pins, {});
-    broken = null;
-    assert.deepEqual(flaky.reload(), [{ id: 'a', state: 'pinned' }]);
-    broken = new Error('EBUSY: resource busy or locked');
-    assert.deepEqual(flaky.reload(), [], 'a failed read changes nothing');
-    assert.deepEqual(flaky.state(), { pins: { a: 'pinned' }, pinsMigratedAt: 'then' });
-    assert.equal(status(() => flaky.set('b', 'pinned')), 503);
-    assert.equal(status(() => flaky.importLocal({ pinned: ['b'] })), 503);
-    assert.equal(disk.saves, 0);
-    assert.deepEqual(flaky.state().pins, { a: 'pinned' });
-    broken = null;
-    write({ a: 'pinned', c: 'sticky', pinsMigratedAt: 'then' });
-    assert.deepEqual(flaky.reload(), [{ id: 'c', state: 'sticky' }], 'the next read takes the fixed file');
-    flaky.set('b', 'pinned');
-    assert.deepEqual(disk.data, { a: 'pinned', c: 'sticky', b: 'pinned', pinsMigratedAt: 'then' });
-  });
-
-  it('a failed save answers 503 and leaves memory as it was', () => {
+  it('a refused save leaves memory as it was and passes the error on', () => {
     let fail = false;
     const flaky = createSessionPinStore({
       load: () => null,
       save: () => {
-        if (fail) throw new Error('EPERM: operation not permitted');
+        if (fail) throw httpError(503, 'pins.json not saved (EPERM)');
       },
     });
-    flaky.set('a', 'pinned');
+    flaky.set(['a'], 'pinned');
     fail = true;
-    assert.equal(status(() => flaky.set('a', 'none')), 503);
+    assert.equal(status(() => flaky.set(['a'], 'none')), 503);
     assert.equal(status(() => flaky.importLocal({ pinned: ['b'] })), 503);
-    assert.deepEqual(flaky.state(), { pins: { a: 'pinned' }, pinsMigratedAt: null });
+    assert.deepEqual(flaky.state(), { pins: { a: 'pinned' } });
   });
 
   it('reloads after another board writes the file and names what changed', () => {
     const { store, write } = harness({ a: 'pinned', b: 'pinned' });
     const s = store();
     assert.deepEqual(s.reload(), []);
-    write({ a: 'sticky', c: 'pinned', pinsMigratedAt: 'x' });
+    write({ a: 'sticky', c: 'pinned' });
     assert.deepEqual(s.reload(), [
       { id: 'a', state: 'sticky' },
       { id: 'b', state: 'none' },
       { id: 'c', state: 'pinned' },
     ]);
-    assert.deepEqual(s.state(), { pins: { a: 'sticky', c: 'pinned' }, pinsMigratedAt: 'x' });
+    assert.deepEqual(s.state(), { pins: { a: 'sticky', c: 'pinned' } });
+  });
+});
+
+describe('stamped JSON file', () => {
+  const tmp = () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'cck-stamped-'));
+    return path.join(dir, 'pins.json');
+  };
+  const atomic = (file, data) => writeFileSync(file, JSON.stringify(data));
+
+  it('keeps memory and refuses a write while the file cannot be read, then takes the fixed file', () => {
+    const file = tmp();
+    const store = createSessionPinStore(stampedJsonFile(file, atomic));
+    store.set(['a'], 'pinned');
+    writeFileSync(file, '{"a":"pinned", "b":');
+    assert.deepEqual(store.reload(), [], 'a failed read changes nothing');
+    assert.deepEqual(store.state().pins, { a: 'pinned' });
+    const err = (() => {
+      try {
+        store.set(['b'], 'pinned');
+      } catch (e) {
+        return e;
+      }
+    })();
+    assert.equal(err.status, 503);
+    assert.equal(err.expose, true);
+    assert.match(err.message, /pins\.json cannot be read .*fix or delete it/);
+    assert.equal(status(() => store.importLocal({ pinned: ['b'] })), 503);
+    assert.equal(readFileSync(file, 'utf8'), '{"a":"pinned", "b":', 'the broken file is left for the user');
+    writeFileSync(file, '{"a":"pinned","c":"sticky"}');
+    assert.deepEqual(store.reload(), [{ id: 'c', state: 'sticky' }]);
+    store.set(['b'], 'pinned');
+    assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')), { a: 'pinned', c: 'sticky', b: 'pinned' });
+  });
+
+  it('starts empty on a broken file and answers a failed write with 503', () => {
+    const file = tmp();
+    writeFileSync(file, 'nope');
+    const store = createSessionPinStore(stampedJsonFile(file, atomic));
+    assert.deepEqual(store.state().pins, {});
+    assert.equal(status(() => store.set(['a'], 'pinned')), 503);
+    writeFileSync(file, '{}');
+    store.reload();
+    const failing = createSessionPinStore(stampedJsonFile(file, () => {
+      throw Object.assign(new Error('EPERM: operation not permitted'), { code: 'EPERM' });
+    }));
+    assert.throws(() => failing.set(['a'], 'pinned'), { status: 503, message: 'pins.json not saved (EPERM)' });
+    assert.deepEqual(failing.state().pins, {});
   });
 });
 
@@ -149,7 +166,7 @@ const json = (body, status = 200) => new Response(JSON.stringify(body), { status
 
 // The board's pin code against a fake server and a fake localStorage.
 function makePage(local = {}) {
-  const server = { pins: {}, pinsMigratedAt: null, imports: 0, posts: [], failPost: false };
+  const server = { pins: {}, imports: 0, posts: [], failPost: false };
   const ls = new Map(Object.entries(local).map(([k, v]) => [k, JSON.stringify(v)]));
   const ctx = {
     console: { warn() {} },
@@ -170,19 +187,18 @@ function makePage(local = {}) {
     fetchSessions: () => ctx.fetched++,
     renderSessions: () => ctx.rendered++,
     api: async (url, opts = {}) => {
-      if (url === '/api/session/pins') return json({ pins: server.pins, pinsMigratedAt: server.pinsMigratedAt });
+      if (url === '/api/session/pins') return json({ pins: server.pins });
       if (url === '/api/session/pins/import') {
         server.imports++;
         for (const id of opts.body.sticky) server.pins[id] ??= 'sticky';
         for (const id of opts.body.pinned) server.pins[id] ??= 'pinned';
-        server.pinsMigratedAt ??= 'now';
-        return json({ pins: server.pins, pinsMigratedAt: server.pinsMigratedAt });
+        return json({ pins: server.pins });
       }
       if (url === '/api/session/pin') {
         server.posts.push(opts.body);
         if (server.failPost) return json({ error: 'disk full' }, 500);
-        const { id, ids, state } = opts.body;
-        for (const x of ids ?? [id]) {
+        const { ids, state } = opts.body;
+        for (const x of ids) {
           if (state === 'none') delete server.pins[x];
           else server.pins[x] = state;
         }
@@ -199,7 +215,6 @@ function makePage(local = {}) {
         'syncSessionPins',
         'applyServerPins',
         'showPinnedSessions',
-        'savedPinState',
         'sendPinChange',
         'postPins',
         'clearSessionPin',
@@ -232,7 +247,6 @@ describe('board pins', () => {
 
     const other = makePage({ 'pinned-sessions': ['b', 'a'] });
     other.server.pins = page.server.pins;
-    other.server.pinsMigratedAt = page.server.pinsMigratedAt;
     await other.ctx.syncSessionPins();
     assert.equal(other.server.imports, 1, 'a second origin merges its own lists');
     assert.deepEqual(other.server.pins, { a: 'sticky', z: 'pinned', b: 'pinned' });
@@ -254,7 +268,7 @@ describe('board pins', () => {
     page.ctx.stickySessionIds.add('a');
     page.ctx.toggleSessionPin('a');
     await new Promise((r) => setImmediate(r));
-    assert.deepEqual(JSON.parse(JSON.stringify(page.server.posts)), [{ id: 'a', state: 'pinned' }]);
+    assert.deepEqual(JSON.parse(JSON.stringify(page.server.posts)), [{ ids: ['a'], state: 'pinned' }]);
     assert.equal(page.ctx.getSessionPinState('a'), 'sticky', 'the page still shows it sticky');
   });
 
@@ -274,7 +288,7 @@ describe('board pins', () => {
 
   it('reads pins from the server only', async () => {
     const page = makePage();
-    Object.assign(page.server, { pins: { b: 'pinned' }, pinsMigratedAt: 'then' });
+    page.server.pins = { b: 'pinned' };
     await page.ctx.syncSessionPins();
     assert.deepEqual(page.ctx.pins(), { pinned: ['b'], sticky: [] });
     assert.equal(page.server.imports, 0);
@@ -282,7 +296,7 @@ describe('board pins', () => {
 
   it('a re-read renders only when the pins changed, and fetches a pinned session it lacks', async () => {
     const page = makePage();
-    Object.assign(page.server, { pins: { a: 'pinned' }, pinsMigratedAt: 'then' });
+    page.server.pins = { a: 'pinned' };
     await page.ctx.syncSessionPins();
     await page.ctx.syncSessionPins();
     assert.equal(page.ctx.rendered, 1);
@@ -296,7 +310,6 @@ describe('board pins', () => {
 
   it('saves a pin and an unpin, one session per request', async () => {
     const page = makePage();
-    page.server.pinsMigratedAt = 'then';
     await page.ctx.syncSessionPins();
     page.ctx.toggleSessionPin('a');
     await new Promise((r) => setImmediate(r));
@@ -309,7 +322,7 @@ describe('board pins', () => {
 
   it('shows a failed save and re-reads the server', async () => {
     const page = makePage();
-    Object.assign(page.server, { pins: { b: 'pinned' }, pinsMigratedAt: 'then', failPost: true });
+    Object.assign(page.server, { pins: { b: 'pinned' }, failPost: true });
     await page.ctx.syncSessionPins();
     page.ctx.pinnedSessionIds.add('x');
     await page.ctx.sendPinChange('a');
@@ -321,7 +334,6 @@ describe('board pins', () => {
 
   it('applies a pushed change from another tab or board', async () => {
     const page = makePage();
-    page.server.pinsMigratedAt = 'then';
     await page.ctx.syncSessionPins();
     page.ctx.handleSessionPinEvent({ id: 'b', state: 'sticky' });
     assert.deepEqual(page.ctx.pins(), { pinned: ['b'], sticky: ['b'] });
@@ -340,7 +352,7 @@ describe('board pins', () => {
 
   it('Clean Orphaned unpins every orphan in one request', async () => {
     const page = makePage();
-    Object.assign(page.server, { pins: { a: 'pinned', x: 'pinned', y: 'sticky' }, pinsMigratedAt: 'then' });
+    page.server.pins = { a: 'pinned', x: 'pinned', y: 'sticky' };
     await page.ctx.syncSessionPins();
     vm.runInNewContext(
       [

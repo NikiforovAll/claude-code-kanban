@@ -2175,14 +2175,8 @@ function showPinnedSessions(added) {
   else renderSessions();
 }
 
-// The pin the user set. A sticky that `session open` added is only this page's and is not saved.
-function savedPinState(sessionId) {
-  if (!pinnedSessionIds.has(sessionId)) return 'none';
-  return stickySessionIds.has(sessionId) && !openedStickyIds.has(sessionId) ? 'sticky' : 'pinned';
-}
-
 function sendPinChange(sessionId) {
-  return postPins({ id: sessionId, state: savedPinState(sessionId) });
+  return postPins({ ids: [sessionId], state: getSessionPinState(sessionId, { saved: true }) });
 }
 
 // A write names only its sessions, so the last write for a session wins. A failed save re-reads the
@@ -2236,7 +2230,7 @@ function toggleSessionSticky(sessionId) {
 
 // The echo of this page's own change is a no-op, so the selected session keeps its deferred place.
 function handleSessionPinEvent({ id, state }) {
-  if (!id || savedPinState(id) === state) return;
+  if (!id || getSessionPinState(id, { saved: true }) === state) return;
   clearSessionPin(id);
   if (state === 'pinned') pinnedSessionIds.add(id);
   if (state === 'sticky') {
@@ -2254,8 +2248,9 @@ function isPlacedSticky(id) {
   return stickySessionIds.has(id) && !deferredPinPlacement.has(id);
 }
 
-function getSessionPinState(sessionId) {
-  if (stickySessionIds.has(sessionId)) return 'sticky';
+// `saved` gives the pin the user set: a sticky that `session open` added is only this page's.
+function getSessionPinState(sessionId, { saved = false } = {}) {
+  if (stickySessionIds.has(sessionId) && !(saved && openedStickyIds.has(sessionId))) return 'sticky';
   if (pinnedSessionIds.has(sessionId)) return 'pinned';
   return 'none';
 }

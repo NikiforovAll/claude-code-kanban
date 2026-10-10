@@ -55,6 +55,7 @@ const { createProcStats } = require('./lib/proc-stats');
 const { createGroupStore, isGroupName, suggestGroupName } = require('./lib/dispatch-groups');
 const { createUserGroupStore } = require('./lib/user-groups');
 const { createSessionPinStore } = require('./lib/session-pins');
+const { stampedJsonFile } = require('./lib/stamped-json-file');
 const { ownerLinks, moveRecipients } = require('./lib/owner-routing');
 const { parseReviewSource, parseActionBody, formatActionMarkdown } = require('./lib/preview-action');
 const { createDispatchedStore, scanTranscripts, pruneSessionDirs, pruneContextStatus, pruneTaskMaps, retentionMs } = require('./lib/retention');
@@ -198,36 +199,7 @@ const jsonFile = (file) => ({
   save: (data) => writeJsonAtomicOrLog(file, data),
 });
 
-// `load` answers undefined while the file's mtime and size are the ones last read or written, and
-// null when there is no file. A file that cannot be read or parsed (a hand edit, a cut-off write,
-// EBUSY while another board renames over it) throws and keeps the old stamp, so the next load
-// tries again. `save` throws when the write fails.
-const stampedJsonFile = (file) => {
-  const stampOf = () => {
-    try {
-      const s = statSync(file);
-      return `${s.mtimeMs}:${s.size}`;
-    } catch {
-      return null;
-    }
-  };
-  let stamp;
-  return {
-    load: () => {
-      const next = stampOf();
-      if (next === stamp) return undefined;
-      const data = next === null ? null : JSON.parse(readFileSync(file, 'utf8'));
-      stamp = next;
-      return data;
-    },
-    save: (data) => {
-      writeJsonAtomic(file, data);
-      stamp = stampOf();
-    },
-  };
-};
-
-const sessionPins = createSessionPinStore(stampedJsonFile(PINS_FILE));
+const sessionPins = createSessionPinStore(stampedJsonFile(PINS_FILE, writeJsonAtomic));
 
 // Port discovery for out-of-process helpers (the plugin's doorbell mod, the CLI).
 // The pid rides along so a reader can tell a live server from a file left behind by
@@ -4028,41 +4000,33 @@ chokidar.watch(PINS_FILE, { ignoreInitial: true }).on('all', (event) => {
 });
 
 function pinsReply() {
-  const { pins, pinsMigratedAt } = sessionPins.state();
-  return { pins, pinsMigratedAt, items: Object.entries(pins).map(([id, state]) => ({ id, state })) };
+  const { pins } = sessionPins.state();
+  return { pins, items:Object.entries(pins).map(([id, state]) => ({ id, state })) };
 }
 
 function pinRoute(fn) {
-  return (req, res, next) => {
+  return (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     broadcastPins(sessionPins.reload());
-    try {
-      res.json(fn(req.body || {}));
-    } catch (e) {
-      // The page shows the message: a pins.json that cannot be read or written is for the user to fix.
-      if (e.status === 503) return res.status(503).json({ error: e.message });
-      next(e);
-    }
+    res.json(fn(req.body || {}));
   };
 }
 
-// `ids` changes several sessions in one write, for the board's Clean Orphaned.
-app.post('/api/session/pin', pinRoute(({ id, ids, state }) => {
-  broadcastPins(sessionPins.set(ids ?? id, state));
-  return { success: true, id, ids, state };
+app.post('/api/session/pin', pinRoute(({ ids, state }) => {
+  broadcastPins(sessionPins.set(ids, state));
+  return { success: true, ids, state };
 }));
 
 app.post('/api/session/pins/import', pinRoute((b) => {
-  const { imported, changed } = sessionPins.importLocal(b);
-  broadcastPins(changed);
-  return { imported, ...pinsReply() };
+  broadcastPins(sessionPins.importLocal(b));
+  return pinsReply();
 }));
 
 app.get('/api/session/pins', pinRoute(() => pinsReply()));
 // #endregion
 
 // #region USER_GROUPS
-const userGroups = createUserGroupStore(stampedJsonFile(USER_GROUPS_FILE));
+const userGroups = createUserGroupStore(stampedJsonFile(USER_GROUPS_FILE, writeJsonAtomic));
 // The watcher tells this board's pages about another board's write; the reload in each route
 // covers a write that lands before the watcher fires.
 chokidar.watch(USER_GROUPS_FILE, { ignoreInitial: true }).on('all', (event) => {
@@ -4081,7 +4045,6 @@ function groupRoute(fn) {
       out = fn(req.body || {}, req.params);
     } catch (e) {
       if (e.status === 409) return res.status(409).json({ error: e.message, ...userGroups.state() });
-      if (e.status === 503) return res.status(503).json({ error: e.message });
       return next(e);
     }
     res.json(out);
@@ -4522,7 +4485,7 @@ app.use((err, req, res, next) => {
   if (res.headersSent || !req.path.startsWith('/api/')) return next(err);
   const status = err.status || 500;
   if (status >= 500) console.error(`Error in ${req.method} ${req.path}:`, err);
-  res.status(status).json({ error: status >= 500 ? 'Internal error' : err.message });
+  res.status(status).json({ error: status >= 500 && !err.expose ? 'Internal error' : err.message });
 });
 
 // Watch for file changes (chokidar handles non-existent paths)

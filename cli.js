@@ -896,7 +896,7 @@ async function runSessionPinCli(args) {
   const resolved = await resolveSessionByIdOrPrefix(idArg);
   if (!resolved) return 1;
   try {
-    if (!await cliPostJson('/api/session/pin', { id: resolved.id, state }, 'Pin')) return 1;
+    if (!await cliPostJson('/api/session/pin', { ids: [resolved.id], state }, 'Pin')) return 1;
     const label = state === 'none' ? 'unpinned' : state;
     console.log(`Session ${label}: ${resolved.id}${resolved.customTitle ? ` (${resolved.customTitle})` : ''}`);
     return 0;
@@ -1013,10 +1013,10 @@ async function runGroupListCli(args) {
     ({ rev, groups, released, dispatch } = await cliGetJson('/api/groups?dispatch=1', 'Group list'));
     const memberRefs = groups.flatMap((g) => g.members.filter((m) => m.type === 'session').map((m) => m.ref));
     const sessionRefs = [...new Set([...memberRefs, ...Object.keys(dispatch || {})])];
-    const projects = [...new Set(groups.flatMap((g) => g.members.filter((m) => m.type === 'project').map((m) => m.ref)))];
+    // An inactive session held by id is still listed, so only the active list needs the id lookups.
     const lists = await Promise.all([
-      fetchSessionsByIds(sessionRefs, 'Group list', { lite: true }),
-      ...projects.map((project) => fetchSessionsList({ limit: null, project, activeOnly, lite: true }, 'Group list')),
+      fetchSessionsList({ limit: null, activeOnly, lite: true }, 'Group list'),
+      activeOnly ? fetchSessionsByIds(sessionRefs, 'Group list', { lite: true }) : [],
     ]);
     const sessions = uniqueById(lists.flat());
     groups = describeGroupMembers(placeDispatched(groups, sessions, released), sessions, activeOnly);
