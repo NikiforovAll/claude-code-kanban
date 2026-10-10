@@ -194,19 +194,21 @@ Lists and opens Claude Code sessions. Where a command takes `<id>`, you can give
 ### session list
 
 ```bash
-claude-code-kanban session list [--active] [--days <n>] [--project <name>] [--limit <n|all>] [--no-pins] [--json]
+claude-code-kanban session list [--all] [--days <n>] [--project <name>] [--limit <n|all>] [--no-pins] [--json]
 ```
+
+Lists the active sessions, the same ones the sidebar's Active view shows. The server decides which sessions are active: a session that runs in the board terminal, or a session with messages and open tasks, live agents, a wait on the user or recent activity.
 
 | Flag | What it does |
 | --- | --- |
-| `--active` | Only sessions with recent activity, as in the sidebar's Active filter. |
+| `--all` | Every session, active or not. |
 | `--days <n>` | Only sessions changed in the last `n` days. Fractions work, for example `0.5`. |
 | `--project <name>` | Only sessions of matching projects. An absolute path selects that one project. Other text matches any part of the project path. The match ignores case, and `\` and `/` are the same. |
 | `--limit <n\|all>` | Maximum rows. Default 10. `all` removes the limit. |
 | `--no-pins` | Treats pinned sessions like other sessions. |
 | `--json` | Prints JSON. Each entry has a `pinState` field. |
 
-By default pinned and sticky sessions are always in the list, even past the limit or outside the `--active` and `--days` filters. `--project` still removes them. Sticky sessions come first. The table has the columns `ID`, `PIN`, `STATUS` (`idle`, `active`, `busy` or `wait`), `AGE`, `TASKS`, `PROJECT` and `TITLE`.
+By default pinned and sticky sessions are always in the list, even when they are not active, past the limit or outside `--days`. `--project` still removes them. Sticky sessions come first. The table has the columns `ID`, `PIN`, `STATUS` (`idle`, `active`, `busy` or `wait`), `AGE`, `TASKS`, `PROJECT` and `TITLE`. The command accepts `--active` from older scripts and ignores it.
 
 ### session search
 
@@ -238,7 +240,7 @@ Prints the session's title, status, project, branch and task counts. When the pl
 claude-code-kanban session pin <id> [--sticky] [--unpin]
 ```
 
-Pins the session in the sidebar. `--sticky` makes it sticky: always shown, at the top of the list. `--unpin` clears the pin and the sticky state. The server keeps pins in `<config-dir>/.cck/pins.json`, so `session list` sees them.
+Pins the session in the sidebar. `--sticky` makes it sticky: always shown, at the top of the list. `--unpin` clears the pin and the sticky state. The server keeps pins in `<config-dir>/.cck/pins.json`, so `session list` and every board on the config dir see them.
 
 ### session group
 
@@ -283,10 +285,14 @@ Lists the subagents of the session with the columns `AGENT`, `STATUS`, `AGE`, `T
 ## group list
 
 ```bash
-claude-code-kanban group list [--json]
+claude-code-kanban group list [--all] [--json]
 ```
 
-Lists the session groups in sidebar order, with the columns `ID`, `PROJECTS`, `SESSIONS` and `NAME`. A nested group is indented under its parent. Pass a name, a path or an id from this list to `session group`. Dispatch groups are not listed, because they go when their sessions end. `--json` prints `{rev, groups}`, each group as `{id, name, parent, members}`.
+Lists the session groups in sidebar order, each with the members the sidebar's Active view shows (active, pinned or sticky), and the projects that have such a session. Each group line ends with `visible/total`, the members shown and all members. `--all` shows every member. The table has the columns `ID`, `STATUS`, `AGE`, `PIN` and `NAME`. A nested group is indented under its parent, and its members under it. Pass a name, a path or an id from this list to `session group`.
+
+A session started with `dispatch start --group` shows in its dispatch group, as in the sidebar: after the user groups, with `(dispatch)` after the name and `-` as the ID. A user group that holds the session or its project keeps it, and a user group with the same name, in any case, takes it in. A session removed from its dispatch group in the sidebar does not show there. A dispatch group goes when its sessions end.
+
+`--json` prints `{rev, groups}`, each group as `{id, name, parent, visible, total, members}`. A dispatch group has `dispatch: true` and the id `dispatch:<name>`, which `session group` does not take. A session member has `title`, `branch`, `status`, `pinned` and `age`, so you do not need `session list` to describe it. A session member whose session is gone has `missing: true`. A project member has `sessions`, the count of its sessions shown.
 
 ## task list
 

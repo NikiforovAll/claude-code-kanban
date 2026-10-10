@@ -323,18 +323,16 @@ async function getJson(path, fallback = null, opts) {
 
 async function fetchSessions(includeTasks = true, focusId = currentSessionId) {
   try {
-    const allPinnedIds = new Set([...pinnedSessionIds, ...stickySessionIds]);
-    if (revealedPlanSessionId) allPinnedIds.add(revealedPlanSessionId);
-    if (revealedStorageSessionId) allPinnedIds.add(revealedStorageSessionId);
+    // The focused session must come back whatever the filters say: renderSession and the
+    // info modal both look it up in `sessions` and bail when it is absent, so a session
+    // opened from outside the current filter would leave the view on the previous one.
+    // The server adds the pinned sessions itself; the ones `session open` showed are this page's.
+    const include = [focusId, revealedPlanSessionId, revealedStorageSessionId, ...openedStickyIds].filter(Boolean);
     const recent = filterProject === '__recent__';
     const res = await api('/api/sessions', {
       query: {
         limit: sessionLimit,
-        pinned: allPinnedIds.size > 0 ? [...allPinnedIds].join(',') : null,
-        // The focused session must come back whatever the filters say: renderSession and the
-        // info modal both look it up in `sessions` and bail when it is absent, so a session
-        // opened from outside the current filter would leave the view on the previous one.
-        include: focusId || null,
+        include: include.length ? include.join(',') : null,
         recentHours: recent ? RECENT_PROJECT_HOURS : null,
         project: !recent && filterProject ? filterProject : null,
         filter: sessionFilter === 'active' ? 'active' : null,
@@ -2135,35 +2133,89 @@ let stickySessionIds = new Set();
 // Pinning the currently-selected session keeps it in place until deselected (less UI movement).
 const deferredPinPlacement = new Set();
 
-function loadPinnedSessions() {
-  return new Set(readStoredList(PINNED_SESSIONS_KEY));
+// Sessions that `session open` keeps on screen for this page only; the server never has them.
+const openedStickyIds = new Set();
+
+// The server keeps the pins (`/api/session/pins`, lib/session-pins.js); the two sets are only the
+// page's copy. The localStorage lists are from before that. Each origin has its own (the hub's
+// proxied port, the standalone board), so each one merges its lists into the server's once, then
+// deletes them.
+async function syncSessionPins() {
+  try {
+    const body = { pinned: readStoredList(PINNED_SESSIONS_KEY), sticky: readStoredList(STICKY_SESSIONS_KEY) };
+    const local = body.pinned.length || body.sticky.length;
+    const res = await (local ? api('/api/session/pins/import', { method: 'POST', body }) : api('/api/session/pins'));
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    store.removeItem(PINNED_SESSIONS_KEY);
+    store.removeItem(STICKY_SESSIONS_KEY);
+    applyServerPins(data.pins);
+  } catch (e) {
+    console.warn('[pins] server sync failed:', e.message);
+  }
 }
 
-function loadStickySessions() {
-  return new Set(readStoredList(STICKY_SESSIONS_KEY));
+// The first apply needs no fetch: `/api/sessions` adds the pinned sessions itself.
+let pinsApplied = false;
+
+function applyServerPins(pins) {
+  const before = new Map([...pinnedSessionIds].map((id) => [id, getSessionPinState(id)]));
+  pinnedSessionIds = new Set();
+  stickySessionIds = new Set(openedStickyIds);
+  for (const [id, state] of Object.entries(pins || {})) {
+    pinnedSessionIds.add(id);
+    if (state === 'sticky') {
+      stickySessionIds.add(id);
+      openedStickyIds.delete(id);
+    }
+  }
+  for (const id of deferredPinPlacement) if (!isAnyPinned(id)) deferredPinPlacement.delete(id);
+  const first = !pinsApplied;
+  pinsApplied = true;
+  const unchanged =
+    before.size === pinnedSessionIds.size && [...before].every(([id, s]) => getSessionPinState(id) === s);
+  if (unchanged && !first) return;
+  const added = first ? [] : [...pinnedSessionIds].filter((id) => !before.has(id));
+  for (const id of added) expandPinnedFor(id);
+  showPinnedSessions(added);
 }
 
-function savePinnedSessions() {
-  store.writeJson(PINNED_SESSIONS_KEY, [...pinnedSessionIds]);
-  store.writeJson(STICKY_SESSIONS_KEY, [...stickySessionIds]);
+// A pinned session outside the current filter is only in the list once it is fetched with the pins.
+function showPinnedSessions(added) {
+  const known = new Set(sessions.map((s) => s.id));
+  if (added.some((id) => !known.has(id))) fetchSessions(false);
+  else renderSessions();
 }
 
-// Mirror pin state to server so it can be queried by the CLI. UI remains source of truth for itself.
-function offloadSessionPin(sessionId) {
-  const state = getSessionPinState(sessionId);
-  api('/api/session/pin', { method: 'POST', body: { id: sessionId, state } }).catch(() => {});
+function sendPinChange(sessionId) {
+  return postPins({ ids: [sessionId], state: getSessionPinState(sessionId, { saved: true }) });
+}
+
+// A write names only its sessions, so the last write for a session wins. A failed save re-reads the
+// server so the page shows what is saved.
+async function postPins(body) {
+  let error;
+  try {
+    const res = await api('/api/session/pin', { method: 'POST', body });
+    if (res.ok) return;
+    error = (await res.json().catch(() => null))?.error || `HTTP ${res.status}`;
+  } catch (e) {
+    error = e.message;
+  }
+  showToast(`Pin not saved (${error}); showing the saved pins`, 'error');
+  await syncSessionPins();
 }
 
 function clearSessionPin(sessionId) {
   pinnedSessionIds.delete(sessionId);
   stickySessionIds.delete(sessionId);
+  openedStickyIds.delete(sessionId);
   deferredPinPlacement.delete(sessionId);
 }
 
 function unpinSession(sessionId) {
   clearSessionPin(sessionId);
-  savePinnedSessions();
-  offloadSessionPin(sessionId);
+  sendPinChange(sessionId);
   renderSessions();
 }
 
@@ -2172,8 +2224,7 @@ function toggleSessionPin(sessionId) {
   pinnedSessionIds.add(sessionId);
   if (sessionId === currentSessionId) deferredPinPlacement.add(sessionId);
   expandPinnedFor(sessionId);
-  savePinnedSessions();
-  offloadSessionPin(sessionId);
+  sendPinChange(sessionId);
   renderSessions();
 }
 
@@ -2185,9 +2236,21 @@ function toggleSessionSticky(sessionId) {
     stickySessionIds.add(sessionId);
     if (sessionId === currentSessionId) deferredPinPlacement.add(sessionId);
   }
-  savePinnedSessions();
-  offloadSessionPin(sessionId);
+  sendPinChange(sessionId);
   renderSessions();
+}
+
+// The echo of this page's own change is a no-op, so the selected session keeps its deferred place.
+function handleSessionPinEvent({ id, state }) {
+  if (!id || getSessionPinState(id, { saved: true }) === state) return;
+  clearSessionPin(id);
+  if (state === 'pinned') pinnedSessionIds.add(id);
+  if (state === 'sticky') {
+    pinnedSessionIds.add(id);
+    stickySessionIds.add(id);
+  }
+  expandPinnedFor(id);
+  showPinnedSessions(isAnyPinned(id) ? [id] : []);
 }
 
 function isPlacedPinned(id) {
@@ -2197,21 +2260,9 @@ function isPlacedSticky(id) {
   return stickySessionIds.has(id) && !deferredPinPlacement.has(id);
 }
 
-function handleSessionPinEvent({ id, state }) {
-  if (!id) return;
-  clearSessionPin(id);
-  if (state === 'pinned') pinnedSessionIds.add(id);
-  if (state === 'sticky') {
-    pinnedSessionIds.add(id);
-    stickySessionIds.add(id);
-  }
-  expandPinnedFor(id);
-  savePinnedSessions();
-  renderSessions();
-}
-
-function getSessionPinState(sessionId) {
-  if (stickySessionIds.has(sessionId)) return 'sticky';
+// `saved` gives the pin the user set: a sticky that `session open` added is only this page's.
+function getSessionPinState(sessionId, { saved = false } = {}) {
+  if (stickySessionIds.has(sessionId) && !(saved && openedStickyIds.has(sessionId))) return 'sticky';
   if (pinnedSessionIds.has(sessionId)) return 'pinned';
   return 'none';
 }
@@ -6268,6 +6319,7 @@ const SHORTCUT_TABS = [
           { keys: ['T'], label: 'Toggle theme' },
           { keys: ['Shift', 'S'], combo: true, label: 'Storage manager' },
           { keys: ['Ctrl', 'Shift', 'Z'], combo: true, label: 'Zen mode (current session only)' },
+          { keys: ['Ctrl', 'Shift', 'K'], combo: true, label: 'Show / hide Kanbot' },
           { keys: ['Ctrl', '+'], combo: true, label: 'Larger modal text' },
           { keys: ['Ctrl', '−'], combo: true, label: 'Smaller modal text' },
           { keys: ['Ctrl', '0'], combo: true, label: 'Reset modal text size' },
@@ -6999,7 +7051,7 @@ async function _storageViewSession(id) {
 
 function _storageUnpinSession(id) {
   clearSessionPin(id);
-  savePinnedSessions();
+  sendPinChange(id);
   renderSessions();
   _renderStorageTab();
   _updateStorageTotal();
@@ -7259,13 +7311,10 @@ async function cleanupOrphanedStorage() {
   const orphaned = _findOrphanedKeys(known);
   const unpinned = new Set();
   for (const key of orphaned) {
-    if (key.startsWith('__pinned__')) {
-      const id = key.slice('__pinned__'.length);
-      pinnedSessionIds.delete(id);
-      unpinned.add(id);
-    } else if (key.startsWith('__sticky__')) {
-      const id = key.slice('__sticky__'.length);
-      stickySessionIds.delete(id);
+    const pin = /^__(pinned|sticky)__/.exec(key);
+    if (pin) {
+      const id = key.slice(pin[0].length);
+      clearSessionPin(id);
       unpinned.add(id);
     } else {
       store.removeItem(key);
@@ -7273,8 +7322,7 @@ async function cleanupOrphanedStorage() {
       if (key.startsWith(PREVIEW_STORAGE_PREFIX)) forgetServerLinkedDoc(key.slice(PREVIEW_STORAGE_PREFIX.length));
     }
   }
-  if (unpinned.size) savePinnedSessions();
-  for (const id of unpinned) offloadSessionPin(id);
+  if (unpinned.size) postPins({ ids: [...unpinned], state: 'none' });
   const removed = orphaned.length;
 
   showToast(removed ? `Cleaned ${removed} orphaned item${removed > 1 ? 's' : ''}` : 'No orphaned items found');
@@ -8902,6 +8950,7 @@ function handleSessionOpenEvent(data) {
   }
   if (!isSessionActive(target)) {
     stickySessionIds.add(id);
+    openedStickyIds.add(id);
   }
   setSessionDismissed(id, false);
   cliOpenedId = id;
@@ -9568,6 +9617,7 @@ function setupEventSource() {
         if (sgRev === null) syncSessionGroups();
         else if (sgUnsent) persistSessionGroups();
         else sgRefresh();
+        syncSessionPins();
         if (terminalAvailable())
           loadTerminals()
             .then(renderSessions)
@@ -14219,6 +14269,7 @@ function terminalShortcut(e, probe = false) {
   if (ctrlShift && e.code === 'KeyP') return toggleSessionPicker;
   // Ctrl+Shift+Z is redo in a text field, so only the terminal's own textarea gives it up.
   if (ctrlShift && e.code === 'KeyZ') return inPageField(e) ? null : toggleZenMode;
+  if (ctrlShift && e.code === 'KeyK') return kanbotAvailable() ? () => toggleKanbot() : null;
   if (ctrlAlt && (e.code === 'KeyN' || e.code === 'KeyR') && terminalAvailable()) {
     return () => openNewSession(null, e.code === 'KeyR');
   }
@@ -14584,15 +14635,19 @@ function pushTerminalClaims() {
   queueMicrotask(() => {
     terminalClaimsQueued = false;
     const bridged = bridgedFrameEls();
-    if (!termFrame.inited && !bridged.length) return;
+    if (!termFrame.inited && !kanbotState.inited && !bridged.length) return;
     const claims = keyClaims();
     sendBridgeClaimsAll(bridged, claims);
-    if (!termFrame.inited) return;
     const sig = JSON.stringify(claims);
-    if (sig === termFrame.claims) return;
-    termFrame.claims = sig;
-    terminalFrameSend('claims', claims);
+    sendFrameClaims(kanbotState, claims, sig, postToKanbotFrame);
+    sendFrameClaims(termFrame, claims, sig, terminalFrameSend);
   });
+}
+
+function sendFrameClaims(frameState, claims, sig, send) {
+  if (!frameState.inited || sig === frameState.claims) return;
+  frameState.claims = sig;
+  send('claims', claims);
 }
 
 function terminalTheme() {
@@ -15138,7 +15193,13 @@ const kanbotState = {
   ended: false,
   socketId: 0,
   theme: null,
+  claims: null,
+  returnFocus: null,
 };
+
+function kanbotFocused() {
+  return !!kanbotState.el?.contains(document.activeElement);
+}
 
 function kanbotAvailable() {
   return !!appConfig.kanbot && terminalAvailable();
@@ -15220,12 +15281,25 @@ function setKanbotAttached(on) {
 function toggleKanbot(force) {
   const el = ensureKanbotPopover();
   const show = typeof force === 'boolean' ? force : !el.classList.contains('visible');
+  const wasShown = el.classList.contains('visible');
   el.classList.toggle('visible', show);
   if (!show) {
+    const hadFocus = kanbotFocused();
     postToKanbotFrame('detach');
     setKanbotAttached(false);
+    const back = kanbotState.returnFocus;
+    kanbotState.returnFocus = null;
+    if (hadFocus) {
+      document.activeElement.blur();
+      if (back === 'terminal') focusTerminalPane();
+      else if (back?.isConnected) back.focus();
+    }
     return;
   }
+  if (!wasShown && !kanbotFocused()) {
+    kanbotState.returnFocus = terminalPaneFocused() ? 'terminal' : document.activeElement;
+  }
+  kanbotState.frame?.focus();
   if (!kanbotState.frame) {
     const frame = document.createElement('iframe');
     frame.className = 'kanbot-frame';
@@ -15277,13 +15351,22 @@ window.addEventListener('message', (e) => {
   if (t === 'loaded') {
     const themeOptions = terminalThemeOptions();
     kanbotState.inited = false;
+    kanbotState.claims = null;
     kanbotState.theme = JSON.stringify(themeOptions);
     postToKanbotFrame('init', terminalInitOptions(themeOptions));
     return;
   }
   if (t === 'term') {
     kanbotState.inited = true;
+    const claims = keyClaims();
+    sendFrameClaims(kanbotState, claims, JSON.stringify(claims), postToKanbotFrame);
+    // The first show created the frame after its focus call, so the frame takes focus once it is up.
+    if (kanbotState.el.classList.contains('visible')) kanbotState.frame.focus();
     openKanbot();
+    return;
+  }
+  if (t === 'key') {
+    replayKey(m, document.getElementById('terminal-key-proxy'));
     return;
   }
   if (m.socketId !== kanbotState.socketId) return;
@@ -16792,8 +16875,7 @@ searchQuery = urlState.search || '';
 
 renderFilterState();
 renderZenState();
-pinnedSessionIds = loadPinnedSessions();
-stickySessionIds = loadStickySessions();
+syncSessionPins();
 setupEventSource();
 
 if (urlState.search) {

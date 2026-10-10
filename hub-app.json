@@ -5,7 +5,7 @@
   "icon": "columns",
   "run": { "entry": "server.js", "defaultPort": 3541 },
   "publishes": ["session.changed"],
-  "keys": { "keeps": ["ctrl+alt+n", "ctrl+alt+r", "ctrl+alt+s"] },
+  "keys": { "keeps": ["ctrl+alt+n", "ctrl+alt+r", "ctrl+alt+s", "ctrl+shift+k", "ctrl+shift+p", "ctrl+shift+z"] },
   "plugin": {
     "id": "claude-code-kanban@claude-code-kanban",
     "path": "plugin/plugins/claude-code-kanban",

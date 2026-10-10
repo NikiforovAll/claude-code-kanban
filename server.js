@@ -54,6 +54,8 @@ const { readLiveSessions, isPidAlive, isSessionLive } = require('./lib/live-sess
 const { createProcStats } = require('./lib/proc-stats');
 const { createGroupStore, isGroupName, suggestGroupName } = require('./lib/dispatch-groups');
 const { createUserGroupStore } = require('./lib/user-groups');
+const { createSessionPinStore } = require('./lib/session-pins');
+const { stampedJsonFile } = require('./lib/stamped-json-file');
 const { ownerLinks, moveRecipients } = require('./lib/owner-routing');
 const { parseReviewSource, parseActionBody, formatActionMarkdown } = require('./lib/preview-action');
 const { createDispatchedStore, scanTranscripts, pruneSessionDirs, pruneContextStatus, pruneTaskMaps, retentionMs } = require('./lib/retention');
@@ -145,15 +147,6 @@ const SCRATCHPAD_ROOT = (() => {
 // #endregion
 
 // #region SERVER_STATE
-// Server-side pin mirror (UI authoritative, server stores latest pushed state for CLI queries).
-function readPins() {
-  try {
-    const obj = JSON.parse(readFileSync(PINS_FILE, 'utf8'));
-    if (obj && typeof obj === 'object' && !Array.isArray(obj)) return obj;
-  } catch (_) {}
-  return {};
-}
-
 function writeJsonAtomic(file, obj, mode) {
   mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
@@ -206,9 +199,7 @@ const jsonFile = (file) => ({
   save: (data) => writeJsonAtomicOrLog(file, data),
 });
 
-function writePins(pins) {
-  writeJsonAtomic(PINS_FILE, pins);
-}
+const sessionPins = createSessionPinStore(stampedJsonFile(PINS_FILE, writeJsonAtomic));
 
 // Port discovery for out-of-process helpers (the plugin's doorbell mod, the CLI).
 // The pid rides along so a reader can tell a live server from a file left behind by
@@ -1277,12 +1268,13 @@ app.get('/api/sessions', async (req, res) => {
     const limitParam = req.query.limit || '20';
     const limit = limitParam === 'all' ? null : parseInt(limitParam, 10);
 
-    const pinnedParam = req.query.pinned;
+    // `pinned=` from a board page loaded before the server kept pins is ignored.
     const includeIds = req.query.include ? new Set(req.query.include.split(',').filter(Boolean)) : new Set();
-    const pinnedIds = pinnedParam ? new Set(pinnedParam.split(',').filter(Boolean)) : new Set();
+    const pins = req.query.pins === 'off' ? {} : sessionPins.state().pins;
+    const pinnedIds = new Set(Object.keys(pins));
     for (const id of includeIds) pinnedIds.add(id);
     const activeFilter = req.query.filter === 'active';
-    const terminalIds = activeFilter ? new Set(terminal.ids()) : new Set();
+    const terminalIds = new Set(terminal.ids());
 
     const metadata = loadSessionMetadata();
     const sessionsMap = new Map();
@@ -1606,20 +1598,16 @@ app.get('/api/sessions', async (req, res) => {
       }));
     }
 
-    // Server-side activity filter (mirrors the client predicate in public/app.js).
-    // Pinned IDs bypass — they should always be in the response.
-    if (activeFilter) {
-      const isActive = (s) =>
-        s.hasMessages && (
-          (!s.sharedTaskList && (s.pending > 0 || s.inProgress > 0))
-          || s.hasActiveAgents
-          || s.hasWaitingForUser
-          || s.hasRecentActivity
-        );
-      for (const [id, s] of sessionsMap) {
-        if (pinnedIds.has(id) || terminalIds.has(id)) continue;
-        if (!isActive(s)) sessionsMap.delete(id);
-      }
+    // The sidebar's Active rule (getFilteredSessions in public/app.js); the CLI reads `active`
+    // instead of keeping its own copy. Pinned IDs bypass the filter.
+    for (const [id, s] of sessionsMap) {
+      s.active = terminalIds.has(id) || !!(s.hasMessages && (
+        (!s.sharedTaskList && (s.pending > 0 || s.inProgress > 0))
+        || s.hasActiveAgents
+        || s.hasWaitingForUser
+        || s.hasRecentActivity
+      ));
+      if (activeFilter && !s.active && !pinnedIds.has(id)) sessionsMap.delete(id);
     }
 
     // Convert map to array and sort by most recently modified
@@ -1628,7 +1616,7 @@ app.get('/api/sessions', async (req, res) => {
 
     // Apply project filter before limit so the limit is per-project
     const projectFilter = req.query.project;
-    // `include` is narrower than `pinned`: pinned rows survive the limit but still obey
+    // `include` is narrower than a pin: pinned rows survive the limit but still obey
     // the project filter, because pinning is a preference and the filter is an intent.
     // The client sends the session it currently has open, which it cannot render at all
     // if the row is missing — that one is not a preference.
@@ -1656,10 +1644,14 @@ app.get('/api/sessions', async (req, res) => {
       sessions = [...top, ...missingPinned];
     }
 
-    // Loop info can mean a full read of the transcript, so only the rows sent pay for it.
+    // Loop info can mean a full read of the transcript, so only the rows sent pay for it, and
+    // `lite=1` (the CLI's group list, which only counts and names sessions) skips it.
     // Same for autoCompact: up to 3 settings stats per call.
+    const lite = req.query.lite === '1';
     const autoCompactByProject = new Map();
     for (const s of sessions) {
+      s.pin = pins[s.id] || null;
+      if (lite) continue;
       s.loopInfo = getLoopInfoSummary(s);
       if (!s.contextStatus) continue;
       if (!autoCompactByProject.has(s.project)) autoCompactByProject.set(s.project, getAutoCompact(CLAUDE_DIR, s.project));
@@ -3469,7 +3461,7 @@ const dispatched = createDispatchedStore(jsonFile(DISPATCHED_FILE));
 const dispatchGroups = createGroupStore({
   ...jsonFile(DISPATCH_GROUPS_FILE),
   isAlive: (id) => terminal.isRunning(id) || isSessionLive(loadLiveSessions(), id),
-  pinnedIds: () => new Set(Object.keys(readPins())),
+  pinnedIds: () => new Set(Object.keys(sessionPins.state().pins)),
 });
 
 const linkedDocs = createLinkedDocStore(jsonFile(LINKED_DOCS_FILE));
@@ -3996,59 +3988,45 @@ app.post('/api/session/open', async (req, res) => {
   }
 });
 
-app.post('/api/session/pin', async (req, res) => {
-  try {
-    const { id, state } = req.body || {};
-    if (!id || typeof id !== 'string') return res.status(400).json({ error: 'id is required' });
-    if (!['none', 'pinned', 'sticky'].includes(state)) {
-      return res.status(400).json({ error: 'state must be none|pinned|sticky' });
-    }
-    const pins = readPins();
-    if (state === 'none') delete pins[id];
-    else pins[id] = state;
-    writePins(pins);
-    broadcast({ type: 'session:pin', id, state });
-    res.json({ success: true, id, state });
-  } catch (error) {
-    console.error('Error in /api/session/pin:', error);
-    res.status(500).json({ error: error.message || 'Failed' });
-  }
+// #region SESSION_PINS
+function broadcastPins(changed) {
+  for (const { id, state } of changed) broadcast({ type: 'session:pin', id, state });
+}
+
+// Another board on this config dir wrote the file. The reload in each route covers a write that
+// lands before the watcher fires.
+chokidar.watch(PINS_FILE, { ignoreInitial: true }).on('all', (event) => {
+  if (event === 'add' || event === 'change') broadcastPins(sessionPins.reload());
 });
 
-app.get('/api/session/pins', (_req, res) => {
-  res.setHeader('Cache-Control', 'no-store');
-  try {
-    const pins = readPins();
-    const items = Object.entries(pins).map(([id, state]) => ({ id, state }));
-    res.json({ pins, items });
-  } catch (error) {
-    console.error('Error in GET /api/session/pins:', error);
-    res.status(500).json({ error: error.message || 'Failed' });
-  }
-});
+function pinsReply() {
+  const { pins } = sessionPins.state();
+  return { pins, items:Object.entries(pins).map(([id, state]) => ({ id, state })) };
+}
+
+function pinRoute(fn) {
+  return (req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    broadcastPins(sessionPins.reload());
+    res.json(fn(req.body || {}));
+  };
+}
+
+app.post('/api/session/pin', pinRoute(({ ids, state }) => {
+  broadcastPins(sessionPins.set(ids, state));
+  return { success: true, ids, state };
+}));
+
+app.post('/api/session/pins/import', pinRoute((b) => {
+  broadcastPins(sessionPins.importLocal(b));
+  return pinsReply();
+}));
+
+app.get('/api/session/pins', pinRoute(() => pinsReply()));
+// #endregion
 
 // #region USER_GROUPS
-const userGroupsFileStamp = () => {
-  try {
-    const s = statSync(USER_GROUPS_FILE);
-    return `${s.mtimeMs}:${s.size}`;
-  } catch {
-    return null;
-  }
-};
-let userGroupsStamp;
-const userGroups = createUserGroupStore({
-  load: () => {
-    const stamp = userGroupsFileStamp();
-    if (stamp === userGroupsStamp) return undefined;
-    userGroupsStamp = stamp;
-    return readJsonOrNull(USER_GROUPS_FILE);
-  },
-  save: (data) => {
-    writeJsonAtomicOrLog(USER_GROUPS_FILE, data);
-    userGroupsStamp = userGroupsFileStamp();
-  },
-});
+const userGroups = createUserGroupStore(stampedJsonFile(USER_GROUPS_FILE, writeJsonAtomic));
 // The watcher tells this board's pages about another board's write; the reload in each route
 // covers a write that lands before the watcher fires.
 chokidar.watch(USER_GROUPS_FILE, { ignoreInitial: true }).on('all', (event) => {
@@ -4074,10 +4052,11 @@ function groupRoute(fn) {
   };
 }
 
-app.get('/api/groups', (_req, res) => {
+app.get('/api/groups', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   userGroups.reload();
-  res.json(userGroups.state());
+  const state = userGroups.state();
+  res.json(req.query.dispatch === '1' ? { ...state, dispatch: Object.fromEntries(dispatchGroups.snapshot()) } : state);
 });
 app.post('/api/groups', groupRoute((b) => userGroups.create(b)));
 app.put('/api/groups', groupRoute((b) => userGroups.replace(b)));
@@ -4506,7 +4485,7 @@ app.use((err, req, res, next) => {
   if (res.headersSent || !req.path.startsWith('/api/')) return next(err);
   const status = err.status || 500;
   if (status >= 500) console.error(`Error in ${req.method} ${req.path}:`, err);
-  res.status(status).json({ error: status >= 500 ? 'Internal error' : err.message });
+  res.status(status).json({ error: status >= 500 && !err.expose ? 'Internal error' : err.message });
 });
 
 // Watch for file changes (chokidar handles non-existent paths)

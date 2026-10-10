@@ -3,6 +3,8 @@ const path = require('node:path');
 const { getClaudeDir, displayPath } = require('./lib/claude-dir');
 const { isGroupName, suggestGroupName } = require('./lib/dispatch-groups');
 const { linkUrl } = require('./public/link-url');
+const { sessionProjectKey } = require('./public/project-match');
+const { placeSession } = require('./lib/user-groups');
 // Help is auto-generated from this table — keep flags/usage in sync with `run` behavior.
 const SESSION_FLAG = '--session <id>';
 const SESSION_FLAG_HELP = 'Session, full id or unique prefix (default: $PREVIEW_SESSION, else $CLAUDE_CODE_SESSION_ID)';
@@ -102,19 +104,20 @@ const COMMANDS = {
     summary: 'List, search, open, inspect and group Claude Code sessions',
     verbs: {
       list: {
-        summary: 'List sessions (pinned/sticky always included)',
-        usage: 'claude-code-kanban session list [--active] [--days <n>] [--project <name>] [--limit <n|all>] [--no-pins] [--json]',
+        summary: 'List the active sessions, as the sidebar\'s Active view shows them (pinned/sticky always included)',
+        usage: 'claude-code-kanban session list [--all] [--days <n>] [--project <name>] [--limit <n|all>] [--no-pins] [--json]',
         flags: {
-          '--active': 'Only sessions with recent activity (sidebar-style filter)',
+          '--all': 'Every session, active or not',
           '--days <n>': 'Only sessions modified within the last N days (fractional ok, e.g. 0.5)',
           '--project <name>': 'Filter by project: an absolute path selects one project, other text matches a part of the path',
           '--limit <n|all>': 'Max rows to display (default: 10). Use "all" for no cap.',
           '--no-pins': 'Disable always-include and sticky-first ordering for pinned sessions',
           '--json': 'Output JSON instead of a table',
         },
+        notes: 'Active: running in the terminal, or with messages and open tasks, live agents, a wait on the user or recent activity. STATUS is idle, active, busy (a task in progress) or wait. --active is accepted and does nothing.',
         examples: [
-          'claude-code-kanban session list --active',
-          'claude-code-kanban session list --days 0.5 --limit all --project my-repo',
+          'claude-code-kanban session list',
+          'claude-code-kanban session list --all --days 0.5 --limit all --project my-repo',
         ],
         run: runSessionListCli,
       },
@@ -173,7 +176,7 @@ const COMMANDS = {
         run: runSessionAgentsCli,
       },
       pin: {
-        summary: 'Pin (or unpin) a session in the sidebar of connected browser tabs',
+        summary: 'Pin (or unpin) a session in the sidebar; every board on this config dir shows it',
         usage: 'claude-code-kanban session pin <id> [--sticky] [--unpin]',
         flags: {
           '<id>': 'Full session id, or a unique prefix',
@@ -224,13 +227,14 @@ const COMMANDS = {
     summary: 'Read the session groups in the sidebar',
     verbs: {
       list: {
-        summary: 'List the groups, nested groups under their parent, in sidebar order',
-        usage: 'claude-code-kanban group list [--json]',
+        summary: 'List the groups in sidebar order, nested groups under their parent, with the members the sidebar\'s Active view shows (active, pinned or sticky)',
+        usage: 'claude-code-kanban group list [--all] [--json]',
         flags: {
-          '--json': 'Output JSON ({rev, groups: [{id, name, parent, members: [{type, ref}]}]})',
+          '--all': 'Every member, active or not',
+          '--json': 'Output JSON ({rev, groups: [{id, name, parent, visible, total, members}]}); a dispatch group has dispatch: true and id dispatch:<name>; a session member has title, branch, status, pinned and age, or missing: true; a project member has sessions (its shown sessions)',
         },
-        notes: 'Pass a name, a path (parent/child) or an id to `session group`. Dispatch groups are not listed: they go when their sessions end.',
-        examples: ['claude-code-kanban group list'],
+        notes: 'A project member shows when it has a session the Active view shows. visible/total counts the members shown. A session started with `dispatch start --group` shows in that dispatch group, marked (dispatch) and listed after the user groups, unless a user group holds it or its project; a user group with the same name takes it in. Dispatch groups go when their sessions end. Pass a user group\'s name, path (parent/child) or id to `session group`.',
+        examples: ['claude-code-kanban group list', 'claude-code-kanban group list --all --json'],
         run: runGroupListCli,
       },
     },
@@ -718,13 +722,13 @@ async function printLinkedDocs(sessionId, asJson) {
   } catch (e) { reportCliError(e); return 1; }
 }
 
-// Mirror of `isSessionActive` in public/app.js — keep in sync (different runtimes, no shared module).
-function isSessionActive(s) {
-  return s.hasRecentLog || s.inProgress > 0 || s.hasActiveAgents || s.hasWaitingForUser;
+function sessionTitle(s) {
+  return s.customTitle || s.name || s.slug || '';
 }
 
+// The board's badge rule (docs/session-states.md). `active` is a wider rule, for which rows show.
 function sessionStatus(s) {
-  if (!isSessionActive(s)) return 'idle';
+  if (!(s.hasRecentLog || s.inProgress > 0 || s.hasActiveAgents || s.hasWaitingForUser)) return 'idle';
   if (s.hasWaitingForUser) return 'wait';
   if (s.inProgress > 0) return 'busy';
   return 'active';
@@ -739,24 +743,27 @@ function parseLimit(args, { fallback, allowAll = false }) {
   return { ok: true, limit: n };
 }
 
-async function fetchSessionsList(limit, pinnedIds = [], project = null) {
+// `lite` leaves out the fields that can read a whole transcript (loopInfo).
+function fetchSessionsList({ limit, noPins = false, include = [], project = null, activeOnly = false, lite = false }, label = 'Session list') {
   const q = limit === null ? 'all' : String(limit);
-  const pinnedQ = pinnedIds.length ? `&pinned=${pinnedIds.join(',')}` : '';
+  const pinsQ = noPins ? '&pins=off' : '';
+  const includeQ = include.length ? `&include=${include.map(encodeURIComponent).join(',')}` : '';
   const projectQ = project ? `&project=${encodeURIComponent(project)}` : '';
-  return cliGetJson(`/api/sessions?limit=${q}${pinnedQ}${projectQ}`, 'Session list');
+  const filterQ = activeOnly ? '&filter=active' : '';
+  const liteQ = lite ? '&lite=1' : '';
+  return cliGetJson(`/api/sessions?limit=${q}${pinsQ}${includeQ}${projectQ}${filterQ}${liteQ}`, label);
 }
 
-function fetchSessionsByIds(ids, label) {
-  return cliGetJson(`/api/sessions?limit=1&include=${ids.map(encodeURIComponent).join(',')}`, label);
-}
+const uniqueById = (list) => [...new Map(list.map((s) => [s.id, s])).values()];
 
-async function fetchPinsMap() {
-  try {
-    const res = await cliFetch('/api/session/pins');
-    if (!res.ok) return {};
-    const { pins = {} } = await res.json();
-    return pins;
-  } catch { return {}; }
+// The server refuses a request line above about 16 KB (431), about 430 ids, so the ids go in batches.
+const IDS_PER_REQUEST = 100;
+
+async function fetchSessionsByIds(ids, label, { lite = false } = {}) {
+  const batches = [];
+  for (let i = 0; i < ids.length; i += IDS_PER_REQUEST) batches.push(ids.slice(i, i + IDS_PER_REQUEST));
+  const lists = await Promise.all(batches.map((include) => fetchSessionsList({ limit: 1, include, lite }, label)));
+  return uniqueById(lists.flat());
 }
 
 async function resolveSessionByIdOrPrefix(idArg) {
@@ -785,7 +792,7 @@ async function resolveSessionByIdOrPrefix(idArg) {
 }
 
 async function runSessionListCli(args) {
-  const activeOnly = args.includes('--active');
+  const activeOnly = !args.includes('--all');
   const noPins = args.includes('--no-pins');
   const projectFilter = getArgValue(args, 'project');
   const daysArg = getArgValue(args, 'days');
@@ -797,36 +804,31 @@ async function runSessionListCli(args) {
   if (!parsed.ok) return usageError(COMMANDS.session.verbs.list, parsed.error);
   const limit = parsed.limit;
   const asJson = args.includes('--json');
-  const pinsMap = noPins ? {} : await fetchPinsMap();
-  const pinnedIds = Object.keys(pinsMap);
-  const hasClientFilter = activeOnly || days !== null;
   let list;
   try {
-    list = await fetchSessionsList(hasClientFilter ? null : limit, pinnedIds, projectFilter);
+    list = await fetchSessionsList({ limit: days !== null ? null : limit, noPins, project: projectFilter, activeOnly });
   } catch (e) {
     reportCliError(e);
     return 1;
   }
-  const pinOf = id => pinsMap[id] || null;
-  if (activeOnly) list = list.filter(s => pinOf(s.id) || isSessionActive(s));
   if (days !== null) {
     const cutoff = Date.now() - days * 86_400_000;
-    list = list.filter(s => pinOf(s.id) || (s.modifiedAt && new Date(s.modifiedAt).getTime() >= cutoff));
+    list = list.filter(s => s.pin || (s.modifiedAt && new Date(s.modifiedAt).getTime() >= cutoff));
   }
-  const pinRank = id => pinOf(id) === 'sticky' ? 0 : pinOf(id) === 'pinned' ? 1 : 2;
+  const pinRank = s => s.pin === 'sticky' ? 0 : s.pin === 'pinned' ? 1 : 2;
   list.sort((a, b) => {
-    const r = pinRank(a.id) - pinRank(b.id);
+    const r = pinRank(a) - pinRank(b);
     if (r !== 0) return r;
     return new Date(b.modifiedAt || 0) - new Date(a.modifiedAt || 0);
   });
   if (limit !== null && list.length > limit) {
     const top = list.slice(0, limit);
     const topIds = new Set(top.map(s => s.id));
-    const extraPinned = list.filter(s => pinOf(s.id) && !topIds.has(s.id));
+    const extraPinned = list.filter(s => s.pin && !topIds.has(s.id));
     list = [...top, ...extraPinned];
   }
   if (asJson) {
-    console.log(JSON.stringify(list.map(s => ({ ...s, pinState: pinOf(s.id) })), null, 2));
+    console.log(JSON.stringify(list.map(({ pin, ...s }) => ({ ...s, pinState: pin || null })), null, 2));
     return 0;
   }
   if (!list.length) {
@@ -835,12 +837,12 @@ async function runSessionListCli(args) {
   }
   const rows = list.map(s => ({
     id: s.id.slice(0, 8),
-    pin: pinOf(s.id) || '',
+    pin: s.pin || '',
     status: sessionStatus(s),
     age: s.modifiedAt ? formatAge(Date.now() - new Date(s.modifiedAt).getTime()) : '-',
     tasks: `${s.completed}/${s.taskCount}`,
     project: path.basename(s.project || ''),
-    title: s.customTitle || s.name || s.slug || '',
+    title: sessionTitle(s),
   }));
   const w = {
     id: 8,
@@ -894,7 +896,7 @@ async function runSessionPinCli(args) {
   const resolved = await resolveSessionByIdOrPrefix(idArg);
   if (!resolved) return 1;
   try {
-    if (!await cliPostJson('/api/session/pin', { id: resolved.id, state }, 'Pin')) return 1;
+    if (!await cliPostJson('/api/session/pin', { ids: [resolved.id], state }, 'Pin')) return 1;
     const label = state === 'none' ? 'unpinned' : state;
     console.log(`Session ${label}: ${resolved.id}${resolved.customTitle ? ` (${resolved.customTitle})` : ''}`);
     return 0;
@@ -951,12 +953,74 @@ async function runSessionUngroupCli(args, entry) {
   } catch (e) { reportCliError(e); return 1; }
 }
 
+// A session member carries the session's metadata; a project member carries the count of its
+// sessions that are shown. With activeOnly, a member is shown when the sidebar's Active view
+// shows it: an active or pinned session, a project with one. A project counts the sessions the
+// sidebar puts under it: keyed as the board keys them, without those a group holds by id.
+function describeGroupMembers(groups, sessions, activeOnly) {
+  const byId = new Map(sessions.map((s) => [s.id, s]));
+  const shown = (s) => !activeOnly || s.active || !!s.pin;
+  const heldById = new Set(groups.flatMap((g) => g.members.filter((m) => m.type === 'session').map((m) => m.ref)));
+  const shownByProject = new Map();
+  for (const s of sessions) {
+    const key = sessionProjectKey(s);
+    if (!shown(s) || !key || heldById.has(s.id)) continue;
+    shownByProject.set(key, (shownByProject.get(key) || 0) + 1);
+  }
+  const describe = (m) => {
+    if (m.type === 'project') {
+      const count = shownByProject.get(m.ref) || 0;
+      return [!activeOnly || count > 0, { ...m, sessions: count }];
+    }
+    const s = byId.get(m.ref);
+    if (!s) return [!activeOnly, { ...m, missing: true }];
+    return [shown(s), {
+      ...m,
+      title: sessionTitle(s),
+      branch: s.gitBranch || null,
+      status: sessionStatus(s),
+      pinned: s.pin || null,
+      age: ageOf(s.modifiedAt),
+    }];
+  };
+  return groups.map((g) => {
+    const members = g.members.map(describe).filter(([visible]) => visible).map(([, m]) => m);
+    return { ...g, visible: members.length, total: g.members.length, members };
+  });
+}
+
+// Dispatch groups are listed after the user groups, as in the sidebar.
+function placeDispatched(groups, sessions, released = []) {
+  const dispatchGroups = new Map();
+  for (const s of sessions) {
+    if (!s.dispatchGroup) continue;
+    const { named, dispatch } = placeSession(groups, released, { ref: s.id, project: sessionProjectKey(s), dispatchGroup: s.dispatchGroup });
+    if (dispatch && !dispatchGroups.has(dispatch)) {
+      dispatchGroups.set(dispatch, { id: `dispatch:${dispatch}`, name: dispatch, parent: null, dispatch: true, members: [] });
+    }
+    (named || dispatchGroups.get(dispatch))?.members.push({ type: 'session', ref: s.id });
+  }
+  return [...groups, ...dispatchGroups.values()];
+}
+
 async function runGroupListCli(args) {
-  let state;
+  const activeOnly = !args.includes('--all');
+  let rev;
+  let groups;
   try {
-    state = await cliGetJson('/api/groups', 'Group list');
+    let released;
+    let dispatch;
+    ({ rev, groups, released, dispatch } = await cliGetJson('/api/groups?dispatch=1', 'Group list'));
+    const memberRefs = groups.flatMap((g) => g.members.filter((m) => m.type === 'session').map((m) => m.ref));
+    const sessionRefs = [...new Set([...memberRefs, ...Object.keys(dispatch || {})])];
+    // An inactive session held by id is still listed, so only the active list needs the id lookups.
+    const lists = await Promise.all([
+      fetchSessionsList({ limit: null, activeOnly, lite: true }, 'Group list'),
+      activeOnly ? fetchSessionsByIds(sessionRefs, 'Group list', { lite: true }) : [],
+    ]);
+    const sessions = uniqueById(lists.flat());
+    groups = describeGroupMembers(placeDispatched(groups, sessions, released), sessions, activeOnly);
   } catch (e) { reportCliError(e); return 1; }
-  const { rev, groups } = state;
   if (args.includes('--json')) {
     console.log(JSON.stringify({ rev, groups }, null, 2));
     return 0;
@@ -967,14 +1031,19 @@ async function runGroupListCli(args) {
   }
   const rows = [];
   const add = (parent, depth) => {
+    const pad = '  '.repeat(depth);
     for (const g of groups.filter((x) => x.parent === parent)) {
-      const count = (type) => g.members.filter((m) => m.type === type).length;
-      rows.push([g.id, count('project'), count('session'), `${'  '.repeat(depth)}${g.name}`]);
+      rows.push([g.dispatch ? '-' : g.id, '', '', '', `${pad}${g.name}${g.dispatch ? ' (dispatch)' : ''} (${g.visible}/${g.total})`]);
+      for (const m of g.members) {
+        if (m.type === 'project') rows.push(['project', '', '', '', `${pad}  ${m.ref} (${m.sessions} sessions)`]);
+        else if (m.missing) rows.push([m.ref.slice(0, 8), 'gone', '-', '', `${pad}  (no such session)`]);
+        else rows.push([m.ref.slice(0, 8), m.status, m.age, m.pinned || '', `${pad}  ${m.title}`]);
+      }
       add(g.id, depth + 1);
     }
   };
   add(null, 0);
-  printTable(['ID', 'PROJECTS', 'SESSIONS', 'NAME'], rows);
+  printTable(['ID', 'STATUS', 'AGE', 'PIN', 'NAME'], rows);
   return 0;
 }
 
@@ -1002,7 +1071,7 @@ async function runSessionViewCli(args) {
     return 0;
   }
   const status = sessionStatus(s);
-  const title = s.customTitle || s.name || s.slug || '';
+  const title = sessionTitle(s);
   const age = s.modifiedAt ? formatAge(Date.now() - new Date(s.modifiedAt).getTime()) : '-';
   const fmtTok = (n) => typeof n === 'number' ? (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n)) : '-';
   const fmtCost = (n) => typeof n === 'number' ? `$${n.toFixed(2)}` : '-';
@@ -1083,7 +1152,7 @@ async function runSessionSearchCli(args) {
       byId.has(s.id) ? sessionStatus(s) : '-',
       ageOf(s.modifiedAt),
       path.basename(s.project || ''),
-      s.customTitle || s.name || s.slug || '',
+      sessionTitle(s),
     ]));
     return 0;
   } catch (e) { reportCliError(e); return 1; }

@@ -74,7 +74,7 @@ Press <kbd>.</kbd> or click the pin icon on a card to pin or unpin a session. Pr
 
 Idle pinned sessions collect in a **Pinned** sub-section inside their project. Sticky sessions stay in the main list and never move into this sub-section. Click the **x** on the sub-section to ungroup pinned sessions. Then sticky sessions sort to the top of their list, and idle pinned sessions come next. A **Group pinned sessions** banner puts them back.
 
-The browser keeps your pins and also sends them to the server, so the [CLI](/claude-code-kanban/reference/cli/) can read them.
+The server keeps your pins, so every board tab and browser on the same config dir shows the same pins, and the [CLI](/claude-code-kanban/reference/cli/) can read and change them. A pin made in one tab shows in the others at once. If the server cannot save a pin, the board shows an error and goes back to the saved pins. Each browser address that had pins (for example the board in the hub and the board on its own port) adds them to the server's pins the first time it loads after an update to this version. A session that already has a pin on the server keeps it. If `pins.json` cannot be read, for example after a hand edit with a syntax error, the board keeps the last pins it read and does not save changes until the file is fixed or deleted.
 
 ## The board
 

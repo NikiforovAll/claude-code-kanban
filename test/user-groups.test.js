@@ -1,6 +1,11 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
+const { mkdtempSync, readFileSync, writeFileSync } = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const { createUserGroupStore } = require('../lib/user-groups');
+const { stampedJsonFile } = require('../lib/stamped-json-file');
+const { httpError } = require('../lib/http-error');
 
 function harness(initial = null) {
   const disk = { data: initial, saves: 0 };
@@ -27,6 +32,41 @@ const status = (fn) => {
   }
   assert.fail('expected a GroupError');
 };
+
+describe('user groups file errors', () => {
+  it('keeps the last good groups and writes nothing while the file cannot be read', () => {
+    const file = path.join(mkdtempSync(path.join(os.tmpdir(), 'cck-groups-')), 'groups.json');
+    const s = createUserGroupStore(stampedJsonFile(file, (f, data) => writeFileSync(f, JSON.stringify(data))));
+    s.create({ name: 'Work' });
+    const good = JSON.parse(JSON.stringify(s.state()));
+    writeFileSync(file, '{"rev":');
+    assert.equal(s.reload(), false);
+    assert.deepEqual(s.state(), good);
+    assert.equal(status(() => s.create({ name: 'Home' })), 503);
+    assert.deepEqual(JSON.parse(JSON.stringify(s.state())), good, 'the refused change is undone in memory');
+    assert.equal(readFileSync(file, 'utf8'), '{"rev":');
+    writeFileSync(file, JSON.stringify(good));
+    s.reload();
+    assert.equal(s.create({ name: 'Home' }).rev, 2);
+  });
+
+  it('a refused save leaves memory as it was', () => {
+    let fail = false;
+    const flaky = createUserGroupStore({
+      load: () => null,
+      save: () => {
+        if (fail) throw httpError(503, 'groups.json not saved (EPERM)');
+      },
+      newId: () => 'g1',
+    });
+    flaky.create({ name: 'Work' });
+    const before = JSON.parse(JSON.stringify(flaky.state()));
+    fail = true;
+    assert.equal(status(() => flaky.update('g1', { name: 'Home' })), 503);
+    assert.equal(status(() => flaky.place('g1', { type: 'project', ref: '/p' })), 503);
+    assert.deepEqual(flaky.state(), before);
+  });
+});
 
 describe('user groups', () => {
   it('creates, renames and survives a restart', () => {
