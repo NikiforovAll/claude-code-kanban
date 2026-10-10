@@ -3739,12 +3739,14 @@ function getFilteredSessions() {
   if (filterProject) {
     // The open session keeps its row even when it belongs to another project, so that
     // revealing one by id has something to scroll to. Same exemption the active branch
-    // above already makes, for the same reason.
+    // above already makes, for the same reason. recentProjects lags behind the session list, so a
+    // session in a new folder counts as recent on its own.
+    const recentCutoff = Date.now() - RECENT_PROJECT_HOURS * 60 * 60 * 1000;
     filteredSessions = filteredSessions.filter(
       (s) =>
         matchesProjectFilter(s.project, s.worktree?.repo) ||
         s.id === currentSessionId ||
-        (filterProject === '__recent__' && isAnyPinned(s.id)),
+        (filterProject === '__recent__' && (isAnyPinned(s.id) || Date.parse(s.modifiedAt) >= recentCutoff)),
     );
   }
 
@@ -16270,7 +16272,22 @@ function mergePlaceholders(list) {
     for (const id of [...specs.keys()]) if (ids.has(id)) specs.delete(id);
   }
   const pending = [...newSpecs, ...dispatchSpecs].sort((a, b) => b[1].startedAt - a[1].startedAt);
-  return [...pending.map(([id, spec]) => placeholderSession(id, spec)), ...list];
+  const placeholders = pending.map(([id, spec]) => placeholderSession(id, spec));
+  revealNewPlaceholders(placeholders);
+  return [...placeholders, ...list];
+}
+
+// Ids whose sections were expanded once; a section the user collapses again stays collapsed.
+const revealedPlaceholderIds = new Set();
+
+function revealNewPlaceholders(placeholders) {
+  let changed = false;
+  for (const p of placeholders) {
+    if (revealedPlaceholderIds.has(p.id)) continue;
+    revealedPlaceholderIds.add(p.id);
+    if (uncollapseFor(p)) changed = true;
+  }
+  if (changed) persistCollapsedGroups();
 }
 
 async function loadDispatches() {
@@ -16337,9 +16354,8 @@ async function restorePendingSessions() {
   document.getElementById('new-session-btn').hidden = !terminalAvailable();
   const terminals = terminalAvailable() ? loadTerminals() : null;
   await loadDispatches();
-  if (!terminals) return;
   try {
-    for (const t of await terminals) {
+    for (const t of terminals ? await terminals : []) {
       if ((t.mode !== 'new' && t.mode !== 'pick') || newSpecs.has(t.id) || dispatchSpecs.has(t.id)) continue;
       newSpecs.set(t.id, {
         cwd: t.cwd,
@@ -16352,6 +16368,8 @@ async function restorePendingSessions() {
       });
     }
   } catch (_) {}
+  // Sessions that were already running keep the collapse state saved before the reload.
+  for (const id of [...newSpecs.keys(), ...dispatchSpecs.keys()]) revealedPlaceholderIds.add(id);
 }
 
 async function loadTerminals() {

@@ -27,7 +27,7 @@ started  SendMessage to the starter, as the spec says
 
 A started session must not jump into a group after it appears, so its place is decided when it starts. Only an explicit `--group <g>` (kebab-case, `^[a-z0-9]+(-[a-z0-9]+)*$`) puts it in a group; without the flag it goes to its project block. The starter's own group is never inherited, so each dispatch states its group.
 
-`dispatch-update` makes the board fetch `GET /api/dispatch` and show a "starting" placeholder in that place until the transcript appears. `/api/sessions` then carries `dispatchGroup`, so the real card lands in the same place.
+`dispatch-update` makes the board fetch `GET /api/dispatch` and show a "starting" placeholder in that place until the transcript appears. A new placeholder expands the collapsed sections that would hide it once, and the Recent project filter keeps any session modified in its window, because a new folder is in no recent project until the project list reloads. `/api/sessions` then carries `dispatchGroup`, so the real card lands in the same place.
 
 ## Transient groups
 
