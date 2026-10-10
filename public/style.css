@@ -4214,19 +4214,6 @@ body.light .show-card.focused {
   background: color-mix(in srgb, var(--danger) 10%, transparent);
 }
 
-.show-md pre.mermaid {
-  min-height: 40px;
-  margin: 0.6em 0;
-  overflow-x: auto;
-  text-align: center;
-  background: transparent;
-  color: transparent;
-}
-
-.show-md pre.mermaid[data-processed] {
-  color: inherit;
-}
-
 .show-md pre.mermaid svg {
   max-width: 100%;
   height: auto;
@@ -9672,6 +9659,30 @@ pre.mermaid {
 }
 pre.mermaid svg {
   max-width: 100%;
+}
+/* Hides the diagram source while it loads; a failed diagram shows its error instead. */
+pre.mermaid:not(:has(svg), [data-mermaid-error]) {
+  min-height: 40px;
+  font-size: 0;
+}
+pre.mermaid:not(:has(svg), [data-mermaid-error])::before {
+  content: 'Rendering diagram…';
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+pre.mermaid[data-mermaid-error] {
+  padding: 8px 10px;
+  border: 1px dashed var(--border);
+  border-radius: 4px;
+  font-size: 12px;
+  text-align: left;
+  white-space: pre-wrap;
+  color: var(--text-secondary);
+}
+pre.mermaid[data-mermaid-error]::before {
+  content: 'Diagram failed to render\A';
+  color: var(--danger);
 }
 .modal.has-mermaid {
   width: 80vw;

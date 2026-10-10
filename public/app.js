@@ -10619,7 +10619,6 @@ const MERMAID_VARS = {
   pieOuterStrokeColor: '--border',
   pieTitleTextColor: '--text-primary',
   pieLegendTextColor: '--text-primary',
-  fontFamily: '--mono',
 };
 // --bg-elevated sits too close to the dark page for a node, and the base theme derives near-black ER
 // rows from a dark primaryColor.
@@ -10628,15 +10627,39 @@ const MERMAID_MODE_VARS = {
   light: { primaryColor: '--bg-elevated', rowOdd: '--bg-elevated', rowEven: '--bg-elevated' },
 };
 let mermaidThemeKey = '';
+let colorProbe = null;
+const probedColors = new Map();
+
+// Mermaid's color parser knows only plain hex, rgb() and hsl(), and a hub theme may set oklch() or
+// relative color syntax; its initialize throws on one, and no diagram renders.
+function mermaidColor(value) {
+  if (!value || value.startsWith('#')) return value;
+  let rgb = probedColors.get(value);
+  if (rgb) return rgb;
+  colorProbe ??= document.createElement('canvas').getContext('2d', { willReadFrequently: true });
+  colorProbe.clearRect(0, 0, 1, 1);
+  colorProbe.fillStyle = 'transparent';
+  colorProbe.fillStyle = value;
+  colorProbe.fillRect(0, 0, 1, 1);
+  const [r, g, b, a] = colorProbe.getImageData(0, 0, 1, 1).data;
+  rgb = a === 255 ? `rgb(${r}, ${g}, ${b})` : `rgba(${r}, ${g}, ${b}, ${+(a / 255).toFixed(3)})`;
+  probedColors.set(value, rgb);
+  return rgb;
+}
 
 // The base theme derives its other colors from these, and it parses colors itself, so it takes
 // resolved values rather than var() references.
 function mermaidConfig() {
   const css = getComputedStyle(document.body);
   const mode = isLightTheme() ? 'light' : 'dark';
-  const themeVariables = { darkMode: mode === 'dark', pieOpacity: '1', pieSectionTextColor: '#fff' };
+  const themeVariables = {
+    darkMode: mode === 'dark',
+    pieOpacity: '1',
+    pieSectionTextColor: '#fff',
+    fontFamily: css.getPropertyValue('--mono').trim(),
+  };
   for (const [k, name] of Object.entries({ ...MERMAID_VARS, ...MERMAID_MODE_VARS[mode] })) {
-    themeVariables[k] = css.getPropertyValue(name).trim();
+    themeVariables[k] = mermaidColor(css.getPropertyValue(name).trim());
   }
   SHOW_PALETTE[mode].series.forEach((c, i) => {
     themeVariables[`pie${i + 1}`] = c;
@@ -10662,10 +10685,14 @@ function loadMermaid() {
     script.integrity = MERMAID_SCRIPT.integrity;
     script.crossOrigin = 'anonymous';
     script.onload = () => {
-      const config = mermaidConfig();
-      mermaidThemeKey = JSON.stringify(config);
-      mermaid.initialize(config);
-      resolve();
+      try {
+        const config = mermaidConfig();
+        mermaidThemeKey = JSON.stringify(config);
+        mermaid.initialize(config);
+        resolve();
+      } catch (err) {
+        reject(err);
+      }
     };
     script.onerror = () => {
       script.remove();
@@ -10684,22 +10711,43 @@ function queueMermaid(work) {
   mermaidQueue = mermaidQueue.then(work).catch((err) => console.warn(err.message));
 }
 
+const MERMAID_PENDING = 'pre.mermaid:not([data-processed])';
+
 function initMermaidBlocks(container) {
   const root = container || document;
-  if (!root.querySelector('pre.mermaid:not([data-processed])')) return;
+  if (!root.querySelector(MERMAID_PENDING)) return;
+  // Stamped here, after DOMPurify: it drops an attribute whose value holds `-->`, as most diagrams do.
+  const stampPending = () =>
+    [...root.querySelectorAll(MERMAID_PENDING)].map((b) => {
+      if (!b.hasAttribute('data-original')) b.setAttribute('data-original', b.textContent);
+      return b;
+    });
   if (typeof mermaid === 'undefined') {
     loadMermaid().then(
       () => initMermaidBlocks(container),
-      (err) => console.warn(err.message),
+      (err) => {
+        console.warn(err.message);
+        for (const b of stampPending()) showMermaidError(b, err);
+      },
     );
     return;
   }
-  queueMermaid(() => {
-    const blocks = [...root.querySelectorAll('pre.mermaid:not([data-processed])')];
-    // Set here, after DOMPurify: it drops an attribute whose value holds `-->`, as most diagrams do.
-    for (const b of blocks) if (!b.hasAttribute('data-original')) b.setAttribute('data-original', b.textContent);
-    return blocks.length ? mermaid.run({ nodes: blocks }) : undefined;
+  queueMermaid(async () => {
+    // One block per run, so a bad diagram shows its own error and the others still render.
+    for (const b of stampPending()) {
+      try {
+        await mermaid.run({ nodes: [b] });
+      } catch (err) {
+        showMermaidError(b, err);
+      }
+    }
   });
+}
+
+function showMermaidError(block, err) {
+  block.setAttribute('data-processed', 'true');
+  block.setAttribute('data-mermaid-error', '');
+  block.textContent = err?.message || String(err);
 }
 
 function reinitMermaidTheme() {
@@ -10712,6 +10760,7 @@ function reinitMermaidTheme() {
     mermaid.initialize(config);
     document.querySelectorAll('pre.mermaid[data-processed]').forEach((el) => {
       el.removeAttribute('data-processed');
+      el.removeAttribute('data-mermaid-error');
       el.innerHTML = escapeHtml(el.getAttribute('data-original') || '');
     });
     initMermaidBlocks();
