@@ -6235,6 +6235,7 @@ const SHORTCUT_TABS = [
           { keys: ['T'], label: 'Toggle theme' },
           { keys: ['Shift', 'S'], combo: true, label: 'Storage manager' },
           { keys: ['Ctrl', 'Shift', 'Z'], combo: true, label: 'Zen mode (current session only)' },
+          { keys: ['Ctrl', 'Shift', 'K'], combo: true, label: 'Show / hide Kanbot' },
           { keys: ['Ctrl', '+'], combo: true, label: 'Larger modal text' },
           { keys: ['Ctrl', '−'], combo: true, label: 'Smaller modal text' },
           { keys: ['Ctrl', '0'], combo: true, label: 'Reset modal text size' },
@@ -14065,6 +14066,7 @@ function terminalShortcut(e, probe = false) {
   if (ctrlShift && e.code === 'KeyP') return toggleSessionPicker;
   // Ctrl+Shift+Z is redo in a text field, so only the terminal's own textarea gives it up.
   if (ctrlShift && e.code === 'KeyZ') return inPageField(e) ? null : toggleZenMode;
+  if (ctrlShift && e.code === 'KeyK') return kanbotAvailable() ? () => toggleKanbot() : null;
   if (ctrlAlt && (e.code === 'KeyN' || e.code === 'KeyR') && terminalAvailable()) {
     return () => openNewSession(null, e.code === 'KeyR');
   }
@@ -14430,9 +14432,10 @@ function pushTerminalClaims() {
   queueMicrotask(() => {
     terminalClaimsQueued = false;
     const bridged = bridgedFrameEls();
-    if (!termFrame.inited && !bridged.length) return;
+    if (!termFrame.inited && !kanbotState.inited && !bridged.length) return;
     const claims = keyClaims();
     sendBridgeClaimsAll(bridged, claims);
+    sendKanbotClaims(claims);
     if (!termFrame.inited) return;
     const sig = JSON.stringify(claims);
     if (sig === termFrame.claims) return;
@@ -14957,7 +14960,21 @@ const kanbotState = {
   ended: false,
   socketId: 0,
   theme: null,
+  claims: null,
+  returnFocus: null,
 };
+
+function sendKanbotClaims(claims) {
+  if (!kanbotState.inited) return;
+  const sig = JSON.stringify(claims);
+  if (sig === kanbotState.claims) return;
+  kanbotState.claims = sig;
+  postToKanbotFrame('claims', claims);
+}
+
+function kanbotFocused() {
+  return !!kanbotState.el?.contains(document.activeElement);
+}
 
 function kanbotAvailable() {
   return !!appConfig.kanbot && terminalAvailable();
@@ -15039,12 +15056,25 @@ function setKanbotAttached(on) {
 function toggleKanbot(force) {
   const el = ensureKanbotPopover();
   const show = typeof force === 'boolean' ? force : !el.classList.contains('visible');
+  const wasShown = el.classList.contains('visible');
   el.classList.toggle('visible', show);
   if (!show) {
+    const hadFocus = kanbotFocused();
     postToKanbotFrame('detach');
     setKanbotAttached(false);
+    const back = kanbotState.returnFocus;
+    kanbotState.returnFocus = null;
+    if (hadFocus) {
+      document.activeElement.blur();
+      if (back === 'terminal') focusTerminalPane();
+      else if (back?.isConnected) back.focus();
+    }
     return;
   }
+  if (!wasShown && !kanbotFocused()) {
+    kanbotState.returnFocus = terminalPaneFocused() ? 'terminal' : document.activeElement;
+  }
+  kanbotState.frame?.focus();
   if (!kanbotState.frame) {
     const frame = document.createElement('iframe');
     frame.className = 'kanbot-frame';
@@ -15096,13 +15126,19 @@ window.addEventListener('message', (e) => {
   if (t === 'loaded') {
     const themeOptions = terminalThemeOptions();
     kanbotState.inited = false;
+    kanbotState.claims = null;
     kanbotState.theme = JSON.stringify(themeOptions);
     postToKanbotFrame('init', terminalInitOptions(themeOptions));
     return;
   }
   if (t === 'term') {
     kanbotState.inited = true;
+    sendKanbotClaims(keyClaims());
     openKanbot();
+    return;
+  }
+  if (t === 'key') {
+    replayKey(m, document.getElementById('terminal-key-proxy'));
     return;
   }
   if (m.socketId !== kanbotState.socketId) return;
