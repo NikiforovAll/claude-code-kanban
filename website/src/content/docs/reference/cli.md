@@ -240,7 +240,7 @@ Prints the session's title, status, project, branch and task counts. When the pl
 claude-code-kanban session pin <id> [--sticky] [--unpin]
 ```
 
-Pins the session in the sidebar. `--sticky` makes it sticky: always shown, at the top of the list. `--unpin` clears the pin and the sticky state. The server keeps pins in `<config-dir>/.cck/pins.json`, so `session list` sees them.
+Pins the session in the sidebar. `--sticky` makes it sticky: always shown, at the top of the list. `--unpin` clears the pin and the sticky state. The server keeps pins in `<config-dir>/.cck/pins.json`, so `session list` and every board on the config dir see them.
 
 ### session group
 

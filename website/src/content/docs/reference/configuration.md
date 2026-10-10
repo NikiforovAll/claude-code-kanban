@@ -169,7 +169,7 @@ The server, the plugin and the installer keep their state in `<config-dir>/.cck/
 | `agent-activity/<sessionId>/_*` | Plugin mod, server | Markers for a waiting prompt and a finished turn, the board's answers to prompts, and team member name-to-id maps |
 | `agent-activity/_task-maps/<task list id>.json` | Plugin mod | Sessions that share a task list through `CLAUDE_CODE_TASK_LIST_ID` |
 | `context-status/<sessionId>.json` | Plugin mod (`context.ts`) | Context use, cost and model for each session |
-| `pins.json` | Server | Copy of the browser's session pins, so the CLI can read them |
+| `pins.json` | Server | Session pins (`{sessionId: "pinned" \| "sticky"}`, at most 1000) and `pinsMigratedAt`, the time a board copied its browser pins here. Every board on the config dir reads it. |
 | `linked-docs.json` | Server | Docs linked with `doc link`, so a link sent while no board is open is not lost |
 | `dispatched.json` | Server | Sessions started with `dispatch start` |
 | `groups.json` | Server | Session groups you make on the board |
@@ -200,4 +200,4 @@ Some data stays in the browser's `localStorage` and never reaches the server:
 
 Each config dir other than `~/.claude` gets its own key prefix, so two config dirs on the same port do not share this data. Another browser or profile does not see it.
 
-To remove data for sessions that no longer exist, open the Storage Manager with <kbd>Shift+S</kbd> and select **Clean Orphaned**. It also removes their pins and linked docs from `pins.json` and `linked-docs.json`.
+To remove data for sessions that no longer exist, open the Storage Manager with <kbd>Shift+S</kbd> and select **Clean Orphaned**. It also removes their pins from `pins.json` and their linked docs from `linked-docs.json`.

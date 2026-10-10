@@ -29,20 +29,22 @@ const GROUPS = {
   }],
 };
 
-// Stands in for the board: `filter=active` keeps active sessions and the pinned/included ones,
-// as the real route does; `include` adds the named ids.
+// Stands in for the board: it keeps the pins, `filter=active` keeps active sessions and the
+// pinned/included ones, as the real route does; `include` adds the named ids; `pins=off` drops
+// the pins.
 async function withBoard(fn) {
   const hits = [];
   const srv = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://x');
     hits.push(url);
     res.setHeader('Content-Type', 'application/json');
-    if (url.pathname === '/api/session/pins') return res.end(JSON.stringify({ pins: PINS }));
     if (url.pathname === '/api/groups') return res.end(JSON.stringify(GROUPS));
     if (url.pathname === '/api/sessions') {
-      const keep = new Set([...(url.searchParams.get('pinned') || '').split(','), ...(url.searchParams.get('include') || '').split(',')]);
+      const pins = url.searchParams.get('pins') === 'off' ? {} : PINS;
+      const keep = new Set([...Object.keys(pins), ...(url.searchParams.get('include') || '').split(',')]);
       const active = url.searchParams.get('filter') === 'active';
-      return res.end(JSON.stringify(SESSIONS.filter((s) => !active || s.active || keep.has(s.id))));
+      const rows = SESSIONS.filter((s) => !active || s.active || keep.has(s.id)).map((s) => ({ ...s, pin: pins[s.id] || null }));
+      return res.end(JSON.stringify(rows));
     }
     res.statusCode = 404;
     res.end('{}');
@@ -71,6 +73,23 @@ describe('session list', () => {
       assert.equal(sessionHits(hits)[0].searchParams.get('filter'), 'active');
       const ids = JSON.parse(stdout).map((s) => s.id);
       assert.deepEqual(ids.sort(), [SESSIONS[0].id, SESSIONS[2].id].sort());
+    });
+  });
+
+  it('takes pins from the server rows and makes one request', async () => {
+    await withBoard(async (run, hits) => {
+      const { stdout } = await run(['session', 'list', '--json']);
+      assert.equal(hits.length, 1);
+      assert.equal(hits[0].searchParams.get('pinned'), null);
+      assert.equal(JSON.parse(stdout).find((s) => s.id === SESSIONS[2].id).pinState, 'pinned');
+    });
+  });
+
+  it('--no-pins asks the server to drop the pins', async () => {
+    await withBoard(async (run, hits) => {
+      const { stdout } = await run(['session', 'list', '--no-pins', '--json']);
+      assert.equal(sessionHits(hits)[0].searchParams.get('pins'), 'off');
+      assert.deepEqual(JSON.parse(stdout).map((s) => s.id), [SESSIONS[0].id]);
     });
   });
 

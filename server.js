@@ -54,6 +54,7 @@ const { readLiveSessions, isPidAlive, isSessionLive } = require('./lib/live-sess
 const { createProcStats } = require('./lib/proc-stats');
 const { createGroupStore, isGroupName, suggestGroupName } = require('./lib/dispatch-groups');
 const { createUserGroupStore } = require('./lib/user-groups');
+const { createSessionPinStore } = require('./lib/session-pins');
 const { ownerLinks, moveRecipients } = require('./lib/owner-routing');
 const { parseReviewSource, parseActionBody, formatActionMarkdown } = require('./lib/preview-action');
 const { createDispatchedStore, scanTranscripts, pruneSessionDirs, pruneContextStatus, pruneTaskMaps, retentionMs } = require('./lib/retention');
@@ -145,15 +146,6 @@ const SCRATCHPAD_ROOT = (() => {
 // #endregion
 
 // #region SERVER_STATE
-// Server-side pin mirror (UI authoritative, server stores latest pushed state for CLI queries).
-function readPins() {
-  try {
-    const obj = JSON.parse(readFileSync(PINS_FILE, 'utf8'));
-    if (obj && typeof obj === 'object' && !Array.isArray(obj)) return obj;
-  } catch (_) {}
-  return {};
-}
-
 function writeJsonAtomic(file, obj, mode) {
   mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
@@ -206,9 +198,32 @@ const jsonFile = (file) => ({
   save: (data) => writeJsonAtomicOrLog(file, data),
 });
 
-function writePins(pins) {
-  writeJsonAtomic(PINS_FILE, pins);
-}
+// `load` answers undefined while the file's mtime and size are the ones last read or written.
+const stampedJsonFile = (file) => {
+  const stampOf = () => {
+    try {
+      const s = statSync(file);
+      return `${s.mtimeMs}:${s.size}`;
+    } catch {
+      return null;
+    }
+  };
+  let stamp;
+  return {
+    load: () => {
+      const next = stampOf();
+      if (next === stamp) return undefined;
+      stamp = next;
+      return readJsonOrNull(file);
+    },
+    save: (data) => {
+      writeJsonAtomicOrLog(file, data);
+      stamp = stampOf();
+    },
+  };
+};
+
+const sessionPins = createSessionPinStore(stampedJsonFile(PINS_FILE));
 
 // Port discovery for out-of-process helpers (the plugin's doorbell mod, the CLI).
 // The pid rides along so a reader can tell a live server from a file left behind by
@@ -1277,9 +1292,10 @@ app.get('/api/sessions', async (req, res) => {
     const limitParam = req.query.limit || '20';
     const limit = limitParam === 'all' ? null : parseInt(limitParam, 10);
 
-    const pinnedParam = req.query.pinned;
+    // `pinned=` from a board page loaded before the server kept pins is ignored.
     const includeIds = req.query.include ? new Set(req.query.include.split(',').filter(Boolean)) : new Set();
-    const pinnedIds = pinnedParam ? new Set(pinnedParam.split(',').filter(Boolean)) : new Set();
+    const pins = req.query.pins === 'off' ? {} : sessionPins.state().pins;
+    const pinnedIds = new Set(Object.keys(pins));
     for (const id of includeIds) pinnedIds.add(id);
     const activeFilter = req.query.filter === 'active';
     const terminalIds = new Set(terminal.ids());
@@ -1624,7 +1640,7 @@ app.get('/api/sessions', async (req, res) => {
 
     // Apply project filter before limit so the limit is per-project
     const projectFilter = req.query.project;
-    // `include` is narrower than `pinned`: pinned rows survive the limit but still obey
+    // `include` is narrower than a pin: pinned rows survive the limit but still obey
     // the project filter, because pinning is a preference and the filter is an intent.
     // The client sends the session it currently has open, which it cannot render at all
     // if the row is missing — that one is not a preference.
@@ -1656,6 +1672,7 @@ app.get('/api/sessions', async (req, res) => {
     // Same for autoCompact: up to 3 settings stats per call.
     const autoCompactByProject = new Map();
     for (const s of sessions) {
+      s.pin = pins[s.id] || null;
       s.loopInfo = getLoopInfoSummary(s);
       if (!s.contextStatus) continue;
       if (!autoCompactByProject.has(s.project)) autoCompactByProject.set(s.project, getAutoCompact(CLAUDE_DIR, s.project));
@@ -3465,7 +3482,7 @@ const dispatched = createDispatchedStore(jsonFile(DISPATCHED_FILE));
 const dispatchGroups = createGroupStore({
   ...jsonFile(DISPATCH_GROUPS_FILE),
   isAlive: (id) => terminal.isRunning(id) || isSessionLive(loadLiveSessions(), id),
-  pinnedIds: () => new Set(Object.keys(readPins())),
+  pinnedIds: () => new Set(Object.keys(sessionPins.state().pins)),
 });
 
 const linkedDocs = createLinkedDocStore(jsonFile(LINKED_DOCS_FILE));
@@ -3992,59 +4009,51 @@ app.post('/api/session/open', async (req, res) => {
   }
 });
 
-app.post('/api/session/pin', async (req, res) => {
-  try {
-    const { id, state } = req.body || {};
-    if (!id || typeof id !== 'string') return res.status(400).json({ error: 'id is required' });
-    if (!['none', 'pinned', 'sticky'].includes(state)) {
-      return res.status(400).json({ error: 'state must be none|pinned|sticky' });
-    }
-    const pins = readPins();
-    if (state === 'none') delete pins[id];
-    else pins[id] = state;
-    writePins(pins);
-    broadcast({ type: 'session:pin', id, state });
-    res.json({ success: true, id, state });
-  } catch (error) {
-    console.error('Error in /api/session/pin:', error);
-    res.status(500).json({ error: error.message || 'Failed' });
-  }
+// #region SESSION_PINS
+function broadcastPins(changed) {
+  for (const { id, state } of changed) broadcast({ type: 'session:pin', id, state });
+}
+
+// Another board on this config dir wrote the file. The reload in each route covers a write that
+// lands before the watcher fires.
+chokidar.watch(PINS_FILE, { ignoreInitial: true }).on('all', (event) => {
+  if (event === 'add' || event === 'change') broadcastPins(sessionPins.reload());
 });
 
-app.get('/api/session/pins', (_req, res) => {
-  res.setHeader('Cache-Control', 'no-store');
-  try {
-    const pins = readPins();
-    const items = Object.entries(pins).map(([id, state]) => ({ id, state }));
-    res.json({ pins, items });
-  } catch (error) {
-    console.error('Error in GET /api/session/pins:', error);
-    res.status(500).json({ error: error.message || 'Failed' });
-  }
-});
+function pinsReply() {
+  const { pins, pinsMigratedAt } = sessionPins.state();
+  return { pins, pinsMigratedAt, items: Object.entries(pins).map(([id, state]) => ({ id, state })) };
+}
+
+function pinRoute(fn) {
+  return (req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    broadcastPins(sessionPins.reload());
+    try {
+      res.json(fn(req.body || {}));
+    } catch (e) {
+      if (e.status) return res.status(e.status).json({ error: e.message });
+      return next(e);
+    }
+  };
+}
+
+app.post('/api/session/pin', pinRoute(({ id, state }) => {
+  broadcastPins(sessionPins.set(id, state));
+  return { success: true, id, state, ...pinsReply() };
+}));
+
+app.post('/api/session/pins/import', pinRoute((b) => {
+  const { imported, changed } = sessionPins.importLocal(b);
+  broadcastPins(changed);
+  return { imported, ...pinsReply() };
+}));
+
+app.get('/api/session/pins', pinRoute(() => pinsReply()));
+// #endregion
 
 // #region USER_GROUPS
-const userGroupsFileStamp = () => {
-  try {
-    const s = statSync(USER_GROUPS_FILE);
-    return `${s.mtimeMs}:${s.size}`;
-  } catch {
-    return null;
-  }
-};
-let userGroupsStamp;
-const userGroups = createUserGroupStore({
-  load: () => {
-    const stamp = userGroupsFileStamp();
-    if (stamp === userGroupsStamp) return undefined;
-    userGroupsStamp = stamp;
-    return readJsonOrNull(USER_GROUPS_FILE);
-  },
-  save: (data) => {
-    writeJsonAtomicOrLog(USER_GROUPS_FILE, data);
-    userGroupsStamp = userGroupsFileStamp();
-  },
-});
+const userGroups = createUserGroupStore(stampedJsonFile(USER_GROUPS_FILE));
 // The watcher tells this board's pages about another board's write; the reload in each route
 // covers a write that lands before the watcher fires.
 chokidar.watch(USER_GROUPS_FILE, { ignoreInitial: true }).on('all', (event) => {

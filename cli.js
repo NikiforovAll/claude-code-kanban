@@ -174,7 +174,7 @@ const COMMANDS = {
         run: runSessionAgentsCli,
       },
       pin: {
-        summary: 'Pin (or unpin) a session in the sidebar of connected browser tabs',
+        summary: 'Pin (or unpin) a session in the sidebar; every board on this config dir shows it',
         usage: 'claude-code-kanban session pin <id> [--sticky] [--unpin]',
         flags: {
           '<id>': 'Full session id, or a unique prefix',
@@ -736,26 +736,17 @@ function parseLimit(args, { fallback, allowAll = false }) {
   return { ok: true, limit: n };
 }
 
-function fetchSessionsList({ limit, pinnedIds = [], include = [], project = null, activeOnly = false }, label = 'Session list') {
+function fetchSessionsList({ limit, noPins = false, include = [], project = null, activeOnly = false }, label = 'Session list') {
   const q = limit === null ? 'all' : String(limit);
-  const pinnedQ = pinnedIds.length ? `&pinned=${pinnedIds.map(encodeURIComponent).join(',')}` : '';
+  const pinsQ = noPins ? '&pins=off' : '';
   const includeQ = include.length ? `&include=${include.map(encodeURIComponent).join(',')}` : '';
   const projectQ = project ? `&project=${encodeURIComponent(project)}` : '';
   const filterQ = activeOnly ? '&filter=active' : '';
-  return cliGetJson(`/api/sessions?limit=${q}${pinnedQ}${includeQ}${projectQ}${filterQ}`, label);
+  return cliGetJson(`/api/sessions?limit=${q}${pinsQ}${includeQ}${projectQ}${filterQ}`, label);
 }
 
 function fetchSessionsByIds(ids, label) {
   return cliGetJson(`/api/sessions?limit=1&include=${ids.map(encodeURIComponent).join(',')}`, label);
-}
-
-async function fetchPinsMap() {
-  try {
-    const res = await cliFetch('/api/session/pins');
-    if (!res.ok) return {};
-    const { pins = {} } = await res.json();
-    return pins;
-  } catch { return {}; }
 }
 
 async function resolveSessionByIdOrPrefix(idArg) {
@@ -796,16 +787,15 @@ async function runSessionListCli(args) {
   if (!parsed.ok) return usageError(COMMANDS.session.verbs.list, parsed.error);
   const limit = parsed.limit;
   const asJson = args.includes('--json');
-  const pinsMap = noPins ? {} : await fetchPinsMap();
-  const pinnedIds = Object.keys(pinsMap);
   let list;
   try {
-    list = await fetchSessionsList({ limit: days !== null ? null : limit, pinnedIds, project: projectFilter, activeOnly });
+    list = await fetchSessionsList({ limit: days !== null ? null : limit, noPins, project: projectFilter, activeOnly });
   } catch (e) {
     reportCliError(e);
     return 1;
   }
-  const pinOf = id => pinsMap[id] || null;
+  const pins = Object.fromEntries(list.map(s => [s.id, noPins ? null : s.pin]));
+  const pinOf = id => pins[id] || null;
   if (days !== null) {
     const cutoff = Date.now() - days * 86_400_000;
     list = list.filter(s => pinOf(s.id) || (s.modifiedAt && new Date(s.modifiedAt).getTime() >= cutoff));
@@ -951,9 +941,9 @@ async function runSessionUngroupCli(args, entry) {
 // A session member carries the session's metadata; a project member carries the count of its
 // sessions that are shown. With activeOnly, a member is shown when the sidebar's Active view
 // shows it: an active or pinned session, a project with one.
-function describeGroupMembers(groups, sessions, pinsMap, activeOnly) {
+function describeGroupMembers(groups, sessions, activeOnly) {
   const byId = new Map(sessions.map((s) => [s.id, s]));
-  const shown = (s) => !activeOnly || s.active || !!pinsMap[s.id];
+  const shown = (s) => !activeOnly || s.active || !!s.pin;
   const shownByProject = new Map();
   for (const s of sessions) {
     if (!shown(s)) continue;
@@ -971,7 +961,7 @@ function describeGroupMembers(groups, sessions, pinsMap, activeOnly) {
       title: s.customTitle || s.name || s.slug || '',
       branch: s.gitBranch || null,
       status: sessionStatus(s),
-      pinned: pinsMap[s.id] || null,
+      pinned: s.pin || null,
       age: ageOf(s.modifiedAt),
     }];
   };
@@ -987,13 +977,12 @@ async function runGroupListCli(args) {
   let groups;
   try {
     ({ rev, groups } = await cliGetJson('/api/groups', 'Group list'));
-    const pinsMap = await fetchPinsMap();
     const sessionRefs = [...new Set(groups.flatMap((g) => g.members.filter((m) => m.type === 'session').map((m) => m.ref)))];
     const hasProjects = groups.some((g) => g.members.some((m) => m.type === 'project'));
     const sessions = sessionRefs.length || hasProjects
-      ? await fetchSessionsList({ limit: hasProjects ? null : 1, pinnedIds: Object.keys(pinsMap), include: sessionRefs, activeOnly: hasProjects && activeOnly }, 'Group list')
+      ? await fetchSessionsList({ limit: hasProjects ? null : 1, include: sessionRefs, activeOnly: hasProjects && activeOnly }, 'Group list')
       : [];
-    groups = describeGroupMembers(groups, sessions, pinsMap, activeOnly);
+    groups = describeGroupMembers(groups, sessions, activeOnly);
   } catch (e) { reportCliError(e); return 1; }
   if (args.includes('--json')) {
     console.log(JSON.stringify({ rev, groups }, null, 2));

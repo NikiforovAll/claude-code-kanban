@@ -323,18 +323,16 @@ async function getJson(path, fallback = null, opts) {
 
 async function fetchSessions(includeTasks = true, focusId = currentSessionId) {
   try {
-    const allPinnedIds = new Set([...pinnedSessionIds, ...stickySessionIds]);
-    if (revealedPlanSessionId) allPinnedIds.add(revealedPlanSessionId);
-    if (revealedStorageSessionId) allPinnedIds.add(revealedStorageSessionId);
+    // The focused session must come back whatever the filters say: renderSession and the
+    // info modal both look it up in `sessions` and bail when it is absent, so a session
+    // opened from outside the current filter would leave the view on the previous one.
+    // The server adds the pinned sessions itself.
+    const include = [focusId, revealedPlanSessionId, revealedStorageSessionId].filter(Boolean);
     const recent = filterProject === '__recent__';
     const res = await api('/api/sessions', {
       query: {
         limit: sessionLimit,
-        pinned: allPinnedIds.size > 0 ? [...allPinnedIds].join(',') : null,
-        // The focused session must come back whatever the filters say: renderSession and the
-        // info modal both look it up in `sessions` and bail when it is absent, so a session
-        // opened from outside the current filter would leave the view on the previous one.
-        include: focusId || null,
+        include: include.length ? include.join(',') : null,
         recentHours: recent ? RECENT_PROJECT_HOURS : null,
         project: !recent && filterProject ? filterProject : null,
         filter: sessionFilter === 'active' ? 'active' : null,
@@ -2123,35 +2121,80 @@ let stickySessionIds = new Set();
 // Pinning the currently-selected session keeps it in place until deselected (less UI movement).
 const deferredPinPlacement = new Set();
 
-function loadPinnedSessions() {
-  return new Set(readStoredList(PINNED_SESSIONS_KEY));
+// Sessions that `session open` keeps on screen for this page only; the server never has them.
+const openedStickyIds = new Set();
+
+// The server keeps the pins (`/api/session/pins`, lib/session-pins.js); the two sets are only the
+// page's copy. The localStorage lists are from before that: the first board to load imports them,
+// and every board deletes them.
+async function syncSessionPins() {
+  try {
+    let res = await api('/api/session/pins');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    let data = await res.json();
+    if (!data.pinsMigratedAt) {
+      const body = { pinned: readStoredList(PINNED_SESSIONS_KEY), sticky: readStoredList(STICKY_SESSIONS_KEY) };
+      res = await api('/api/session/pins/import', { method: 'POST', body });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      data = await res.json();
+    }
+    store.removeItem(PINNED_SESSIONS_KEY);
+    store.removeItem(STICKY_SESSIONS_KEY);
+    applyServerPins(data.pins);
+  } catch (e) {
+    console.warn('[pins] server sync failed:', e.message);
+  }
 }
 
-function loadStickySessions() {
-  return new Set(readStoredList(STICKY_SESSIONS_KEY));
+function applyServerPins(pins) {
+  const before = new Set(pinnedSessionIds);
+  pinnedSessionIds = new Set();
+  stickySessionIds = new Set(openedStickyIds);
+  for (const [id, state] of Object.entries(pins || {})) {
+    pinnedSessionIds.add(id);
+    if (state === 'sticky') stickySessionIds.add(id);
+  }
+  for (const id of deferredPinPlacement) if (!isAnyPinned(id)) deferredPinPlacement.delete(id);
+  const added = [...pinnedSessionIds].filter((id) => !before.has(id));
+  for (const id of added) expandPinnedFor(id);
+  showPinnedSessions(added);
 }
 
-function savePinnedSessions() {
-  store.writeJson(PINNED_SESSIONS_KEY, [...pinnedSessionIds]);
-  store.writeJson(STICKY_SESSIONS_KEY, [...stickySessionIds]);
+// A pinned session outside the current filter is only in the list once it is fetched with the pins.
+function showPinnedSessions(added) {
+  const known = new Set(sessions.map((s) => s.id));
+  if (added.some((id) => !known.has(id))) fetchSessions(false);
+  else renderSessions();
 }
 
-// Mirror pin state to server so it can be queried by the CLI. UI remains source of truth for itself.
-function offloadSessionPin(sessionId) {
-  const state = getSessionPinState(sessionId);
-  api('/api/session/pin', { method: 'POST', body: { id: sessionId, state } }).catch(() => {});
+// One session per request, so the last write for a session wins. A failed save re-reads the server
+// so the page shows what is saved.
+async function sendPinChange(sessionId) {
+  let error;
+  try {
+    const res = await api('/api/session/pin', {
+      method: 'POST',
+      body: { id: sessionId, state: getSessionPinState(sessionId) },
+    });
+    if (res.ok) return;
+    error = (await res.json().catch(() => null))?.error || `HTTP ${res.status}`;
+  } catch (e) {
+    error = e.message;
+  }
+  showToast(`Pin not saved (${error}); showing the saved pins`, 'error');
+  await syncSessionPins();
 }
 
 function clearSessionPin(sessionId) {
   pinnedSessionIds.delete(sessionId);
   stickySessionIds.delete(sessionId);
+  openedStickyIds.delete(sessionId);
   deferredPinPlacement.delete(sessionId);
 }
 
 function unpinSession(sessionId) {
   clearSessionPin(sessionId);
-  savePinnedSessions();
-  offloadSessionPin(sessionId);
+  sendPinChange(sessionId);
   renderSessions();
 }
 
@@ -2160,8 +2203,7 @@ function toggleSessionPin(sessionId) {
   pinnedSessionIds.add(sessionId);
   if (sessionId === currentSessionId) deferredPinPlacement.add(sessionId);
   expandPinnedFor(sessionId);
-  savePinnedSessions();
-  offloadSessionPin(sessionId);
+  sendPinChange(sessionId);
   renderSessions();
 }
 
@@ -2173,16 +2215,8 @@ function toggleSessionSticky(sessionId) {
     stickySessionIds.add(sessionId);
     if (sessionId === currentSessionId) deferredPinPlacement.add(sessionId);
   }
-  savePinnedSessions();
-  offloadSessionPin(sessionId);
+  sendPinChange(sessionId);
   renderSessions();
-}
-
-function isPlacedPinned(id) {
-  return pinnedSessionIds.has(id) && !deferredPinPlacement.has(id);
-}
-function isPlacedSticky(id) {
-  return stickySessionIds.has(id) && !deferredPinPlacement.has(id);
 }
 
 function handleSessionPinEvent({ id, state }) {
@@ -2194,8 +2228,14 @@ function handleSessionPinEvent({ id, state }) {
     stickySessionIds.add(id);
   }
   expandPinnedFor(id);
-  savePinnedSessions();
-  renderSessions();
+  showPinnedSessions(isAnyPinned(id) ? [id] : []);
+}
+
+function isPlacedPinned(id) {
+  return pinnedSessionIds.has(id) && !deferredPinPlacement.has(id);
+}
+function isPlacedSticky(id) {
+  return stickySessionIds.has(id) && !deferredPinPlacement.has(id);
 }
 
 function getSessionPinState(sessionId) {
@@ -6959,7 +6999,7 @@ async function _storageViewSession(id) {
 
 function _storageUnpinSession(id) {
   clearSessionPin(id);
-  savePinnedSessions();
+  sendPinChange(id);
   renderSessions();
   _renderStorageTab();
   _updateStorageTotal();
@@ -7233,8 +7273,7 @@ async function cleanupOrphanedStorage() {
       if (key.startsWith(PREVIEW_STORAGE_PREFIX)) forgetServerLinkedDoc(key.slice(PREVIEW_STORAGE_PREFIX.length));
     }
   }
-  if (unpinned.size) savePinnedSessions();
-  for (const id of unpinned) offloadSessionPin(id);
+  for (const id of unpinned) sendPinChange(id);
   const removed = orphaned.length;
 
   showToast(removed ? `Cleaned ${removed} orphaned item${removed > 1 ? 's' : ''}` : 'No orphaned items found');
@@ -8832,6 +8871,7 @@ function handleSessionOpenEvent(data) {
   }
   if (!isSessionActive(target)) {
     stickySessionIds.add(id);
+    openedStickyIds.add(id);
   }
   setSessionDismissed(id, false);
   cliOpenedId = id;
@@ -9498,6 +9538,7 @@ function setupEventSource() {
         if (sgRev === null) syncSessionGroups();
         else if (sgUnsent) persistSessionGroups();
         else sgRefresh();
+        syncSessionPins();
         if (terminalAvailable())
           loadTerminals()
             .then(renderSessions)
@@ -16643,8 +16684,7 @@ searchQuery = urlState.search || '';
 
 renderFilterState();
 renderZenState();
-pinnedSessionIds = loadPinnedSessions();
-stickySessionIds = loadStickySessions();
+syncSessionPins();
 setupEventSource();
 
 if (urlState.search) {
