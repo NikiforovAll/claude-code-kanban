@@ -49,7 +49,7 @@ const { buildDecision, decisionFileName, isDecisionFile, approvalsFrom, boardRef
 const { getClaudeDir, getArgValue, storageNamespace, isDefaultClaudeDir } = require('./lib/claude-dir');
 const { readTerminalConfig } = require('./lib/terminal');
 const { createTerminalClient } = require('./lib/terminal-client');
-const { clawdOn, createClawd } = require('./lib/clawd');
+const { kanbotOn, kanbotModel, createKanbot } = require('./lib/kanbot');
 const { createShowStore, mountShowRoutes, showBodyParser, SHOW_PATH } = require('./lib/show');
 const { readLiveSessions, isPidAlive, isSessionLive } = require('./lib/live-sessions');
 const { createProcStats } = require('./lib/proc-stats');
@@ -321,12 +321,16 @@ function boardEventsEnabled() {
   return cachedByMtime(cckConfigCache, 'boardEvents', CCK_CONFIG_FILE,
     () => boardEventsOn(readCckConfig()), boardEventsOn(null));
 }
-function clawdEnabled() {
-  return cachedByMtime(cckConfigCache, 'clawd', CCK_CONFIG_FILE,
-    () => clawdOn(readCckConfig()), clawdOn(null));
+function kanbotEnabled() {
+  return cachedByMtime(cckConfigCache, 'kanbot', CCK_CONFIG_FILE,
+    () => kanbotOn(readCckConfig()), kanbotOn(null));
 }
-// Clawd's transcripts all land in one project folder, which the board never lists (docs/clawd.md).
-const clawd = createClawd({ cckDir: CCK_DIR, projectsDir: PROJECTS_DIR });
+function kanbotModelSetting() {
+  return cachedByMtime(cckConfigCache, 'kanbotModel', CCK_CONFIG_FILE,
+    () => kanbotModel(readCckConfig()), kanbotModel(null));
+}
+// Kanbot's transcripts all land in one project folder, which the board never lists (docs/kanbot.md).
+const kanbot = createKanbot({ cckDir: CCK_DIR, projectsDir: PROJECTS_DIR });
 
 // approvals.json predates config.json (and was opt-in). Fold it into
 // config.json once so an existing opt-in keeps its tuning, then drop it.
@@ -941,7 +945,7 @@ function loadSessionMetadata() {
     }
 
     const projectDirs = readdirSync(PROJECTS_DIR, { withFileTypes: true })
-      .filter(d => d.isDirectory() && !clawd.isOwnProjectDirName(d.name));
+      .filter(d => d.isDirectory() && !kanbot.isOwnProjectDirName(d.name));
 
     for (const projectDir of projectDirs) {
       const projectPath = path.join(PROJECTS_DIR, projectDir.name);
@@ -1531,8 +1535,8 @@ app.get('/api/sessions', async (req, res) => {
       } catch (_) {}
     }
 
-    // Task dirs and agent-activity name Clawd's sessions too.
-    for (const sid of sessionsMap.keys()) if (clawd.isOwnSession(sid)) sessionsMap.delete(sid);
+    // Task dirs and agent-activity name Kanbot's sessions too.
+    for (const sid of sessionsMap.keys()) if (kanbot.isOwnSession(sid)) sessionsMap.delete(sid);
 
     // Correlate plan sessions with their implementation sessions (same slug)
     const slugGroups = new Map();
@@ -3286,7 +3290,7 @@ app.get('/api/config', (_req, res) => {
     memoryUrl: MEMORY_URL,
     scratchAvailable: !!whichSync('scratch'),
     terminal: terminal.clientConfig(),
-    clawd: clawdEnabled(),
+    kanbot: kanbotEnabled(),
   });
 });
 
@@ -3296,7 +3300,7 @@ app.get('/api/config', (_req, res) => {
 // A new session may start only in a folder the user has already worked in, or one they
 // chose in the native dialog during this run. Anything else would let a page script pick
 // the directory claude runs in.
-const pickedFolders = new Set([clawd.cwd]);
+const pickedFolders = new Set([kanbot.cwd]);
 function isAllowedFolder(dir) {
   const known = pickedFolders.has(dir) || Object.values(loadSessionMetadata()).some((m) => m.project === dir);
   try { return known && statSync(dir).isDirectory(); } catch { return false; }
@@ -3311,7 +3315,7 @@ function resolveSessionFolder(id) {
   }
   try {
     for (const dir of readdirSync(PROJECTS_DIR, { withFileTypes: true })) {
-      if (!dir.isDirectory() || clawd.isOwnProjectDirName(dir.name)) continue;
+      if (!dir.isDirectory() || kanbot.isOwnProjectDirName(dir.name)) continue;
       const jsonlPath = path.join(PROJECTS_DIR, dir.name, `${id}.jsonl`);
       if (!existsSync(jsonlPath)) continue;
       let indexProject = null;
@@ -3398,7 +3402,13 @@ app.post('/api/terminal/start', terminalRoute(async (req, res) => {
 app.get('/api/terminals', terminalRoute(async (_req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   const sessions = await terminal.sessions();
-  res.json({ sessions: sessions.map((t) => (t.id === clawd.ptyId ? { ...t, clawd: true } : t)) });
+  res.json({
+    sessions: sessions.map((t) => {
+      if (t.id === kanbot.ptyId) return { ...t, kanbot: true };
+      const marker = dispatched.get(t.id);
+      return marker ? { ...t, dispatched: { parent: marker.parent || null } } : t;
+    }),
+  });
 }));
 
 const terminalProcStats = createProcStats();
@@ -3507,45 +3517,26 @@ app.get('/api/dispatch', (req, res) => {
 });
 // #endregion
 
-// #region CLAWD
-function clawdRoute(fn) {
+// #region KANBOT
+function kanbotRoute(fn) {
   return terminalRoute(async (req, res) => {
-    if (!clawdEnabled()) return res.status(404).json({ error: 'clawd is turned off in .cck/config.json' });
+    if (!kanbotEnabled()) return res.status(404).json({ error: 'kanbot is turned off in .cck/config.json' });
     return fn(req, res);
   });
 }
 
-const clawdState = () => ({ ptyId: clawd.ptyId, sessionId: clawd.sessionId });
+const kanbotState = () => ({ ptyId: kanbot.ptyId, sessionId: kanbot.sessionId });
 
-app.post('/api/clawd/start', clawdRoute(async (req, res) => {
+app.post('/api/kanbot/start', kanbotRoute(async (req, res) => {
   if (!terminal.authorized(req.get('x-terminal-token'))) return res.status(401).json({ error: 'invalid terminal token' });
-  if (clawd.ptyId && terminal.isRunning(clawd.ptyId)) return res.json(clawdState());
-  const started = await terminal.startNew(clawd.startSpec());
+  if (kanbot.ptyId && terminal.isRunning(kanbot.ptyId)) return res.json(kanbotState());
+  const started = await terminal.startNew(kanbot.startSpec({
+    model: kanbotModelSetting(),
+    boardUrl: `http://127.0.0.1:${boardPort}`,
+  }));
   if (started.error) return res.status(started.status).json({ error: started.error });
-  clawd.ptyId = started.id;
-  res.status(201).json(clawdState());
-}));
-
-app.post('/api/clawd/context', clawdRoute(async (req, res) => {
-  const id = req.body?.sessionId ?? null;
-  if (id !== null && !(typeof id === 'string' && isUUID(id))) return res.status(400).json({ error: 'invalid sessionId' });
-  clawd.setFocus(id);
-  res.status(204).end();
-}));
-
-app.get('/api/clawd/context', clawdRoute(async (req, res) => {
-  res.setHeader('Cache-Control', 'no-store');
-  const focus = clawd.focus;
-  if (req.query.seen === String(focus?.sessionId ?? null)) return res.status(204).end();
-  if (!focus) return res.json({ sessionId: null });
-  const meta = sessionMetaFor(focus.sessionId) || {};
-  res.json({
-    ...focus,
-    project: meta.project || meta.cwd || null,
-    name: getSessionDisplayName(focus.sessionId, meta),
-    gitBranch: sessionGitBranch(meta, !!worktrees.resolve(meta.project), getGitBranch) || null,
-    transcript: meta.jsonlPath || null,
-  });
+  kanbot.ptyId = started.id;
+  res.status(201).json(kanbotState());
 }));
 // #endregion
 
@@ -4482,7 +4473,7 @@ const projectsWatcher = chokidar.watch(PROJECTS_DIR, {
 
 projectsWatcher.on('all', (event, filePath) => {
   if (event !== 'add' && event !== 'change' && event !== 'unlink') return;
-  if (clawd.isOwnPath(filePath)) return clawd.onTranscript(filePath, event);
+  if (kanbot.isOwnPath(filePath)) return kanbot.onTranscript(filePath, event);
   if (filePath.endsWith('.jsonl')) {
     if (event === 'unlink') {
       loopInfoStateByPath.delete(filePath);

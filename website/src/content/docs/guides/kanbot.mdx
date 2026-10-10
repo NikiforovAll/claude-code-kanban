@@ -1,0 +1,79 @@
+---
+title: Kanbot
+description: Chat with Kanbot, the assistant built into the board. It answers questions, runs the board for you and hands project work to new sessions.
+---
+
+import Shot from '../../../kit/Shot.astro';
+import Lightbox from '../../../kit/Lightbox.astro';
+
+Kanbot is a Claude Code session that belongs to the board, not to a project. Ask it about your sessions, about Claude Code Kanban itself, or about anything else. It runs the board CLI for you, and it hands work that changes a project to a new session that you can watch.
+
+Kanbot is experimental. It needs the [embedded terminal](/claude-code-kanban/guides/embedded-terminal/).
+
+## Open Kanbot
+
+Click the small orange glyph next to the version at the bottom of the sidebar. Kanbot opens in a popover over the board. The first open starts the Claude Code process, so it takes a few seconds.
+
+<style>{`:root[data-theme='dark'] .mode-light, :root:not([data-theme='dark']) .mode-dark { display: none; }`}</style>
+
+<div class="mode-light"><Shot src="shots/kanbot-popover-light.webp" alt="Kanbot in a popover at the bottom left of the board" /></div>
+<div class="mode-dark"><Shot src="shots/kanbot-popover-dark.webp" alt="Kanbot in a popover at the bottom left of the board" /></div>
+
+The popover header has four buttons:
+
+| Button | Action |
+| --- | --- |
+| – | Hide the popover. Kanbot keeps running, and the next open shows the same screen. |
+| Dock | Dock Kanbot as a full-height panel on the right edge. Drag its left edge to change the width. Click again to undock. |
+| Expand | Show Kanbot in a large panel in the middle of the window. Click again to restore. |
+| × | End the Claude Code process. The next open resumes the same chat. |
+
+<div class="mode-light"><Shot src="shots/kanbot-docked-light.webp" alt="Kanbot docked as a full-height panel on the right edge of the board" /></div>
+<div class="mode-dark"><Shot src="shots/kanbot-docked-dark.webp" alt="Kanbot docked as a full-height panel on the right edge of the board" /></div>
+
+<div class="mode-light"><Shot src="shots/kanbot-expanded-light.webp" alt="Kanbot expanded to a large panel in the middle of the window" /></div>
+<div class="mode-dark"><Shot src="shots/kanbot-expanded-dark.webp" alt="Kanbot expanded to a large panel in the middle of the window" /></div>
+
+The browser remembers the layout and the docked width.
+
+While Kanbot is open, <kbd>Ctrl+W</kbd> in a browser tab asks before it closes the page, as for the embedded terminal.
+
+## What Kanbot does
+
+- **Answers questions** about your sessions, their transcripts and tasks, and about Claude Code Kanban. For Claude Code Kanban, it reads this documentation.
+- **Runs the board.** It uses the `claude-code-kanban` CLI to link documents, add panes, open and pin sessions, and list tasks. See the [CLI reference](/claude-code-kanban/reference/cli/).
+- **Hands off project work.** For a code change, a fix or a long build, Kanbot does not do the work itself. It suggests a new session, with the project folder and a prompt, and starts it with [dispatch](/claude-code-kanban/guides/dispatch/) when you agree.
+
+Kanbot cannot see which session you have open on the board. Name the session, for example "the login session", and Kanbot finds it with `session search`. When more than one session fits, it asks.
+
+## One chat that stays
+
+Kanbot always resumes its newest chat. When you end it with ×, type `/exit` or restart the server, the next open continues where you stopped. Type `/clear` to start a new chat.
+
+Kanbot runs in its own folder, `<config-dir>/.cck/kanbot`. Its sessions do not show in the session list, the live feed or the session picker. In the Terminals manager, its row is named Kanbot.
+
+The first time Kanbot starts, Claude Code asks whether you trust its folder. Choose **Yes, I trust this folder**.
+
+## Memory
+
+Kanbot keeps its own memory in `<config-dir>/.cck/kanbot/.claude/agent-memory/`. Ask it to remember something, and it writes a note there for later chats. This memory is separate from the memory of your project sessions.
+
+## Settings
+
+Set these in `<config-dir>/.cck/config.json`:
+
+```json
+{
+  "kanbot": {
+    "enabled": true,
+    "model": "sonnet"
+  }
+}
+```
+
+- `enabled`: set to `false` to hide the Kanbot button. The server reads the file again when it changes, so no restart is needed.
+- `model`: `fable`, `opus`, `sonnet` or `haiku`. With no value, Claude Code uses its default model. The model applies from the next start: click × and open Kanbot again. `/model` in the chat changes it for the running process only.
+
+Until you click the button, Kanbot starts no process and uses no resources.
+
+<Lightbox />

@@ -34,6 +34,7 @@ export default defineConfig({
 						{ label: 'Panes and split view', slug: 'guides/panes' },
 						{ label: 'Review comments', slug: 'guides/review-comments' },
 						{ label: 'Embedded terminal', slug: 'guides/embedded-terminal' },
+						{ label: 'Kanbot', slug: 'guides/kanbot' },
 						{ label: 'Markdown views', slug: 'guides/markdown-views' },
 						{ label: 'Session groups', slug: 'guides/session-groups' },
 						{ label: 'Dispatch tasks to other sessions', slug: 'guides/dispatch' },

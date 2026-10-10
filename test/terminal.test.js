@@ -616,6 +616,16 @@ describe('terminal restore', () => {
     assert.deepEqual(store.data.sessions, [B]);
   });
 
+  it('does not save a terminal started with restore off', async () => {
+    const { t, store } = service(true, null);
+    const FRESH = 'aaaaaaaa-0000-0000-0000-000000000005';
+    assert.equal((await t.startNew({ id: UNKNOWN, cwd: os.tmpdir(), restore: false })).id, UNKNOWN);
+    assert.equal((await t.startNew({ id: FRESH, cwd: os.tmpdir() })).id, FRESH);
+    await until(() => store.data?.sessions?.length === 1);
+    assert.deepEqual(store.data.sessions, [FRESH]);
+    t.shutdown();
+  });
+
   it('resumes a terminal with the task list it was saved with, and saves only valid ones', async () => {
     const { t, pty, store } = service(true, { sessions: [A, B], taskLists: { [A]: 'shared-list', [B]: '../up', [UNKNOWN]: 'x' } });
     t.restore();

@@ -192,6 +192,44 @@ describe('CLI server resolution', () => {
     }
   });
 
+  it('terminal list shows every terminal, newest first, and hints at dispatch end for its own', async () => {
+    const self = '11111111-1111-4111-8111-111111111111';
+    const sessions = [
+      { id: 'aaaa1111-0000-4000-8000-000000000001', mode: 'resume', cwd: 'C:/a', startedAt: Date.now() - 60000, kanbot: true },
+      { id: 'aaaa2222-0000-4000-8000-000000000002', mode: 'new', cwd: 'C:/b', name: 'api-worker', startedAt: Date.now() - 1000, dispatched: { parent: self } },
+      { id: 'aaaa3333-0000-4000-8000-000000000003', mode: 'new', cwd: 'C:/c', startedAt: Date.now() - 5000, dispatched: { parent: null } },
+      { id: 'aaaa4444-0000-4000-8000-000000000004', mode: 'shell', cwd: 'C:/d', startedAt: Date.now() - 9000 },
+    ];
+    const seen = [];
+    const srv = http.createServer((req, res) => {
+      seen.push(`${req.method} ${req.url}`);
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ sessions }));
+    });
+    await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    try {
+      const dir = tempConfigDir({ port: srv.address().port, pid: process.pid });
+      const mine = await runCli(['terminal', 'list'], { CLAUDE_CONFIG_DIR: dir, CLAUDE_CODE_SESSION_ID: self });
+      assert.equal(mine.code, 0);
+      const lines = mine.stdout.trim().split('\n');
+      assert.match(lines[0], /^SESSION\s+AGE\s+KIND\s+NAME\s+CWD$/);
+      assert.match(lines[1], /^aaaa2222-\S+\s+\S+\s+dispatch \(yours\)\s+api-worker\s+C:\/b$/);
+      assert.match(lines[2], /^aaaa3333-\S+\s+\S+\s+dispatch\s+-\s+C:\/c$/);
+      assert.match(lines[3], /^aaaa4444-\S+\s+\S+\s+shell\s+/);
+      assert.match(lines[4], /^aaaa1111-\S+\s+\S+\s+kanbot\s+/);
+      assert.match(mine.stdout, /dispatch end <session>/);
+
+      const other = await runCli(['terminal', 'list'], { CLAUDE_CONFIG_DIR: dir, CLAUDE_CODE_SESSION_ID: '' });
+      assert.doesNotMatch(other.stdout, /yours|dispatch end/);
+
+      const json = await runCli(['terminal', 'list', '--json'], { CLAUDE_CONFIG_DIR: dir });
+      assert.deepEqual(JSON.parse(json.stdout).map((t) => t.id.slice(0, 8)), ['aaaa2222', 'aaaa3333', 'aaaa4444', 'aaaa1111']);
+      assert.deepEqual([...new Set(seen)], ['GET /api/terminals']);
+    } finally {
+      srv.close();
+    }
+  });
+
   it('names the config dir when the server is unreachable', async () => {
     const dir = tempConfigDir();
     const { code, stderr } = await runCli(['session', 'list'], { CLAUDE_CONFIG_DIR: dir, PORT: '1' });

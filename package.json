@@ -55,7 +55,7 @@
     "cli.js",
     "install.js",
     "plugin/**/*",
-    "clawd/**/*",
+    "kanbot/**/*",
     "lib/**/*",
     "public/**/*",
     "skill-guides/**/*"

@@ -105,6 +105,26 @@ Your card moves and review comments reach the session as prompts. This is on by 
 
 The server reads the file again when it changes, so no restart is needed. See [Steer a session from the board](/claude-code-kanban/guides/plugin-skills/#steer-a-session-from-the-board).
 
+## Kanbot config
+
+[Kanbot](/claude-code-kanban/guides/kanbot/) is on by default when the embedded terminal is on. To change it, add a `kanbot` block to the same `<config-dir>/.cck/config.json`:
+
+```json
+{
+  "kanbot": {
+    "enabled": true,
+    "model": "sonnet"
+  }
+}
+```
+
+| Field | Default | What it does |
+|---|---|---|
+| `enabled` | `true` | Only an explicit `false` turns Kanbot off. The button goes away and the `/api/kanbot` routes answer `404`. |
+| `model` | none | `fable`, `opus`, `sonnet` or `haiku`. Read at each start of Kanbot. Any other value is ignored, and Claude Code uses its default. |
+
+The server reads the file again when it changes, so no restart is needed.
+
 ## Network and security
 
 The server binds to `127.0.0.1` and also listens on `::1` on the same port. It has no authentication. Anyone who can reach the port can read your sessions.
@@ -160,7 +180,8 @@ The server, the plugin and the installer keep their state in `<config-dir>/.cck/
 | `session-cache.json` | Server | Session list cache, so the first list after a restart is fast. Safe to delete. |
 | `server.json` | Server | `{port, pid}` of the running server. The CLI and the plugin use it to find the port. |
 | `terminal-tokens/<port>.json` | Server | Terminal token of the board on `<port>` (file mode 600), used by `dispatch start`. Written only when the terminal is available. One file per board, so two boards on one config dir each keep their own. |
-| `config.json` | You | Optional [UI approvals config](#ui-approvals-config) and [board events config](#board-events-config) |
+| `kanbot/` | Server, Kanbot | Kanbot's working folder: its prompt file, written at each start, and its memory in `.claude/agent-memory/` |
+| `config.json` | You | Optional [UI approvals config](#ui-approvals-config), [board events config](#board-events-config) and [Kanbot config](#kanbot-config) |
 | `plugin/` | Installer | Copy of the Claude Code plugin |
 
 The server removes `server.json` and its `terminal-tokens/<port>.json` when it exits, if they still belong to it. At start it also removes token files left by servers that are no longer running.
@@ -175,6 +196,7 @@ Some data stays in the browser's `localStorage` and never reaches the server:
 - Pinned messages
 - Linked documents added on the board (links made with `doc link` are also in `linked-docs.json`)
 - Scratchpad notes
+- Kanbot's layout (floating, docked or expanded) and docked width
 
 Each config dir other than `~/.claude` gets its own key prefix, so two config dirs on the same port do not share this data. Another browser or profile does not see it.
 
