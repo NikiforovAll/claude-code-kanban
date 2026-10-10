@@ -53,6 +53,14 @@ In auto mode, `tool.check` says `ask` before the classifier decides, and most of
 
 An ask from a settings `ask` rule always opens the dialog, in auto mode too. `tool.check` names that rule, and the mod writes it to the marker as `rule`, so the server keeps those asks. A dialog that the classifier itself falls back to shows only in the terminal.
 
+## Keys and layout
+
+- `Ctrl+Enter` (`Cmd+Enter` on macOS) allows a permission ask, approves a plan, or sends the answers of a question. It works in the detail modal, and from the log entry when no modal is open (not for a question).
+- On a question, `1`–`9` pick an option of the tab on screen, and `←`/`→` move between tabs. With more than one question, each has a tab, plus a Review tab. A single-select pick moves to the next tab.
+- The log entry has no "waiting…" pill, because the sidebar already marks the session. It shows a key hint; a plan row has no yellow background and takes reject feedback in an inline input.
+- A permission card shows the whole command or the diff, the cwd and how long the ask has waited. The wait is computed when the card renders; there is no timer, so it costs nothing between renders.
+- The hints show `⌘` and `⌥` on macOS (`IS_MAC`).
+
 ## Auto-open
 
 A new answerable ask in the selected session opens the waiting modal by itself, in follow mode. It does not open when any modal is already visible — you are reading something, so the ask stays on the card and the sidebar badge until you get to it. Each ask opens once: closing the modal does not bring it back on the next poll, and a newer ask (new `id`) opens again.

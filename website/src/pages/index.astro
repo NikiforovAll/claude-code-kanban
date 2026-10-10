@@ -51,6 +51,12 @@ const watch = [
     shot: '08b-zen-mode',
     alt: 'Zen mode: one session in the sidebar next to its task board',
   },
+  {
+    title: 'Jump to any session',
+    body: '[Ctrl+Shift+P] opens a picker over every session. Each row shows the project, branch, task progress, and age. Move with the arrow keys and press [Enter] to open a session.',
+    src: 'shots/15-session-picker.webp',
+    alt: 'Session picker listing sessions with their projects, branches, task progress, and age',
+  },
 ];
 
 const drive = [
@@ -191,7 +197,7 @@ const setup = [
                   <h3>{it.title}</h3>
                   <p><Keys text={it.body} /></p>
                 </div>
-                <Shot themed={it.shot} alt={it.alt} />
+                <Shot themed={it.shot} src={it.src} alt={it.alt} />
               </article>
             ))
           }

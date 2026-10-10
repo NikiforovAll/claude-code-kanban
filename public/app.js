@@ -1655,8 +1655,12 @@ function toggleToolGroup(id) {
 
 // Legacy markers (written before the gate minted kind:"plan") carry no kind
 // for plans — the tool name is the durable signal there.
+function isPlanAsk(kind, tool) {
+  return kind === 'plan' || tool === 'ExitPlanMode';
+}
+
 function getWaitingPill(kind, tool) {
-  if (kind === 'plan' || tool === 'ExitPlanMode') return 'Plan awaiting approval';
+  if (isPlanAsk(kind, tool)) return 'Plan awaiting approval';
   if (kind === 'question') return 'Question pending';
   return 'Awaiting permission';
 }
@@ -1735,27 +1739,34 @@ function waitingDecisionButtons(cls) {
   const plan = currentWaiting.kind === 'plan';
   // Code-authored call argument, not data — hence the constant-style name the
   // escaping check reads as safe.
-  const DENY_ARG = plan ? "{behavior:'deny',message:PLAN_REJECT_MSG}" : "{behavior:'deny'}";
-  return `<button class="${escapeHtml(cls)}-allow" onclick="event.stopPropagation();respondWaiting({behavior:'allow'})">${plan ? 'Approve' : 'Allow'}</button><button class="${escapeHtml(cls)}-deny" onclick="event.stopPropagation();respondWaiting(${DENY_ARG})">${plan ? 'Reject' : 'Deny'}</button>`;
+  const DENY_ARG = plan ? "rejectWaitingPlan('inline-plan-feedback')" : "respondWaiting({behavior:'deny'})";
+  const feedback = plan
+    ? `<input id="inline-plan-feedback" class="msg-waiting-feedback" type="text" placeholder="feedback for reject (optional)…" value="${escapeHtml(inlinePlanFeedback)}" oninput="inlinePlanFeedback=this.value" onclick="event.stopPropagation()" onkeydown="event.stopPropagation()">`
+    : '';
+  return `${feedback}<button class="${escapeHtml(cls)}-allow" onclick="event.stopPropagation();respondWaiting({behavior:'allow'})">${plan ? 'Approve' : 'Allow'}</button><button class="${escapeHtml(cls)}-deny" onclick="event.stopPropagation();${DENY_ARG}">${plan ? 'Reject' : 'Deny'}</button>`;
 }
+
+let inlinePlanFeedback = '';
 
 function renderWaitingEntry() {
   if (!isWaitingFresh()) return '';
   const tool = currentWaiting.toolName || 'unknown';
   const params = parseWaitingInput();
-  const pillText = getWaitingPill(currentWaiting.kind, tool);
+  const plan = isPlanAsk(currentWaiting.kind, tool);
   const detail = deriveWaitingDetail(tool, params);
   const detailHtml = detail ? ` <span style="color:var(--text-secondary)">${escapeHtml(detail)}</span>` : '';
   const bodyHtml = renderWaitingBody(tool, params);
   const bodyWrap = bodyHtml ? `<div class="msg-waiting-body">${bodyHtml}</div>` : '';
-  const pill = `<span class="msg-waiting-pill">${escapeHtml(pillText)}</span>`;
   const discardBtn = `<button class="msg-waiting-discard" title="Discard permission prompt" onclick="event.stopPropagation();discardWaiting()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>`;
   // Questions are answered in the detail modal; plans render there too.
   const buttons = waitingDecisionButtons('msg-waiting');
   const actions = buttons ? `<span class="msg-waiting-actions">${buttons}</span>` : '';
   // Lapsed = gate stopped polling — the ask is only answerable in the terminal
   const lapsed = !!currentWaiting.lapsed;
-  return `<div class="msg-item msg-waiting" onclick="msgDetailFollowLatest=false;showWaitingDetail()">${getToolIcon(tool)}<div class="msg-body"><div class="msg-text">${pill} <span style="font-weight:600">${escapeHtml(tool)}</span>${detailHtml}</div>${bodyWrap}<div class="msg-waiting-footer"><div class="msg-time">${lapsed ? 'answer in the terminal' : 'waiting…'}</div>${actions}</div></div>${discardBtn}</div>`;
+  const keyHint = lapsed ? 'answer in the terminal' : buttons ? `${sendKbd()} ${plan ? 'approve' : 'allow'}` : '';
+  const hintHtml = keyHint ? `<div class="msg-time waiting-key-hint-line">${keyHint}</div>` : '';
+  const footer = hintHtml || actions ? `<div class="msg-waiting-footer">${hintHtml}${actions}</div>` : '';
+  return `<div class="msg-item msg-waiting${plan ? ' msg-waiting-plan' : ''}" onclick="msgDetailFollowLatest=false;showWaitingDetail()">${getToolIcon(tool)}<div class="msg-body"><div class="msg-text"><span style="font-weight:600">${escapeHtml(tool)}</span>${detailHtml}</div>${bodyWrap}${footer}</div>${discardBtn}</div>`;
 }
 
 // Shared approval controls for a fresh plan ask — the waiting-detail footer and
@@ -1804,6 +1815,7 @@ async function respondWaiting(payload) {
 // Drop the answered/discarded ask from every surface it renders on
 function clearWaitingUi() {
   currentWaiting = null;
+  inlinePlanFeedback = '';
   waitingAnswerDraft = {};
   waitingCustomDraft = {};
   if (currentMsgDetailIdx === MSG_DETAIL_WAITING_IDX) {
@@ -6128,10 +6140,30 @@ function closeDetailPanel() {
 // Set while #confirm-modal is open; settles the open confirmModal() promise.
 let closeConfirmModal = null;
 
-function confirmModal({ title, message, okLabel }) {
+// chip: the object named in one line. items: [{state, label, meta}] rows, state in busy|wait|idle (a dot) or
+// omitted (no dot); steps: plain strings shown as what will happen; warn: a line under the list.
+function confirmModal({ title, message, okLabel, chip, items, steps, warn }) {
   const modal = document.getElementById('confirm-modal');
   document.getElementById('confirm-modal-title').textContent = title;
   document.getElementById('confirm-modal-message').textContent = message;
+  const chipEl = document.getElementById('confirm-modal-chip');
+  chipEl.hidden = !chip;
+  chipEl.textContent = chip || '';
+  const listEl = document.getElementById('confirm-modal-list');
+  const rows = [
+    ...(items || []).map(
+      (it) =>
+        `<div class="confirm-row">${it.state ? `<span class="confirm-dot ${escapeHtml(it.state)}"></span>` : ''}<span class="confirm-row-label">${escapeHtml(it.label)}</span><span class="confirm-row-meta">${escapeHtml(it.meta || '')}</span></div>`,
+    ),
+    ...(steps || []).map(
+      (s) => `<div class="confirm-row confirm-step"><span class="confirm-row-label">${escapeHtml(s)}</span></div>`,
+    ),
+  ];
+  listEl.hidden = !rows.length;
+  listEl.innerHTML = rows.join('');
+  const warnEl = document.getElementById('confirm-modal-warn');
+  warnEl.hidden = !warn;
+  warnEl.textContent = warn || '';
   const buttons = [document.getElementById('confirm-cancel-btn'), document.getElementById('confirm-ok-btn')];
   buttons[1].textContent = okLabel;
   const returnFocus = document.activeElement;
@@ -6163,9 +6195,10 @@ async function deleteTask(taskId, sessionId) {
   const task = currentTasks.find((t) => t.id === taskId);
   if (!task) return;
   const ok = await confirmModal({
-    title: 'Delete Task',
-    message: `Delete task "${task.subject}"? This cannot be undone.`,
-    okLabel: 'Delete',
+    title: 'Delete this task?',
+    message: 'It is removed from the board. This cannot be undone.',
+    chip: task.subject,
+    okLabel: 'Delete task',
   });
   if (!ok) return;
 
@@ -6351,6 +6384,14 @@ const SHORTCUT_TABS = [
 const IS_MAC = /^Mac/i.test(navigator.userAgentData?.platform || navigator.platform || '');
 const MAC_KEYS = { Ctrl: '⌃', Alt: '⌥', Shift: '⇧' };
 if (IS_MAC) document.getElementById('new-session-btn')?.setAttribute('title', 'New session (⌃⌥N)');
+
+// Ctrl+Enter sends on macOS as Cmd+Enter too (the handlers accept metaKey), so the hints show ⌘ and ⌥ there.
+function sendKbd() {
+  return `<kbd>${IS_MAC ? '⌘' : 'Ctrl'}</kbd>+<kbd>Enter</kbd>`;
+}
+function termKbd() {
+  return `<kbd>${IS_MAC ? '⌥' : 'Alt'}</kbd>+<kbd>\`</kbd>`;
+}
 
 // The keys of a help row as they read on this system. The hub's modifier is Ctrl+Alt, and on
 // macOS Control+Option for the tab numbers too (Windows and Linux use bare Alt for those). A hub
@@ -7300,13 +7341,18 @@ async function confirmDismissBlockers(sid) {
   const session = sessions.find((s) => s.id === sid);
   const name = session ? sessionDisplayName(session) : sid.slice(0, 8);
   const has = [sticky && 'a sticky pin', terminal && 'a running terminal'].filter(Boolean).join(' and ');
-  const [title, verb, okLabel] =
-    sticky && terminal
-      ? ['Unpin and End Terminal', 'Unpin, end the terminal', 'Unpin, end and dismiss']
-      : sticky
-        ? ['Remove Sticky Pin', 'Remove the pin', 'Unpin and dismiss']
-        : ['End Terminal', 'End the terminal', 'End and dismiss'];
-  const ok = await confirmModal({ title, message: `"${name}" has ${has}. ${verb} and dismiss the session?`, okLabel });
+  const okLabel = sticky && terminal ? 'Unpin, end and dismiss' : sticky ? 'Unpin and dismiss' : 'End and dismiss';
+  const steps = [
+    sticky && 'Remove the sticky pin',
+    terminal && 'End the terminal',
+    'Hide the session from the sidebar',
+  ].filter(Boolean);
+  const ok = await confirmModal({
+    title: `Dismiss “${name}”?`,
+    message: `The session has ${has}.`,
+    steps,
+    okLabel,
+  });
   if (!ok) return false;
   if (sticky) unpinSession(sid);
   if (terminal) closeTerminalSession(sid);
@@ -7411,15 +7457,26 @@ document.addEventListener('keydown', (e) => {
       e.preventDefault();
       closeMsgDetailModal();
     } else if (document.getElementById('msg-detail-modal').classList.contains('visible')) {
-      if (
-        e.key === 'Enter' &&
-        (e.ctrlKey || e.metaKey) &&
-        currentMsgDetailIdx === MSG_DETAIL_WAITING_IDX &&
-        isWaitingAnswerable() &&
-        currentWaiting.kind !== 'question'
-      ) {
+      const askOpen = currentMsgDetailIdx === MSG_DETAIL_WAITING_IDX && isWaitingAnswerable();
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && askOpen && currentWaiting.kind !== 'question') {
         e.preventDefault();
         respondWaiting({ behavior: 'allow' });
+      } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && askOpen) {
+        e.preventDefault();
+        submitWaitingAnswers();
+      } else if (
+        askOpen &&
+        currentWaiting.kind === 'question' &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        /^[1-9]$/.test(e.key)
+      ) {
+        e.preventDefault();
+        pickWaitingOptionByNumber(Number(e.key) - 1);
+      } else if (askOpen && currentWaiting.kind === 'question' && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+        e.preventDefault();
+        setWaitingTab(waitingTab + (e.key === 'ArrowRight' ? 1 : -1));
       } else if (matchKey(e, 'ArrowDown')) {
         e.preventDefault();
         if (currentMsgDetailIdx === MSG_DETAIL_WAITING_IDX) {
@@ -7448,6 +7505,20 @@ document.addEventListener('keydown', (e) => {
         }
       }
     }
+    return;
+  }
+
+  if (
+    e.key === 'Enter' &&
+    (e.ctrlKey || e.metaKey) &&
+    !e.altKey &&
+    !e.shiftKey &&
+    isWaitingFresh() &&
+    isWaitingAnswerable() &&
+    currentWaiting.kind !== 'question'
+  ) {
+    e.preventDefault();
+    respondWaiting({ behavior: 'allow' });
     return;
   }
 
@@ -9980,45 +10051,93 @@ function renderWaitingFooter(tool, params) {
   if (currentWaiting?.kind === 'plan') {
     return isWaitingAnswerable() ? planApprovalControlsHtml('plan-reject-feedback') : '';
   }
-  if (currentWaiting?.kind !== 'question') return waitingDecisionButtons('waiting-btn');
+  if (currentWaiting?.kind !== 'question') {
+    const buttons = waitingDecisionButtons('waiting-btn');
+    const hint = `<span class="waiting-footer-hint">${sendKbd()} allow · ${termKbd()} terminal</span>`;
+    return buttons ? hint + buttons : '';
+  }
   if (!isWaitingAnswerable()) return '';
   if (tool !== 'AskUserQuestion') return '';
   const questions = Array.isArray(params?.questions) ? params.questions : [];
   if (!questions.length) return '';
   const picked = questions.filter((q) => waitingAnswerFor(q)).length;
   const partial = picked > 0 && picked < questions.length ? ` (${picked}/${questions.length})` : '';
-  return `<button id="waiting-answer-btn" class="waiting-btn-allow" ${picked > 0 ? '' : 'disabled'} onclick="submitWaitingAnswers()">Answer${partial}</button>`;
+  return `<span class="waiting-footer-hint"><kbd>1</kbd>–<kbd>9</kbd> pick · ${sendKbd()} send</span><button id="waiting-answer-btn" class="waiting-btn-allow" ${picked > 0 ? '' : 'disabled'} onclick="submitWaitingAnswers()">Send answers${partial}</button>`;
 }
 
 function renderWaitingActions(tool, params) {
   if (!isWaitingAnswerable() || currentWaiting.kind !== 'question' || tool !== 'AskUserQuestion') return '';
   waitingQuestions = Array.isArray(params?.questions) ? params.questions : [];
   if (!waitingQuestions.length) return '';
+  const multiQ = waitingQuestions.length > 1;
+  waitingTab = Math.max(0, Math.min(waitingTab, multiQ ? waitingQuestions.length : 0));
+  const onReview = multiQ && waitingTab === waitingQuestions.length;
+  const tabs = multiQ
+    ? `<div class="waiting-qtabs" role="tablist">${waitingQuestions
+        .map((q, idx) => {
+          const done = !!waitingAnswerFor(q);
+          return `<button class="waiting-qtab${idx === waitingTab ? ' active' : ''}${done ? ' done' : ''}" role="tab" onclick="setWaitingTab(${idx})"><span class="waiting-qtab-n">${idx + 1}</span>${escapeHtml(q.header || `Question ${idx + 1}`)}${done ? '<span class="waiting-qtab-check">✓</span>' : ''}</button>`;
+        })
+        .join(
+          '',
+        )}<button class="waiting-qtab${onReview ? ' active' : ''}" role="tab" onclick="setWaitingTab(${escapeHtml(String(waitingQuestions.length))})">Review</button><span class="waiting-qtabs-hint"><kbd>←</kbd><kbd>→</kbd> switch</span></div>`
+    : '';
+  if (onReview) {
+    const rows = waitingQuestions
+      .map((q) => {
+        const a = waitingAnswerFor(q);
+        const text = Array.isArray(a) ? a.join(', ') : a;
+        return `<div class="waiting-review-row"><div class="waiting-review-q">${escapeHtml(q.header || q.question || '')}</div><div class="waiting-review-a${text ? '' : ' empty'}">${text ? escapeHtml(text) : 'Not answered'}</div></div>`;
+      })
+      .join('');
+    return `<div class="waiting-actions">${tabs}<div class="waiting-review">${rows}</div></div>`;
+  }
   const qs = waitingQuestions
     .map((q, idx) => {
+      if (idx !== waitingTab && multiQ) return '';
       const picks = waitingAnswerDraft[q.question] || [];
       const opts = (q.options || [])
-        .map((o) => {
-          const label = typeof o === 'string' ? o : o?.label || '';
+        .map((o, oi) => {
+          const label = waitingOptionLabel(o);
           const desc = typeof o === 'object' ? o?.description || '' : '';
           const descHtml = desc ? `<span class="waiting-option-desc">${renderMarkdown(desc)}</span>` : '';
           // The option `preview` field is the TUI's side-by-side visualization
           // pane (mockups, code snippets, diagrams) — rendered as markdown
           const preview = typeof o === 'object' ? o?.preview || '' : '';
           const previewHtml = preview ? `<span class="waiting-option-preview">${renderMarkdown(preview)}</span>` : '';
-          return `<button class="waiting-option${picks.includes(label) ? ' selected' : ''}" data-label="${escapeHtml(label)}" onclick="selectWaitingAnswer(${idx}, this.dataset.label)"><span class="waiting-option-label">${escapeHtml(label)}</span>${descHtml}${previewHtml}</button>`;
+          return `<button class="waiting-option${picks.includes(label) ? ' selected' : ''}" data-label="${escapeHtml(label)}" onclick="selectWaitingAnswer(${idx}, this.dataset.label)"><kbd class="waiting-option-key">${oi + 1}</kbd><span class="waiting-option-text"><span class="waiting-option-label">${escapeHtml(label)}</span>${descHtml}${previewHtml}</span></button>`;
         })
         .join('');
       const header = q.header ? `<span class="waiting-question-header">${escapeHtml(q.header)}</span>` : '';
       const multi = q.multiSelect ? '<span class="waiting-question-multi">multi-select</span>' : '';
-      const input = `<input type="text" class="waiting-option-input" placeholder="Or type your own answer" value="${escapeHtml(waitingCustomDraft[q.question] || '')}" oninput="setWaitingCustomAnswer(${idx}, this)">`;
-      return `<div class="waiting-question">${header}${multi}<div class="waiting-question-text">${renderMarkdown(q.question || '')}</div><div class="waiting-options">${opts}</div>${input}</div>`;
+      const input = `<input type="text" class="waiting-option-input" placeholder="Or type your own answer" value="${escapeHtml(waitingCustomDraft[q.question] || '')}" oninput="setWaitingCustomAnswer(${idx}, this)" onkeydown="if((event.ctrlKey||event.metaKey)&&event.key==='Enter'){event.preventDefault();submitWaitingAnswers()}">`;
+      return `<div class="waiting-question">${multiQ ? '' : header}${multi}<div class="waiting-question-text">${renderMarkdown(q.question || '')}</div><div class="waiting-options">${opts}</div>${input}</div>`;
     })
     .join('');
-  return `<div class="waiting-actions">${qs}</div>`;
+  return `<div class="waiting-actions">${tabs}${qs}</div>`;
 }
 
-// biome-ignore lint/correctness/noUnusedVariables: used in HTML onclick
+let waitingTab = 0;
+
+function waitingOptionLabel(o) {
+  return typeof o === 'string' ? o : o?.label || '';
+}
+
+function setWaitingTab(i) {
+  const last = waitingQuestions.length > 1 ? waitingQuestions.length : 0;
+  const next = Math.max(0, Math.min(i, last));
+  if (next === waitingTab) return;
+  waitingTab = next;
+  showWaitingDetail();
+}
+
+function pickWaitingOptionByNumber(n) {
+  const qi = waitingQuestions.length > 1 ? waitingTab : 0;
+  const o = waitingQuestions[qi]?.options?.[n];
+  if (!o) return;
+  selectWaitingAnswer(qi, waitingOptionLabel(o));
+}
+
 function selectWaitingAnswer(qi, label) {
   const q = waitingQuestions[qi];
   if (!q) return;
@@ -10031,6 +10150,7 @@ function selectWaitingAnswer(qi, label) {
   } else {
     waitingAnswerDraft[q.question] = [label];
     delete waitingCustomDraft[q.question];
+    if (waitingQuestions.length > 1 && waitingTab < waitingQuestions.length) waitingTab += 1;
   }
   showWaitingDetail();
 }
@@ -10056,11 +10176,12 @@ function setWaitingCustomAnswer(qi, el) {
     const picked = waitingQuestions.filter((qq) => waitingAnswerFor(qq)).length;
     btn.disabled = picked === 0;
     btn.textContent =
-      picked > 0 && picked < waitingQuestions.length ? `Answer (${picked}/${waitingQuestions.length})` : 'Answer';
+      picked > 0 && picked < waitingQuestions.length
+        ? `Send answers (${picked}/${waitingQuestions.length})`
+        : 'Send answers';
   }
 }
 
-// biome-ignore lint/correctness/noUnusedVariables: used in HTML onclick
 function submitWaitingAnswers() {
   // Partial submits are fine — send only the questions actually answered.
   // multiSelect answers go as arrays of labels (the shape the TUI validates).
@@ -10071,6 +10192,38 @@ function submitWaitingAnswers() {
   }
   if (!Object.keys(answers).length) return;
   respondWaiting({ answers });
+}
+
+function renderPermissionDiff(oldText, newText) {
+  const rows = (text, sign, cls) =>
+    String(text)
+      .split('\n')
+      .map(
+        (l) =>
+          `<div class="perm-diff-row ${escapeHtml(cls)}"><span class="perm-diff-sign">${sign}</span>${escapeHtml(l)}</div>`,
+      )
+      .join('');
+  return `<div class="perm-diff">${rows(oldText, '−', 'del')}${rows(newText, '+', 'add')}</div>`;
+}
+
+// The permission card shows what Claude wants to run in full, not a one-line gist:
+// the command or the diff, where it runs, and how long the ask has been waiting.
+function renderPermissionSummary(tool, params) {
+  const waited = formatDuration(Math.max(0, Date.now() - new Date(currentWaiting.timestamp).getTime()));
+  const head = `<div class="perm-head"><span class="perm-tool">${escapeHtml(tool)}</span><span class="perm-wait" title="How long Claude has been waiting">waiting ${escapeHtml(waited)}</span></div>`;
+  let body = '';
+  if (typeof params.command === 'string') {
+    body = `<div class="perm-label">Command</div><pre class="perm-code">${escapeHtml(params.command)}</pre>`;
+    if (params.description) body += `<div class="perm-note">${escapeHtml(params.description)}</div>`;
+  } else if (typeof params.old_string === 'string' && typeof params.new_string === 'string') {
+    body = `<div class="perm-label">${escapeHtml(params.file_path || 'File')}</div>${renderPermissionDiff(params.old_string, params.new_string)}`;
+  } else if (typeof params.file_path === 'string') {
+    body = `<div class="perm-label">File</div><pre class="perm-code">${escapeHtml(params.file_path)}</pre>`;
+  } else if (typeof params.description === 'string') {
+    body = `<pre class="perm-code">${escapeHtml(params.description)}</pre>`;
+  }
+  const cwd = currentWaiting.cwd ? `<div class="perm-cwd">in ${escapeHtml(currentWaiting.cwd)}</div>` : '';
+  return `<div class="perm-card">${head}${body}${cwd}</div>`;
 }
 
 function showWaitingDetail() {
@@ -10087,6 +10240,7 @@ function showWaitingDetail() {
     waitingDraftId = currentWaiting.id || null;
     waitingAnswerDraft = {};
     waitingCustomDraft = {};
+    waitingTab = 0;
   }
   const tool = currentWaiting.toolName || 'unknown';
   const label = getWaitingLabel(currentWaiting.kind, tool);
@@ -10108,17 +10262,9 @@ function showWaitingDetail() {
       // A plan ask IS the plan — render it in full so it can be reviewed and
       // approved right here (follow mode included) instead of a JSON dump. The
       // raw tool input is dropped entirely to match the saved-plan modal.
-      inputHtml = `<div class="detail-desc rendered-md">${renderMarkdown(params.plan)}</div>`;
+      inputHtml = `<div class="detail-desc rendered-md waiting-plan">${renderMarkdown(params.plan)}</div>`;
     } else {
-      if (currentWaiting.kind !== 'question' && params) {
-        const gist =
-          typeof params.command === 'string'
-            ? params.command
-            : typeof params.description === 'string'
-              ? params.description
-              : '';
-        if (gist) summaryHtml = `<pre class="${TINTED_PRE_CLASS}">${escapeHtml(gist)}</pre>`;
-      }
+      if (currentWaiting.kind !== 'question' && params) summaryHtml = renderPermissionSummary(tool, params);
       inputHtml = `${summaryHtml}<details class="waiting-raw-input"><summary>Raw tool input</summary>${inputHtml}</details>`;
     }
   }
@@ -10936,9 +11082,10 @@ document.addEventListener('click', (e) => {
     if (sgHeader.dataset.transientGroup && e.target.closest('.sg-delete')) {
       const name = sgHeader.dataset.transientGroup;
       confirmModal({
-        title: 'Delete Group',
-        message: `Delete group “${name}”? Its sessions go back to Projects.`,
-        okLabel: 'Delete',
+        title: 'Delete this group?',
+        message: 'Its sessions go back to Projects.',
+        chip: name,
+        okLabel: 'Delete group',
       }).then((ok) => {
         if (!ok) return;
         sgDeleteTransient(name);
@@ -10955,9 +11102,10 @@ document.addEventListener('click', (e) => {
       }
       if (e.target.closest('.sg-delete')) {
         confirmModal({
-          title: 'Delete Group',
-          message: `Delete group “${group.name}”? Its sessions and projects go back to Projects.`,
-          okLabel: 'Delete',
+          title: 'Delete this group?',
+          message: 'Its sessions and projects go back to Projects.',
+          chip: group.name,
+          okLabel: 'Delete group',
         }).then((ok) => {
           if (!ok) return;
           sgDeleteGroup(groupId);
@@ -12821,6 +12969,15 @@ function markPaneSide(el, side, focused) {
 
 const paneLabel = (p) => (p.kind === 'message' ? p.title : p.target);
 
+function paneMenuLabel(pane, label) {
+  const cut =
+    pane.kind !== 'url' && pane.kind !== 'message' ? Math.max(label.lastIndexOf('/'), label.lastIndexOf('\\')) + 1 : 0;
+  if (!cut || cut === label.length) {
+    return `<div class="pane-menu-label" title="${escapeHtml(label)}">${escapeHtml(label)}</div>`;
+  }
+  return `<div class="pane-menu-label pane-menu-path" title="${escapeHtml(label)}"><span class="pane-menu-dir">&lrm;${escapeHtml(label.slice(0, cut))}&lrm;</span><span class="pane-menu-name">${escapeHtml(label.slice(cut))}</span></div>`;
+}
+
 function renderPaneTabs(sid, layout, split) {
   // A rebuild mid-drag removes the dragged tab, and then no dragend fires. Mid-rename it drops the input.
   if (paneDragId || paneRenameId) return;
@@ -12960,15 +13117,6 @@ async function loadPaneView(sid, pane, view, scroll) {
       ? `<script>addEventListener('load',()=>requestAnimationFrame(()=>scrollTo(${Number(scroll.x) || 0},${Number(scroll.y) || 0})))</script>`
       : '';
     // A show card's own zoom follows the text zoom (showBridge), so its frame is not .modal-zoomable.
-function paneMenuLabel(pane, label) {
-  const cut =
-    pane.kind !== 'url' && pane.kind !== 'message' ? Math.max(label.lastIndexOf('/'), label.lastIndexOf('\\')) + 1 : 0;
-  if (!cut || cut === label.length) {
-    return `<div class="pane-menu-label" title="${escapeHtml(label)}">${escapeHtml(label)}</div>`;
-  }
-  return `<div class="pane-menu-label pane-menu-path" title="${escapeHtml(label)}"><span class="pane-menu-dir">&lrm;${escapeHtml(label.slice(0, cut))}&lrm;</span><span class="pane-menu-name">${escapeHtml(label.slice(cut))}</span></div>`;
-}
-
     const [cls, doc] = pane.show
       ? ['pane-frame show-pane-frame', showSrcdoc(data.content, scroll?.y)]
       : ['pane-frame modal-zoomable', data.content + REVIEW_BRIDGE_TAG + restore];
@@ -13320,16 +13468,22 @@ function paneMenuKeydown(e) {
 async function deleteBoardTasks(onlyCompleted) {
   const sid = paneSessionId();
   if (!sid) return;
-  const count = currentTasks.filter((t) => !onlyCompleted || t.status === 'completed').length;
+  const doomed = currentTasks.filter((t) => !onlyCompleted || t.status === 'completed');
+  const count = doomed.length;
   if (!count) {
     showToast(onlyCompleted ? 'No completed tasks' : 'No tasks', 'info');
     return;
   }
   const noun = `${count} ${onlyCompleted ? 'completed ' : ''}task${count === 1 ? '' : 's'}`;
+  const shown = doomed.slice(0, 3).map((t) => ({ label: t.subject, meta: t.status.replace('_', ' ') }));
+  if (doomed.length > shown.length) shown.push({ label: `+ ${doomed.length - shown.length} more`, meta: '' });
   const ok = await confirmModal({
-    title: onlyCompleted ? 'Delete Completed Tasks' : 'Delete All Tasks',
-    message: `Delete ${noun}? This cannot be undone.`,
-    okLabel: 'Delete',
+    title: `Delete ${noun}?`,
+    message: onlyCompleted
+      ? 'Every completed task in this session. This cannot be undone.'
+      : 'Every task in this session. This cannot be undone.',
+    items: shown,
+    okLabel: `Delete ${noun}`,
   });
   if (!ok) return;
   const q = onlyCompleted ? '?status=completed' : '';
@@ -13408,11 +13562,29 @@ function openPaneMenu(x, y, id) {
     paneMenuLabel(pane, label) +
       (message ? '' : paneMenuItem('copy', url ? 'Copy URL' : 'Copy path')) +
       paneMenuItem('open', url ? 'Open in new tab' : message ? 'Open in message dialog' : 'Open in preview') +
+      (message
+        ? ''
+        : paneMenuItem('link', paneIsLinked(pane) ? 'Remove from linked documents' : 'Add to linked documents')) +
       paneMenuItem('rename', 'Rename') +
       paneMenuItem('reload', 'Reload') +
       paneMenuItem('close', 'Close pane'),
   );
   return true;
+}
+
+function paneIsLinked(pane) {
+  const key = canonicalPath(pane.target);
+  return getSessionPreviewPaths(paneSessionId()).some((p) => canonicalPath(p) === key);
+}
+
+function togglePaneLink(id) {
+  const pane = paneById(id);
+  const sid = paneSessionId();
+  if (!pane || !sid) return;
+  const unlink = paneIsLinked(pane);
+  setSessionDocLink(sid, pane.target, unlink);
+  if (unlink) forgetServerLinkedDoc(sid, pane.target);
+  showToast(unlink ? 'Unlinked from session' : 'Linked to session', 'success');
 }
 
 function showPaneMenu(x, y, id, ariaLabel, html) {
@@ -13433,6 +13605,7 @@ function showPaneMenu(x, y, id, ariaLabel, html) {
 const PANE_MENU_ACTIONS = {
   copy: copyPaneTarget,
   open: openPaneExternally,
+  link: togglePaneLink,
   rename: beginPaneRename,
   reload: reloadPane,
   close: closePane,
@@ -13553,9 +13726,6 @@ function msgDetailPaneSource() {
   if (currentMsgDetailIdx != null) return currentMessages[currentMsgDetailIdx] || null;
   const pin = currentPinDetailId && currentPins.find((p) => p.id === currentPinDetailId);
   return pin && pin.type !== 'agent' ? pin : null;
-      (message
-        ? ''
-        : paneMenuItem('link', paneIsLinked(pane) ? 'Remove from linked documents' : 'Add to linked documents')) +
 }
 
 function syncMsgDetailPaneBtn() {
@@ -13563,21 +13733,6 @@ function syncMsgDetailPaneBtn() {
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
-function paneIsLinked(pane) {
-  const key = canonicalPath(pane.target);
-  return getSessionPreviewPaths(paneSessionId()).some((p) => canonicalPath(p) === key);
-}
-
-function togglePaneLink(id) {
-  const pane = paneById(id);
-  const sid = paneSessionId();
-  if (!pane || !sid) return;
-  const unlink = paneIsLinked(pane);
-  setSessionDocLink(sid, pane.target, unlink);
-  if (unlink) forgetServerLinkedDoc(sid, pane.target);
-  showToast(unlink ? 'Unlinked from session' : 'Linked to session', 'success');
-}
-
 async function openMsgInPane() {
   const m = msgDetailPaneSource();
   if (!m?.timestamp) return;
@@ -13596,7 +13751,6 @@ function describePaneInput() {
   const doc = panePopMatches[panePopIdx];
   const t = doc ? null : paneTargetFrom(panePopInput.value);
   panePopDetect.classList.toggle('error', !!t?.error);
-  link: togglePaneLink,
   panePopDetect.textContent = doc
     ? `Enter opens ${linkedDocLabel(doc)}`
     : !t
@@ -14901,7 +15055,7 @@ async function renderTerminalManager() {
         </div>
         <div class="terminal-manager-actions">
           <button type="button" class="btn btn-secondary" data-open="${escapeHtml(t.id)}"${t.kanbot ? ' data-kanbot' : ''}>Open</button>
-          <button type="button" class="btn btn-secondary terminal-manager-end" data-end="${escapeHtml(t.id)}">End</button>
+          <button type="button" class="btn btn-secondary terminal-manager-end" data-end="${escapeHtml(t.id)}" data-started="${escapeHtml(String(Number(t.startedAt) || 0))}">End</button>
         </div>
       </div>`;
     })
@@ -14928,10 +15082,37 @@ async function terminalFetch(url, method, body) {
   return res.status === 401 && (await refreshTerminalToken()) ? send() : res;
 }
 
+const TERMINAL_STATE_LABEL = { busy: 'working', wait: 'waiting', idle: 'idle' };
+
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
 async function endAllTerminals() {
-  const buttons = document.querySelectorAll('#terminal-manager-body [data-end]');
-  await Promise.all([...buttons].map((b) => closeTerminalSession(b.dataset.end)));
+  const items = [...document.querySelectorAll('#terminal-manager-body [data-end]')].map((b) => {
+    const id = b.dataset.end;
+    const session = sessions.find((s) => s.id === id);
+    const state = !session ? 'idle' : isWaitingSession(session) ? 'wait' : isActiveSession(session) ? 'busy' : 'idle';
+    const started = Number(b.dataset.started);
+    const meta = [
+      TERMINAL_STATE_LABEL[state],
+      started && `up ${formatDuration(Date.now() - started)}`,
+      formatTerminalProc(terminalProcStats[id]),
+    ]
+      .filter(Boolean)
+      .join(' · ');
+    return { id, state, label: session ? sessionDisplayName(session) : id.slice(0, 8), meta };
+  });
+  const ids = items.map((i) => i.id);
+  const notIdle = items.filter((i) => i.state !== 'idle').length;
+  if (notIdle) {
+    const ok = await confirmModal({
+      title: `End ${ids.length} terminals?`,
+      message: 'The Claude Code processes stop. Sessions stay on the board and can be resumed.',
+      items,
+      warn: `${notIdle} ${notIdle === 1 ? 'is' : 'are'} not idle. Work in progress is cut off.`,
+      okLabel: `End ${ids.length} terminals`,
+    });
+    if (!ok) return;
+  }
+  await Promise.all(ids.map((id) => closeTerminalSession(id)));
   renderTerminalManager();
 }
 
@@ -15261,8 +15442,12 @@ function showCardKey(e) {
   }
   const p = showState.posts[showState.idx];
   if (combo !== 'ctrl+d' || !p) return false;
-  const message = `Remove "${p.title}" from the card?`;
-  confirmModal({ title: 'Remove post', message, okLabel: 'Remove' }).then((ok) => {
+  confirmModal({
+    title: 'Remove this post?',
+    message: 'It is taken off the card.',
+    chip: p.title,
+    okLabel: 'Remove post',
+  }).then((ok) => {
     if (!ok || showState.posts[showState.idx]?.id !== p.id) return;
     showCommand('remove');
     focusAfterShowRemove();

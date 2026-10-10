@@ -22,21 +22,27 @@ This feature needs the Claude Code Kanban plugin. See [Getting started](/claude-
 
 A session that waits for you gets an amber highlight in the sidebar. The "N waiting" chip at the top of the sidebar counts these sessions. Click it to list only them. The ask shows in three places:
 
-- The last entry of the session log. It has a pill with the kind of ask: "Awaiting permission", "Question pending" or "Plan awaiting approval". The tool name shows next to the pill.
+- The last entry of the session log. It shows the tool name and a key hint, such as <kbd>Ctrl+Enter</kbd> allow. The sidebar already marks the session as waiting, so the entry has no pill.
 - A badge in the agent footer under the board. Click it to open the ask.
 - The detail modal, which opens when you click the log entry or the badge.
 
-For a permission ask, the title of the detail modal names the tool. The modal shows a short summary of the command or description. The full tool input is in a collapsible "Raw tool input" section. A plan shows in full Markdown.
+For a permission ask, the title of the detail modal names the tool. The modal shows a card with the full command, or the diff of an edit, the folder it runs in and how long Claude has waited. The full tool input is in a collapsible "Raw tool input" section. A plan shows in full Markdown.
 
 ## Answer an ask
 
 The buttons depend on the kind of ask:
 
 - **Permission ask.** Click **Allow** or **Deny**. The buttons are on the log entry and in the detail modal.
-- **Plan.** Click **Approve** or **Reject**. In the detail modal you can type feedback before you reject. Claude Code gets the feedback as the reason.
-- **Question.** Open the detail modal. Pick an option for each question, or type text in "Or type your own answer". Questions that allow more than one choice let you pick several options. You can send before you answer all questions. The button then reads **Answer (n/m)**, where n is the number of questions you answered.
+- **Plan.** Click **Approve** or **Reject**. You can type feedback before you reject, on the log entry or in the detail modal. Claude Code gets the feedback as the reason.
+- **Question.** Open the detail modal. With more than one question, each question has a tab, and a **Review** tab lists your answers. Pick an option for each question, or type text in "Or type your own answer". Questions that allow more than one choice let you pick several options. You can send before you answer all questions. The button then reads **Answer (n/m)**, where n is the number of questions you answered.
 
-In the detail modal, <kbd>Ctrl+Enter</kbd> allows a permission ask or approves a plan. It does not answer questions.
+Keys in the detail modal:
+
+- <kbd>Ctrl+Enter</kbd> allows a permission ask, approves a plan, or sends the answers to a question.
+- <kbd>1</kbd> to <kbd>9</kbd> pick an option of the question on screen.
+- <kbd>←</kbd> and <kbd>→</kbd> move between the question tabs.
+
+On macOS, use <kbd>Cmd+Enter</kbd>. The same <kbd>Ctrl+Enter</kbd> allows the ask from the log entry when no window is open.
 
 The **x** on the log entry removes the ask from the board. It does not answer the ask. Claude Code still waits for your answer in the terminal.
 

@@ -523,21 +523,25 @@
 
   <!-- Confirmation Modal -->
   <div id="confirm-modal" class="modal-overlay" onclick="closeConfirmModal?.(false)">
-    <div class="modal modal-sm" onclick="event.stopPropagation()">
-      <div class="modal-header">
-        <h3 id="confirm-modal-title" class="modal-title"></h3>
-        <button class="modal-close" aria-label="Close dialog" onclick="closeConfirmModal?.(false)">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M18 6L6 18M6 6l12 12"/>
-          </svg>
-        </button>
+    <div class="modal modal-sm confirm-dialog" onclick="event.stopPropagation()" role="alertdialog" aria-labelledby="confirm-modal-title" aria-describedby="confirm-modal-message">
+      <div class="modal-body confirm-body">
+        <div class="confirm-top">
+          <div class="confirm-icon" aria-hidden="true">!</div>
+          <div>
+            <h3 id="confirm-modal-title" class="confirm-title"></h3>
+            <p id="confirm-modal-message" class="confirm-message"></p>
+          </div>
+        </div>
+        <div id="confirm-modal-chip" class="confirm-chip" hidden></div>
+        <div id="confirm-modal-list" class="confirm-list" hidden></div>
+        <div id="confirm-modal-warn" class="confirm-warn" hidden></div>
       </div>
-      <div class="modal-body">
-        <p id="confirm-modal-message" style="margin: 0; color: var(--text-primary);"></p>
-      </div>
-      <div class="modal-footer">
-        <button id="confirm-cancel-btn" class="btn btn-secondary" onclick="closeConfirmModal?.(false)">Cancel</button>
-        <button id="confirm-ok-btn" class="btn btn-danger" onclick="closeConfirmModal?.(true)"></button>
+      <div class="modal-footer confirm-footer">
+        <span class="confirm-hint"><span><kbd>Enter</kbd> confirm</span><span><kbd>Esc</kbd> cancel</span></span>
+        <div class="confirm-buttons">
+          <button id="confirm-cancel-btn" class="btn btn-secondary" onclick="closeConfirmModal?.(false)">Cancel</button>
+          <button id="confirm-ok-btn" class="btn btn-danger" onclick="closeConfirmModal?.(true)"></button>
+        </div>
       </div>
     </div>
   </div>
