@@ -14469,6 +14469,8 @@ function focusTerminalPane() {
     termFrame.el.focus();
     terminalFrameSend('focus');
   }
+  // After a page load the frame may still be loading; its socket's ready takes the focus then.
+  else termState.focusNext = true;
 }
 
 function leaveTerminalPane() {
