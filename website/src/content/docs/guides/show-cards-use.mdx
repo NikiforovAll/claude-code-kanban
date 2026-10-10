@@ -54,6 +54,10 @@ Use a pane when you want the card next to the board, or when the card is too big
 
 Select text in the card to add a [review comment](/claude-code-kanban/guides/review-comments/), as in a file preview. The comments list under the card body. Send them, and the session that posted the card gets them with the name of the card's file, so Claude knows which card you mean. Claude can then change the card, and the card shows the change.
 
+## Answer from a card
+
+A card can ask you a question with buttons or a form. Click a button, or fill the form and submit it, and the session gets your answer as its next prompt. A button sends at once. A form sends once, with all its fields. Only your click sends: a script in the card cannot answer for you. This works in any HTML preview, a pane and the file preview too.
+
 ## What the card keeps
 
 - Each terminal opens the card the way you left it: collapsed, expanded or closed. This stays across a page reload.

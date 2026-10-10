@@ -7956,6 +7956,31 @@ function reviewBridge(textBefore, headingBefore, rangeAt, comboOf, fieldSelector
     (document.head || document.documentElement).append(style);
   }
   const send = (msg) => parent.postMessage({ ...msg, type: P + msg.type }, '*');
+  const fields = (form, submitter) => {
+    const out = {};
+    for (const [k, v] of new FormData(form, submitter)) {
+      if (typeof v !== 'string') continue;
+      out[k] = k in out ? [].concat(out[k], v) : v;
+    }
+    return out;
+  };
+  const labelOf = (el, fallback) => (el?.textContent || el?.value || '').trim().slice(0, 200) || fallback;
+  addEventListener('click', (e) => {
+    const b = e.target.closest?.('[data-cck-action]');
+    if (!b || (b.form?.matches('[data-cck-submit]') && b.type === 'submit')) return;
+    e.preventDefault();
+    const action = b.dataset.cckAction;
+    send({ type: 'action', action, label: labelOf(b, action), data: b.form ? fields(b.form) : {} });
+  });
+  // The sandbox allows forms so validation runs. Every submit stops here, so a page still cannot
+  // navigate its frame with a form: a show card's form-action 'none' does not stop a GET to about:srcdoc.
+  addEventListener('submit', (e) => {
+    e.preventDefault();
+    const f = e.target.closest?.('form[data-cck-submit]');
+    if (!f) return;
+    const action = f.dataset.cckSubmit;
+    send({ type: 'action', action, label: labelOf(e.submitter, action), data: fields(f, e.submitter) });
+  });
   const describe = (node) => {
     const el = node.nodeType === 1 ? node : node.parentElement;
     if (!el) return {};
@@ -8139,10 +8164,11 @@ function sendBridgeClaims(frames, claims) {
 window.addEventListener('message', (e) => {
   const type =
     typeof e.data?.type === 'string' && e.data.type.startsWith(REVIEW_MSG) && e.data.type.slice(REVIEW_MSG.length);
-  if (type !== 'link' && type !== 'key' && type !== 'scroll') return;
+  if (type !== 'link' && type !== 'key' && type !== 'scroll' && type !== 'action') return;
   const frame = bridgedFrameEls().find((f) => f.contentWindow === e.source);
   if (!frame) return;
-  if (type === 'scroll') paneFrameScroll.set(frame, { x: e.data.x, y: e.data.y });
+  if (type === 'action') sendPreviewAction(frame, e.data);
+  else if (type === 'scroll') paneFrameScroll.set(frame, { x: e.data.x, y: e.data.y });
   else if (type === 'key') replayKey(e.data, frame);
   else {
     const url = linkUrl(e.data.href);
@@ -8355,6 +8381,24 @@ function renderReviewPanel() {
       .join('')}</ol>`;
 }
 
+async function toastDelivery({ delivered, markdown }, noun) {
+  if (delivered === 'doorbell') return showToast('Queued for the session', 'success');
+  if (delivered === 'terminal') return showToast('Pasted into the terminal: press Enter there to send', 'info');
+  const copy = async () => {
+    const copied = await navigator.clipboard.writeText(markdown).then(
+      () => true,
+      () => false,
+    );
+    showToast(
+      copied ? `Copied the ${noun}. Paste it into the session.` : `Failed to copy the ${noun}`,
+      'info',
+      { label: 'Copy again', onClick: copy },
+      `Sessions get ${noun}s directly when the cck plugin runs there and board events are on.`,
+    );
+  };
+  await copy();
+}
+
 async function sendReview() {
   if (!activeReview) return;
   const { sessionId, source, key, onSent } = activeReview;
@@ -8367,28 +8411,47 @@ async function sendReview() {
     });
     const data = await res.json();
     if (!res.ok) return showToast(data.error || 'Review failed', 'error');
-    if (data.delivered === 'doorbell') showToast('Queued for the session', 'success');
-    else if (data.delivered === 'terminal') showToast('Pasted into the terminal: press Enter there to send', 'info');
-    else {
-      const { markdown } = data;
-      const copy = async () => {
-        const copied = await navigator.clipboard.writeText(markdown).then(
-          () => true,
-          () => false,
-        );
-        showToast(
-          copied ? 'Copied the review. Paste it into the session.' : 'Failed to copy the review',
-          'info',
-          { label: 'Copy again', onClick: copy },
-          'Sessions get reviews directly when the cck plugin runs there and board events are on.',
-        );
-      };
-      await copy();
-    }
+    await toastDelivery(data, 'review');
     clearReviewDrafts(key);
     if (activeReview?.key === key) onSent?.();
   } catch {
     showToast('Failed to send the review', 'error');
+  }
+}
+
+// A page script can post an action without a click, so the board sends it only with transient
+// user activation, which a click in the frame gives to the board too.
+const ACTION_REPEAT_MS = 1000;
+let lastAction = null;
+
+function reviewOptsOfFrame(frame) {
+  return (
+    [...reviewStack, reviewBase, showState.review].find((o) => o?.frame === frame) ||
+    paneReviews.get(frame.parentElement) ||
+    null
+  );
+}
+
+async function sendPreviewAction(frame, msg) {
+  if (!navigator.userActivation?.isActive) return;
+  const opts = reviewOptsOfFrame(frame);
+  if (!opts?.sessionId) return;
+  const key = `${msg.action}\n${JSON.stringify(msg.data)}`;
+  const now = Date.now();
+  if (lastAction?.frame === frame && lastAction.key === key && now - lastAction.at < ACTION_REPEAT_MS) return;
+  lastAction = { frame, key, at: now };
+  try {
+    const res = await terminalFetch(apiPath`/api/sessions/${opts.sessionId}/action`, 'POST', {
+      source: opts.source,
+      action: msg.action,
+      label: msg.label,
+      data: msg.data,
+    });
+    const out = await res.json();
+    if (!res.ok) return showToast(out.error || 'Send failed', 'error');
+    await toastDelivery(out, 'answer');
+  } catch {
+    showToast('Failed to send the answer', 'error');
   }
 }
 //#endregion
@@ -8501,7 +8564,7 @@ function renderFrontmatterBlock(fm) {
 // allow-same-origin puts it on an opaque origin, so it cannot touch this app's
 // storage, DOM or API. srcdoc has no base URL, so the server has already embedded
 // the document's local assets (lib/inline-assets.js); remote refs load normally.
-function createPreviewFrame(className, srcdoc, sandbox = 'allow-scripts allow-popups') {
+function createPreviewFrame(className, srcdoc, sandbox = 'allow-scripts allow-popups allow-forms') {
   const frame = document.createElement('iframe');
   frame.className = className;
   frame.setAttribute('sandbox', sandbox);
@@ -14817,6 +14880,7 @@ const SHOW_VIEW_KEY = 'cck-show-view-v1';
 const SHOW_MIN_W = 280;
 const SHOW_MIN_H = 120;
 const SHOW_INSET = 8;
+const SHOW_SANDBOX = 'allow-scripts allow-forms';
 const SHOW_CSP =
   "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; frame-src 'none'; connect-src 'none'; form-action 'none'";
 // The card's token contract (the show skill lists these names) mapped to the board's theme vars.
@@ -15219,7 +15283,7 @@ function setShowReview(opts) {
 // No allow-popups: it opens window.open as a way out. The CSP blocks fetch and remote sub-resources,
 // but not navigation or WebRTC; the real guard is that only the terminal's own agent can post.
 function createShowFrame(title, srcdoc) {
-  const frame = createPreviewFrame('show-frame', srcdoc, 'allow-scripts');
+  const frame = createPreviewFrame('show-frame', srcdoc, SHOW_SANDBOX);
   frame.title = title;
   // Focus given before the first document loads stays on the frame element, out of the document's
   // keys, and the document never reports focus or blur, so the body holds focus until then.

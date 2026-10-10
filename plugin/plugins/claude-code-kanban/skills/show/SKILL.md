@@ -18,6 +18,10 @@ This applies to the `.html` file that a `kind: "html"` post names.
 - The card is about 360 to 640 px wide and sizes its height to the content. Keep the content in normal flow, without `position: fixed` or `100vh`.
 - One chart or diagram per card, under an `<h2>` that says what to see. Keep it flat: solid fills and 1 px lines.
 - Open links with `<a href="https://...">`; the overlay opens them in a new browser tab.
+- To ask the user something, let the card answer for them. You get the answer as your next prompt, with a file that holds the fields as JSON.
+  - One choice: a button per answer, sent on click: `<button data-cck-action="approve">Approve</button>`.
+  - Several inputs: one form, sent once on submit with every field: `<form data-cck-submit="plan">…<button>Send</button></form>`. Give each input a `name`. `required` works.
+  - Action names use letters, digits, `.`, `_` and `-`. The button text is the label you get. Nothing else in the card sends.
 - Take every color and font from these variables, so the card follows the user's light or dark theme:
 
 | Variable | Use |

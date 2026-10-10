@@ -16,7 +16,6 @@ const { isContained, realpathDeepest } = require('./lib/contain');
 const { resolveScratchSubdir, listScratchDir } = require('./lib/scratch-files');
 const { fileUrlToPath } = require('./lib/file-url');
 const { httpError: previewError } = require('./lib/http-error');
-const { oneLine } = require('./lib/one-line');
 const { pluginStatus } = require('./lib/plugin-status');
 const { getAutoCompact } = require('./lib/auto-compact');
 
@@ -55,6 +54,7 @@ const { createProcStats } = require('./lib/proc-stats');
 const { createGroupStore, isGroupName, suggestGroupName } = require('./lib/dispatch-groups');
 const { createUserGroupStore } = require('./lib/user-groups');
 const { ownerLinks, moveRecipients } = require('./lib/owner-routing');
+const { parseReviewSource, parseActionBody, formatActionMarkdown } = require('./lib/preview-action');
 const { createDispatchedStore, scanTranscripts, pruneSessionDirs, pruneContextStatus, pruneTaskMaps, retentionMs } = require('./lib/retention');
 const { freshRateLimits } = require('./lib/rate-limits');
 const { createWorktreeStore } = require('./lib/worktrees');
@@ -3546,6 +3546,7 @@ const {
   boardEventsOn,
   enqueueSessionEvent,
   formatReviewSubmitted,
+  formatActionSubmitted,
   formatTaskMoved,
   handleSessionEvents,
   hasDoorbell,
@@ -4260,7 +4261,6 @@ app.delete('/api/panes/:sessionId/:paneId', (req, res) => {
 // client change only. The batch is always written to a file: the doorbell is lossy and
 // carries one line, and the file is what each route points at.
 const REVIEW_DIR = path.join(CCK_DIR, 'reviews');
-const REVIEW_KIND_RE = /^[a-z]{1,20}$/;
 
 // `<ts>.pending` holds the doorbell line of a review the mod has not acked yet.
 configureSessionEvents({
@@ -4283,10 +4283,7 @@ const REVIEW_MAX_CHARS = 4000;
 
 function parseReviewBody(body) {
   const { source, comments } = body || {};
-  if (!source || !REVIEW_KIND_RE.test(source.kind)) throw previewError(400, 'source.kind is required');
-  // The label is pasted into the terminal; an ESC could end bracketed paste and submit text.
-  const label = oneLine(source.label, 200);
-  if (!label) throw previewError(400, 'source.label is required');
+  const src = parseReviewSource(source);
   if (!Array.isArray(comments) || !comments.length || comments.length > REVIEW_MAX_COMMENTS) {
     throw previewError(400, `comments must hold 1 to ${REVIEW_MAX_COMMENTS} items`);
   }
@@ -4302,8 +4299,14 @@ function parseReviewBody(body) {
     selector: code(c?.selector, 500),
   }));
   if (items.some((c) => !c.comment)) throw previewError(400, 'every comment needs text');
-  const locate = oneLine(source.locate, 600) || null;
-  return { kind: source.kind, label, path: source.kind === 'file' ? source.path : null, locate, items };
+  return { ...src, items };
+}
+
+async function resolveReviewSource(src) {
+  if (src.kind !== 'file') return;
+  src.path = resolvePreviewPath(src.path);
+  if (!src.path) throw previewError(400, 'source.path is required for a file');
+  await statFileTarget(src.path);
 }
 
 function formatReviewMarkdown(src, items) {
@@ -4333,38 +4336,66 @@ app.post('/api/sessions/:sessionId/review', async (req, res) => {
     const sessionId = req.params.sessionId;
     if (!isUUID(sessionId)) return res.status(400).json({ error: 'invalid session id' });
     const src = parseReviewBody(req.body);
-    if (src.kind === 'file') {
-      src.path = resolvePreviewPath(src.path);
-      if (!src.path) return res.status(400).json({ error: 'source.path is required for a file' });
-      await statFileTarget(src.path);
-    }
-
+    await resolveReviewSource(src);
     const markdown = formatReviewMarkdown(src, src.items);
-    const dir = path.join(REVIEW_DIR, sessionId);
-    await fs.mkdir(dir, { recursive: true });
-    const file = path.join(dir, `${Date.now()}.md`);
-    await fs.writeFile(file, markdown);
-
-    let delivered = null;
-    if (boardEventsEnabled() && hasDoorbell(sessionId)) {
-      const line = formatReviewSubmitted(src.items.length, src.label, file);
-      const marker = file.replace(/\.md$/, '.pending');
-      await fs.writeFile(marker, line);
-      enqueueSessionEvent(sessionId, line, { marker });
-      delivered = 'doorbell';
-    } else if (
-      terminal.authorized(req.get('x-terminal-token')) &&
-      terminal.isRunning(sessionId) &&
-      !isWaitingOnUser(sessionId)
-    ) {
-      if (await terminal.paste(sessionId, `Address my review comments on ${src.label}: ${file}`)) delivered = 'terminal';
-    }
+    const file = await writeReviewFile(sessionId, markdown);
+    const delivered = await deliverReviewFile(req, sessionId, file, {
+      line: formatReviewSubmitted(src.items.length, src.label, file),
+      paste: `Address my review comments on ${src.label}: ${file}`,
+    });
     res.json({ delivered, file, markdown });
   } catch (error) {
     if (!error.status) console.error('Error in POST /api/sessions/:id/review:', error);
     res.status(error.status || 500).json({ error: error.message || 'Review failed' });
   }
 });
+
+// A button or form in an HTML preview, sent by the board after the user's click. The file goes in
+// REVIEW_DIR, so a review's restore and retention cover it.
+app.post('/api/sessions/:sessionId/action', async (req, res) => {
+  try {
+    const sessionId = req.params.sessionId;
+    if (!isUUID(sessionId)) return res.status(400).json({ error: 'invalid session id' });
+    const act = parseActionBody(req.body);
+    await resolveReviewSource(act.src);
+    const markdown = formatActionMarkdown(act);
+    const file = await writeReviewFile(sessionId, markdown);
+    const delivered = await deliverReviewFile(req, sessionId, file, {
+      line: formatActionSubmitted(act.action, act.src.label, file),
+      paste: `Act on my answer "${act.action}" on ${act.src.label}: ${file}`,
+    });
+    res.json({ delivered, file, markdown });
+  } catch (error) {
+    if (!error.status) console.error('Error in POST /api/sessions/:id/action:', error);
+    res.status(error.status || 500).json({ error: error.message || 'Action failed' });
+  }
+});
+
+async function writeReviewFile(sessionId, markdown) {
+  const dir = path.join(REVIEW_DIR, sessionId);
+  await fs.mkdir(dir, { recursive: true });
+  const file = path.join(dir, `${Date.now()}.md`);
+  await fs.writeFile(file, markdown);
+  return file;
+}
+
+async function deliverReviewFile(req, sessionId, file, { line, paste }) {
+  if (boardEventsEnabled() && hasDoorbell(sessionId)) {
+    const marker = file.replace(/\.md$/, '.pending');
+    await fs.writeFile(marker, line);
+    enqueueSessionEvent(sessionId, line, { marker });
+    return 'doorbell';
+  }
+  if (
+    terminal.authorized(req.get('x-terminal-token')) &&
+    terminal.isRunning(sessionId) &&
+    !isWaitingOnUser(sessionId) &&
+    (await terminal.paste(sessionId, paste))
+  ) {
+    return 'terminal';
+  }
+  return null;
+}
 
 // #endregion
 
