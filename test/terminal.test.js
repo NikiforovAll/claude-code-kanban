@@ -289,6 +289,69 @@ describe('edit before run', () => {
   });
 });
 
+describe('folder trust dialog', () => {
+  const A = 'aaaaaaaa-0000-0000-0000-000000000001';
+  const DIALOG = '\x1b[?2004hDo you trust the files in this folder?\r\n❯ 1. Yes, I trust this folder\r\n  2. No, exit\r\n';
+  const INPUT_BOX = '\x1b[2J\x1b[H\x1b[?2004h> ';
+
+  async function started() {
+    const pty = fakePty();
+    let changes = 0;
+    const t = createTerminalService({
+      config: { enabled: true, restore: false, shell: 'bash', maxSessions: 30, scrollback: 100 },
+      net: { EXPOSED: false },
+      pty,
+      token: TOKEN,
+      claudeDir: os.tmpdir(),
+      which: (n) => n,
+      isLiveElsewhere: () => false,
+      resolveCwd: () => null,
+      isAllowedFolder: () => true,
+      liveSessions: () => [],
+      isPidAlive: () => true,
+      exitPollMs: 20,
+      onChange: () => { changes++; },
+    });
+    await t.startNew({ id: A, cwd: os.tmpdir(), prompt: 'do the task' });
+    return { t, p: pty.spawned[0], changes: () => changes };
+  }
+
+  const awaiting = (t) => t.list()[0].awaitingTrust;
+
+  it('flags the dialog, holds the prompt, then sends it and clears the flag once the dialog is answered', async () => {
+    const { t, p } = await started();
+    p.emit(DIALOG);
+    await until(() => awaiting(t));
+    assert.equal(awaiting(t), true);
+    assert.deepEqual(p.written, []);
+    p.emit(INPUT_BOX);
+    await until(() => p.written.length > 0);
+    assert.equal(awaiting(t), false);
+    assert.equal(p.written[0], '\x1b[200~do the task\x1b[201~');
+    t.shutdown();
+  });
+
+  it('does not flag a screen that only says trust', async () => {
+    const { t, p } = await started();
+    p.emit('\x1b[?2004hI trust the plan\r\n');
+    await wait(600);
+    assert.equal(awaiting(t), false);
+    t.shutdown();
+  });
+
+  it('never flags the dialog text after the prompt is sent', async () => {
+    const { t, p, changes } = await started();
+    p.emit(INPUT_BOX);
+    await until(() => p.written.length > 0);
+    const before = changes();
+    p.emit(DIALOG);
+    await wait(600);
+    assert.equal(awaiting(t), false);
+    assert.equal(changes(), before);
+    t.shutdown();
+  });
+});
+
 describe('resume picker', () => {
   it('opens claude\'s own picker', () => {
     assert.deepEqual(claudeArgsFor('pick', SESSION), ['--resume']);

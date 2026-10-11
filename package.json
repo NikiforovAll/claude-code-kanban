@@ -11,7 +11,7 @@
     "start": "node server.js",
     "dev": "node --watch server.js",
     "test": "node --test test/*.test.js",
-    "test:swarm": "npm --prefix plugin/plugins/kanban-delm-swarm test",
+    "test:swarm": "npm --prefix extensions/swarm/plugin/plugins/kanban-delm-swarm test",
     "validate:schemas": "node test/validate-live-schemas.js",
     "prepare": "husky"
   },

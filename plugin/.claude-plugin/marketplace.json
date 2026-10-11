@@ -8,11 +8,6 @@
       "name": "claude-code-kanban",
       "source": "./plugins/claude-code-kanban",
       "description": "claude-code-kanban dashboard integration: agent activity tracking, context and cost tracking, and a skill to drive the board from a session"
-    },
-    {
-      "name": "kanban-delm-swarm",
-      "source": "./plugins/kanban-delm-swarm",
-      "description": "Kanban DeLM Swarm: several sessions on one goal through a shared task queue and log of findings. Opt-in: claude plugin install kanban-delm-swarm@claude-code-kanban"
     }
   ]
 }

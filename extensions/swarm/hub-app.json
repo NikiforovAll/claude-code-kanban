@@ -1,0 +1,43 @@
+{
+  "manifest": 1,
+  "id": "swarm",
+  "name": "Swarm",
+  "icon": "network",
+  "run": { "entry": "plugin/plugins/kanban-delm-swarm/viewer/server.js", "defaultPort": 3546 },
+  "plugin": { "marketplace": "plugin", "name": "kanban-delm-swarm" },
+  "requires": { "node": "22.13.0", "apps": ["kanban"] },
+  "listing": {
+    "tagline": "A DeLM implementation built on Claude Code Kanban",
+    "description": "A DeLM implementation built on Claude Code Kanban. A supervisor and its workers run as Claude Code sessions on the Kanban board, share a task queue and a log of findings, and the app shows each swarm's tasks, claims and published changes. /swarm start refuses when the Kanban CLI does not run.",
+    "tags": ["delm", "agents", "kanban"],
+    "homepage": "https://nikiforovall.blog/claude-code-hub/swarm/",
+    "screenshots": [
+      {
+        "url": "https://nikiforovall.blog/claude-code-hub/shots/extensions/swarm-timeline.webp",
+        "alt": "The Swarm timeline: three workers' claimed tasks over one hour, with findings, publications, applies, lost claims, a released task and a stopped worker"
+      },
+      {
+        "url": "https://nikiforovall.blog/claude-code-hub/shots/extensions/swarm-board.webp",
+        "alt": "Swarm in the hub: the supervisor and two workers grouped in the Kanban sidebar, the task cards with the owner of each, and the Swarm timeline in a pane beside the board"
+      },
+      {
+        "url": "https://nikiforovall.blog/claude-code-hub/shots/extensions/swarm-summary.webp",
+        "alt": "The Swarm summary: the goal, the outcome and delivered files, a change request, the three workers and the items that need a look"
+      },
+      {
+        "url": "https://nikiforovall.blog/claude-code-hub/shots/extensions/swarm-changes.webp",
+        "alt": "The Swarm changes view: who applied whose work, the files each worker touched, and the publications"
+      }
+    ],
+    "author": "NikiforovAll",
+    "license": "MIT"
+  },
+  "loading": {
+    "verbs": ["Reading the board…", "Replaying the log…", "Counting claims…", "Following the workers…"]
+  },
+  "actions": {
+    "handles": {
+      "swarm.open": { "params": { "swarm": "string?" }, "url": "?swarm={swarm}", "mode": "message" }
+    }
+  }
+}

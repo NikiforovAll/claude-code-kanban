@@ -148,6 +148,8 @@ let taskHighlightDimmed = false;
 let focusZone = 'board'; // 'board' | 'sidebar'
 let appConfig = { marketplaceUrl: null, costUrl: null, memoryUrl: null, scratchAvailable: false };
 let runningTerminals = new Set();
+// Embedded sessions stuck on Claude Code's folder-trust dialog. No hook runs before it, so the server reads it off the screen.
+let trustWaiting = new Set();
 let selectedSessionIdx = -1;
 let selectedSessionKbId = null;
 let sessionJustSelected = false;
@@ -558,14 +560,14 @@ function toggleSection(containerId, chevronId) {
 }
 
 function isWaitingSession(s) {
-  return !!s.hasWaitingForUser;
+  return !!s.hasWaitingForUser || trustWaiting.has(s.id);
 }
 function sessionBarClass(s) {
   if (isWaitingSession(s)) return 'permission-pending';
   return s.unread ? 'unread' : '';
 }
 function isActiveSession(s) {
-  return !s.hasWaitingForUser && (s.inProgress > 0 || s.hasRecentLog || s.hasRunningAgents);
+  return !isWaitingSession(s) && (s.inProgress > 0 || s.hasRecentLog || s.hasRunningAgents);
 }
 // hasRecentLog carries the server's registry-idle correction: an open-but-idle
 // terminal keeps touching its JSONL, so mtime alone is not proof of activity.
@@ -3933,12 +3935,12 @@ function renderSessions() {
     const padEmoji = store.getItem(_padEmojiKey(session.id));
     const hasScratchpad = !!padEmoji || _hasScratchpad(_sessionScratchpadKey(session.id));
     const tempClass =
-      session.hasRecentLog || session.hasRecentActivity || session.inProgress || session.hasWaitingForUser
+      session.hasRecentLog || session.hasRecentActivity || session.inProgress || isWaitingSession(session)
         ? 'warm'
         : 'stale';
     // Open tasks keep an idle session warm, but the green dot is for a session that is working.
     const idleClass =
-      tempClass === 'warm' && !session.hasWaitingForUser && !session.hasRecentLog && !session.hasRunningAgents
+      tempClass === 'warm' && !isWaitingSession(session) && !session.hasRecentLog && !session.hasRunningAgents
         ? 'idle'
         : '';
     const justFinishedClass = isJustFinished(session) ? 'just-finished' : '';
@@ -3970,8 +3972,8 @@ function renderSessions() {
                 ${session.sharedTaskList ? `<span class="shared-tasklist-badge" title="Shared task list: ${escapeHtml(session.sharedTaskList)}">${linkSvg(12)}</span>` : ''}
                 ${session.dispatched ? `<span class="dispatched-badge"${session.dispatched.parent ? ` onclick="event.stopPropagation(); revealSession('${escAttrJs(session.dispatched.parent)}')"` : ''} title="${escapeHtml(dispatchedTitle(session.dispatched))}">${ICON_DISPATCHED}</span>` : ''}
                 ${runningTerminals.has(session.id) ? `<span class="terminal-badge" onclick="event.stopPropagation(); showSessionTerminal('${escAttrJs(session.id)}')" title="${TERMINAL_TITLE}">${ICON_TERMINAL}</span>` : ''}
-                ${session.hasWaitingForUser ? `<span class="agent-badge agent-badge-waiting" title="Waiting for user">${ICON_AGENT_WAITING}</span>` : ''}
-                ${session.hasRunningAgents && !session.hasWaitingForUser ? `<span class="agent-badge agent-badge-active" title="Agents running">${ICON_AGENT_ACTIVE}</span>` : ''}
+                ${isWaitingSession(session) ? `<span class="agent-badge agent-badge-waiting" title="Waiting for user">${ICON_AGENT_WAITING}</span>` : ''}
+                ${session.hasRunningAgents && !isWaitingSession(session) ? `<span class="agent-badge agent-badge-active" title="Agents running">${ICON_AGENT_ACTIVE}</span>` : ''}
                 ${isLive || session.hasRunningAgents ? `<span class="pulse" title="${isLive ? 'Live' : 'Active agents'}"></span>` : ''}
               </span>
             </div>
@@ -5065,6 +5067,20 @@ function sgDeleteGroup(id) {
   for (const g of sessionGroups) if (g.parent === id) g.parent = parent;
   if (collapsedProjectGroups.delete(sgKey(id))) persistCollapsedGroups();
   persistSessionGroups();
+}
+
+async function sgConfirmDelete(group) {
+  const ok = await confirmModal({
+    title: 'Delete this group?',
+    message: 'Its sessions and projects go back to Projects.',
+    chip: group.name,
+    okLabel: 'Delete group',
+  });
+  if (ok) {
+    sgDeleteGroup(group.id);
+    renderSessions();
+  }
+  return ok;
 }
 
 // Move one member of a group in front of another — the user's own order inside the group.
@@ -7060,6 +7076,9 @@ function _renderStorageTab() {
   if (!modal?.classList.contains('visible')) return;
   const body = document.getElementById('storage-modal-body');
   const tab = document.querySelector('.storage-tab.active')?.dataset.tab || 'sessions';
+  const groupsClean = document.getElementById('storage-groups-clean-btn');
+  groupsClean.style.display = tab === 'groups' ? '' : 'none';
+  groupsClean.disabled = true;
   if (tab === 'sessions') body.innerHTML = _renderStorageSessions();
   else if (tab === 'scratchpads') body.innerHTML = _renderStorageScratchpads();
   else if (tab === 'linked-docs') body.innerHTML = _renderStorageLinkedDocs();
@@ -7372,7 +7391,10 @@ function _storageClearLinkedDocs(sessionId) {
 async function _storageGroupsClean(group, dryRun) {
   const shown = await getJson('/api/sessions', null, { query: { filter: 'active', limit: 'all', lite: '1' } });
   if (!Array.isArray(shown)) throw new Error('could not list sessions');
-  const res = await api('/api/groups/clean', { method: 'POST', body: { group, dryRun, keep: shown.map((s) => s.id) } });
+  const res = await api('/api/groups/clean', {
+    method: 'POST',
+    body: { group, dryRun, keep: shown.map((s) => s.id), hide: [...dismissedSessionIds.keys()] },
+  });
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
   return res.json();
 }
@@ -7390,6 +7412,7 @@ async function _renderStorageGroups(body) {
 
 function _showStorageGroups(body, out) {
   if (document.querySelector('.storage-tab.active')?.dataset.tab !== 'groups') return;
+  document.getElementById('storage-groups-clean-btn').disabled = !out.groups?.some((g) => g.hidden);
   if (out.error) {
     body.innerHTML = `<div class="storage-empty">Could not load groups: ${escapeHtml(out.error)}</div>`;
     return;
@@ -7401,18 +7424,18 @@ function _showStorageGroups(body, out) {
   const rows = out.groups
     .map((g) => {
       const badge = g.hidden ? ` <span class="storage-item-badge">${g.hidden} hidden</span>` : '';
-      return `<div class="storage-group-header">
+      return `<div class="storage-group-header storage-group-row">
       <span>${escapeHtml(g.path)}${badge}</span>
       <div class="storage-item-actions">
         <span class="storage-item-meta">${g.members} member${g.members === 1 ? '' : 's'}</span>
-        <button class="danger" title="Take out the sessions that are not active or pinned, here and in the groups under it" onclick="_storageCleanGroup('${escAttrJs(g.id)}')">Clean</button>
+        <button class="danger" title="Take out the hidden sessions, here and in the groups under it" onclick="_storageCleanGroup('${escAttrJs(g.id)}')">Clean</button>
+        <button class="danger" onclick="_storageDeleteGroup('${escAttrJs(g.id)}')">Delete</button>
       </div>
     </div>`;
     })
     .join('');
   const hidden = out.groups.reduce((n, g) => n + g.hidden, 0);
-  const meta = `${hidden} hidden <button class="btn btn-secondary" ${hidden ? '' : 'disabled'} onclick="_storageCleanGroup(null)">Clean all</button>`;
-  body.innerHTML = _renderProjectGroup('Groups', meta, rows);
+  body.innerHTML = _renderProjectGroup('Groups', `${hidden} hidden`, rows);
 }
 
 async function _storageCleanGroup(group) {
@@ -7426,6 +7449,13 @@ async function _storageCleanGroup(group) {
   const n = out.dropped;
   showToast(n ? `Took ${n} hidden session${n === 1 ? '' : 's'} out of the groups` : 'No hidden sessions');
   _showStorageGroups(document.getElementById('storage-modal-body'), out);
+}
+
+async function _storageDeleteGroup(id) {
+  const group = sgGroupById(id);
+  if (!group || !(await sgConfirmDelete(group))) return;
+  await sgSaving;
+  _renderStorageTab();
 }
 
 function _findOrphanedKeys(known) {
@@ -9851,7 +9881,8 @@ function setupEventSource() {
         if (!skipOffScreen()) refreshOpenPlan();
       }
 
-      if (data.type === 'terminals-update' && Array.isArray(data.ids)) setRunningTerminals(data.ids);
+      if (data.type === 'terminals-update' && Array.isArray(data.ids))
+        setRunningTerminals(data.ids, data.awaitingTrust);
 
       if (data.type === 'terminal:ended' && typeof data.id === 'string') onTerminalEnded(data.id);
 
@@ -11380,16 +11411,7 @@ document.addEventListener('click', (e) => {
         return;
       }
       if (e.target.closest('.sg-delete')) {
-        confirmModal({
-          title: 'Delete this group?',
-          message: 'Its sessions and projects go back to Projects.',
-          chip: group.name,
-          okLabel: 'Delete group',
-        }).then((ok) => {
-          if (!ok) return;
-          sgDeleteGroup(groupId);
-          renderSessions();
-        });
+        sgConfirmDelete(group);
         return;
       }
     } else if (!sgHeader.dataset.transientGroup) return;
@@ -14661,7 +14683,8 @@ function takeTerminalFocus(sessionId) {
 
 // The terminal attaches asynchronously; by then the user may be typing elsewhere or reading a modal.
 function promptAwaitsUser(sessionId) {
-  if (!sessions.find((s) => s.id === sessionId)?.hasWaitingForUser || isAnyModalOpen()) return false;
+  const session = sessions.find((s) => s.id === sessionId);
+  if (!session || !isWaitingSession(session) || isAnyModalOpen()) return false;
   return !document.activeElement?.matches(TEXT_FIELD_SELECTOR);
 }
 
@@ -16510,7 +16533,11 @@ function renderPlaceholderCard(session, depth) {
           <button onclick="fetchTasks('${escAttrJs(session.id)}')" data-session-id="${escapeHtml(session.id)}" class="session-item session-placeholder ${isActive ? 'active' : ''}${childDepthClass(depth)}" title="${escapeHtml(`${session.id} | ${session.project}`)}">
             <div class="session-name">${escapeHtml(session.name)}</div>
             ${projectHtml ? `<div class="session-secondary">${projectHtml}</div>` : ''}
-            <div class="session-waiting"><span class="pulse"></span>${PLACEHOLDER_HINTS[session.edit ? 'edit' : session.mode] || PLACEHOLDER_HINTS.new}</div>
+            ${
+              trustWaiting.has(session.id)
+                ? `<div class="session-waiting"><span class="agent-badge agent-badge-waiting" title="Waiting for user">${ICON_AGENT_WAITING}</span>trust this folder?</div>`
+                : `<div class="session-waiting"><span class="pulse"></span>${PLACEHOLDER_HINTS[session.edit ? 'edit' : session.mode] || PLACEHOLDER_HINTS.new}</div>`
+            }
           </button>
         `;
 }
@@ -16544,6 +16571,7 @@ async function loadTerminals() {
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
   const list = data.sessions || [];
   runningTerminals = new Set(list.map((t) => t.id));
+  setTrustWaiting(list.filter((t) => t.awaitingTrust).map((t) => t.id));
   rememberTerminalIds(list);
   syncShowCard();
   pushTerminalClaims();
@@ -16551,8 +16579,20 @@ async function loadTerminals() {
   return list;
 }
 
-function setRunningTerminals(ids) {
+// A dispatched session never had its terminal toggled on, so the dialog would stay out of sight.
+function setTrustWaiting(ids) {
+  const before = trustWaiting;
+  trustWaiting = new Set(ids);
+  for (const id of trustWaiting) {
+    if (before.has(id)) continue;
+    setTerminalMode(id, true);
+    if (id === currentSessionId && viewMode === 'session') syncTerminal();
+  }
+}
+
+function setRunningTerminals(ids, awaitingTrust = []) {
   runningTerminals = new Set(ids);
+  setTrustWaiting(awaitingTrust);
   forgetEndedTerminals();
   syncShowCard();
   pushTerminalClaims();

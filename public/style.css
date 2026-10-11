@@ -9602,6 +9602,15 @@ select.form-input option:checked {
   padding-top: 0;
 }
 
+.storage-group-header.storage-group-row {
+  padding: 6px 0;
+}
+
+.storage-group-row .storage-item-actions {
+  align-items: center;
+  gap: 8px;
+}
+
 .storage-empty {
   text-align: center;
   padding: 32px 0;

@@ -3346,7 +3346,7 @@ const terminal = createTerminalClient({
   // project dir it started in, and cwd drifts into subdirectories.
   resolveCwd: resolveSessionFolder,
   isAllowedFolder,
-  onChange: () => broadcast({ type: 'terminals-update', ids: terminal.ids() }),
+  onChange: () => broadcast({ type: 'terminals-update', ids: terminal.ids(), awaitingTrust: terminal.awaitingTrust() }),
   onExit: (id) => {
     if (dispatched.get(id)) broadcast({ type: 'dispatch-update' });
   },
@@ -4075,10 +4075,15 @@ app.post('/api/groups/prune', groupRoute((b) => {
   return userGroups.prune({ dryRun: b.dryRun === true, isLive: liveGroupMember((id) => !!known[id]) });
 }));
 // `keep` is the ids of `/api/sessions?filter=active&limit=all`: the Active rule lives in that route.
+// `hide` is the ids dismissed on the board: hidden there even while their terminal runs, unless pinned.
 app.post('/api/groups/clean', groupRoute((b) => {
   if (!Array.isArray(b.keep)) throw previewError(400, 'keep must be an array of session ids');
   const keep = new Set(b.keep);
-  return userGroups.clean({ group: b.group ?? null, dryRun: b.dryRun === true, isVisible: liveGroupMember((id) => keep.has(id)) });
+  const hide = new Set(Array.isArray(b.hide) ? b.hide : []);
+  const pins = sessionPins.state().pins;
+  const live = liveGroupMember((id) => keep.has(id));
+  const isVisible = (m) => (Object.hasOwn(pins, m.ref) || !hide.has(m.ref)) && live(m);
+  return userGroups.clean({ group: b.group ?? null, dryRun: b.dryRun === true, isVisible });
 }));
 
 // A session that runs in the terminal or is still starting has no transcript yet.

@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { pluginStatus, installCommand, isInstalled, PLUGIN_ID, SWARM_PLUGIN_ID, BUNDLED_MANIFEST } = require('../lib/plugin-status');
+const { pluginStatus, installCommand, PLUGIN_ID, BUNDLED_MANIFEST } = require('../lib/plugin-status');
 
 function world({ bundled = '2.14.0', installs, enabled } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cck-plugin-'));
@@ -72,26 +72,14 @@ describe('pluginStatus', () => {
   });
 });
 
-describe('isInstalled', () => {
-  it('is true only with an install entry for that plugin', () => {
-    const { claudeDir } = world({ installs: [{ scope: 'user', version: '2.14.0' }] });
-    assert.equal(isInstalled(claudeDir, PLUGIN_ID), true);
-    assert.equal(isInstalled(claudeDir, SWARM_PLUGIN_ID), false);
-    assert.equal(isInstalled(world().claudeDir, PLUGIN_ID), false);
-  });
-});
-
 describe('marketplace', () => {
   const root = path.join(__dirname, '..', 'plugin');
   const marketplace = JSON.parse(fs.readFileSync(path.join(root, '.claude-plugin', 'marketplace.json'), 'utf8'));
 
-  it('lists each plugin id the installer names, with a manifest of the same name', () => {
-    const names = marketplace.plugins.map((p) => p.name);
-    for (const id of [PLUGIN_ID, SWARM_PLUGIN_ID]) {
-      const [name, market] = id.split('@');
-      assert.equal(market, marketplace.name);
-      assert.ok(names.includes(name), `${name} is not in marketplace.json`);
-    }
+  it('lists the plugin id the installer names, with a manifest of the same name', () => {
+    const [name, market] = PLUGIN_ID.split('@');
+    assert.equal(market, marketplace.name);
+    assert.ok(marketplace.plugins.some((p) => p.name === name), `${name} is not in marketplace.json`);
     for (const p of marketplace.plugins) {
       const manifest = JSON.parse(fs.readFileSync(path.join(root, p.source, '.claude-plugin', 'plugin.json'), 'utf8'));
       assert.equal(manifest.name, p.name);

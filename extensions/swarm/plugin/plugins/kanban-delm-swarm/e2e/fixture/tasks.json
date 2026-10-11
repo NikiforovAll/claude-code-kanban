@@ -1,0 +1,10 @@
+[
+  {
+    "title": "Implement slugify",
+    "description": "Implement `slugify` in `src/slugify.js` as the spec decides. It shares nothing with titleCase."
+  },
+  {
+    "title": "Implement titleCase",
+    "description": "Implement `titleCase` in `src/title-case.js` as the spec decides. It shares nothing with slugify."
+  }
+]

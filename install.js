@@ -5,7 +5,7 @@ const path = require('node:path');
 const readline = require('node:readline');
 const { execSync } = require('node:child_process');
 const { getClaudeDir, claudeCliEnv, displayPath } = require('./lib/claude-dir');
-const { PLUGIN_ID, SWARM_PLUGIN_ID, isInstalled } = require('./lib/plugin-status');
+const { PLUGIN_ID } = require('./lib/plugin-status');
 
 const CLAUDE_DIR = getClaudeDir();
 const CLI_ENV = claudeCliEnv(CLAUDE_DIR);
@@ -164,9 +164,6 @@ async function runInstall({ yes = false } = {}) {
     // until `update` pulls the new one in. That is how a config dir ends up serving
     // a plugin older than the board it talks to.
     if (alreadyInstalled) updatePlugin(PLUGIN_ID, 'Plugin');
-
-    // The swarm plugin ships in the same copy but is opt-in, so it is only updated, never installed here.
-    if (isInstalled(CLAUDE_DIR, SWARM_PLUGIN_ID)) updatePlugin(SWARM_PLUGIN_ID, 'kanban-delm-swarm');
   } else {
     console.log(`    ${dim('Skipped')}`);
   }
@@ -198,12 +195,7 @@ async function runUninstall() {
   console.log(`\n  ${bold('claude-code-kanban')} — Uninstaller\n`);
   console.log(`  Claude config dir: ${dim(displayPath(CLAUDE_DIR))}\n`);
 
-  // 1. Uninstall plugins via Claude CLI; the swarm plugin would be orphaned once its marketplace goes
-  if (isInstalled(CLAUDE_DIR, SWARM_PLUGIN_ID)) {
-    process.stdout.write('  Removing kanban-delm-swarm... ');
-    const swarm = runCLI(`claude plugin uninstall ${SWARM_PLUGIN_ID}`, ['not found', 'not installed']);
-    console.log(swarm.ok ? green('✓ Removed') : yellow(`⚠ ${swarm.error}`));
-  }
+  // 1. Uninstall plugin via Claude CLI
   process.stdout.write('  Removing plugin... ');
   const uninst = runCLI('claude plugin uninstall claude-code-kanban', ['not found', 'not installed']);
   if (uninst.ok) {

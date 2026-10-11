@@ -759,6 +759,7 @@
       </div>
       <div class="modal-body modal-zoomable" id="storage-modal-body"></div>
       <div class="modal-footer">
+        <button id="storage-groups-clean-btn" class="btn btn-secondary" style="display:none" disabled title="Take the sessions the sidebar hides (not active or dismissed, and not pinned) out of every group" onclick="_storageCleanGroup(null)">Clean all</button>
         <button id="storage-cleanup-btn" class="btn btn-secondary" onclick="cleanupOrphanedStorage()">Clean Orphaned</button>
         <button class="btn btn-secondary" onclick="closeStorageManager()">Close</button>
       </div>
