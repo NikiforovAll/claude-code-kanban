@@ -94,6 +94,8 @@ let sessionsHasMore = false;
 // URL, so a query string would not survive a hub reload.
 const ZEN_KEY = 'zenMode';
 let zenMode = store.getItem(ZEN_KEY) === 'true';
+// Group zen: the sidebar shows one group's subtree. A view of the moment, so it is not persisted.
+let zenGroup = null;
 let filterProject = FILTER_DEFAULTS.project; // null = all, '__recent__' = last 24h, or project path
 let recentProjects = new Set();
 let projectsCacheDirty = true;
@@ -258,6 +260,7 @@ function resetState() {
   sessionLimit = SESSION_PAGE;
   filterProject = FILTER_DEFAULTS.project;
   zenMode = false;
+  zenGroup = null;
   store.removeItem(ZEN_KEY);
   renderZenState();
   searchQuery = '';
@@ -329,15 +332,26 @@ async function fetchSessions(includeTasks = true, focusId = currentSessionId) {
     // info modal both look it up in `sessions` and bail when it is absent, so a session
     // opened from outside the current filter would leave the view on the previous one.
     // The server adds the pinned sessions itself; the ones `session open` showed are this page's.
-    const include = [focusId, revealedPlanSessionId, revealedStorageSessionId, ...openedStickyIds].filter(Boolean);
-    const recent = filterProject === '__recent__';
+    // Group zen ignores the filters, and its session members come back through `include`.
+    const zenIds = zenGroup ? sgSubtreeIds(zenGroup) : new Set();
+    const zenMembers = sessionGroups
+      .filter((g) => zenIds.has(g.id))
+      .flatMap((g) => g.members.filter((m) => m.type === 'session').map((m) => m.ref));
+    const include = [
+      focusId,
+      revealedPlanSessionId,
+      revealedStorageSessionId,
+      ...openedStickyIds,
+      ...zenMembers,
+    ].filter(Boolean);
+    const recent = !zenGroup && filterProject === '__recent__';
     const res = await api('/api/sessions', {
       query: {
         limit: sessionLimit,
         include: include.length ? include.join(',') : null,
         recentHours: recent ? RECENT_PROJECT_HOURS : null,
-        project: !recent && filterProject ? filterProject : null,
-        filter: sessionFilter === 'active' ? 'active' : null,
+        project: !zenGroup && !recent && filterProject ? filterProject : null,
+        filter: !zenGroup && sessionFilter === 'active' ? 'active' : null,
       },
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -3850,12 +3864,20 @@ function renderSessions() {
   scheduleJustFinishedExpiry();
   refreshProjectList();
 
+  if (zenGroup && !sgGroupById(zenGroup)) {
+    zenGroup = null;
+    renderZenState();
+  }
   // Zen narrows the rendered list only — the session picker keeps calling getFilteredSessions()
   // and still offers everything, or there would be no way to switch sessions without leaving zen.
+  // Group zen renders only its subtree's buckets, so it takes every session unfiltered.
   const zenSession = zenMode && currentSessionId ? sessions.find((s) => s.id === currentSessionId) : null;
-  const filteredSessions = zenMode ? (zenSession ? [zenSession] : []) : applyStableSessionOrder(getFilteredSessions());
+  let filteredSessions;
+  if (zenGroup) filteredSessions = applyStableSessionOrder(sessions);
+  else if (zenMode) filteredSessions = zenSession ? [zenSession] : [];
+  else filteredSessions = applyStableSessionOrder(getFilteredSessions());
 
-  const outside = sidebarSearch.rows(zenMode ? '' : searchQuery, filteredSessions);
+  const outside = sidebarSearch.rows(zenMode || zenGroup ? '' : searchQuery, filteredSessions);
 
   const childDepth = new Map();
   const parentOf = new Map();
@@ -3981,7 +4003,7 @@ function renderSessions() {
       )
     : '';
 
-  if (filteredSessions.length === 0) {
+  if (filteredSessions.length === 0 && !zenGroup) {
     let emptyMsg = 'No sessions found';
     let emptyHint = 'Tasks appear when you use Claude Code';
 
@@ -4115,7 +4137,8 @@ function renderSessions() {
   for (const [name, g] of transientGroups) if (!sgBuckets.has(g.id)) transientGroups.delete(name);
   // A group emptied by a filter hides its header; a group the user just created (no filters)
   // shows its drop-here state instead of vanishing.
-  const sgFiltering = !!searchQuery || activityFilter.size > 0 || (!!filterProject && filterProject !== '__recent__');
+  const sgFiltering =
+    !zenGroup && (!!searchQuery || activityFilter.size > 0 || (!!filterProject && filterProject !== '__recent__'));
 
   // A group whose parent is gone renders at the top.
   const sgIds = new Set(sessionGroups.map((g) => g.id));
@@ -4215,8 +4238,10 @@ function renderSessions() {
         </div>`;
   }
 
-  // Group active sessions by project
-  if (sessionFilter === 'active') {
+  if (zenGroup) {
+    sessionsList.innerHTML = sgGroupHtml(sgGroupById(zenGroup), sessionFilter !== 'active');
+  } else if (sessionFilter === 'active') {
+    // Group active sessions by project
     // Auto-expand a collapsed section when newly-active work lands in it (live refresh).
     expandActiveGroups({ onlyNew: true });
     html += sgSectionHtml(false);
@@ -4874,6 +4899,12 @@ function sgGroupById(id) {
 // Matches MAX_DEPTH in lib/user-groups.js.
 const SG_MAX_DEPTH = 8;
 
+function sgSubtreeIds(rootId) {
+  const ids = new Set([rootId]);
+  for (const id of ids) for (const g of sessionGroups) if (g.parent === id) ids.add(g.id);
+  return ids;
+}
+
 function sgPathOf(group) {
   const names = [];
   for (let g = group; g && names.length < SG_MAX_DEPTH; g = sgGroupById(g.parent)) names.unshift(g.name);
@@ -5066,7 +5097,7 @@ function sgHeaderHtml(group, countHtml) {
     : `<span class="group-name">${escapeHtml(group.name)}</span>`;
   const attrs = group.transient
     ? `class="session-group-header sg-transient${collapsed ? ' collapsed' : ''}" data-transient-group="${escapeHtml(group.name)}" title="${escapeHtml(group.name)} — goes when its sessions end"`
-    : `class="session-group-header${collapsed ? ' collapsed' : ''}" draggable="${editing ? 'false' : 'true'}" data-group-id="${escapeHtml(group.id)}" title="${escapeHtml(group.name)} — drop sessions or projects here"`;
+    : `class="session-group-header${collapsed ? ' collapsed' : ''}${group.id === zenGroup ? ' sg-zen' : ''}" draggable="${editing ? 'false' : 'true'}" data-group-id="${escapeHtml(group.id)}" title="${escapeHtml(group.name)} — drop sessions or projects here"`;
   const actions = group.transient
     ? `<span class="sg-action sg-keep" title="Keep this group after its sessions end">Keep</span>
           <span class="sg-action sg-delete" title="Delete group (sessions return to Projects)">&times;</span>`
@@ -6335,7 +6366,11 @@ const SHORTCUT_TABS = [
           { keys: ['\\'], label: 'Toggle sidebar' },
           { keys: ['T'], label: 'Toggle theme' },
           { keys: ['Shift', 'S'], combo: true, label: 'Storage manager' },
-          { keys: ['Ctrl', 'Shift', 'Z'], combo: true, label: 'Zen mode (current session only)' },
+          {
+            keys: ['Ctrl', 'Shift', 'Z'],
+            combo: true,
+            label: 'Zen mode (current session, or the group under the cursor)',
+          },
           { keys: ['Ctrl', 'Shift', 'K'], combo: true, label: 'Show / hide Kanbot' },
           { keys: ['Ctrl', '+'], combo: true, label: 'Larger modal text' },
           { keys: ['Ctrl', '−'], combo: true, label: 'Smaller modal text' },
@@ -11129,24 +11164,32 @@ function renderFilterState() {
   document.getElementById('filter-menu-btn')?.classList.toggle('has-filters', short.length > 0);
 }
 
+// With the sidebar cursor on a group header, zen shows that group instead of the open session.
 function toggleZenMode() {
-  zenMode = !zenMode;
+  const leavingSessionZen = zenMode;
+  if (zenMode) zenMode = false;
+  else if (zenGroup) zenGroup = null;
+  else {
+    const header = focusZone === 'sidebar' ? sessionsList.querySelector('.session-group-header.kb-selected') : null;
+    zenGroup = header?.dataset.groupId || null;
+    zenMode = !zenGroup;
+  }
   store.setItem(ZEN_KEY, String(zenMode));
   renderZenState();
-  if (zenMode) closeFilterMenu();
+  if (zenMode || zenGroup) closeFilterMenu();
   renderSessions();
-  // The open session may be outside the current server page/filter; refetch pins it in.
-  if (zenMode) fetchSessions(false);
+  // The open session or the group's members may be outside the current server page/filter,
+  // and leaving group zen needs the filtered page back.
+  if (!leavingSessionZen) fetchSessions(false);
 }
 
 function renderZenState() {
   const btn = document.getElementById('zen-mode-btn');
   if (!btn) return;
-  btn.classList.toggle('active', zenMode);
-  btn.setAttribute('aria-pressed', String(zenMode));
-  btn.title = zenMode
-    ? 'Zen mode on — show all sessions (Ctrl+Shift+Z)'
-    : 'Zen mode: current session only (Ctrl+Shift+Z)';
+  const on = zenMode || !!zenGroup;
+  btn.classList.toggle('active', on);
+  btn.setAttribute('aria-pressed', String(on));
+  btn.title = on ? 'Zen mode on — show all sessions (Ctrl+Shift+Z)' : 'Zen mode: current session only (Ctrl+Shift+Z)';
 }
 
 function filterBySessions(value) {

@@ -380,7 +380,7 @@ describe('board pins', () => {
 });
 
 describe('board session list request', () => {
-  it('asks for the sessions that session open showed', async () => {
+  const listRequest = async (extra) => {
     let query;
     const ctx = {
       console: { error() {} },
@@ -389,18 +389,41 @@ describe('board session list request', () => {
       revealedPlanSessionId: null,
       revealedStorageSessionId: null,
       openedStickyIds: new Set(['opened']),
-      filterProject: null,
+      filterProject: '/p',
       sessionLimit: 20,
       sessionFilter: 'active',
       RECENT_PROJECT_HOURS: 24,
+      zenGroup: null,
+      sessionGroups: [],
       api: async (_url, opts) => {
         query = opts.query;
         throw new Error('stop');
       },
+      ...extra,
     };
-    vm.runInNewContext(fn('fetchSessions'), ctx);
+    vm.runInNewContext([fn('sgSubtreeIds'), fn('fetchSessions')].join('\n'), ctx);
     await ctx.fetchSessions();
+    return query;
+  };
+
+  it('asks for the sessions that session open showed', async () => {
+    const query = await listRequest();
     assert.equal(query.include, 'focus,opened');
     assert.equal(query.filter, 'active');
+    assert.equal(query.project, '/p');
+  });
+
+  it('group zen drops the filters and asks for the subtree session members', async () => {
+    const query = await listRequest({
+      zenGroup: 'g',
+      sessionGroups: [
+        { id: 'g', parent: null, members: [{ type: 'session', ref: 's1' }, { type: 'project', ref: '/x' }] },
+        { id: 'c', parent: 'g', members: [{ type: 'session', ref: 's2' }] },
+        { id: 'other', parent: null, members: [{ type: 'session', ref: 's3' }] },
+      ],
+    });
+    assert.equal(query.include, 'focus,opened,s1,s2');
+    assert.equal(query.filter, null);
+    assert.equal(query.project, null);
   });
 });

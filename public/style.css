@@ -10092,6 +10092,10 @@ pre.mermaid[data-mermaid-error]::before {
   outline-offset: -1px;
 }
 
+.session-group-header.sg-zen {
+  color: var(--accent);
+}
+
 .sg-sub-label {
   padding: 8px 10px 2px 8px;
   font-size: 10px;
