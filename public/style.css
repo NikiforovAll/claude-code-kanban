@@ -2263,6 +2263,29 @@ body.booting .boot-splash {
 .detail-panel.visible {
   display: flex;
 }
+
+.detail-panel.expanded {
+  top: 50%;
+  left: 50%;
+  right: auto;
+  width: min(1200px, calc(100vw - 48px));
+  height: auto;
+  max-height: calc(100vh - 96px);
+  transform: translate(-50%, -50%);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 12px 40px rgb(0 0 0 / 35%);
+  z-index: 900;
+}
+
+.detail-panel.expanded .panel-resize-handle {
+  display: none;
+}
+
+.detail-expand svg {
+  width: 15px;
+  height: 15px;
+}
 .detail-panel.resizing,
 .message-panel.resizing {
   transition: none;

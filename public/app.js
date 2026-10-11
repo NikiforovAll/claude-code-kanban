@@ -6240,6 +6240,23 @@ async function saveTaskField(taskId, sessionId, field, value) {
   }
 }
 
+const DETAIL_LAYOUT_KEY = 'cck-detail-layout';
+
+function setDetailExpanded(expanded) {
+  detailPanel.classList.toggle('expanded', expanded);
+  const btn = document.getElementById('expand-detail');
+  btn.innerHTML = showIcon(expanded ? 'restore' : 'expand');
+  btn.title = expanded ? 'Restore (E)' : 'Expand (E)';
+  btn.setAttribute('aria-label', expanded ? 'Restore' : 'Expand');
+  store.setItem(DETAIL_LAYOUT_KEY, expanded ? 'expanded' : '');
+}
+
+function initDetailLayout() {
+  document.getElementById('expand-detail').onclick = () =>
+    setDetailExpanded(!detailPanel.classList.contains('expanded'));
+  setDetailExpanded(store.getItem(DETAIL_LAYOUT_KEY) === 'expanded');
+}
+
 function closeDetailPanel() {
   detailPanel.classList.remove('visible');
   document.getElementById('delete-task-btn').style.display = 'none';
@@ -6368,6 +6385,7 @@ const SHORTCUT_TABS = [
         rows: [
           { keys: ['Enter'], label: 'Toggle task detail panel' },
           { keys: ['D'], label: 'Delete selected task' },
+          { keys: ['E'], label: 'Expand / restore task detail panel' },
           { keys: ['N'], label: 'Toggle scratchpad (in the sidebar: the item under the cursor)' },
           { keys: ['Ctrl', 'E'], combo: true, label: 'Set the session scratchpad emoji (in the scratchpad)' },
           { keys: ['R'], label: 'Refresh data' },
@@ -7873,6 +7891,12 @@ document.addEventListener('keydown', (e) => {
     if (matchKey(e, 'KeyD') && selectedTaskId) {
       e.preventDefault();
       deleteTask(selectedTaskId, selectedSessionId || currentSessionId);
+      return;
+    }
+
+    if (matchKey(e, 'KeyE') && detailPanel.classList.contains('visible')) {
+      e.preventDefault();
+      setDetailExpanded(!detailPanel.classList.contains('expanded'));
       return;
     }
   }
@@ -16994,6 +17018,7 @@ loadModalFullscreen();
 initModalResize();
 loadPanelWidths();
 initPanelResize('detail-panel', 'detail-panel-resize', '--detail-panel-width');
+initDetailLayout();
 initPanelResize('message-panel', 'message-panel-resize', '--message-panel-width');
 initMessagePanelFull();
 
