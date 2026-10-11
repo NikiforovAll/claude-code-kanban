@@ -6255,6 +6255,9 @@ async function deleteTask(taskId, sessionId) {
     okLabel: 'Delete task',
   });
   if (!ok) return;
+  const info = taskId === selectedTaskId ? getSelectedCardInfo() : null;
+  const colCards = info ? Array.from(COLUMNS[info.colIndex].el.querySelectorAll('.task-card')) : [];
+  const next = colCards[info?.cardIndex + 1] || colCards[info?.cardIndex - 1];
 
   try {
     const res = await api(apiPath`/api/tasks/${sessionId}/${taskId}`, { method: 'DELETE' });
@@ -6262,6 +6265,14 @@ async function deleteTask(taskId, sessionId) {
     if (res.ok) {
       closeDetailPanel();
       await refreshCurrentView();
+      if (info && focusZone === 'board') {
+        if (next) {
+          selectTask(next.dataset.taskId, next.dataset.sessionId);
+        } else {
+          selectedTaskId = null;
+          navigateVertical(1);
+        }
+      }
     } else {
       const error = await res.json().catch(() => ({}));
       showToast(`Failed to delete task: ${error.error || 'Unknown error'}`, 'error');

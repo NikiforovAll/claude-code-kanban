@@ -7855,7 +7855,7 @@ body.light .msg-assistant .msg-text {
 
 .confirm-dialog {
   padding: 0;
-  max-width: 480px;
+  max-width: 560px;
   overflow: hidden;
 }
 
