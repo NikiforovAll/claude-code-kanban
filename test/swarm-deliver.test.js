@@ -146,6 +146,17 @@ describe('swarm delivery', () => {
     assert.deepEqual([out.changed, out.merged], [['f.txt'], []]);
   });
 
+  it('an LF file under autocrlf that git status shows clean is not a user edit', () => {
+    const p = project({ 'f.txt': lines(6) }, { autocrlf: 'true', workers: ['w1'] });
+    write(p.repo, 'f.txt', lines(6));
+    write(p.repo, 'g.txt', 'g\n');
+    const wt = p.trees.w1.path;
+    write(wt, 'f.txt', lines(6, { 4: 'worker' }).replaceAll('\n', '\r\n'));
+    const out = d.deliver({ dir: p.dir, project: p.repo, base: p.base, wt });
+    assert.deepEqual([out.delivered, out.changed, out.merged, out.conflicts], [true, ['f.txt'], [], []]);
+    assert.equal(read(p.repo, 'f.txt'), lines(6, { 4: 'worker' }).replaceAll('\n', '\r\n'));
+  });
+
   it('a symlink on the way in the project is a conflict, not a redirect', { skip: process.platform === 'win32' && 'symlinks need admin rights on Windows' }, () => {
     const p = project({ 'sub/f.txt': 'f\n' });
     const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'cck-outside-'));

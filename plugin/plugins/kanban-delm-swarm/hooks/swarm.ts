@@ -69,7 +69,7 @@ export const TOOLS: { name: string; command: string; description: string; inputS
     name: 'swarm_complete',
     command: 'complete',
     description:
-      'Declare your outcome for the whole goal with the current board request_revision as expected_revision, then end your turn. complete means the full result is ready: the supervisor checks it, and workers change nothing until it ends the swarm or sends a new request. partial resumes you to continue the unfinished requirement. waiting needs dependency task:<id> or worker:<name>, not your own work; the swarm resumes you when it is ready, new work becomes available, the request changes, or no one can produce it. Never sleep or poll to wait. blocked tells the supervisor the concrete input you need; it answers with a new request. checks lists the checks you ran, each with its command and result. artifacts lists every requested generated output file or directory, relative to your workspace; use [] for source-only work.',
+      'Declare your outcome for the whole goal with the current board request_revision as expected_revision, then end your turn. complete means the full result is ready: the supervisor checks it, and workers change nothing until it ends the swarm or sends a new request. partial resumes you to continue the unfinished requirement. waiting needs dependency task:<id> or worker:<name>, not your own work; the swarm resumes you when it is ready, new work becomes available, the request changes, or no one can produce it. Never sleep or poll to wait. blocked tells the supervisor the concrete input you need; it answers with a message or a new request. checks lists the checks you ran, each with its command and result. artifacts lists every requested generated output file or directory, relative to your workspace; use [] for source-only work.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -279,7 +279,7 @@ async function store($: EngineInterface, s: Swarm, command: string, args: Record
 }
 
 async function run($: EngineInterface, s: Swarm, command: string, input: Record<string, unknown>) {
-  const { tool: _tool, tool_use_id: _id, ...args } = input
+  const { tool: _tool, tool_use_id: _id, agentId: _agent, consent: _consent, ...args } = input
   const owned = RUNTIME_FIELDS.filter(f => f in args)
   if (owned.length) return { deny: `${owned.join(', ')} ${owned.length > 1 ? 'are' : 'is'} set by the swarm, not by the call.` }
   const { ok, error, ...result } = await store($, s, command, args)

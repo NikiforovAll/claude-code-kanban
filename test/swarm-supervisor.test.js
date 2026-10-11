@@ -50,6 +50,7 @@ describe('swarm supervisor', { skip: !hasSqlite && 'node:sqlite needs Node 22.5 
     const created = sup.command('task_create', request, '{"title": "Docs", "description": "Write them", "assignee": "w2-abc123"}');
     assert.deepEqual([created.ok, created.result.owner], [true, 'w2-abc123']);
     assert.throws(() => sup.command('request', request, '{oops'), /one JSON object/);
+    assert.deepEqual(sup.command('notices', request), { ok: false, error: 'notices is not a supervisor command' }, 'it would move the watch cursor');
   });
 
   it('prints one line per notice and exits at the end', async () => {

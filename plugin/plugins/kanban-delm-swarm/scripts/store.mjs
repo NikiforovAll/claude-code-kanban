@@ -50,6 +50,7 @@ const TASK_EVENTS = ['task_create', 'task_claim', 'task_update', 'task_release',
 // DeLM's resume messages (src/claude/controller.rs).
 const WAKE_MESSAGES = {
   ready: 'Shared work changed. Read the board, take ready work, and reuse the new contribution.',
+  assigned: 'The supervisor assigned you a task. Read the board and do it.',
   no_producer: 'Your dependency has no active producer. Resolve available work now, or declare blocked with the concrete input needed.',
   partial: 'Continue the concrete unfinished requirement in your declaration. Read ownership and reuse peer contributions; do not repeat completed checks.',
   repair: 'State the whole-request outcome with swarm_complete, then end your turn. If ready, reference checks already performed; do not start another improvement pass.',
@@ -280,9 +281,9 @@ class Store {
     }
   }
 
-  // A worker's change acknowledges the request revision it was made under: the response that
-  // carries it also carries the request changes the worker had not seen.
-  append(actor, kind, payload) {
+  // A worker's change acknowledges the request revisions that its response carries (`ack`, read
+  // before the change), never one that a request committed in the meantime.
+  append(actor, kind, payload, ack = this.ack ?? null) {
     const r = this.db
       .prepare(`INSERT INTO events(actor, name, kind, payload, revision) VALUES (?, ?, ?, ?, ${REVISION})`)
       .run(actor.id, actor.name ?? null, kind, JSON.stringify(payload))
@@ -290,9 +291,9 @@ class Store {
     if (!actor.parent) {
       this.db
         .prepare(
-          `INSERT INTO workers(actor, name, updated, acked) VALUES (?, ?, ?, ${REVISION}) ON CONFLICT(actor) DO UPDATE SET name = COALESCE(excluded.name, workers.name), acked = excluded.acked`,
+          'INSERT INTO workers(actor, name, updated, acked) VALUES (?1, ?2, ?3, COALESCE(?4, 1)) ON CONFLICT(actor) DO UPDATE SET name = COALESCE(excluded.name, workers.name), acked = MAX(workers.acked, COALESCE(?4, workers.acked))',
         )
-        .run(actor.id, actor.name ?? null, seq)
+        .run(actor.id, actor.name ?? null, seq, ack)
     }
     if (actor.name && this.nameCache) this.nameCache[actor.id] = actor.name
     if (TASK_EVENTS.includes(kind)) this.touched.add(payload.task_id)
@@ -970,7 +971,7 @@ class Store {
       reason === 'request'
         ? [...updates.map((u) => `Request revision ${u.revision}: ${u.text}`), 'Read the board and continue under the current revision.'].join('\n\n')
         : WAKE_MESSAGES[reason]
-    const seq = this.append(actor, 'worker_woken', { worker: display(actor), reason, state: w.state, dependency: w.dependency })
+    const seq = this.append(actor, 'worker_woken', { worker: display(actor), reason, state: w.state, dependency: w.dependency }, updates.at(-1)?.revision ?? null)
     this.setWorker(actor.id, 'working', w.summary, null, seq)
     this.db.prepare('UPDATE workers SET turn = 1, resume = NULL WHERE actor = ?').run(actor.id)
     if (reason === 'no_producer') this.db.prepare('UPDATE workers SET wait_repaired = ? WHERE actor = ?').run(revision, actor.id)
@@ -980,6 +981,7 @@ class Store {
   wakeReason(w, revision, updates) {
     if (updates.length) return 'request'
     if (w.resume) return w.resume
+    if (this.db.prepare("SELECT 1 FROM tasks WHERE owner = ? AND state = 'claimed' AND created > ?").get(w.actor, w.idle_seq)) return 'assigned'
     if (w.state === 'working') return this.availableSince(w.idle_seq) ? 'ready' : null
     if (w.state !== 'waiting') return null
     if (this.ready(w, this.parseDependency(w.dependency))) return 'ready'
@@ -1240,7 +1242,7 @@ const always = () => true
 const changes = (role, names) => names.map((c) => [c, { mutates: always, role }])
 // role: who may make the change; a command with no role is open to the parent and the workers.
 // internal: for a script (a mod, the watch, the start), never a model; only its role may call it.
-const COMMANDS = {
+export const COMMANDS = {
   ...Object.fromEntries([
     ...changes(undefined, ['task_create', 'task_release', 'worker_stop']),
     ...changes('worker', ['task_claim', 'task_update', 'task_split', 'task_finish', 'publish', 'apply', 'complete']),
@@ -1288,6 +1290,7 @@ export function main(command, request) {
     if (spec.readOnly) return { ok: true, ...store[command](args) }
     if (spec.internal) return { ok: true, result: { ...store.tx(() => store[command](actor, args), spec), changes: store.changes } }
     const updates = actor.parent ? [] : store.requestUpdates(actor.id)
+    store.ack = updates.at(-1)?.revision
     const result = mutates ? store.mutate(actor, command, args) : store[spec.read ?? command](actor, args)
     return { ok: true, result, board: store.view(), ...(updates.length ? { request_updates: updates } : {}) }
   } catch (err) {

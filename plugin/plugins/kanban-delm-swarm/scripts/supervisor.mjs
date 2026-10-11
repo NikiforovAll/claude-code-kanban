@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url'
 import { cleanup, deliver, NOT_DELIVERED, preserve, worktreeRoot, worktrees } from './deliver.mjs'
 import { readJson, writeJson } from './files.mjs'
 import { cck, configDir, storeRequest } from './start.mjs'
-import { CHANGES_FILE, compact, END_OUTCOMES, main } from './store.mjs'
+import { CHANGES_FILE, COMMANDS, compact, END_OUTCOMES, main } from './store.mjs'
 
 const POLL_MS = 1500
 const FINISH_OUTCOMES = END_OUTCOMES.filter((o) => o !== 'delivery_conflict')
@@ -125,7 +125,14 @@ export async function finish(request, { outcome, summary }, { run = cck, waitMs 
   const registry = readJson(path.join(request.dir, 'swarm.json'))
   if (!registry.project) return { ok: false, error: 'this swarm has no project path in swarm.json; start a new swarm' }
   // On Windows a shell whose cwd is in a worktree locks it, and the cleanup fails after delivery.
-  const inside = path.relative(worktreeRoot(registry.project), cwd)
+  const real = (p) => {
+    try {
+      return fs.realpathSync.native(p)
+    } catch {
+      return p
+    }
+  }
+  const inside = path.relative(real(worktreeRoot(registry.project)), real(cwd))
   if (inside && !inside.startsWith('..') && !path.isAbsolute(inside)) return { ok: false, error: `your shell's working directory ${cwd} is inside a worker's worktree, which blocks its removal; cd to ${registry.project} and run this again` }
   if (!result) {
     if (!FINISH_OUTCOMES.includes(outcome)) return { ok: false, error: `outcome must be ${FINISH_OUTCOMES.join(', ')}` }
@@ -212,6 +219,7 @@ function parseArgs(json) {
 }
 
 export function command(name, request, json) {
+  if (COMMANDS[name]?.internal) return { ok: false, error: `${name} is not a supervisor command` }
   return main(name, { idempotency_key: randomUUID(), ...parseArgs(json), ...request, cwd: process.cwd() })
 }
 

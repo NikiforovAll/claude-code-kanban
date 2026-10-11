@@ -121,8 +121,8 @@ class Base {
     this.files = new Map()
     for (const entry of names(git(project, ['ls-tree', '-r', '-z', '--full-tree', commit]))) {
       const tab = entry.indexOf('\t')
-      const [mode, type] = entry.slice(0, tab).split(' ')
-      this.tree.set(entry.slice(tab + 1), { mode, type })
+      const [mode, type, id] = entry.slice(0, tab).split(' ')
+      this.tree.set(entry.slice(tab + 1), { mode, type, id })
     }
   }
 
@@ -135,6 +135,12 @@ class Base {
       else this.files.set(p, { data: git(this.project, ['cat-file', '--filters', `${this.commit}:${p}`], 'buffer') })
     }
     return this.files.get(p)
+  }
+
+  // A file whose bytes differ from the checkout can still be the start's blob: an LF file under
+  // core.autocrlf=true, written by a formatter, shows clean in git status.
+  cleansToStart(p, file) {
+    return git(this.project, ['hash-object', `--path=${p}`, file]).trim() === this.tree.get(p)?.id
   }
 }
 
@@ -203,7 +209,7 @@ function plan({ project, base, wt, artifacts, stage }) {
     if (same(now.data, want.data)) continue
     let result = want.data
     let mode = want.mode
-    if (!same(now.data, start.data)) {
+    if (!same(now.data, start.data) && !(now.data && start.data && base.cleansToStart(p, path.join(project, p)))) {
       result = now.data && start.data && want.data ? merge(stage, now.data, start.data, want.data) : null
       if (!result) {
         conflicts.push(p)

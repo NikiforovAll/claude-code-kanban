@@ -53,6 +53,7 @@ function parseEvent(e) {
 const WAKE_REASONS = {
   request: 'a new request',
   ready: 'work is ready',
+  assigned: 'the supervisor assigned it a task',
   no_producer: 'no running worker can produce its dependency',
 };
 

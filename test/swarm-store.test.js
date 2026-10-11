@@ -590,6 +590,25 @@ describe('swarm store', { skip: !hasSqlite && 'node:sqlite needs Node 22.5 or la
   const turn = (t, actor, running) => answer(ok(t, 'turn', actor, { running }));
   const wake = (t, actor) => answer(ok(t, 'wake', actor));
 
+  it('only a response that carries a request revision acknowledges it', () => {
+    const t = team(world());
+    assert.equal(turn(t, a, false).reason, 'repair');
+    done(t, 'request', parent, { idempotency_key: 'r2', text: 'More' });
+    const woken = turn(t, a, false);
+    assert.deepEqual([woken.reason, woken.message.startsWith('Request revision 2: More')], ['request', true], 'the automatic blocked does not swallow it');
+  });
+
+  it('a task the supervisor assigns wakes its idle worker', () => {
+    const t = team(world());
+    waitOn(t, a, 'wait-a', 'worker:worker-b');
+    assert.equal(turn(t, a, false).wake, false, 'worker-b still runs');
+    done(t, 'task_create', parent, { idempotency_key: 'assign', title: 'Mine', description: 'For a', assignee: 'worker-a' });
+    assert.equal(wake(t, a).reason, 'assigned');
+    turn(t, a, true);
+    waitOn(t, a, 'wait-again', 'worker:worker-b');
+    assert.equal(turn(t, a, false).wake, false, 'an assignment it already had does not wake it again');
+  });
+
   it('a waiting worker is stalled while no worker has a turn running, as the no-producer wake decides', () => {
     const t = team(world());
     const task = create(t, b, 'open');
