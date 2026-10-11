@@ -6985,6 +6985,7 @@ function _renderStorageTab() {
   if (tab === 'sessions') body.innerHTML = _renderStorageSessions();
   else if (tab === 'scratchpads') body.innerHTML = _renderStorageScratchpads();
   else if (tab === 'linked-docs') body.innerHTML = _renderStorageLinkedDocs();
+  else if (tab === 'groups') _renderStorageGroups(body);
 }
 
 function _renderStorageSessions() {
@@ -7288,6 +7289,65 @@ function _storageClearLinkedDocs(sessionId) {
   // The auto-link record deliberately survives: clearing is unlinking every row at
   // once, and an unlinked pad must not come back on the next read of the transcript.
   afterLinkedDocsChanged(sessionId);
+}
+
+async function _storageGroupsClean(group, dryRun) {
+  const shown = await getJson('/api/sessions', null, { query: { filter: 'active', limit: 'all', lite: '1' } });
+  if (!Array.isArray(shown)) throw new Error('could not list sessions');
+  const res = await api('/api/groups/clean', { method: 'POST', body: { group, dryRun, keep: shown.map((s) => s.id) } });
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `HTTP ${res.status}`);
+  return res.json();
+}
+
+async function _renderStorageGroups(body) {
+  body.innerHTML = '<div class="storage-empty">Loading groups…</div>';
+  let out;
+  try {
+    out = await _storageGroupsClean(null, true);
+  } catch (e) {
+    out = { error: e.message };
+  }
+  _showStorageGroups(body, out);
+}
+
+function _showStorageGroups(body, out) {
+  if (document.querySelector('.storage-tab.active')?.dataset.tab !== 'groups') return;
+  if (out.error) {
+    body.innerHTML = `<div class="storage-empty">Could not load groups: ${escapeHtml(out.error)}</div>`;
+    return;
+  }
+  if (!out.groups.length) {
+    body.innerHTML = '<div class="storage-empty">No groups</div>';
+    return;
+  }
+  const rows = out.groups
+    .map((g) => {
+      const badge = g.hidden ? ` <span class="storage-item-badge">${g.hidden} hidden</span>` : '';
+      return `<div class="storage-group-header">
+      <span>${escapeHtml(g.path)}${badge}</span>
+      <div class="storage-item-actions">
+        <span class="storage-item-meta">${g.members} member${g.members === 1 ? '' : 's'}</span>
+        <button class="danger" title="Take out the sessions that are not active or pinned, here and in the groups under it" onclick="_storageCleanGroup('${escAttrJs(g.id)}')">Clean</button>
+      </div>
+    </div>`;
+    })
+    .join('');
+  const hidden = out.groups.reduce((n, g) => n + g.hidden, 0);
+  const meta = `${hidden} hidden <button class="btn btn-secondary" ${hidden ? '' : 'disabled'} onclick="_storageCleanGroup(null)">Clean all</button>`;
+  body.innerHTML = _renderProjectGroup('Groups', meta, rows);
+}
+
+async function _storageCleanGroup(group) {
+  let out;
+  try {
+    out = await _storageGroupsClean(group, false);
+  } catch (e) {
+    showToast(`Clean failed: ${e.message}`, 'error');
+    return;
+  }
+  const n = out.dropped;
+  showToast(n ? `Took ${n} hidden session${n === 1 ? '' : 's'} out of the groups` : 'No hidden sessions');
+  _showStorageGroups(document.getElementById('storage-modal-body'), out);
 }
 
 function _findOrphanedKeys(known) {

@@ -174,7 +174,7 @@ describe('user groups', () => {
     const s = harness().store();
     s.create({ id: 'a', name: 'two\nlines' });
     assert.equal(s.state().groups[0].name, 'two lines');
-    for (let i = 1; i < 200; i++) s.create({ name: `g${i}` });
+    for (let i = 1; i < 1000; i++) s.create({ name: `g${i}` });
     assert.equal(status(() => s.create({ name: 'over' })), 422);
   });
 
@@ -308,6 +308,59 @@ describe('user groups', () => {
     assert.equal(out.rev, rev + 1);
     assert.deepEqual(s.prune({ isLive }).removed, []);
     assert.equal(s.state().rev, rev + 1);
+  });
+
+  it('expires dead session members and only the groups it empties', () => {
+    const { disk, store } = harness();
+    const s = store();
+    s.createPath('swarms/run1');
+    s.createPath('mine/empty');
+    s.groupSession('gone1', { group: 'swarms/run1' });
+    s.groupSession('gone2', { group: 'swarms' });
+    s.place(s.state().groups[0].id, { type: 'project', ref: '/p' });
+    s.groupSession('live', { group: 'mine' });
+    s.groupSession('gone3', { group: 'mine' });
+    const isDead = (m) => m.ref.startsWith('gone');
+    const out = s.expire(isDead);
+    assert.deepEqual([out.members, out.groups], [3, 1]);
+    assert.deepEqual(s.state().groups.map((g) => g.name), ['swarms', 'mine', 'empty']);
+    assert.deepEqual(s.state().groups[0].members, [{ type: 'project', ref: '/p' }]);
+    const saves = disk.saves;
+    assert.deepEqual(s.expire(isDead).members, 0);
+    assert.equal(disk.saves, saves);
+  });
+
+  it('expire removes a parent it empties along with its children', () => {
+    const s = harness().store();
+    s.createPath('a/b');
+    s.groupSession('x', { group: 'a' });
+    s.groupSession('y', { group: 'a/b' });
+    assert.equal(s.expire(() => true).groups, 2);
+    assert.deepEqual(s.state().groups, []);
+  });
+
+  it('cleans hidden sessions in a group and the groups under it, and keeps the groups', () => {
+    const s = harness().store();
+    s.createPath('a/b');
+    s.createPath('c');
+    s.groupSession('h1', { group: 'a' });
+    s.groupSession('h2', { group: 'a/b' });
+    s.groupSession('h3', { group: 'c' });
+    s.groupSession('v', { group: 'a' });
+    const isVisible = (m) => m.ref === 'v';
+    const a = s.state().groups.find((g) => g.name === 'a').id;
+    const rev = s.state().rev;
+    const dry = s.clean({ group: a, dryRun: true, isVisible });
+    assert.deepEqual(dry.groups.map((g) => [g.path, g.members, g.hidden]), [['a', 2, 1], ['a/b', 1, 1], ['c', 1, 1]]);
+    assert.equal(dry.dropped, 2);
+    assert.equal(s.state().rev, rev);
+    const done = s.clean({ group: a, isVisible });
+    assert.equal(done.dropped, 2);
+    assert.deepEqual(done.groups.map((g) => g.hidden), [0, 0, 1]);
+    assert.deepEqual(s.state().groups.map((g) => [g.name, g.members.map((m) => m.ref)]), [['a', ['v']], ['b', []], ['c', ['h3']]]);
+    assert.equal(s.clean({ isVisible }).dropped, 1);
+    assert.equal(s.state().groups.length, 3);
+    assert.equal(status(() => s.clean({ group: 'nope', isVisible })), 404);
   });
 
   it('keeps a parent session inside the group and drops it on a move out', () => {

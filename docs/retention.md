@@ -4,7 +4,7 @@ State that cck writes under `<config dir>/.cck/` must not grow without a limit. 
 
 ## Who owns the data
 
-- **Session groups:** `groups.json` (`lib/user-groups.js`) is user-managed and changes only when the user edits a group. The caps bound it: at most 200 groups of 500 members each, and the newest 500 session ids released from a dispatch group. cck does not expire it.
+- **Session groups:** `groups.json` (`lib/user-groups.js`) is user-managed. The caps bound it: at most 1000 groups of 500 members each, and the newest 500 session ids released from a dispatch group. Session members expire too, see [Groups](#groups). The Storage Manager's Groups tab takes out, from one group and the groups under it or from all of them, the sessions the board does not show: not active (the Active filter's rule, read from `/api/sessions?filter=active`), not pinned and not running in the terminal or a dispatch group (`POST /api/groups/clean`). It keeps the groups, even when empty. It runs only when the tab opens or the user presses Clean, at the cost of one session list.
 - **User-managed:** pins (`pins.json`, the only copy of the session pins, at most 1000; `lib/session-pins.js`) and linked docs (`linked-docs.json`, the server copy of links made with `doc link`, at most 200 per session). They change only when the user pins, unpins, links or unlinks. The Storage Manager's Clean Orphaned removes the entries of sessions that no longer exist, so cck does not expire these files.
 - **User-written:** `config.json`. cck only reads it.
 - **cck-generated, short-lived:** `agent-activity/`. The sweep in the `CLEANUP` region of `server.js` runs every hour. It deletes a session folder older than 2 days, or an empty one older than 30 minutes, and the board's approval answers (`_decision-*.json`) older than 30 minutes. It skips `agent-activity/_task-maps/`, because the plugin mod rewrites those files in place and the folder's mtime does not change.
@@ -33,6 +33,12 @@ Claude Code deletes transcripts on the same schedule, so cck never keeps state f
 - **Grace period:** a started session writes its transcript a moment after cck records it, and a review folder exists a moment before its file. Entries younger than one hour are never dropped.
 - **Cap:** for users who keep transcripts forever, `dispatched.json` keeps only the newest 500 entries and `context-status/` the newest 2000 files by mtime (`MAX_CONTEXT_STATUS`). Past 2000 sessions in the retention window, the oldest idle ones lose their context status before their transcript goes.
 
+## Groups
+
+The sweep takes a session member out of its group when its transcript is not in `scanTranscripts()`, it does not run in the terminal or a dispatch group, and it is not pinned. A member has no timestamp, so the grace period is one sweep: the member is taken out only when the previous sweep found it dead too (the set lives in memory, so a board restart starts it again). Project members stay. When the scan finds no transcripts, nothing is dropped.
+
+A group the sweep empties is removed when no child group is left, and so is a parent it empties in the same pass. A group that was empty before the sweep stays, because the user may have made it to fill later. Each `/swarm` start adds one group, and this rule removes it once its sessions are gone.
+
 ## Worktrees
 
 `lib/worktrees.js` maps a project path to `{repo, name, at}` when the path is a linked worktree. The board folds a worktree into its repo in `/api/projects` and in the project filter. Claude Code deletes worktrees but keeps their transcripts, so the mapping must outlive the checkout:
@@ -49,7 +55,7 @@ The sweep drops an entry when, after the one-hour grace period, no project dir u
 
 - It uses async `fs.promises` calls, so the event loop keeps serving requests while it waits on the disk.
 - Its cost is one directory listing per project plus one pass over the entries cck stores. It never opens a transcript.
-- It writes `dispatched.json` and `panes.json` only when an entry was dropped, and logs one `[retention]` line only when something was removed.
+- It writes `dispatched.json`, `panes.json` and `groups.json` only when an entry was dropped, and logs one `[retention]` line only when something was removed.
 - Errors are caught per entry and per run; a failed run waits for the next one.
 
 ## Adding a store

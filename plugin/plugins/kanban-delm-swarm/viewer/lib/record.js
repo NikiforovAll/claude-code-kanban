@@ -4,7 +4,6 @@ const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
 
-// One shared viewer per config dir, as the hub keeps one hub per hub dir (lib/hub-record.js).
 const recordFile = (config) => path.join(config, '.cck', 'swarm-viewer.json');
 
 function readText(file) {
@@ -34,9 +33,8 @@ function alive(pid) {
 
 const samePath = (a, b) => typeof a === 'string' && typeof b === 'string' && path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
 
-// A killed viewer leaves its record behind, and its pid and port can be reused, so only a viewer
-// that names this config dir on its health route counts as live. http.get with no agent, not
-// fetch: the caller may exit right after, and on Windows process.exit with an undici socket still
+// A dead viewer's pid and port can be reused, so the health route must name this config dir.
+// http.get with no agent, not fetch: on Windows, process.exit while an undici socket is still
 // closing trips a libuv assertion.
 function liveRecord(file, config) {
   const record = readRecord(file);
@@ -62,8 +60,6 @@ function liveRecord(file, config) {
   });
 }
 
-// The 'wx' open is the claim, so of two viewers that start together one writes the record and the
-// other finds it. A record left by a dead viewer is removed once and the claim tried again.
 async function claimRecord(file, config, port) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const content = `${JSON.stringify({ pid: process.pid, port, configDir: config })}\n`;

@@ -4070,13 +4070,38 @@ app.put('/api/groups/:id/members', groupRoute((b, p) => userGroups.place(p.id, b
 app.post('/api/groups/path', groupRoute((b) => userGroups.createPath(b.path)));
 app.post('/api/groups/rename', groupRoute((b) => userGroups.rename(b.group, b.name)));
 app.post('/api/groups/remove', groupRoute((b) => userGroups.removeByKey(b.group)));
-app.post('/api/groups/prune', groupRoute((b) => userGroups.prune({ dryRun: b.dryRun === true, isLive: liveGroupMember() })));
+app.post('/api/groups/prune', groupRoute((b) => {
+  const known = loadSessionMetadata();
+  return userGroups.prune({ dryRun: b.dryRun === true, isLive: liveGroupMember((id) => !!known[id]) });
+}));
+// `keep` is the ids of `/api/sessions?filter=active&limit=all`: the Active rule lives in that route.
+app.post('/api/groups/clean', groupRoute((b) => {
+  if (!Array.isArray(b.keep)) throw previewError(400, 'keep must be an array of session ids');
+  const keep = new Set(b.keep);
+  return userGroups.clean({ group: b.group ?? null, dryRun: b.dryRun === true, isVisible: liveGroupMember((id) => keep.has(id)) });
+}));
 
 // A session that runs in the terminal or is still starting has no transcript yet.
-function liveGroupMember() {
-  const known = loadSessionMetadata();
-  const running = new Set([...terminal.ids(), ...dispatchGroups.snapshot().keys()]);
-  return (m) => m.type !== 'session' || !!known[m.ref] || running.has(m.ref);
+function liveGroupMember(isKnown) {
+  const live = new Set([...terminal.ids(), ...dispatchGroups.snapshot().keys(), ...Object.keys(sessionPins.state().pins)]);
+  return (m) => m.type !== 'session' || isKnown(m.ref) || live.has(m.ref);
+}
+
+// Members dead in the previous sweep too, which is the grace period: a member has no timestamp.
+let groupMembersDead = new Set();
+function expireGroupMembers(known) {
+  if (!known) return { members: 0, groups: 0 };
+  const isLive = liveGroupMember((id) => known.has(id));
+  const dead = new Set();
+  userGroups.reload();
+  const out = userGroups.expire((m) => {
+    if (isLive(m)) return false;
+    dead.add(m.ref);
+    return groupMembersDead.has(m.ref);
+  });
+  groupMembersDead = dead;
+  if (out.members) broadcast({ type: 'group:changed', rev: out.rev });
+  return out;
 }
 // `with` names another session; its project is keyed as the board keys it, by the worktree's repo.
 function groupPeer(id) {
@@ -4753,8 +4778,9 @@ async function runRetention() {
     const contexts = await pruneContextStatus(CONTEXT_STATUS_DIR, opts);
     const wts = worktrees.prune(scan?.dirs);
     const taskMaps = await pruneTaskMaps(TASK_MAPS_DIR, opts);
-    if (markers || layouts || reviews || contexts || wts || taskMaps) {
-      console.log(`[retention] removed ${markers} dispatch markers, ${layouts} pane layouts, ${reviews} reviews, ${contexts} context status files, ${wts} worktrees, ${taskMaps} task-list mappings`);
+    const grouped = expireGroupMembers(scan?.ids);
+    if (markers || layouts || reviews || contexts || wts || taskMaps || grouped.members) {
+      console.log(`[retention] removed ${markers} dispatch markers, ${layouts} pane layouts, ${reviews} reviews, ${contexts} context status files, ${wts} worktrees, ${taskMaps} task-list mappings, ${grouped.members} group members, ${grouped.groups} groups`);
     }
   } catch (e) {
     console.warn('[retention] failed:', e.message);
