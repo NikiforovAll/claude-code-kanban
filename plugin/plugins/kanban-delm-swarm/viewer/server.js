@@ -8,7 +8,8 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { parseExport, nameMap, logRow } = require('./lib/events');
 const { buildModel } = require('./lib/model');
-const { swarmRoot, listSwarms, describe, readRegistry, ID_RE } = require('./lib/swarms');
+const { configDir, swarmRoot, listSwarms, describe, readRegistry, ID_RE } = require('./lib/swarms');
+const { recordFile, liveRecord, claimRecord, removeRecord } = require('./lib/record');
 const manifest = require('./hub-app.json');
 
 const arg = (name) => {
@@ -21,6 +22,10 @@ const PORT = Number(arg('port') ?? process.env.PORT ?? manifest.run.defaultPort)
 const PINNED = arg('swarm') ? path.resolve(arg('swarm')) : null;
 const STORE = path.resolve(arg('store') ?? path.join(__dirname, '..', 'scripts', 'store.mjs'));
 const PUBLIC = path.join(__dirname, 'public');
+const CONFIG = path.resolve(configDir());
+// The hub's app and a viewer pinned to one folder are not the config dir's shared viewer.
+const SHARED = !PINNED && process.env.CLAUDE_HUB !== '1';
+const IDLE_MS = Number(arg('idle-exit') ?? 0) * 60_000;
 const POLL_MS = 1000;
 const RUNNING_RESEND_MS = 15_000;
 const ALLOWED = new Set(
@@ -218,6 +223,12 @@ app.get('/api/stats', (_req, res) => {
   res.json({ ...stats, swarms });
 });
 
+app.get('/api/health', (_req, res) => {
+  res.json({ ok: true, pid: process.pid, port: server.address()?.port ?? null, configDir: CONFIG, pinned: !!PINNED });
+});
+
+const activity = { last: Date.now(), streams: 0 };
+
 // EventSource cannot read an error body, so a wrong id is a `missing` frame on an open stream.
 app.get('/api/stream', async (req, res) => {
   const { dir, missing } = resolveSwarm(req.query.get('swarm'));
@@ -225,6 +236,11 @@ app.get('/api/stream', async (req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
   if (missing) return res.end(frame('missing', `No swarm named ${req.query.get('swarm')}.`));
   res.write(frame('swarm', model));
+  activity.streams++;
+  res.on('close', () => {
+    activity.streams--;
+    activity.last = Date.now();
+  });
   if (!dir) return;
   const w = entry(dir);
   w.clients.add(res);
@@ -255,6 +271,7 @@ function serveStatic(pathname, res) {
 }
 
 function handle(req, res) {
+  activity.last = Date.now();
   decorate(res);
   // A page on another site can reach a loopback server through DNS rebinding. The Host header gives it away.
   const host = (req.headers.host || '').toLowerCase().replace(/:\d+$/, '');
@@ -276,15 +293,45 @@ function handle(req, res) {
 const server = http.createServer(handle);
 server.keepAliveTimeout = 65_000;
 
-if (require.main === module) {
-  server.listen(PORT, HOST, () => {
-    console.log(`Swarm running at http://localhost:${server.address().port}`);
-    console.log(PINNED ? `swarm folder: ${PINNED}` : `swarms under: ${swarmRoot()}`);
-  });
+const ready = (port) => console.log(`Swarm running at http://localhost:${port}`);
+
+function idleExit() {
+  const timer = setInterval(() => {
+    if (activity.streams || Date.now() - activity.last < IDLE_MS) return;
+    console.log(`Swarm exits: no request for ${IDLE_MS / 60_000} min`);
+    clearInterval(timer);
+    server.close();
+    process.exit(0);
+  }, Math.min(60_000, Math.max(100, IDLE_MS / 4)));
+}
+
+async function start() {
+  const file = recordFile(CONFIG);
+  if (SHARED) {
+    const live = await liveRecord(file, CONFIG);
+    if (live) return ready(live.port);
+    process.on('exit', () => removeRecord(file));
+    for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(signal, () => process.exit(0));
+  }
   server.on('error', (err) => {
     console.error(`Swarm could not listen on ${HOST}:${PORT}: ${err.message}`);
     process.exit(1);
   });
+  await new Promise((resolve) => server.listen(PORT, HOST, resolve));
+  const { port } = server.address();
+  if (SHARED) {
+    const claim = await claimRecord(file, CONFIG, port);
+    if (claim.live) {
+      server.close();
+      return ready(claim.live.port);
+    }
+    if (!claim.claimed) console.error(`Swarm runs without a record: ${file} is held`);
+  }
+  ready(port);
+  console.log(PINNED ? `swarm folder: ${PINNED}` : `swarms under: ${swarmRoot()}`);
+  if (IDLE_MS > 0) idleExit();
 }
+
+if (require.main === module) start();
 
 module.exports = server;

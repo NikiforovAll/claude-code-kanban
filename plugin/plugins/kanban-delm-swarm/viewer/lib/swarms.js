@@ -37,4 +37,4 @@ function listSwarms(root) {
     );
 }
 
-module.exports = { swarmRoot, listSwarms, describe, readRegistry, ID_RE };
+module.exports = { configDir, swarmRoot, listSwarms, describe, readRegistry, ID_RE };
