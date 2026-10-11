@@ -512,6 +512,18 @@ describe('swarm store', { skip: !hasSqlite && 'node:sqlite needs Node 22.5 or la
     assert.equal(events(t).find((e) => e.kind === 'outcome').revision, 2);
   });
 
+  it('the spec is request revision 1, written once and never delivered as an update', () => {
+    const t = team(world());
+    assert.match(run(t, 'spec', a, { text: 'Ship it' }).error, /a worker has no spec/);
+    assert.match(run(t, 'spec', parent, { text: ' ' }).error, /text must be nonempty/);
+    assert.equal(done(t, 'spec', parent, { text: 'Ship it' }).result.request_revision, 1);
+    assert.match(run(t, 'spec', parent, { text: 'Again' }).error, /has its spec; send a request/);
+    const read = done(t, 'status', a);
+    assert.equal(read.board.request_revision, 1);
+    assert.equal(read.request_updates, undefined);
+    assert.deepEqual(events(t).filter((e) => e.kind === 'request').map((e) => [e.revision, e.payload.text]), [[1, 'Ship it']]);
+  });
+
   it('a list cursor from an older request revision is refused', () => {
     const t = team(world());
     for (let i = 0; i < 3; i++) create(t, a, `t${i}`);

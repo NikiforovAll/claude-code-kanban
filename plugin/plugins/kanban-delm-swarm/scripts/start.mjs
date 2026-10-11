@@ -1,11 +1,13 @@
 // Starts a swarm: claims a folder and a task list unique to this start, writes the registry,
-// then has cck dispatch the workers. Run by the swarm skill from the parent session.
+// stores the supervisor's spec as request revision 1, then has cck dispatch the workers.
+// Run by the swarm skill from the parent session.
 import { execFileSync } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { renameRetry } from './files.mjs'
+import { main } from './store.mjs'
 
 // DeLM's research harness runs 2 or 4 workers; its product runs 2.
 const MIN_WORKERS = 2
@@ -94,17 +96,45 @@ export function groupPath(groups, sessionId) {
   return names.join('/')
 }
 
-export function workerSpec({ goal, name, listId, names }) {
+// DeLM's research prompts (STARTUP_A and STARTUP_B): the first worker in the roster makes the
+// first split, so no planner or planning gate stands between the request and the work.
+const FIRST_SPLIT =
+  'You are first in the roster, so you make the first split. Inspect the request and just enough of the project to choose the simplest approach. Then create tasks that give every peer ready, nonoverlapping work, with the inputs, the interfaces and the first usable dependency. Do not wait for a whole plan: claim your own part and implement it in this same turn. Add the remaining work as it becomes clear.'
+const AFTER_SPLIT = (first) =>
+  `${first} makes the first split. Meanwhile, explore the entry point and the environment the result runs in, and share findings that change the implementation or show a missing prerequisite. As soon as a ready task is on the board, claim it and implement it in this same turn. After that, you can also create tasks for distinct required work.`
+
+// The store request the supervisor's commands run with.
+export const storeRequest = (config, registry) => ({
+  dir: `${config}/.cck/swarm/${registry.listId}`,
+  tasksDir: `${config}/tasks/${registry.listId}`,
+  base: registry.base,
+  parent: registry.parent,
+  roster: registry.workers,
+  actor: { id: registry.parent },
+})
+
+function transcriptPath(sessionId) {
+  try {
+    return JSON.parse(cck(['session', 'view', sessionId, '--json'])).jsonlPath ?? null
+  } catch {
+    return null
+  }
+}
+
+export function workerSpec({ spec, name, listId, names, transcript }) {
   const peers = names.filter((n) => n !== name)
   return [
     `# Swarm worker ${name}`,
     '',
-    `You are one of ${names.length} workers on one goal in swarm ${listId}. Peers: ${peers.join(', ') || 'none'}. No one leads: you coordinate through the shared board with the swarm_* tools.`,
+    `You are one of ${names.length} workers on one request in swarm ${listId}. Peers: ${peers.join(', ') || 'none'}. No one leads: you coordinate through the shared board with the swarm_* tools.`,
     '',
-    '## Goal',
+    name === names[0] ? FIRST_SPLIT : AFTER_SPLIT(names[0]),
     '',
-    goal.trim(),
+    '## Request (revision 1)',
     '',
+    spec,
+    '',
+    ...(transcript ? [`The supervisor wrote this request from its conversation with the user: ${transcript}. Read it only when the request leaves a question open.`, ''] : []),
     '## How to work',
     '',
     fs.readFileSync(WORKER_POLICY, 'utf8').trim(),
@@ -113,8 +143,10 @@ export function workerSpec({ goal, name, listId, names }) {
   ].join('\n')
 }
 
-export function start({ goal, n = 2, cwd = process.cwd(), env = process.env }) {
+export function start({ goal, spec: rawSpec, n = 2, cwd = process.cwd(), env = process.env }) {
+  const spec = rawSpec?.trim()
   if (!goal?.trim()) throw new Error('give the goal')
+  if (!spec) throw new Error('give the spec with --spec-file')
   if (!Number.isInteger(n) || n < MIN_WORKERS || n > MAX_WORKERS) throw new Error(`--n must be ${MIN_WORKERS} to ${MAX_WORKERS}`)
   const parent = env.CLAUDE_CODE_SESSION_ID
   if (!parent) throw new Error('run /swarm from a Claude Code session')
@@ -130,14 +162,17 @@ export function start({ goal, n = 2, cwd = process.cwd(), env = process.env }) {
   const group = [groupPath(JSON.parse(cck(['group', 'list', '--all', '--json'])).groups, parent), listId].filter(Boolean).join('/')
   const workers = Array.from({ length: n }, (_, i) => ({ name: `w${i + 1}-${suffix}` }))
   const registry = { listId, group, goal: goal.trim(), parent, base, workers, state: 'running', startedAt: new Date().toISOString() }
+  const stored = main('spec', { ...storeRequest(config, registry), text: spec })
+  if (!stored.ok) throw new Error(`the spec: ${stored.error}`)
   writeJson(`${dir}/swarm.json`, registry)
   // Made before the first dispatch: a user group named like the dispatch group takes its
   // sessions in from the first frame, so they never jump between groups.
   cck(['group', 'create', group, '--json'])
   const names = workers.map((w) => w.name)
+  const transcript = transcriptPath(parent)
   for (const w of workers) {
     const specFile = `${dir}/spec-${w.name}.md`
-    fs.writeFileSync(specFile, `${workerSpec({ goal, name: w.name, listId, names })}\n`)
+    fs.writeFileSync(specFile, `${workerSpec({ spec, name: w.name, listId, names, transcript })}\n`)
     let out
     try {
       out = JSON.parse(
@@ -165,6 +200,7 @@ function parseArgs(argv) {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
     if (a === '--n') out.n = Number(argv[++i])
+    else if (a === '--spec-file') out.spec = fs.readFileSync(argv[++i], 'utf8')
     else if (a === '--cwd') out.cwd = argv[++i]
     else out.goal.push(a)
   }

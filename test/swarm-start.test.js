@@ -71,20 +71,30 @@ describe('swarm start', () => {
     assert.equal(m.groupPath(groups, 'sid-q'), '');
   });
 
-  it('gives each worker its name, its peers and the swarm policy', () => {
-    const spec = m.workerSpec({ goal: 'Ship it', name: 'w1-abc', listId: 'swarm-ship-it-abc', names: ['w1-abc', 'w2-abc'] });
-    assert.match(spec, /Peers: w2-abc\./);
-    assert.match(spec, /declare swarm_complete\(waiting\) with the named dependency/);
-    assert.doesNotMatch(spec, /delm_|DeLM|SendMessage/);
+  it('gives each worker its name, its peers, the spec, its part in the first split and the swarm policy', () => {
+    const names = ['w1-abc', 'w2-abc'];
+    const first = m.workerSpec({ spec: 'Ship it\n', name: 'w1-abc', listId: 'swarm-ship-it-abc', names, transcript: 'C:/cfg/projects/p/sid.jsonl' });
+    assert.match(first, /Peers: w2-abc\./);
+    assert.match(first, /## Request \(revision 1\)\n\nShip it\n/);
+    assert.match(first, /you make the first split/);
+    assert.match(first, /conversation with the user: C:\/cfg\/projects\/p\/sid\.jsonl\./);
+    assert.match(first, /declare swarm_complete\(waiting\) with the named dependency/);
+    assert.doesNotMatch(first, /delm_|DeLM|SendMessage/);
+    const second = m.workerSpec({ spec: 'Ship it', name: 'w2-abc', listId: 'swarm-ship-it-abc', names, transcript: null });
+    assert.match(second, /w1-abc makes the first split/);
+    assert.doesNotMatch(second, /conversation with the user/);
   });
 
-  it('refuses a start outside a session or a repository before it claims anything', () => {
+  it('refuses a start with no spec, outside a session or outside a repository before it claims anything', () => {
     const config = tempConfig();
     const env = { CLAUDE_CONFIG_DIR: config };
-    assert.throws(() => m.start({ goal: 'g', env }), /from a Claude Code session/);
-    assert.throws(() => m.start({ goal: 'g', n: 5, env }), /--n must be 2 to 4/);
-    assert.throws(() => m.start({ goal: 'g', n: 1, env }), /--n must be 2 to 4/);
-    assert.throws(() => m.start({ goal: 'g', cwd: config, env: { ...env, CLAUDE_CODE_SESSION_ID: 'sid' } }), /not a git repository/);
+    const spec = 'Ship it';
+    assert.throws(() => m.start({ goal: 'g', env }), /--spec-file/);
+    assert.throws(() => m.start({ goal: 'g', spec: ' \n', env }), /--spec-file/);
+    assert.throws(() => m.start({ goal: 'g', spec, env }), /from a Claude Code session/);
+    assert.throws(() => m.start({ goal: 'g', spec, n: 5, env }), /--n must be 2 to 4/);
+    assert.throws(() => m.start({ goal: 'g', spec, n: 1, env }), /--n must be 2 to 4/);
+    assert.throws(() => m.start({ goal: 'g', spec, cwd: config, env: { ...env, CLAUDE_CODE_SESSION_ID: 'sid' } }), /not a git repository/);
     assert.equal(fs.existsSync(`${config}/.cck/swarm`), false);
   });
 });

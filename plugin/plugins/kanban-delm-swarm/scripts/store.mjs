@@ -34,6 +34,7 @@ const TASK_FIELDS = {
 const KEY = { max: 128, required: true }
 const SUMMARY = { max: 2048, required: true }
 const NAME = { max: 256, required: true }
+const REQUEST_TEXT = { max: 8192, required: true }
 const DEPENDENCY = { max: 512, required: true }
 const REVISION = '(SELECT revision FROM context WHERE id = 1)'
 const PUBLISH_FIELDS = { interfaces: { max: 8192 }, unfinished: { max: 8192 } }
@@ -869,9 +870,17 @@ class Store {
       .get()
   }
 
+  // Written by start.mjs before the dispatch: the supervisor's spec is request revision 1, which
+  // each worker gets in its dispatch spec, so it never comes back as a request update.
+  spec(actor, args) {
+    if (this.db.prepare("SELECT 1 FROM events WHERE kind = 'request'").get()) throw new BoardError('the swarm has its spec; send a request')
+    this.append(actor, 'request', { revision: 1, text: text(args, 'text', REQUEST_TEXT) })
+    return { request_revision: 1 }
+  }
+
   // Parent only: a new revision of the request, for every worker's next response.
   request(actor, args) {
-    const change = text(args, 'text', { max: 8192, required: true })
+    const change = text(args, 'text', REQUEST_TEXT)
     const revision = this.context().revision + 1
     this.db.prepare('UPDATE context SET revision = ? WHERE id = 1').run(revision)
     this.append(actor, 'request', { revision, text: change })
@@ -1211,7 +1220,7 @@ function unifiedDiff(before, after, a, b) {
 const always = () => true
 const changes = (role, names) => names.map((c) => [c, { mutates: always, role }])
 // role: who may make the change; a command with no role is open to the parent and the workers.
-// internal: for a mod or a watch, never a model; only its role may call it.
+// internal: for a script (a mod, the watch, the start), never a model; only its role may call it.
 const COMMANDS = {
   ...Object.fromEntries([
     ...changes(undefined, ['task_create', 'task_release', 'worker_stop']),
@@ -1222,6 +1231,7 @@ const COMMANDS = {
   turn: { internal: true, role: 'worker' },
   wake: { internal: true, role: 'worker' },
   notices: { internal: true, role: 'parent', count: false },
+  spec: { internal: true, role: 'parent' },
   list: {},
   expand: {},
   export: { readOnly: true },

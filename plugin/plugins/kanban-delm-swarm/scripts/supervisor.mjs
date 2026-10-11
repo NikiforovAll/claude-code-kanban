@@ -8,7 +8,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
-import { configDir } from './start.mjs'
+import { configDir, storeRequest } from './start.mjs'
 import { CHANGES_FILE, compact, main } from './store.mjs'
 
 const POLL_MS = 1500
@@ -26,7 +26,7 @@ export function swarmRequest(listId, env = process.env) {
   }
   const id = env.CLAUDE_CODE_SESSION_ID
   if (!id || id !== registry.parent) throw new Error('only the session that started the swarm acts as its supervisor')
-  return { dir, tasksDir: `${config}/tasks/${listId}`, base: registry.base, parent: registry.parent, roster: registry.workers, actor: { id } }
+  return storeRequest(config, registry)
 }
 
 const oneLine = (text) => compact(String(text ?? '').replace(/\s+/g, ' ').trim(), SUMMARY_CHARS)
