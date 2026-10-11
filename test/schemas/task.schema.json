@@ -23,7 +23,20 @@
     "metadata": {
       "type": "object",
       "properties": {
-        "_internal": { "type": "boolean" }
+        "_internal": { "type": "boolean" },
+        "dim": { "type": "boolean" },
+        "chips": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["label"],
+            "properties": {
+              "label": { "type": "string" },
+              "title": { "type": "string" },
+              "tone": { "type": "string", "enum": ["muted", "warn", "accent"] }
+            }
+          }
+        }
       }
     }
   },

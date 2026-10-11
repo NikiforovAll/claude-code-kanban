@@ -38,6 +38,7 @@ const REQUEST_TEXT = { max: 8192, required: true }
 const DEPENDENCY = { max: 512, required: true }
 const REVISION = '(SELECT revision FROM context WHERE id = 1)'
 const PUBLISH_FIELDS = { interfaces: { max: 8192 }, unfinished: { max: 8192 } }
+const CLOSED_META = { dim: true, chips: [{ label: 'closed', title: 'The supervisor closed it without doing it', tone: 'muted' }] }
 const STATUS_FIELDS = ['state', 'summary', 'dependency', 'finding']
 const CHECK_LIMITS = { items: 64, bytes: 1024 }
 const ARTIFACT_LIMIT = 1024
@@ -528,7 +529,12 @@ class Store {
       blocks: [],
       blockedBy: [],
       ...(t.owner ? { owner: this.label(t.owner) } : {}),
-      metadata: { swarm: true, kind: t.kind, version: t.version, ...(t.closed ? { closed: true } : {}) },
+      metadata: {
+        swarm: true,
+        kind: t.kind,
+        version: t.version,
+        ...(t.closed ? CLOSED_META : {}),
+      },
     }
   }
 

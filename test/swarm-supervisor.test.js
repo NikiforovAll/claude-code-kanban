@@ -113,7 +113,11 @@ describe('swarm supervisor', { skip: !hasSqlite && 'node:sqlite needs Node 22.5 
     const board = store.main('status', request).board;
     assert.deepEqual([board.state, board.outcome.outcome, board.tasks[0].state], ['ended', 'stopped', 'done']);
     const mirrored = JSON.parse(fs.readFileSync(path.join(request.tasksDir, '1.json'), 'utf8'));
-    assert.deepEqual([mirrored.status, mirrored.metadata.closed], ['completed', true], 'the board shows the task as closed, not open');
+    assert.deepEqual(
+      [mirrored.status, mirrored.metadata.dim, mirrored.metadata.chips.map((c) => c.label)],
+      ['completed', true, ['closed']],
+      'the board shows the task as closed, not open',
+    );
     assert.deepEqual(board.workers.map((w) => w.state), ['stopped', 'stopped']);
     assert.match(sup.boardText(LIST, board), /\n {2}w1-abc123: stopped\. the supervisor stopped the swarm\n/);
     const manifest = JSON.parse(fs.readFileSync(path.join(out.result.recovery, 'complete.json'), 'utf8'));

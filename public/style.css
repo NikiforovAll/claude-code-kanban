@@ -2134,8 +2134,8 @@ body.booting .boot-splash {
   border-left-color: var(--success);
 }
 
-.task-card.closed,
-.task-card.closed:hover {
+.task-card.dim,
+.task-card.dim:hover {
   opacity: 0.55;
   border-left-color: var(--border);
 }
@@ -2215,10 +2215,19 @@ body.booting .boot-splash {
   white-space: nowrap;
 }
 
-.task-closed {
+.task-chip {
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.task-chip-warn {
+  color: var(--warning);
+}
+
+.task-chip-accent {
+  color: var(--accent);
 }
 
 .task-desc {
@@ -9711,19 +9720,16 @@ pre.mermaid[data-mermaid-error]::before {
 /* #endregion */
 
 /* #region ANIMATIONS */
+/* No `to` and fill backwards: the card ends on its own opacity (.completed, .dim), not on 1. */
 @keyframes fadeSlideIn {
   from {
     opacity: 0;
     transform: translateY(8px);
   }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
 }
 
 .column-tasks .task-card {
-  animation: fadeSlideIn 150ms ease-out both;
+  animation: fadeSlideIn 150ms ease-out backwards;
 }
 
 .column-tasks .task-card:nth-child(1) {

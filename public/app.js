@@ -4432,6 +4432,30 @@ function renderOwnerBadge(task) {
   return `<button type="button" class="task-owner-badge task-owner-link" style="${style}" title="Open dispatched session" onclick="event.stopPropagation(); revealSession('${escAttrJs(target)}')">${ICON_DISPATCHED}${escapeHtml(task.owner)}</button>`;
 }
 
+// Card chips that a tool writing the task file adds: metadata.chips = [{label, title?, tone?}], tone one of
+// muted, warn, accent. The writer is outside cck, so the list is capped and every field is checked.
+function taskChips(task) {
+  const chips = task.metadata?.chips;
+  if (!Array.isArray(chips)) return [];
+  return chips
+    .filter((c) => typeof c?.label === 'string' && c.label.trim())
+    .slice(0, 4)
+    .map((c) => ({
+      label: c.label.trim().slice(0, 24),
+      title: typeof c.title === 'string' ? c.title.slice(0, 200) : '',
+      tone: ['muted', 'warn', 'accent'].includes(c.tone) ? c.tone : 'muted',
+    }));
+}
+
+function renderTaskChips(chips) {
+  return chips
+    .map(
+      (c) =>
+        `<span class="task-chip task-chip-${escapeHtml(c.tone)}"${c.title ? ` title="${escapeHtml(c.title)}"` : ''}>${escapeHtml(c.label)}</span>`,
+    )
+    .join('');
+}
+
 function renderTaskCard(task) {
   const blockers = openBlockers(task);
   const isBlocked = blockers.length > 0;
@@ -4439,8 +4463,9 @@ function renderTaskCard(task) {
   const taskId = useSlug ? `${(task._taskDir || task.sessionId || '')?.slice(0, 4)}-${task.id}` : task.id;
   const statusClass = task.status.replace('_', '-');
   const actualSessionId = task._taskDir || task.sessionId || currentSessionId || '';
-  // A swarm task the supervisor closed without doing it (scripts/store.mjs taskFile).
-  const isClosed = task.status === 'completed' && task.metadata?.closed === true;
+  const isDim = task.metadata?.dim === true;
+  const chips = taskChips(task);
+  const state = [task.status.replace('_', ' '), ...chips.map((c) => c.label)].join(', ');
 
   return `
         <div
@@ -4452,11 +4477,11 @@ function renderTaskCard(task) {
           draggable="true"
           ondragstart="onCardDragStart(event)"
           ondragend="onCardDragEnd(event)"
-          class="task-card ${statusClass} ${isBlocked ? 'blocked' : ''} ${isClosed ? 'closed' : ''}"
-          aria-label="${escapeHtml(task.subject)} — ${isClosed ? 'closed' : task.status.replace('_', ' ')}">
+          class="task-card ${statusClass} ${isBlocked ? 'blocked' : ''} ${isDim ? 'dim' : ''}"
+          aria-label="${escapeHtml(task.subject)} — ${escapeHtml(state)}">
           <div class="task-id">
             <span>#${taskId}</span>
-            ${isClosed ? '<span class="task-closed">closed</span>' : ''}
+            ${renderTaskChips(chips)}
             ${isBlocked ? `<span class="task-blocked" title="Blocked">waiting on ${blockers.map((id) => `#${escapeHtml(id)}`).join(' ')}</span>` : ''}
             ${task.owner ? renderOwnerBadge(task) : ''}
           </div>
