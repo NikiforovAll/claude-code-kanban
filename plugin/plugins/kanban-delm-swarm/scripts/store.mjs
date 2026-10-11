@@ -11,7 +11,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { fileURLToPath } from 'node:url'
 import { renameRetry } from './files.mjs'
 
-const SCHEMA_VERSION = 4
+const SCHEMA_VERSION = 5
 const MAX_ARGUMENT_BYTES = 128 * 1024
 const VIEW_LIMIT = 24
 const LIST_LIMIT = 12
@@ -22,7 +22,7 @@ const OUTCOMES = ['complete', 'partial', 'blocked', 'waiting']
 const END_OUTCOMES = ['complete', 'partial', 'stopped']
 // A waiting worker's dependency has no producer when no one works on it.
 // The same name as CHANGES_FILE in hooks/swarm.ts.
-const CHANGES_FILE = 'changes'
+export const CHANGES_FILE = 'changes'
 // The same limits as LIMITS in hooks/swarm.ts, from DeLM's tool definitions.
 const TASK_FIELDS = {
   title: { max: 256, required: true },
@@ -38,6 +38,8 @@ const DEPENDENCY = { max: 512, required: true }
 const REVISION = '(SELECT revision FROM context WHERE id = 1)'
 const PUBLISH_FIELDS = { interfaces: { max: 8192 }, unfinished: { max: 8192 } }
 const STATUS_FIELDS = ['state', 'summary', 'dependency', 'finding']
+const CHECK_LIMITS = { items: 64, bytes: 1024 }
+const ARTIFACT_LIMIT = 1024
 // DeLM's limits for a publication without large_artifact.
 const PUBLISH_LIMITS = { files: 1024, bytes: 64 * 1024 * 1024 }
 const EXPAND_LIMITS = { files: 32, maxBytes: 8192, maxBytesCap: 32768, total: 65536 }
@@ -48,7 +50,10 @@ const TASK_EVENTS = ['task_create', 'task_claim', 'task_update', 'task_release',
 const WAKE_MESSAGES = {
   ready: 'Shared work changed. Read the board, take ready work, and reuse the new contribution.',
   no_producer: 'Your dependency has no active producer. Resolve available work now, or declare blocked with the concrete input needed.',
+  partial: 'Continue the concrete unfinished requirement in your declaration. Read ownership and reuse peer contributions; do not repeat completed checks.',
+  repair: 'State the whole-request outcome with swarm_complete, then end your turn. If ready, reference checks already performed; do not start another improvement pass.',
 }
+const REPAIR_FAILED = 'Ended a second turn without an outcome.'
 // DeLM's wait_ready (src/board/mod.rs): a task became available after the cursor, or an
 // integration task is available and another integration task finished after it, unless an
 // integration task is claimed.
@@ -79,6 +84,13 @@ function text(args, key, { max, required = false }) {
   return value
 }
 
+function strings(args, key, { items, bytes }) {
+  const value = args[key]
+  if (value === undefined) return undefined
+  if (!Array.isArray(value) || value.length > items) throw new BoardError(`${key} must list at most ${items} strings`)
+  return value.map((s, i) => text({ [`${key}[${i}]`]: s }, `${key}[${i}]`, { max: bytes, required: true }))
+}
+
 const placeholders = (n) => Array(n).fill('?').join(',')
 
 const fields = (args, spec) => Object.fromEntries(Object.entries(spec).map(([key, s]) => [key, text(args, key, s)]))
@@ -96,7 +108,7 @@ function count(args, key, fallback, min, max) {
   return value
 }
 
-function compact(value, max) {
+export function compact(value, max) {
   const chars = [...(typeof value === 'string' ? value : '')]
   return chars.length <= max ? chars.join('') : `${chars.slice(0, max).join('')}...`
 }
@@ -212,12 +224,13 @@ class Store {
       actor TEXT NOT NULL, name TEXT, kind TEXT NOT NULL, payload TEXT NOT NULL, revision INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS context (
       id INTEGER PRIMARY KEY CHECK(id = 1), revision INTEGER NOT NULL, state TEXT NOT NULL DEFAULT 'running', outcome TEXT,
-      changes INTEGER NOT NULL DEFAULT 0);
+      changes INTEGER NOT NULL DEFAULT 0, notice_seq INTEGER NOT NULL DEFAULT 0, stall_seq INTEGER NOT NULL DEFAULT -1);
     INSERT OR IGNORE INTO context(id, revision) VALUES (1, 1);
     CREATE TABLE IF NOT EXISTS workers (
       actor TEXT PRIMARY KEY, name TEXT, state TEXT NOT NULL DEFAULT 'working', summary TEXT NOT NULL DEFAULT '',
       dependency TEXT, wait_seq INTEGER, acked INTEGER NOT NULL DEFAULT 1, updated INTEGER NOT NULL,
-      turn INTEGER NOT NULL DEFAULT 1, idle_seq INTEGER NOT NULL DEFAULT 0, wait_repaired INTEGER NOT NULL DEFAULT 0);
+      turn INTEGER NOT NULL DEFAULT 1, idle_seq INTEGER NOT NULL DEFAULT 0, wait_repaired INTEGER NOT NULL DEFAULT 0,
+      resume TEXT, repaired INTEGER NOT NULL DEFAULT 0);
     CREATE TABLE IF NOT EXISTS tasks (
       id INTEGER PRIMARY KEY, created INTEGER NOT NULL, author TEXT NOT NULL, owner TEXT,
       state TEXT NOT NULL CHECK(state IN ('available','claimed','done')), body TEXT NOT NULL, version INTEGER NOT NULL);
@@ -239,7 +252,8 @@ class Store {
     this.db.close()
   }
 
-  tx(fn) {
+  // count: false keeps the change out of the `changes` counter, for a write no worker acts on.
+  tx(fn, { count = true } = {}) {
     this.db.exec('BEGIN IMMEDIATE')
     this.touched = new Set()
     this.diskTop = null
@@ -251,7 +265,7 @@ class Store {
       // Written under the write lock, so two workers' files cannot land out of order.
       // A COMMIT that fails after this leaves a file ahead of the log until the next write to that task.
       this.writeTaskFiles()
-      if (this.totalChanges() > before) {
+      if (count && this.totalChanges() > before) {
         this.changes = this.db.prepare('UPDATE context SET changes = changes + 1 WHERE id = 1 RETURNING changes').get().changes
         // The idle workers' mods watch this file in place of the database. Under the lock, so it
         // never goes back; a watcher that reads it before the COMMIT waits on the lock in `wake`.
@@ -286,7 +300,7 @@ class Store {
 
   label(actorId) {
     if (actorId == null) return null
-    if (actorId === this.parent) return 'parent'
+    if (actorId === this.parent) return 'supervisor'
     this.nameCache ??= Object.fromEntries(this.db.prepare('SELECT actor, name FROM workers WHERE name IS NOT NULL').all().map((r) => [r.actor, r.name]))
     return this.nameCache[actorId] ?? actorId
   }
@@ -368,7 +382,7 @@ class Store {
   }
 
   context() {
-    return this.db.prepare('SELECT revision, state, outcome FROM context WHERE id = 1').get()
+    return this.db.prepare('SELECT * FROM context WHERE id = 1').get()
   }
 
   workerId(name) {
@@ -589,19 +603,24 @@ class Store {
       if (row.state === 'done') return JSON.parse(row.response)
       return this.reconcileApply(actor, key, cwd, JSON.parse(row.detail))
     }
-    const ended = () => {
+    // DeLM closes admission at a candidate: until the supervisor sends a request or ends the swarm,
+    // workers change nothing. A worker whose session stops still releases its claims.
+    const admit = () => {
       if (this.context().state === 'ended') throw new BoardError('This swarm has ended.')
+      if (!actor.parent && command !== 'worker_stop' && this.candidate()) {
+        throw new BoardError('A worker declared the goal complete; the supervisor is checking it. End your turn; a new request resumes you.')
+      }
     }
     const replay = prior()
     if (replay) return replay
-    ended()
+    admit()
     if (command === 'apply') return this.apply(actor, key, digest, args)
     const captured = command === 'publish' ? this.freeze(cwd, args) : null
     try {
       return this.tx(() => {
         const again = prior()
         if (again) return again
-        ended()
+        admit()
         const result = this[command](actor, args, captured)
         this.db
           .prepare("INSERT INTO requests(actor, key, name, digest, state, response) VALUES (?, ?, ?, ?, 'done', ?)")
@@ -665,7 +684,7 @@ class Store {
     const body = this.taskBody(args)
     let owner = null
     if (args.assignee !== undefined) {
-      if (!actor.parent) throw new BoardError('only the parent assigns a task; create it open, then claim it')
+      if (!actor.parent) throw new BoardError('only the supervisor assigns a task; create it open, then claim it')
       owner = this.workerId(text(args, 'assignee', NAME))
       if (!owner) throw new BoardError('unknown assignee')
     }
@@ -797,10 +816,11 @@ class Store {
   }
 
   worker(actorId) {
-    return this.db.prepare('SELECT state, summary, dependency FROM workers WHERE actor = ?').get(actorId)
+    return this.db.prepare('SELECT * FROM workers WHERE actor = ?').get(actorId)
   }
 
   // Sets the caller's status, appends a finding, or both. Waiting must name what it waits for.
+  // A status is not an outcome: a turn still ends with complete.
   status(actor, args) {
     const current = this.worker(actor.id) ?? { state: 'working', summary: '', dependency: null }
     const state = args.state ?? current.state
@@ -817,20 +837,36 @@ class Store {
   }
 
   // DeLM's delm_complete: the worker's outcome for the whole request, made under the current
-  // request revision. `complete` is the goal-met claim the parent checks before it ends the swarm.
+  // request revision. `complete` is the candidate the supervisor checks before it ends the swarm;
+  // `partial` resumes the same worker when its turn ends. checks and artifacts are recorded for
+  // the supervisor, not validated.
   complete(actor, args) {
-    const { revision } = this.context()
-    if (args.expected_revision !== revision) {
+    if (args.expected_revision !== this.context().revision) {
       throw new BoardError('completion must acknowledge the current board request_revision; this declaration is stale')
     }
     const { outcome } = args
     if (!OUTCOMES.includes(outcome)) throw new BoardError('invalid completion outcome')
     const summary = text(args, 'summary', { max: 4096, required: true })
     const dependency = outcome === 'waiting' ? this.checkWait(actor, args.dependency === undefined ? null : text(args, 'dependency', DEPENDENCY)) : null
-    const body = { worker: display(actor), outcome, summary, dependency, expected_revision: revision }
+    const checks = strings(args, 'checks', CHECK_LIMITS)
+    const artifacts = selection(args.artifacts, true)
+    if (artifacts && artifacts.length > ARTIFACT_LIMIT) throw new BoardError(`artifacts lists at most ${ARTIFACT_LIMIT} paths`)
+    return this.declare(actor, outcome, summary, dependency, { ...(checks && { checks }), ...(artifacts && { artifacts }) })
+  }
+
+  declare(actor, outcome, summary, dependency, extra = {}) {
+    const body = { worker: display(actor), outcome, summary, dependency, expected_revision: this.context().revision, ...extra }
     const seq = this.append(actor, 'outcome', body)
     this.setWorker(actor.id, { waiting: 'waiting', blocked: 'blocked' }[outcome] ?? 'working', summary, dependency, seq)
+    this.db.prepare('UPDATE workers SET resume = ?, repaired = 0 WHERE actor = ?').run(outcome === 'partial' ? 'partial' : null, actor.id)
     return body
+  }
+
+  // The complete outcome under the current request revision, if any.
+  candidate() {
+    return this.db
+      .prepare(`SELECT seq, actor, payload FROM events WHERE kind = 'outcome' AND revision = ${REVISION} AND json_extract(payload, '$.outcome') = 'complete' ORDER BY seq LIMIT 1`)
+      .get()
   }
 
   // Parent only: a new revision of the request, for every worker's next response.
@@ -876,12 +912,22 @@ class Store {
 
   // The worker's own mod reports each turn's start and end. A worker counts as running until its
   // first turn ends. The end of a turn is when DeLM checks for a wake, so it answers as wake does.
+  // A turn that ends with no outcome gets one repair resume, then counts as blocked, as in DeLM.
+  // A turn the user interrupted is left to the user.
   turn(actor, args) {
     if (typeof args.running !== 'boolean') throw new BoardError('running must be true or false')
     if (args.running) {
       // Unchanged rows stay unwritten, so the idle peers' watch sees no change.
       this.db.prepare('UPDATE workers SET turn = 1 WHERE actor = ? AND turn = 0').run(actor.id)
       return { wake: false }
+    }
+    const w = this.worker(actor.id)
+    if (w && w.state !== 'stopped' && this.context().state !== 'ended' && args.reason !== 'aborted' && !this.candidate()) {
+      // The worker's own events between two turns are wakes, never outcomes, so the previous
+      // turn's end marks where this one began.
+      const declared = this.db.prepare("SELECT 1 FROM events WHERE kind = 'outcome' AND actor = ? AND seq > ?").get(actor.id, w.idle_seq)
+      if (!declared && !w.repaired) this.db.prepare("UPDATE workers SET resume = 'repair', repaired = 1 WHERE actor = ?").run(actor.id)
+      else if (!declared) this.declare(actor, 'blocked', REPAIR_FAILED, null)
     }
     this.db.prepare('UPDATE workers SET turn = 0, idle_seq = ? WHERE actor = ?').run(this.lastSeq(), actor.id)
     return this.wake(actor)
@@ -896,12 +942,8 @@ class Store {
   wake(actor) {
     const { revision, state } = this.context()
     if (state === 'ended') return { wake: false, ended: true }
-    const w = this.db.prepare('SELECT * FROM workers WHERE actor = ?').get(actor.id)
-    if (!w || w.turn || w.state === 'stopped') return { wake: false }
-    const complete = this.db
-      .prepare("SELECT 1 FROM events WHERE kind = 'outcome' AND revision = ? AND json_extract(payload, '$.outcome') = 'complete'")
-      .get(revision)
-    if (complete) return { wake: false }
+    const w = this.worker(actor.id)
+    if (!w || w.turn || w.state === 'stopped' || this.candidate()) return { wake: false }
     const updates = this.requestUpdates(actor.id)
     const reason = this.wakeReason(w, revision, updates)
     if (!reason) return { wake: false }
@@ -911,17 +953,47 @@ class Store {
         : WAKE_MESSAGES[reason]
     const seq = this.append(actor, 'worker_woken', { worker: display(actor), reason, state: w.state, dependency: w.dependency })
     this.setWorker(actor.id, 'working', w.summary, null, seq)
-    this.db.prepare('UPDATE workers SET turn = 1 WHERE actor = ?').run(actor.id)
+    this.db.prepare('UPDATE workers SET turn = 1, resume = NULL WHERE actor = ?').run(actor.id)
     if (reason === 'no_producer') this.db.prepare('UPDATE workers SET wait_repaired = ? WHERE actor = ?').run(revision, actor.id)
     return { wake: true, reason, message }
   }
 
   wakeReason(w, revision, updates) {
     if (updates.length) return 'request'
+    if (w.resume) return w.resume
     if (w.state === 'working') return this.availableSince(w.idle_seq) ? 'ready' : null
     if (w.state !== 'waiting') return null
     if (this.ready(w, this.parseDependency(w.dependency))) return 'ready'
     return this.noProducer(w, revision) ? 'no_producer' : null
+  }
+
+  // Asked by the supervisor's watch whenever the store changed: the complete and blocked outcomes
+  // and stopped workers since its last ask, and a stall once per board change, when no worker runs
+  // and none would wake (DeLM's "No active worker can continue"). The cursor lives in the store,
+  // so a new watch repeats nothing.
+  notices() {
+    const { revision, state, notice_seq: since, stall_seq: stalledAt } = this.context()
+    const top = this.lastSeq()
+    const notices = this.db
+      .prepare(
+        "SELECT seq, kind, payload FROM events WHERE seq > ? AND (kind = 'worker_stopped' OR (kind = 'outcome' AND json_extract(payload, '$.outcome') IN ('complete', 'blocked'))) ORDER BY seq",
+      )
+      .all(since)
+      .map((e) => {
+        const p = JSON.parse(e.payload)
+        return e.kind === 'outcome' ? { kind: p.outcome, worker: p.worker, summary: p.summary, revision: p.expected_revision } : { kind: 'stopped', worker: p.worker, summary: p.reason }
+      })
+    if (top > since) this.db.prepare('UPDATE context SET notice_seq = ? WHERE id = 1').run(top)
+    if (state === 'ended') return { ended: true, notices }
+    if (top > stalledAt && !this.candidate()) {
+      const workers = this.db.prepare("SELECT * FROM workers WHERE state != 'stopped'").all()
+      const stalled = workers.every((w) => !w.turn && !this.wakeReason(w, revision, this.requestUpdates(w.actor)))
+      if (stalled) {
+        notices.push({ kind: 'stalled', summary: 'No active worker can continue.' })
+        this.db.prepare('UPDATE context SET stall_seq = ? WHERE id = 1').run(top)
+      }
+    }
+    return { ended: false, notices }
   }
 
   // A bounded page of one collection in stable id order. The cursor fixes which records belong
@@ -1139,6 +1211,7 @@ function unifiedDiff(before, after, a, b) {
 const always = () => true
 const changes = (role, names) => names.map((c) => [c, { mutates: always, role }])
 // role: who may make the change; a command with no role is open to the parent and the workers.
+// internal: for a mod or a watch, never a model; only its role may call it.
 const COMMANDS = {
   ...Object.fromEntries([
     ...changes(undefined, ['task_create', 'task_release', 'worker_stop']),
@@ -1146,8 +1219,9 @@ const COMMANDS = {
     ...changes('parent', ['task_close', 'request', 'end']),
   ]),
   status: { mutates: (args) => STATUS_FIELDS.some((k) => args[k] !== undefined), role: 'worker', read: 'look' },
-  turn: { internal: true },
-  wake: { internal: true },
+  turn: { internal: true, role: 'worker' },
+  wake: { internal: true, role: 'worker' },
+  notices: { internal: true, role: 'parent', count: false },
   list: {},
   expand: {},
   export: { readOnly: true },
@@ -1159,7 +1233,8 @@ const PARENT_CHANGES = Object.keys(COMMANDS).filter((c) => COMMANDS[c].mutates &
 // on stdin. Prints {ok: true, ...} or {ok: false, error}; a rejected call is not a crash, so it exits 0.
 // A tool command answers {result, board}, plus request_updates for a worker that has not seen the
 // latest request revisions. `turn` and `wake` are for the worker's own mod, never the model: they
-// answer {result: {wake, reason, message}} with no board. `export` and `diff` are for viewers:
+// answer {result: {wake, reason, message}} with no board. `notices` is for the supervisor's watch
+// (scripts/supervisor.mjs) and answers {result: {ended, notices}}. `export` and `diff` are for viewers:
 // they open the store read-only, need no actor and write nothing.
 export function main(command, request) {
   if (!Object.hasOwn(COMMANDS, command)) return { ok: false, error: `unknown command: ${command}` }
@@ -1171,18 +1246,18 @@ export function main(command, request) {
   if (Buffer.byteLength(JSON.stringify(args)) > MAX_ARGUMENT_BYTES) {
     return { ok: false, error: 'the call exceeds 128 KiB; publish files and expand them selectively' }
   }
-  const actor = parent && caller?.id === parent ? { id: caller.id, name: 'parent', parent: true } : caller
+  const actor = parent && caller?.id === parent ? { id: caller.id, name: 'supervisor', parent: true } : caller
   const mutates = !!spec.mutates?.(args)
   if (mutates && spec.role === 'worker' && actor.parent) {
-    return { ok: false, error: `the parent cannot ${command}; it acts with ${PARENT_CHANGES.join(', ')}` }
+    return { ok: false, error: `the supervisor cannot ${command}; it acts with ${PARENT_CHANGES.join(', ')}` }
   }
-  if (mutates && spec.role === 'parent' && !actor.parent) return { ok: false, error: `only the parent can ${command}` }
-  if (spec.internal && actor.parent) return { ok: false, error: `the parent has no ${command}` }
+  if (mutates && spec.role === 'parent' && !actor.parent) return { ok: false, error: `only the supervisor can ${command}` }
+  if (spec.internal && !!actor.parent !== (spec.role === 'parent')) return { ok: false, error: `${actor.parent ? 'the supervisor' : 'a worker'} has no ${command}` }
   let store
   try {
     store = new Store({ dir, tasksDir, base, parent, roster, readOnly: !!spec.readOnly })
     if (spec.readOnly) return { ok: true, ...store[command](args) }
-    if (spec.internal) return { ok: true, result: { ...store.tx(() => store[command](actor, args)), changes: store.changes } }
+    if (spec.internal) return { ok: true, result: { ...store.tx(() => store[command](actor, args), spec), changes: store.changes } }
     const updates = actor.parent ? [] : store.requestUpdates(actor.id)
     const result = mutates ? store.mutate(actor, command, args) : store[spec.read ?? command](actor, args)
     return { ok: true, result, board: store.view(), ...(updates.length ? { request_updates: updates } : {}) }

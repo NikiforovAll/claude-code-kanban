@@ -12,6 +12,7 @@ const MIN_WORKERS = 2
 const MAX_WORKERS = 4
 const DAY_MS = 86_400_000
 const DEFAULT_CLEANUP_DAYS = 30
+const WORKER_POLICY = new URL('../worker.md', import.meta.url)
 
 // The same formula as hooks/swarm.ts, so the parent and the workers name the same folder.
 export const configDir = (env = process.env) =>
@@ -93,7 +94,7 @@ export function groupPath(groups, sessionId) {
   return names.join('/')
 }
 
-export function workerSpec({ goal, name, listId, names, replyTo }) {
+export function workerSpec({ goal, name, listId, names }) {
   const peers = names.filter((n) => n !== name)
   return [
     `# Swarm worker ${name}`,
@@ -106,21 +107,13 @@ export function workerSpec({ goal, name, listId, names, replyTo }) {
     '',
     '## How to work',
     '',
-    '1. Call swarm_status to see the tasks, the publications, the findings and what your peers do. Page older records with swarm_list.',
-    '2. Claim an available task with swarm_task_claim. When the goal needs work that no task covers, add it with swarm_task_create, then claim it.',
-    "3. Do the work in your own worktree. Share what you verify or rule out as a finding with swarm_status. Use a peer's files with swarm_expand and swarm_apply. To hand off part of a task, use swarm_task_split or swarm_task_release.",
-    '4. Publish the files you changed with swarm_publish, then finish with swarm_task_finish, using the version from your last claim or update. Then read the board again and claim the next task.',
-    '5. When nothing is ready for you, call swarm_status with state waiting and the dependency you need, then end your turn. The swarm resumes you when it is ready, when new work appears or the request changes, and when no one can produce it. Never sleep or poll.',
-    '6. Stop when the goal is met and no task is available or claimed.',
-    '',
-    'Every change takes an idempotency_key: new text for each new change, the same text when you resend the same call.',
+    fs.readFileSync(WORKER_POLICY, 'utf8').trim(),
     '',
     "The board shows the swarm's tasks. Change them only through the swarm tools.",
-    ...(replyTo ? ['', `When you are done, or cannot finish, send the result to ${replyTo} with the SendMessage tool, then stop.`] : []),
   ].join('\n')
 }
 
-export function start({ goal, n = 2, cwd = process.cwd(), replyTo, env = process.env }) {
+export function start({ goal, n = 2, cwd = process.cwd(), env = process.env }) {
   if (!goal?.trim()) throw new Error('give the goal')
   if (!Number.isInteger(n) || n < MIN_WORKERS || n > MAX_WORKERS) throw new Error(`--n must be ${MIN_WORKERS} to ${MAX_WORKERS}`)
   const parent = env.CLAUDE_CODE_SESSION_ID
@@ -144,7 +137,7 @@ export function start({ goal, n = 2, cwd = process.cwd(), replyTo, env = process
   const names = workers.map((w) => w.name)
   for (const w of workers) {
     const specFile = `${dir}/spec-${w.name}.md`
-    fs.writeFileSync(specFile, `${workerSpec({ goal, name: w.name, listId, names, replyTo })}\n`)
+    fs.writeFileSync(specFile, `${workerSpec({ goal, name: w.name, listId, names })}\n`)
     let out
     try {
       out = JSON.parse(
@@ -173,7 +166,6 @@ function parseArgs(argv) {
     const a = argv[i]
     if (a === '--n') out.n = Number(argv[++i])
     else if (a === '--cwd') out.cwd = argv[++i]
-    else if (a === '--reply-to') out.replyTo = argv[++i]
     else out.goal.push(a)
   }
   return { ...out, goal: out.goal.join(' ') }

@@ -53,7 +53,7 @@ export const TOOLS: { name: string; command: string; description: string; inputS
     name: 'swarm_status',
     command: 'status',
     description:
-      'Read the compact board, or report your status. With no state, summary, dependency or finding it only reads. state is working, waiting or blocked. Use waiting only when nothing is ready to advance: name the dependency, then end your turn. The swarm resumes you when that dependency is ready, new work becomes available, the request changes, or no one can produce it. Never sleep or poll to wait. finding shares a short free-text result for every worker: what you verified or ruled out, its scope and basis. Every response carries the board: the latest 24 tasks, publications and findings with totals; page older records with swarm_list.',
+      'Read the compact board, or update your status. With no state, summary, dependency or finding it only reads. state is working, waiting or blocked; waiting names a concrete dependency: task:<id> or worker:<name>. A status is not your outcome: end each turn with swarm_complete. finding shares a short free-text result for every worker: what you verified or ruled out, its scope and basis. Every response carries the board: the latest 24 tasks, publications and findings with totals; page older records with swarm_list.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -63,6 +63,25 @@ export const TOOLS: { name: string; command: string; description: string; inputS
         dependency: { ...bounded(512, true), description: 'What you wait for: task:<id> or worker:<name>. Not your own task or yourself.' },
         finding: bounded(4096, true),
       },
+    },
+  },
+  {
+    name: 'swarm_complete',
+    command: 'complete',
+    description:
+      'Declare your outcome for the whole goal with the current board request_revision as expected_revision, then end your turn. complete means the full result is ready: the supervisor checks it, and workers change nothing until it ends the swarm or sends a new request. partial resumes you to continue the unfinished requirement. waiting needs dependency task:<id> or worker:<name>, not your own work; the swarm resumes you when it is ready, new work becomes available, the request changes, or no one can produce it. Never sleep or poll to wait. blocked tells the supervisor the concrete input you need; it answers with a new request. checks lists the checks you ran, each with its command and result. artifacts lists every requested generated output file or directory, relative to your workspace; use [] for source-only work.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        idempotency_key: key,
+        expected_revision: positive,
+        outcome: { enum: ['complete', 'partial', 'blocked', 'waiting'] },
+        summary: bounded(4096, true),
+        dependency: { ...bounded(512, true), description: 'For waiting: task:<id> or worker:<name>. Not your own task or yourself.' },
+        checks: { type: 'array', maxItems: 64, items: bounded(1024, true) },
+        artifacts: paths('Generated outputs relative to your workspace'),
+      },
+      required: ['idempotency_key', 'expected_revision', 'outcome', 'summary'],
     },
   },
   {
@@ -331,7 +350,7 @@ export const register: Register = on => {
     const s = await swarm($)
     if (s && !e.agentId) {
       idle = true
-      void serial(async () => wakeIfDue($, await store($, s, 'turn', { running: false })))
+      void serial(async () => wakeIfDue($, await store($, s, 'turn', { running: false, reason: e.reason })))
     }
     return next(e)
   })

@@ -71,11 +71,11 @@ describe('swarm start', () => {
     assert.equal(m.groupPath(groups, 'sid-q'), '');
   });
 
-  it('gives each worker its name, its peers and the reply line', () => {
-    const spec = m.workerSpec({ goal: 'Ship it', name: 'w1-abc', listId: 'swarm-ship-it-abc', names: ['w1-abc', 'w2-abc'], replyTo: 'hub-7' });
+  it('gives each worker its name, its peers and the swarm policy', () => {
+    const spec = m.workerSpec({ goal: 'Ship it', name: 'w1-abc', listId: 'swarm-ship-it-abc', names: ['w1-abc', 'w2-abc'] });
     assert.match(spec, /Peers: w2-abc\./);
-    assert.match(spec, /send the result to hub-7/);
-    assert.doesNotMatch(m.workerSpec({ goal: 'g', name: 'w1', listId: 'l', names: ['w1'] }), /SendMessage/);
+    assert.match(spec, /declare swarm_complete\(waiting\) with the named dependency/);
+    assert.doesNotMatch(spec, /delm_|DeLM|SendMessage/);
   });
 
   it('refuses a start outside a session or a repository before it claims anything', () => {

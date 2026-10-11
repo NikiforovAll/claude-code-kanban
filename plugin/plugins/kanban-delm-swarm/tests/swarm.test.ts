@@ -157,6 +157,9 @@ test('each turn reports its start and end, and a due wake at the end resumes the
   expect(board.commands()).toEqual(['turn', 'turn'])
   expect(board.runs.map(r => (r.input as { running: boolean }).running)).toEqual([true, false])
   expect(board.prompts).toEqual(['Swarm: Shared work changed.'])
+  await $.turn.complete({ ...turnEnd, isAborted: true, reason: 'aborted' })
+  await clock.settle()
+  expect(board.runs.map(r => (r.input as { reason?: string }).reason)).toEqual([undefined, 'answer', 'aborted'])
 })
 
 test("a subagent's turn end reports nothing", async ($, on) => {
