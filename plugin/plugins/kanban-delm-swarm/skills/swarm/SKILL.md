@@ -11,7 +11,7 @@ The argument is the goal, plus `--n <workers>` (2 to 4, default 2). With no goal
 
 The swarm runs in cck's embedded terminal, so the cck server must run with the terminal on. Each worker gets its own git worktree of the current repo.
 
-1. Write the spec to a markdown file in your scratchpad directory. The workers are fresh sessions: the spec is all they know of this conversation. Write it from what the user said here:
+1. Write the spec to a markdown file in your scratchpad directory. The workers are fresh sessions, so write a spec that stands alone, from what the user said here:
    - **Goal**: what the result is and who uses it.
    - **Constraints**: what the result must and must not do, and what it must leave alone.
    - **Decisions**: choices already made with the user (stack, approach, names), each with its reason when it matters.
@@ -24,7 +24,7 @@ The swarm runs in cck's embedded terminal, so the cck server must run with the t
    node "<base directory>/../../scripts/start.mjs" --n 2 --spec-file '<spec file>' '<goal>'
    ```
 
-   The swarm id (`listId`) is `swarm-` and the goal in lowercase words. When start says the name is taken, run it again with `--name '<another short name>'`.
+   When start says the name is taken, run it again with `--name '<another short name>'`.
 3. Report the output to the user: the swarm id (`listId`), its group and each worker's name and session id. On any other error, report it as it is and stop.
 4. Open the viewer as a pane: follow the steps in `<base directory>/../swarm-viewer/SKILL.md` with the `listId`. It reuses a viewer that already runs. When it fails, report the error and go on.
 5. Watch the swarm with the `Monitor` tool, `timeout_ms` 1800000, description `swarm <listId>`:
@@ -34,8 +34,6 @@ The swarm runs in cck's embedded terminal, so the cck server must run with the t
    ```
 
    Each line is a notice: a worker declared the goal complete, a worker is blocked or stopped, or no worker can continue. The watch exits when the swarm ends. When it expires first, arm it again: it repeats nothing.
-
-The script claims a folder and a task list unique to this start, writes `swarm.json`, stores the spec as request revision 1, dispatches the workers with cck and puts them in a group under yours. Each worker gets the spec, the path of this session's transcript and the worker policy.
 
 ## Supervise the swarm
 
@@ -63,11 +61,26 @@ Run the board commands with `node "<base directory>/../../scripts/supervisor.mjs
 
 The user can type `/swarm-status` to see the board and `/swarm-stop` to end the swarm as `stopped`; neither takes a turn of yours. After a stop, the watch prints that the swarm ended.
 
-On a complete notice, check the result in the candidate worker's worktree before you end the swarm. Run the check with a path flag or in a subshell (`npm --prefix <worktree> test`, `(cd <worktree> && …)`), never with a `cd` that stays: `end` removes the worktrees and refuses while your shell is in one. A complete result stops the workers' changes until you send a request or end it; a message does not lift it. When it falls short, send a request. Then review the open tasks that the notice lists, a claimed one too, as its work can be missing from the result: close each one the result makes moot with `task_close` and a reason (`task_release` a claimed one first), and send a request for one that names missing work. `end` as `complete` refuses while a task is open. When it is ready, end the swarm as `complete` and report the output to the user as it is:
+### On a complete notice
 
-- **Delivered**: the changed files are in the project. The Git index and HEAD are as they were, so the user reviews and commits them. When the output says to run setup or a focused check (a file merged with the user's edits, or a changed dependency manifest), run it before you call the result ready.
-- **Not delivered** (`delivery_conflict`): the user edited the same lines during the run, so nothing was written to the project. Do not call it delivered. Report the conflicting paths and the recovery bundle. When the user asks, resolve them from the bundle: its `complete.json` names each file's start and result versions, stored as blobs named by their SHA-256.
+A complete result holds the workers' changes until you send a request or end the swarm; a message leaves it in place.
+
+1. Check the result in the candidate worker's worktree, `<project>/.claude/worktrees/<worker>`. Run each check with a path flag or in a subshell (`npm --prefix <worktree> test`, `(cd <worktree> && …)`), so your shell stays in the project: `end` removes the worktrees and refuses while your shell is in one. Done when each acceptance check of the spec has a result. When one falls short, send a request and wait for the next notice.
+2. Review each open task that the notice lists, a claimed one too, as its work can be missing from the result. Close a task the result makes moot with `task_close` and a reason (`task_release` a claimed one first). Send a request for a task that names missing work. Done when no task is open: `end` as `complete` refuses until then.
+3. End the swarm as `complete` and report the output to the user as it is:
+   - **Delivered**: the changed files are in the project. The Git index and HEAD are as they were, so the user reviews and commits them. When the output says to run setup or a focused check (a file merged with the user's edits, or a changed dependency manifest), run it before you call the result ready.
+   - **Not delivered** (`delivery_conflict`): the user edited the same lines during the run, so the project is as it was. Report the result as not delivered, with the conflicting paths and the recovery bundle. When the user asks, resolve them from the bundle: its `complete.json` names each file's start and result versions, stored as blobs named by their SHA-256.
 
 When `end` fails, it has written nothing it cannot finish: fix the cause it names, then run the same command again.
 
-On a blocked notice, read the worker's summary with `status`, then answer it as above, or ask the user first.
+### On a blocked notice
+
+Read the worker's summary with `status`, then answer it as above, or ask the user first.
+
+### On a stalled notice
+
+No worker runs and none will wake. Read the board with `status`, then send a request that names the next step, which wakes every worker, or ask the user. When nothing is left to do, end the swarm as `partial`.
+
+### On a stopped notice
+
+The worker's session ended. Its claims are back on the queue, and it does not restart; the other workers go on. When every worker has stopped, end the swarm as `partial`, which saves their changes to the recovery bundle.
