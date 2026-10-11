@@ -677,6 +677,10 @@ code {
   margin-top: 8px;
 }
 
+.task.closed {
+  opacity: 0.55;
+}
+
 .task .t {
   font-size: 13px;
   font-weight: 500;

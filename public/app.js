@@ -4414,6 +4414,8 @@ function renderTaskCard(task) {
   const taskId = useSlug ? `${(task._taskDir || task.sessionId || '')?.slice(0, 4)}-${task.id}` : task.id;
   const statusClass = task.status.replace('_', '-');
   const actualSessionId = task._taskDir || task.sessionId || currentSessionId || '';
+  // A swarm task the supervisor closed without doing it (scripts/store.mjs taskFile).
+  const isClosed = task.status === 'completed' && task.metadata?.closed === true;
 
   return `
         <div
@@ -4425,10 +4427,11 @@ function renderTaskCard(task) {
           draggable="true"
           ondragstart="onCardDragStart(event)"
           ondragend="onCardDragEnd(event)"
-          class="task-card ${statusClass} ${isBlocked ? 'blocked' : ''}"
-          aria-label="${escapeHtml(task.subject)} — ${task.status.replace('_', ' ')}">
+          class="task-card ${statusClass} ${isBlocked ? 'blocked' : ''} ${isClosed ? 'closed' : ''}"
+          aria-label="${escapeHtml(task.subject)} — ${isClosed ? 'closed' : task.status.replace('_', ' ')}">
           <div class="task-id">
             <span>#${taskId}</span>
+            ${isClosed ? '<span class="task-closed">closed</span>' : ''}
             ${isBlocked ? `<span class="task-blocked" title="Blocked">waiting on ${blockers.map((id) => `#${escapeHtml(id)}`).join(' ')}</span>` : ''}
             ${task.owner ? renderOwnerBadge(task) : ''}
           </div>

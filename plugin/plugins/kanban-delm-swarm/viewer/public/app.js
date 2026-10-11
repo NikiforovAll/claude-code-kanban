@@ -607,7 +607,7 @@ function taskCard(t, s) {
     (r) =>
       `<span class="chip warn" title="${esc(r.owner ? `${r.owner} held it` : `task was ${r.taskState}`)}">${esc(r.who)} lost ${clock(r.t)}</span>`,
   );
-  return `<div class="task${focused(`task-${t.id}`)}" id="task-${t.id}">
+  return `<div class="task${t.closed ? ' closed' : ''}${focused(`task-${t.id}`)}" id="task-${t.id}">
     <div class="t">${hl(t.subject)}</div>
     ${t.detail ? `<div class="detail">${hl(t.detail)}</div>` : ''}
     <div class="meta">${meta.map((m) => `<span>${m}</span>`).join('')}</div>

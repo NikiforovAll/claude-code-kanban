@@ -34,6 +34,8 @@ export function swarmRequest(listId, env = process.env) {
 }
 
 const oneLine = (text) => compact(String(text ?? '').replace(/\s+/g, ' ').trim(), SUMMARY_CHARS)
+// The board view lists open tasks first, so a full view shows every open task it can.
+const openTasks = (board) => board.tasks.filter((t) => t.state !== 'done')
 
 export function noticeLine(n) {
   switch (n.kind) {
@@ -131,6 +133,11 @@ export async function finish(request, { outcome, summary }, { run = cck, waitMs 
     if (outcome === 'complete' && !candidate) {
       return { ok: false, error: 'no worker declared the goal complete under the current request revision; send a request, or end the swarm as partial' }
     }
+    const open = openTasks(status.board)
+    if (outcome === 'complete' && open.length) {
+      const rows = open.map((t) => `#${t.task_id} ${t.state}${t.owner ? ` by ${t.owner}` : ''}: ${oneLine(t.title)}`)
+      return { ok: false, error: `review the open tasks first: ${rows.join('; ')}. Close each moot one with task_close and a reason (task_release a claimed one first), or send a request for the work it names.` }
+    }
     const roster = (request.roster ?? []).filter((w) => w.sessionId)
     const running = () => {
       const live = new Set(JSON.parse(run(['dispatch', 'list', '--json'])).map((r) => r.session))
@@ -144,6 +151,14 @@ export async function finish(request, { outcome, summary }, { run = cck, waitMs 
     for (const w of status.board.workers.filter((x) => x.state !== 'stopped')) {
       const out = main('worker_stop', { ...request, idempotency_key: `swarm-finish-${w.worker}`, worker: w.worker, reason })
       if (!out.ok) return out
+    }
+    // Stopping the workers released their claims. A task left open would stay pending on the board.
+    for (let board = main('status', request).board, left = openTasks(board); left.length; left = openTasks(board)) {
+      for (const t of left) {
+        const out = main('task_close', { ...request, idempotency_key: `swarm-finish-${outcome}-task-${t.task_id}`, task_id: t.task_id, reason: `the swarm ended as ${outcome}` })
+        if (!out.ok) return out
+        board = out.board
+      }
     }
     const { project, base } = registry
     const trees = worktrees(project, roster.map((w) => w.name))

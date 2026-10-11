@@ -106,7 +106,9 @@ describe('swarm supervisor', { skip: !hasSqlite && 'node:sqlite needs Node 22.5 
     assert.equal(out.ok, true);
     assert.deepEqual(calls.filter((c) => c.startsWith('dispatch end')), ['dispatch end sid-1', 'dispatch end sid-2']);
     const board = store.main('status', request).board;
-    assert.deepEqual([board.state, board.outcome.outcome, board.tasks[0].state], ['ended', 'stopped', 'available']);
+    assert.deepEqual([board.state, board.outcome.outcome, board.tasks[0].state], ['ended', 'stopped', 'done']);
+    const mirrored = JSON.parse(fs.readFileSync(path.join(request.tasksDir, '1.json'), 'utf8'));
+    assert.deepEqual([mirrored.status, mirrored.metadata.closed], ['completed', true], 'the board shows the task as closed, not open');
     assert.deepEqual(board.workers.map((w) => w.state), ['stopped', 'stopped']);
     assert.match(sup.boardText(LIST, board), /\n {2}w1-abc123: stopped\. the supervisor stopped the swarm\n/);
     const manifest = JSON.parse(fs.readFileSync(path.join(out.result.recovery, 'complete.json'), 'utf8'));
@@ -134,8 +136,11 @@ describe('swarm supervisor', { skip: !hasSqlite && 'node:sqlite needs Node 22.5 
     assert.match((await sup.finish(request, { outcome: 'complete', summary: 'Done' })).error, /no worker declared the goal complete/);
     write(p.trees['w2-abc123'], 'a.txt', 'a from w2\n');
     write(p.trees['w1-abc123'], 'b.txt', 'b from w1\n');
+    store.main('task_create', { ...request, actor: { id: 'sid-1', name: 'w1-abc123' }, idempotency_key: 't', title: 'Dup', description: 'A duplicate' });
     store.main('complete', { ...request, actor: { id: 'sid-2', name: 'w2-abc123' }, idempotency_key: 'k', outcome: 'complete', expected_revision: 1, summary: 'Ready', artifacts: [] });
     assert.equal(store.main('status', request).board.candidate.worker, 'w2-abc123');
+    assert.match((await sup.finish(request, { outcome: 'complete', summary: 'Done' }, { run: () => assert.fail('no worker is stopped') })).error, /review the open tasks first: #1 available: Dup\./);
+    sup.command('task_close', request, '{"task_id": 1, "reason": "a duplicate"}');
     const out = await sup.finish(request, { outcome: 'complete', summary: 'Done' }, { run: cckStub().run, pollMs: 1 });
     assert.deepEqual([out.ok, out.result.outcome, out.result.changed], [true, 'complete', ['a.txt']]);
     assert.equal(fs.readFileSync(path.join(p.repo, 'a.txt'), 'utf8'), 'a from w2\n');

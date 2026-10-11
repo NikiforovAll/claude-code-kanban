@@ -2134,6 +2134,12 @@ body.booting .boot-splash {
   border-left-color: var(--success);
 }
 
+.task-card.closed,
+.task-card.closed:hover {
+  opacity: 0.55;
+  border-left-color: var(--border);
+}
+
 .task-card.blocked {
   border-left-style: dashed;
 }
@@ -2207,6 +2213,12 @@ body.booting .boot-splash {
   margin-left: auto;
   color: var(--text-muted);
   white-space: nowrap;
+}
+
+.task-closed {
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .task-desc {

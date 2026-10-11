@@ -527,7 +527,7 @@ class Store {
       blocks: [],
       blockedBy: [],
       ...(t.owner ? { owner: this.label(t.owner) } : {}),
-      metadata: { swarm: true, kind: t.kind, version: t.version },
+      metadata: { swarm: true, kind: t.kind, version: t.version, ...(t.closed ? { closed: true } : {}) },
     }
   }
 
