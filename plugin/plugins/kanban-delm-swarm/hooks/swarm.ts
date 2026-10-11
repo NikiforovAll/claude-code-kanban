@@ -243,7 +243,14 @@ async function running($: EngineInterface) {
 }
 
 // $.plugin.root names the folder that holds plugin.json, which is .claude-plugin/.
-export const storePath = (root: string) => `${root.replaceAll('\\', '/').replace(/\/\.claude-plugin\/?$/, '')}/scripts/store.mjs`
+export const scriptPath = (root: string, file: string) => `${root.replaceAll('\\', '/').replace(/\/\.claude-plugin\/?$/, '')}/scripts/${file}`
+export const storePath = (root: string) => scriptPath(root, 'store.mjs')
+
+// DeLM's /delm-status and /delm-stop: they answer with no model turn and run while a turn streams.
+export const COMMANDS = [
+  { name: 'swarm-status', verb: 'board', description: 'Show the board of the swarm this session started', timeoutMs: 15_000 },
+  { name: 'swarm-stop', verb: 'stop', description: 'Stop the workers of the swarm this session started and end it', timeoutMs: 60_000 },
+]
 
 type Reply = { ok?: boolean; error?: string; result?: { wake?: boolean; ended?: boolean; message?: string; changes?: number } }
 
@@ -331,9 +338,24 @@ export const register: Register = on => {
         watching = true
         void watch($, s).catch(() => {})
       }
+    } else {
+      await Promise.all(COMMANDS.map(({ name, description }) => $.command.register({ name, description, argumentHint: '[swarm id]', immediate: true })))
     }
     return next(e)
   })
+
+  for (const { name, verb, timeoutMs } of COMMANDS) {
+    on('command.run', { command: name }, async ($, e) => {
+      const listId = e.args.trim()
+      const argv = ['node', scriptPath($.plugin.root, 'supervisor.mjs'), verb, ...(listId ? [listId] : [])]
+      try {
+        const r = await $.process.run(argv, { env: { CLAUDE_CODE_SESSION_ID: await $.session.id() }, timeoutMs })
+        return { text: (r.stdout || r.stderr).trim(), exitCode: r.exitCode }
+      } catch (err) {
+        return { text: `/${name} failed: ${(err as Error).message}`, exitCode: 1 }
+      }
+    })
+  }
 
   on('turn.start', async ($, e, next) => {
     const s = await swarm($)

@@ -6,7 +6,7 @@ import { randomBytes } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { configDir, renameRetry } from './files.mjs'
+import { configDir, writeJson } from './files.mjs'
 import { main } from './store.mjs'
 
 // DeLM's research harness runs 2 or 4 workers; its product runs 2.
@@ -67,15 +67,9 @@ export function prune(config, now = Date.now()) {
   return removed
 }
 
-function writeJson(file, value) {
-  const tmp = `${file}.${process.pid}.tmp`
-  fs.writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`)
-  renameRetry(tmp, file)
-}
-
 // CCK_CLI names a cck checkout's server.js. Else the claude-code-kanban on PATH, which on
 // Windows is an npm .cmd shim that Node runs only through a shell.
-function cck(args) {
+export function cck(args) {
   const local = process.env.CCK_CLI
   const win = process.platform === 'win32' && !local
   const [cmd, argv] = local ? [process.execPath, [local, ...args]] : ['claude-code-kanban', win ? args.map((a) => `"${a}"`) : args]

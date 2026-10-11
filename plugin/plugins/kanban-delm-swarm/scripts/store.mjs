@@ -9,7 +9,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { fileURLToPath } from 'node:url'
-import { renameRetry } from './files.mjs'
+import { renameRetry, writeJson } from './files.mjs'
 
 const SCHEMA_VERSION = 5
 const MAX_ARGUMENT_BYTES = 128 * 1024
@@ -431,13 +431,13 @@ class Store {
 
   // DeLM resumes a waiter once per request revision when no worker has a turn running.
   noProducer(w, revision) {
-    return w.wait_repaired < revision && !this.db.prepare("SELECT 1 FROM workers WHERE turn = 1 AND state != 'stopped'").get()
+    return w.wait_repaired < revision && !this.db.prepare('SELECT 1 FROM workers WHERE turn = 1').get()
   }
 
   setWorker(actorId, state, summary, dependency, seq) {
     this.db
-      .prepare('UPDATE workers SET state = ?, summary = ?, dependency = ?, wait_seq = ?, updated = ? WHERE actor = ?')
-      .run(state, summary, dependency, state === 'waiting' ? seq : null, seq, actorId)
+      .prepare("UPDATE workers SET state = ?, summary = ?, dependency = ?, wait_seq = ?, updated = ?, turn = turn AND ? != 'stopped' WHERE actor = ?")
+      .run(state, summary, dependency, state === 'waiting' ? seq : null, seq, state, actorId)
   }
 
   // The request revisions after the last one this worker acknowledged.
@@ -912,6 +912,13 @@ class Store {
     const body = { outcome: args.outcome, summary: text(args, 'summary', SUMMARY) }
     const sequence = this.append(actor, 'end', body)
     this.db.prepare("UPDATE context SET state = 'ended', outcome = ? WHERE id = 1").run(JSON.stringify({ ...body, sequence }))
+    // The hooks and /swarm-status read the registry, not the store, to tell a swarm has ended.
+    const file = path.join(this.dir, 'swarm.json')
+    let registry
+    try {
+      registry = JSON.parse(fs.readFileSync(file, 'utf8'))
+    } catch {}
+    if (registry) writeJson(file, { ...registry, state: 'ended' })
     return { ...body, sequence }
   }
 
@@ -927,7 +934,7 @@ class Store {
     if (typeof args.running !== 'boolean') throw new BoardError('running must be true or false')
     if (args.running) {
       // Unchanged rows stay unwritten, so the idle peers' watch sees no change.
-      this.db.prepare('UPDATE workers SET turn = 1 WHERE actor = ? AND turn = 0').run(actor.id)
+      this.db.prepare("UPDATE workers SET turn = 1 WHERE actor = ? AND turn = 0 AND state != 'stopped'").run(actor.id)
       return { wake: false }
     }
     const w = this.worker(actor.id)

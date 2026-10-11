@@ -55,4 +55,47 @@ describe('swarm supervisor', { skip: !hasSqlite && 'node:sqlite needs Node 22.5 
     assert.deepEqual(lines.slice(1), ['The swarm has ended.']);
     assert.equal(sup.noticeLine({ kind: 'complete', worker: 'w2', revision: 2, summary: 'x'.repeat(700) }).length, 'w2 declared the goal complete under revision 2: '.length + sup.SUMMARY_CHARS + '...'.length);
   });
+
+  it("finds this session's running swarm and shows its board", () => {
+    const env = config();
+    assert.equal(sup.ownSwarm({ ...env, CLAUDE_CODE_SESSION_ID: 'sid-1' }), undefined);
+    assert.equal(sup.ownSwarm(env), LIST);
+    const request = sup.swarmRequest(LIST, env);
+    store.main('complete', { ...request, actor: { id: 'sid-1', name: 'w1-abc123' }, idempotency_key: 'w', outcome: 'waiting', expected_revision: 1, summary: 'Waits', dependency: 'worker:w2-abc123' });
+    sup.command('task_create', request, '{"title": "Docs", "description": "Write them"}');
+    assert.equal(
+      sup.boardText(LIST, store.main('status', request).board),
+      [`Swarm ${LIST}: running, request revision 1`, '  w1-abc123: waiting on worker:w2-abc123, in a turn. Waits', '  w2-abc123: working, in a turn', 'Tasks 1, publications 0, findings 0', '  #1 available: Docs'].join('\n'),
+    );
+    sup.command('end', request, '{"outcome": "stopped", "summary": "Done"}');
+    assert.equal(sup.ownSwarm(env), undefined);
+  });
+
+  it('stops the workers, waits until they end, then ends the swarm', async () => {
+    const request = sup.swarmRequest(LIST, config());
+    store.main('task_create', { ...request, actor: { id: 'sid-1', name: 'w1-abc123' }, idempotency_key: 't', title: 'A', description: 'A' });
+    store.main('task_claim', { ...request, actor: { id: 'sid-1', name: 'w1-abc123' }, idempotency_key: 'c', task_id: 1 });
+    let live = ['sid-1', 'sid-2', 'other'];
+    const calls = [];
+    const run = (args) => {
+      calls.push(args.slice(0, 3).join(' '));
+      if (args[1] === 'end') live = live.filter((s) => s !== args[2]);
+      return JSON.stringify(live.map((session) => ({ session })));
+    };
+    const out = await sup.stop(request, { run, pollMs: 1 });
+    assert.equal(out.ok, true);
+    assert.deepEqual(calls.filter((c) => c.startsWith('dispatch end')), ['dispatch end sid-1', 'dispatch end sid-2']);
+    const board = store.main('status', request).board;
+    assert.deepEqual([board.state, board.outcome.outcome, board.tasks[0].state], ['ended', 'stopped', 'available']);
+    assert.deepEqual(board.workers.map((w) => w.state), ['stopped', 'stopped']);
+    assert.match(sup.boardText(LIST, board), /\n {2}w1-abc123: stopped\. the supervisor stopped the swarm\n/);
+  });
+
+  it('leaves the swarm running when a worker does not end', async () => {
+    const request = sup.swarmRequest(LIST, config());
+    const run = () => JSON.stringify([{ session: 'sid-2' }]);
+    const out = await sup.stop(request, { run, waitMs: 5, pollMs: 1 });
+    assert.match(out.error, /w2-abc123 still running/);
+    assert.equal(store.main('status', request).board.state, 'running');
+  });
 });

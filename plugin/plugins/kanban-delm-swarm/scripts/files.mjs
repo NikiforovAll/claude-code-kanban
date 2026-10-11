@@ -17,3 +17,9 @@ export function renameRetry(from, to) {
     }
   }
 }
+
+export function writeJson(file, value) {
+  const tmp = `${file}.${process.pid}.tmp`
+  fs.writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`)
+  renameRetry(tmp, file)
+}

@@ -60,4 +60,6 @@ Run the board commands with `node "<base directory>/../../scripts/supervisor.mjs
 | `request` | `{"text"}` | Sends a new request revision: a change of scope, or more work after a complete result |
 | `end` | `{"outcome": "complete", "summary"}` (or `partial`, `stopped`) | Ends the swarm |
 
+The user can type `/swarm-status` to see the board and `/swarm-stop` to stop the workers and end the swarm as `stopped`; neither takes a turn of yours. After a stop, the watch prints that the swarm ended.
+
 On a complete notice, check the result before you end the swarm. A complete result stops the workers' changes until you send a request or end it; a message does not lift it. On a blocked notice, read the worker's summary with `status`, then answer it as above, or ask the user first.

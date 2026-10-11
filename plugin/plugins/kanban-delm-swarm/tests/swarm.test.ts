@@ -1,12 +1,12 @@
 import type { On, ToolCallArgs } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
-import { CHANGES_FILE, configDir, POLL_MS, SERVER, storePath, TOOLS } from '../hooks/swarm'
+import { CHANGES_FILE, COMMANDS, configDir, POLL_MS, SERVER, storePath, TOOLS } from '../hooks/swarm'
 
 const LIST = 'swarm-fix-login-3fa91c'
 const DIR = `C:/cfg/.cck/swarm/${LIST}`
 const REGISTRY = { listId: LIST, base: 'abc123', parent: 'sid-p', state: 'running', workers: [{ name: 'w1-3fa91c', sessionId: 'sid-1' }] }
 
-type Run = { argv: readonly string[]; input: unknown; timeoutMs?: number }
+type Run = { argv: readonly string[]; input: unknown; env?: Record<string, string>; timeoutMs?: number }
 
 type Reply = string | ((command: string) => string)
 
@@ -36,7 +36,7 @@ function engine(on: On, env: Record<string, string>, registry: unknown = REGISTR
     return { value: { tool: `${SERVER}${e.name}` } }
   })
   on('process.run', (_$, e) => {
-    runs.push({ argv: e.argv, input: JSON.parse(String(e.init?.stdin)), timeoutMs: e.init?.timeoutMs })
+    runs.push({ argv: e.argv, input: e.init?.stdin && JSON.parse(e.init.stdin), env: e.init?.env, timeoutMs: e.init?.timeoutMs })
     const stdout = typeof reply === 'string' ? reply : reply(String(e.argv.at(-1)))
     return { value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
@@ -60,6 +60,33 @@ test('no task list: no tools, and TaskUpdate runs', async ($, on) => {
   await $.session.start(start)
   expect(board.registered).toEqual([])
   expect((await $.tool.call({ tool: 'TaskUpdate', taskId: '1' } as ToolCallArgs)).result).toBe('updated')
+})
+
+test('a session that is not a worker gets /swarm-status and /swarm-stop, which run the supervisor', async ($, on) => {
+  const board = engine(on, {}, REGISTRY, 'No swarm is running in this session.\n')
+  const commands: string[] = []
+  on('command.register', (_$, e) => {
+    commands.push(e.name)
+    return { value: { command: e.name } }
+  })
+  await $.session.start(start)
+  expect(commands).toEqual(COMMANDS.map(c => c.name))
+  expect((await $.command.run({ command: 'swarm-status', args: '' })).text).toBe('No swarm is running in this session.')
+  await $.command.run({ command: 'swarm-stop', args: ` ${LIST} ` })
+  expect(board.runs.map(r => r.argv.slice(2))).toEqual([['board'], ['stop', LIST]])
+  expect(board.runs[0].argv[1]).toMatch(/scripts\/supervisor\.mjs$/)
+  expect(board.runs[1].env).toEqual({ CLAUDE_CODE_SESSION_ID: 'sid-1' })
+})
+
+test('a worker gets no swarm commands', async ($, on) => {
+  engine(on, WORKER)
+  const commands: string[] = []
+  on('command.register', (_$, e) => {
+    commands.push(e.name)
+    return { value: { command: e.name } }
+  })
+  await $.session.start(start)
+  expect(commands).toEqual([])
 })
 
 test('a task list with no registry turns nothing on, whatever its name', async ($, on) => {
