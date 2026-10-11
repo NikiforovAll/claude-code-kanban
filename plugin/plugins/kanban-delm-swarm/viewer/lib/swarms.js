@@ -16,6 +16,16 @@ function readRegistry(dir) {
   }
 }
 
+// The supervisor's <dir>/result.json (scripts/supervisor.mjs), written before the swarm's end event.
+function readDelivery(dir) {
+  try {
+    const r = JSON.parse(fs.readFileSync(path.join(dir, 'result.json'), 'utf8'));
+    return r.delivery ? { ...r.delivery, worker: r.worker ?? null, project: r.project ?? null } : null;
+  } catch {
+    return null;
+  }
+}
+
 function describe(dir) {
   const r = readRegistry(dir);
   if (!r) return null;
@@ -37,4 +47,4 @@ function listSwarms(root) {
     );
 }
 
-module.exports = { configDir, swarmRoot, listSwarms, describe, readRegistry, ID_RE };
+module.exports = { configDir, swarmRoot, listSwarms, describe, readRegistry, readDelivery, ID_RE };

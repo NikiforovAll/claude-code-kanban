@@ -500,6 +500,20 @@ function render() {
   if (state.view === 'log' && !state.log) loadLog();
 }
 
+function deliveryLine(d) {
+  if (!d) return '';
+  const files = (paths) =>
+    `${paths.slice(0, 8).map((p) => `<code>${esc(p)}</code>`).join(', ')}${paths.length > 8 ? ` and ${paths.length - 8} more` : ''}`;
+  let text;
+  if (d.delivered)
+    text = d.changed.length
+      ? `Delivered ${plural(d.changed.length, 'file')} from ${who(d.worker)}: ${files(d.changed)}.${d.merged.length ? ` Merged with local edits: ${files(d.merged)}.` : ''}`
+      : `The result of ${who(d.worker)} changes no file.`;
+  else text = d.conflicts.length ? `Not delivered: conflicts in ${files(d.conflicts)}.` : 'Not delivered.';
+  if (d.recovery) text += ` Saved in <code>${esc(d.recovery)}</code>.`;
+  return `<p class="sub delivery">${text}</p>`;
+}
+
 function summaryView() {
   const { swarm: s, progress: p, workers, findings } = state.model;
   const pct = (n) => (p.total ? (n / p.total) * 100 : 0);
@@ -541,6 +555,7 @@ function summaryView() {
       ${s.revision > 1 ? `<span>request revision ${s.revision}</span>` : ''}
     </div>
     ${s.outcome ? `<p class="outcome"><span class="chip ${s.outcome.outcome === 'complete' ? 'ok' : 'warn'}">${esc(s.outcome.outcome)}</span> ${hl(s.outcome.summary)}</p>` : ''}
+    ${deliveryLine(s.delivery)}
     <div class="progress" title="${p.done} done, ${p.claimed} claimed, ${p.open} open">
       <span class="done" style="width:${pct(p.done)}%"></span><span class="claimed" style="width:${pct(p.claimed)}%"></span>
     </div>
@@ -560,7 +575,7 @@ function summaryView() {
         .map(
           (w) => `<div class="worker-row">
           ${who(w.name)}
-          <span>${healthChip(w.health)}${w.health === 'stopped' ? '' : turnChip(w.running)}</span>
+          <span>${healthChip(w.health)}${w.health === 'stopped' || s.endedAt ? '' : turnChip(w.running)}</span>
           <span class="sub">${w.lastT ? `seen ${dur(w.silence)} ago` : ''}</span>
           <div class="doing">${w.holding ? `#${w.holding.id} ${esc(w.holding.subject)} <span class="muted">· ${dur(s.ref - w.holding.since)}</span>` : (hl(w.status?.summary) || '—')}</div>
         </div>`,
@@ -576,6 +591,11 @@ function summaryView() {
       }
     </div>
   </div>
+  ${
+    findings.length
+      ? `<div class="card"><div class="section-title"><span>Latest findings</span><a class="ref" href="?view=knowledge" data-view="knowledge">all ${findings.length}</a></div>${findings.slice(-3).reverse().map(findingNote).join('')}</div>`
+      : ''
+  }
   <div class="stats">
     ${stat(findings.length, 'Findings')}
     ${stat(state.model.publications.length, 'Publications')}
@@ -772,21 +792,17 @@ const diffHtml = (text) =>
     })
     .join('\n');
 
+const findingNote = (f) => `<div class="note"><div>
+        <div class="text">${hl(f.text)}</div>
+        <div class="sub">${who(f.actor)} · ${clock(f.t)} · #${f.id}</div>
+      </div></div>`;
+
 function knowledgeView() {
   const { findings, releases, workers } = state.model;
   const authors = workers.map((w) => w.name).filter((n) => findings.some((f) => f.actor === n));
   const shown = findings.filter((f) => !state.scope || f.actor === state.scope);
   const filters = `<div class="filters"><button class="filter${state.scope ? '' : ' on'}" data-scope="">all</button>${authors.map((a) => `<button class="filter${state.scope === a ? ' on' : ''}" data-scope="${esc(a)}">${esc(a)}</button>`).join('')}</div>`;
-  const list = shown
-    .slice()
-    .reverse()
-    .map(
-      (f) => `<div class="note"><div>
-        <div class="text">${hl(f.text)}</div>
-        <div class="sub">${who(f.actor)} · ${clock(f.t)} · #${f.id}</div>
-      </div></div>`,
-    )
-    .join('');
+  const list = shown.slice().reverse().map(findingNote).join('');
   const handoffs = releases
     .slice()
     .reverse()

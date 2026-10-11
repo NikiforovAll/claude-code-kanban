@@ -138,10 +138,13 @@ describe('viewer server, run alone', () => {
   });
 
   it('serves the selected swarm with no id, and any swarm by id', async () => {
-    assert.equal((await json(port, '/api/swarm')).body.swarm.listId, RUNNING);
+    const running = (await json(port, '/api/swarm')).body;
+    assert.equal(running.swarm.listId, RUNNING);
+    assert.equal(running.swarm.delivery, null);
     const { body } = await json(port, `/api/swarm?swarm=${ENDED}`);
     assert.equal(body.swarm.listId, ENDED);
     assert.equal(body.swarm.outcome.outcome, 'complete');
+    assert.deepEqual([body.swarm.delivery.delivered, body.swarm.delivery.changed.length, body.swarm.delivery.worker], [true, 3, 'w1-a3f9c2']);
     assert.equal(body.progress.total, 9);
   });
 

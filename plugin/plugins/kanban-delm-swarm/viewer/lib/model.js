@@ -178,6 +178,7 @@ function buildModel(events, registry = {}, now = Date.now(), running = null) {
       seq: events.length ? events.at(-1).seq : 0,
       revision: requests.at(-1)?.revision ?? 1,
       outcome: end,
+      delivery: registry.delivery ?? null,
     },
     progress: {
       total: taskList.length,

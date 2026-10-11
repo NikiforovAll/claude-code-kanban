@@ -25,7 +25,7 @@ export async function build({ out, store = path.join(here, '..', '..', '..', 'sc
   for (const key of Object.keys(process.env)) if (key.startsWith('GIT_')) delete process.env[key]
 
   fs.mkdirSync(dir, { recursive: true })
-  for (const f of ['swarm.db', 'swarm.db-wal', 'swarm.db-shm', 'swarm.json']) fs.rmSync(path.join(dir, f), { force: true })
+  for (const f of ['swarm.db', 'swarm.db-wal', 'swarm.db-shm', 'swarm.json', 'result.json']) fs.rmSync(path.join(dir, f), { force: true })
   const work = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'swarm-fixture-'))
 
   const repo = path.join(work, 'repo')
@@ -257,6 +257,8 @@ export async function build({ out, store = path.join(here, '..', '..', '..', 'sc
     registry.state = 'ended'
     registry.endedAt = new Date(T0 + 60 * 60_000).toISOString()
     writeRegistry()
+    const delivery = { delivered: true, changed: ['README.md', 'src/cli.js', 'src/csv.js'], merged: ['README.md'], conflicts: [], excluded: {}, environment_files_changed: [], recovery: null }
+    fs.writeFileSync(path.join(dir, 'result.json'), `${JSON.stringify({ outcome: 'complete', worker: w1.name, project: repo, delivery }, null, 2)}\n`)
   }
 
   const d = db()

@@ -8,7 +8,7 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { parseExport, nameMap, logRow } = require('./lib/events');
 const { buildModel } = require('./lib/model');
-const { configDir, swarmRoot, listSwarms, describe, readRegistry, ID_RE } = require('./lib/swarms');
+const { configDir, swarmRoot, listSwarms, describe, readRegistry, readDelivery, ID_RE } = require('./lib/swarms');
 const { recordFile, liveRecord, claimRecord, removeRecord } = require('./lib/record');
 const manifest = require('./hub-app.json');
 
@@ -125,7 +125,10 @@ const storeId = (dir) => {
   return s ? `${s.ino}:${s.birthtimeMs}` : null;
 };
 
-const registryOf = (dir) => ({ listId: path.basename(dir), ...(readRegistry(dir) ?? {}) });
+function registryOf(dir) {
+  const r = readRegistry(dir) ?? {};
+  return { listId: path.basename(dir), ...r, delivery: r.state === 'ended' ? readDelivery(dir) : null };
+}
 
 // Only the events after the last export are read. Callers that arrive while a load runs share it,
 // so the same events are never appended twice.
