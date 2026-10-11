@@ -7080,6 +7080,7 @@ function _renderStorageTab() {
   groupsClean.style.display = tab === 'groups' ? '' : 'none';
   groupsClean.disabled = true;
   if (tab === 'sessions') body.innerHTML = _renderStorageSessions();
+  else if (tab === 'dismissed') body.innerHTML = _renderStorageDismissed();
   else if (tab === 'scratchpads') body.innerHTML = _renderStorageScratchpads();
   else if (tab === 'linked-docs') body.innerHTML = _renderStorageLinkedDocs();
   else if (tab === 'groups') _renderStorageGroups(body);
@@ -7156,6 +7157,34 @@ function _renderStorageSessions() {
     html += _renderOrphanGroup(orphans.length, orphans.map(renderSessionItem).join(''));
   }
   return html;
+}
+
+function _renderStorageDismissed() {
+  const ids = [...dismissedSessionIds.keys()];
+  if (!ids.length) return '<div class="storage-empty">No dismissed sessions</div>';
+  const { groups, orphans } = _groupByProject(ids);
+  const renderItem = ({ id, session }) => `<div class="storage-item">
+      <span class="storage-item-id">${_sessionLabel(session, id)}</span>
+      <span class="storage-item-meta">dismissed ${formatDate(dismissedSessionIds.get(id))}</span>
+      <div class="storage-item-actions">
+        <button onclick="_storageRestoreSession('${escAttrJs(id)}')">Restore</button>
+      </div>
+    </div>`;
+  let html = '';
+  for (const [project, items] of groups) {
+    html += _renderProjectGroup(
+      escapeHtml(_projectLabel(project)),
+      `${items.length} session${items.length > 1 ? 's' : ''}`,
+      items.map(renderItem).join(''),
+    );
+  }
+  if (orphans.length) html += _renderOrphanGroup(orphans.length, orphans.map(renderItem).join(''));
+  return html;
+}
+
+function _storageRestoreSession(id) {
+  setSessionDismissed(id, false);
+  _renderStorageTab();
 }
 
 async function _storageViewSession(id) {
