@@ -3,10 +3,10 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { execFile } = require('node:child_process');
+const { execFile, execFileSync } = require('node:child_process');
 const { pathToFileURL } = require('node:url');
 
-const START = path.join(__dirname, '..', 'plugin', 'plugins', 'kanban-delm-swarm', 'scripts', 'start.mjs');
+const START = path.join(__dirname, '..', 'start.mjs');
 
 // A git hook runs the tests with GIT_DIR and friends set, which would make the temp dir look like cck.
 for (const key of Object.keys(process.env)) if (key.startsWith('GIT_')) delete process.env[key];
@@ -125,6 +125,25 @@ describe('swarm start', () => {
     assert.throws(() => m.start({ goal: 'g', spec, n: 5, env }), /--n must be 2 to 4/);
     assert.throws(() => m.start({ goal: 'g', spec, n: 1, env }), /--n must be 2 to 4/);
     assert.throws(() => m.start({ goal: 'g', spec, cwd: config, env: { ...env, CLAUDE_CODE_SESSION_ID: 'sid' } }), /not a git repository/);
+    assert.equal(fs.existsSync(`${config}/.cck/swarm`), false);
+  });
+
+  it('refuses a start with the install command when the cck CLI does not run, before it claims anything', () => {
+    const config = tempConfig();
+    const repo = tempConfig();
+    execFileSync('git', ['-C', repo, 'init', '-q']);
+    execFileSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'base']);
+    const saved = process.env.CCK_CLI;
+    process.env.CCK_CLI = `${config}/missing/server.js`;
+    try {
+      assert.throws(
+        () => m.start({ goal: 'g', spec: 'Ship it', cwd: repo, env: { CLAUDE_CONFIG_DIR: config, CLAUDE_CODE_SESSION_ID: 'sid' } }),
+        /needs the claude-code-kanban CLI: install it with `npm install -g claude-code-kanban`/,
+      );
+    } finally {
+      if (saved === undefined) delete process.env.CCK_CLI;
+      else process.env.CCK_CLI = saved;
+    }
     assert.equal(fs.existsSync(`${config}/.cck/swarm`), false);
   });
 });

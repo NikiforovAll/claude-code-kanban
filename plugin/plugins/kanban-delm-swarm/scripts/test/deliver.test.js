@@ -4,9 +4,9 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
-const { git, write, repoWithWorktrees } = require('./swarm-git-helpers');
+const { git, write, repoWithWorktrees } = require('./git-helpers');
 
-const DELIVER = path.join(__dirname, '..', 'plugin', 'plugins', 'kanban-delm-swarm', 'scripts', 'deliver.mjs');
+const DELIVER = path.join(__dirname, '..', 'deliver.mjs');
 
 const read = (root, p) => fs.readFileSync(path.join(root, p), 'utf8');
 

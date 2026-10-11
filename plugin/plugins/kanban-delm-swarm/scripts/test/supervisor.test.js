@@ -4,9 +4,9 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
-const { git, write, repoWithWorktrees } = require('./swarm-git-helpers');
+const { git, write, repoWithWorktrees } = require('./git-helpers');
 
-const SCRIPTS = path.join(__dirname, '..', 'plugin', 'plugins', 'kanban-delm-swarm', 'scripts');
+const SCRIPTS = path.join(__dirname, '..');
 let hasSqlite = true;
 try {
   require('node:sqlite');

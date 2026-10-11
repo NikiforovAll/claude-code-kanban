@@ -7,7 +7,7 @@ const path = require('node:path');
 const { execFile, execFileSync } = require('node:child_process');
 const { pathToFileURL } = require('node:url');
 
-const STORE = path.join(__dirname, '..', 'plugin', 'plugins', 'kanban-delm-swarm', 'scripts', 'store.mjs');
+const STORE = path.join(__dirname, '..', 'store.mjs');
 // node:sqlite ships from Node 22.5; CI also runs Node 20.
 let hasSqlite = true;
 try {

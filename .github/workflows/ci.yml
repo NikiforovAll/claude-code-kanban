@@ -32,6 +32,9 @@ jobs:
       - name: Contract tests
         run: npm test
 
+      - name: Swarm tests
+        run: npm run test:swarm
+
       - name: Startup smoke test
         run: |
           PORT=9876 node server.js &

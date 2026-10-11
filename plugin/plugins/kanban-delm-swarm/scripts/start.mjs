@@ -95,6 +95,14 @@ export function cck(args) {
   }
 }
 
+export function checkCck() {
+  try {
+    cck(['--version'])
+  } catch (err) {
+    throw new Error(`the swarm needs the claude-code-kanban CLI: install it with \`npm install -g claude-code-kanban\`, or set CCK_CLI to a cck checkout's server.js.\n${err.message}`)
+  }
+}
+
 export function groupPath(groups, sessionId) {
   const byId = new Map(groups.map((g) => [g.id, g]))
   const names = []
@@ -186,6 +194,7 @@ export function start({ goal, name, spec: rawSpec, n = 2, cwd = process.cwd(), e
   } catch {
     throw new Error(`${cwd} is not a git repository with a commit: each worker runs in its own worktree`)
   }
+  checkCck()
   const config = configDir(env)
   prune(config)
   const { groups } = JSON.parse(cck(['group', 'list', '--all', '--json']))

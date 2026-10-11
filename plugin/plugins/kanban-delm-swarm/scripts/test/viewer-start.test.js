@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 
-const VIEWER = path.join(__dirname, '..', 'plugin', 'plugins', 'kanban-delm-swarm', 'scripts', 'viewer.mjs');
+const VIEWER = path.join(__dirname, '..', 'viewer.mjs');
 
 const tempDir = (name) => fs.mkdtempSync(path.join(os.tmpdir(), name)).replaceAll('\\', '/');
 

@@ -1,5 +1,5 @@
 {
   "name": "kanban-delm-swarm",
-  "version": "0.1.1",
-  "description": "Kanban DeLM Swarm: run several Claude Code sessions on one goal, coordinating through a shared task queue and log of findings, shown on the claude-code-kanban board"
+  "version": "0.1.3",
+  "description": "Kanban DeLM Swarm: run several Claude Code sessions on one goal, coordinating through a shared task queue and log of findings, shown on the claude-code-kanban board. Needs claude-code-kanban: its board runs the workers and its CLI on PATH (npm install -g claude-code-kanban)"
 }

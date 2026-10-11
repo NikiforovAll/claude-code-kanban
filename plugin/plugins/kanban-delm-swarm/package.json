@@ -1,0 +1,8 @@
+{
+  "name": "kanban-delm-swarm",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "test": "node --test scripts/test/*.test.js viewer/test/*.test.js"
+  }
+}
