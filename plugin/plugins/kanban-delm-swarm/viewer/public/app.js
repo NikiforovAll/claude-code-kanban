@@ -924,11 +924,15 @@ document.addEventListener('pointermove', (e) => {
   tip.style.top = `${e.clientY + 14}px`;
 });
 
+// A frame drawn while hidden, such as a background pane tab, gets no window resize when shown.
 let resizeTimer = null;
-window.addEventListener('resize', () => {
+let mainWidth = main.clientWidth;
+new ResizeObserver(() => {
+  if (main.clientWidth === mainWidth) return;
+  mainWidth = main.clientWidth;
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(() => state.view === 'timeline' && render(), 120);
-});
+}).observe(main);
 
 document.addEventListener('click', (e) => {
   if (!e.target.closest('#themePickerBtn')) toggleThemeMenu(false);
