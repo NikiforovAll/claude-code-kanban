@@ -89,6 +89,8 @@ function read(root, p) {
 }
 
 // Claude Code's --worktree <name> checks out <repo>/.claude/worktrees/<name>.
+export const worktreeRoot = (project) => path.join(project, '.claude', 'worktrees')
+
 export function worktrees(project, workers) {
   const found = {}
   for (const block of git(project, ['worktree', 'list', '--porcelain', '-z']).split('\0\0')) {

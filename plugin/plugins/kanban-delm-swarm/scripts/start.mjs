@@ -6,7 +6,7 @@ import { randomBytes } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { configDir, writeJson } from './files.mjs'
+import { configDir, readJson, writeJson } from './files.mjs'
 import { main } from './store.mjs'
 
 // DeLM's research harness runs 2 or 4 workers; its product runs 2.
@@ -105,6 +105,22 @@ export const storeRequest = (config, registry) => ({
   actor: { id: registry.parent },
 })
 
+// cck shows a session the task list that _task-maps maps it to, one list per session. The
+// workers' plugin mod maps them; this maps the supervisor before they start, as their mod
+// rewrites the file read-modify-write.
+export function mapSupervisor(config, listId, sessionId, project) {
+  const root = `${config}/.cck/agent-activity/_task-maps`
+  fs.mkdirSync(root, { recursive: true })
+  for (const name of fs.readdirSync(root).filter((f) => f.endsWith('.json') && f !== `${listId}.json`)) {
+    const map = readJson(`${root}/${name}`)
+    if (!map?.[sessionId]) continue
+    delete map[sessionId]
+    if (Object.keys(map).length) writeJson(`${root}/${name}`, map)
+    else fs.rmSync(`${root}/${name}`, { force: true })
+  }
+  writeJson(`${root}/${listId}.json`, { ...readJson(`${root}/${listId}.json`), [sessionId]: { project, updatedAt: new Date().toISOString() } })
+}
+
 function transcriptPath(sessionId) {
   try {
     return JSON.parse(cck(['session', 'view', sessionId, '--json'])).jsonlPath ?? null
@@ -135,12 +151,13 @@ export function workerSpec({ spec, name, listId, names, transcript }) {
   ].join('\n')
 }
 
-export const dispatchArgs = ({ cwd, specFile, name, listId, claudeArgs = [] }) => [
+export const dispatchArgs = ({ cwd, specFile, name, listId, model, claudeArgs = [] }) => [
   ...['dispatch', 'start', '--cwd', cwd, '--spec-file', specFile, '--name', name, '--group', listId, '--task-list', listId, '--worktree', name, '--json'],
+  ...(model ? ['--model', model] : []),
   ...(claudeArgs.length ? ['--', ...claudeArgs] : []),
 ]
 
-export function start({ goal, spec: rawSpec, n = 2, cwd = process.cwd(), env = process.env, claudeArgs = [] }) {
+export function start({ goal, spec: rawSpec, n = 2, cwd = process.cwd(), env = process.env, model, claudeArgs = [] }) {
   const spec = rawSpec?.trim()
   if (!goal?.trim()) throw new Error('give the goal')
   if (!spec) throw new Error('give the spec with --spec-file')
@@ -163,6 +180,7 @@ export function start({ goal, spec: rawSpec, n = 2, cwd = process.cwd(), env = p
   const stored = main('spec', { ...storeRequest(config, registry), text: spec })
   if (!stored.ok) throw new Error(`the spec: ${stored.error}`)
   writeJson(`${dir}/swarm.json`, registry)
+  mapSupervisor(config, listId, parent, project)
   // Made before the first dispatch: a user group named like the dispatch group takes its
   // sessions in from the first frame, so they never jump between groups.
   cck(['group', 'create', group, '--json'])
@@ -176,7 +194,7 @@ export function start({ goal, spec: rawSpec, n = 2, cwd = process.cwd(), env = p
     let out
     try {
       out = JSON.parse(
-        cck(dispatchArgs({ cwd, specFile, name: w.name, listId, claudeArgs })),
+        cck(dispatchArgs({ cwd, specFile, name: w.name, listId, model, claudeArgs })),
       )
     } catch (err) {
       // With no worker running, nothing would ever end the swarm; workers already started keep it.
@@ -206,6 +224,7 @@ function parseArgs(argv) {
     if (a === '--n') out.n = Number(argv[++i])
     else if (a === '--spec-file') out.spec = fs.readFileSync(argv[++i], 'utf8')
     else if (a === '--cwd') out.cwd = argv[++i]
+    else if (a === '--model') out.model = argv[++i]
     else out.goal.push(a)
   }
   return { ...out, goal: out.goal.join(' ') }

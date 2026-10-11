@@ -49,6 +49,20 @@ describe('swarm start', () => {
     assert.equal(fs.readdirSync(`${config}/.cck/swarm`).length, 6);
   });
 
+  it('maps the supervisor to the new list only', () => {
+    const config = tempConfig();
+    const maps = `${config}/.cck/agent-activity/_task-maps`;
+    const read = (list) => JSON.parse(fs.readFileSync(`${maps}/${list}.json`, 'utf8'));
+    m.mapSupervisor(config, 'swarm-a', 'sup', 'C:/p');
+    fs.writeFileSync(`${maps}/swarm-b.json`, JSON.stringify({ w1: { project: 'C:/p' } }));
+    m.mapSupervisor(config, 'swarm-b', 'sup', 'C:/p');
+    assert.equal(fs.existsSync(`${maps}/swarm-a.json`), false);
+    assert.deepEqual(Object.keys(read('swarm-b')), ['w1', 'sup']);
+    m.mapSupervisor(config, 'swarm-c', 'sup', 'C:/p');
+    assert.deepEqual(Object.keys(read('swarm-b')), ['w1']);
+    assert.equal(read('swarm-c').sup.project, 'C:/p');
+  });
+
   it('removes swarm folders not written for cleanupPeriodDays', () => {
     const config = tempConfig();
     fs.writeFileSync(`${config}/settings.json`, JSON.stringify({ cleanupPeriodDays: 2 }));
@@ -89,6 +103,8 @@ describe('swarm start', () => {
     const at = { cwd: 'C:/p', specFile: 's.md', name: 'w1-abc', listId: 'swarm-x-abc' };
     assert.equal(m.dispatchArgs(at).includes('--'), false);
     assert.deepEqual(m.dispatchArgs({ ...at, claudeArgs: ['--plugin-dir', 'C:/plug'] }).slice(-3), ['--', '--plugin-dir', 'C:/plug']);
+    assert.deepEqual(m.dispatchArgs({ ...at, model: 'haiku' }).slice(-2), ['--model', 'haiku']);
+    assert.equal(m.dispatchArgs(at).includes('--model'), false);
   });
 
   it('refuses a start with no spec, outside a session or outside a repository before it claims anything', () => {

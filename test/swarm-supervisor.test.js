@@ -129,6 +129,16 @@ describe('swarm supervisor', { skip: !hasSqlite && 'node:sqlite needs Node 22.5 
     assert.equal(store.main('status', request).board.state, 'running');
   });
 
+  it('refuses to end while the shell is inside a worktree', async () => {
+    const env = config();
+    const p = project(env);
+    const request = sup.swarmRequest(LIST, env);
+    const cwd = path.join(p.repo, '.claude', 'worktrees', 'w1-abc123', 'src');
+    const out = await sup.finish(request, stopped, { run: () => assert.fail('no worker is stopped'), cwd });
+    assert.match(out.error, /inside a worker's worktree/);
+    assert.equal(store.main('status', request).board.state, 'running');
+  });
+
   it('delivers the candidate into the project and ends the swarm as complete', async () => {
     const env = config();
     const p = project(env);

@@ -9,7 +9,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
-import { cleanup, deliver, NOT_DELIVERED, preserve, worktrees } from './deliver.mjs'
+import { cleanup, deliver, NOT_DELIVERED, preserve, worktreeRoot, worktrees } from './deliver.mjs'
 import { readJson, writeJson } from './files.mjs'
 import { cck, configDir, storeRequest } from './start.mjs'
 import { CHANGES_FILE, compact, END_OUTCOMES, main } from './store.mjs'
@@ -118,14 +118,17 @@ export function boardText(listId, b) {
 // never ended under it. <dir>/result.json is written before the first write to the project, so a
 // rerun finishes the end that run chose, whatever outcome it is given.
 // Each poll spawns the cck CLI, which takes most of a second on Windows.
-export async function finish(request, { outcome, summary }, { run = cck, waitMs = 10_000, pollMs = 1000 } = {}) {
+export async function finish(request, { outcome, summary }, { run = cck, waitMs = 10_000, pollMs = 1000, cwd = process.cwd() } = {}) {
   const resultFile = path.join(request.dir, 'result.json')
   let result = readJson(resultFile)
+  const registry = readJson(path.join(request.dir, 'swarm.json'))
+  if (!registry.project) return { ok: false, error: 'this swarm has no project path in swarm.json; start a new swarm' }
+  // On Windows a shell whose cwd is in a worktree locks it, and the cleanup fails after delivery.
+  const inside = path.relative(worktreeRoot(registry.project), cwd)
+  if (inside && !inside.startsWith('..') && !path.isAbsolute(inside)) return { ok: false, error: `your shell's working directory ${cwd} is inside a worker's worktree, which blocks its removal; cd to ${registry.project} and run this again` }
   if (!result) {
-    const registry = readJson(path.join(request.dir, 'swarm.json'))
     if (!FINISH_OUTCOMES.includes(outcome)) return { ok: false, error: `outcome must be ${FINISH_OUTCOMES.join(', ')}` }
     if (typeof summary !== 'string' || !summary.trim()) return { ok: false, error: 'give the summary' }
-    if (!registry.project) return { ok: false, error: 'this swarm has no project path in swarm.json; start a new swarm' }
     const status = main('status', request)
     if (!status.ok) return status
     if (status.board.state === 'ended') return { ok: false, error: 'This swarm has ended.' }

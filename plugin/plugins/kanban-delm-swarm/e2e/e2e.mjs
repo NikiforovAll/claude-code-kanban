@@ -1,7 +1,7 @@
 // The trivial end-to-end run of a swarm on a toy project. See README.md for the run book.
 //   node e2e.mjs setup                              a fresh toy repo at <root>/repo
-//   node e2e.mjs supervise [--n 2] [-- <claude args>]  dispatches a supervisor session that runs start
-//   node e2e.mjs start [--n 2] [-- <claude args>]   a swarm on it, with this session as the supervisor
+//   node e2e.mjs supervise [--n 2] [--model sonnet] [--stop] [-- <claude args>]  dispatches a supervisor session that runs start
+//   node e2e.mjs start [--n 2] [--model sonnet] [-- <claude args>]   a swarm on it, with this session as the supervisor
 //   node e2e.mjs conflict                           the user edits a line the workers change
 //   node e2e.mjs report [listId]                    wall time, outcome, timeline and leftovers of a run
 //   node e2e.mjs clean                              removes the repo's leftover worktrees and branches
@@ -57,14 +57,17 @@ function setup() {
   return `A fresh toy repo at ${REPO} (base ${git('rev-parse', '--short', 'HEAD')}). Next: node e2e.mjs supervise`
 }
 
+function split(argv) {
+  const cut = argv.indexOf('--')
+  return cut < 0 ? { own: argv, given: [] } : { own: argv.slice(0, cut), given: argv.slice(cut + 1) }
+}
+const opt = (own, name, fallback) => (own.includes(name) ? own[own.indexOf(name) + 1] : fallback)
+
 function start(argv) {
   if (!process.env.CLAUDE_CODE_SESSION_ID) throw new Error('run start from the Claude Code session that supervises the swarm')
-  const cut = argv.indexOf('--')
-  const own = cut < 0 ? argv : argv.slice(0, cut)
-  const given = cut < 0 ? [] : argv.slice(cut + 1)
-  const n = own.includes('--n') ? own[own.indexOf('--n') + 1] : '2'
+  const { own, given } = split(argv)
   const claudeArgs = ['--plugin-dir', PLUGIN, ...(given.length ? given : ['--permission-mode', 'auto'])]
-  const out = node('start.mjs', ['--n', n, '--cwd', REPO, '--spec-file', `${HERE}/fixture/spec.md`, GOAL, '--', ...claudeArgs])
+  const out = node('start.mjs', ['--n', opt(own, '--n', '2'), '--model', opt(own, '--model', 'sonnet'), '--cwd', REPO, '--spec-file', `${HERE}/fixture/spec.md`, GOAL, '--', ...claudeArgs])
   if (out.status !== 0) throw new Error(out.stderr.trim())
   const started = JSON.parse(out.stdout)
   fs.writeFileSync(RUNS, JSON.stringify([...runs(), { listId: started.listId, config: configDir(process.env), at: new Date().toISOString() }], null, 2))
@@ -79,9 +82,10 @@ function start(argv) {
 // The supervisor is a dispatched session with the plugin loaded, so /swarm-status and /swarm-stop
 // work in it.
 function supervise(argv) {
-  const cut = argv.indexOf('--')
+  const stop = argv.includes('--stop')
+  argv = argv.filter((a) => a !== '--stop')
+  const { own, given } = split(argv)
   const startArgs = argv.join(' ')
-  const given = cut < 0 ? [] : argv.slice(cut + 1)
   const specFile = `${ROOT}/supervisor.md`
   fs.writeFileSync(
     specFile,
@@ -92,12 +96,14 @@ function supervise(argv) {
       '',
       `1. Run \`node "${HERE}/e2e.mjs" start ${startArgs}\` and report its output. On an error, report it and stop.`,
       `2. Follow ${PLUGIN}/skills/swarm/SKILL.md from step 3 to the end, with the base directory ${PLUGIN}/skills/swarm.`,
-      "3. On a complete notice, run `npm test` in the candidate worker's worktree. End the swarm as complete when it passes; else send a request.",
+      stop
+        ? `3. This run checks the stop path. Right after start, run \`node "${SCRIPTS}/supervisor.mjs" status <listId>\` every 5 s. As soon as a task is claimed, end the swarm as stopped.`
+        : "3. On a complete notice, run `npm test` in the candidate worker's worktree. End the swarm as complete when it passes; else send a request.",
       `4. After the swarm ends, run \`node "${HERE}/e2e.mjs" report\`, report its output, and stop.`,
     ].join('\n'),
   )
   const out = JSON.parse(
-    cck(['dispatch', 'start', '--cwd', REPO, '--spec-file', specFile, '--name', `swarm-e2e-${Date.now().toString(36)}`, '--json', '--', '--plugin-dir', PLUGIN, ...(given.length ? given : ['--permission-mode', 'auto'])]),
+    cck(['dispatch', 'start', '--cwd', REPO, '--spec-file', specFile, '--name', `swarm-e2e-${Date.now().toString(36)}`, '--model', opt(own, '--model', 'sonnet'), '--json', '--', '--plugin-dir', PLUGIN, ...(given.length ? given : ['--permission-mode', 'auto'])]),
   )
   return `Dispatched the supervisor, session ${out.session}. Follow it on the board.`
 }
