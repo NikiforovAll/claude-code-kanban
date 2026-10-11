@@ -9,10 +9,13 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
+import { cleanup, deliver, NOT_DELIVERED, preserve, worktrees } from './deliver.mjs'
+import { readJson, writeJson } from './files.mjs'
 import { cck, configDir, storeRequest } from './start.mjs'
-import { CHANGES_FILE, compact, main } from './store.mjs'
+import { CHANGES_FILE, compact, END_OUTCOMES, main } from './store.mjs'
 
 const POLL_MS = 1500
+const FINISH_OUTCOMES = END_OUTCOMES.filter((o) => o !== 'delivery_conflict')
 export const SUMMARY_CHARS = 600
 
 export function swarmRequest(listId, env = process.env) {
@@ -107,39 +110,91 @@ export function boardText(listId, b) {
   return lines.join('\n')
 }
 
-// DeLM's /delm-stop: stop the workers, confirm they ended, then end the swarm as stopped. A worker
-// that still runs leaves the swarm running, so its work is never ended under it. The worktrees stay.
+// DeLM's end of a run: stop the workers and confirm they ended, then deliver the candidate's result
+// (complete) or save every worker's changes to a recovery bundle (partial, stopped), remove the
+// worktrees and end the swarm. A worker that still runs leaves the swarm running, so its work is
+// never ended under it. <dir>/result.json is written before the first write to the project, so a
+// rerun finishes the end that run chose, whatever outcome it is given.
 // Each poll spawns the cck CLI, which takes most of a second on Windows.
-export async function stop(request, { run = cck, waitMs = 10_000, pollMs = 1000 } = {}) {
-  const roster = (request.roster ?? []).filter((w) => w.sessionId)
-  const running = () => {
-    const live = new Set(JSON.parse(run(['dispatch', 'list', '--json'])).map((r) => r.session))
-    return roster.filter((w) => live.has(w.sessionId))
+export async function finish(request, { outcome, summary }, { run = cck, waitMs = 10_000, pollMs = 1000 } = {}) {
+  const resultFile = path.join(request.dir, 'result.json')
+  let result = readJson(resultFile)
+  if (!result) {
+    const registry = readJson(path.join(request.dir, 'swarm.json'))
+    if (!FINISH_OUTCOMES.includes(outcome)) return { ok: false, error: `outcome must be ${FINISH_OUTCOMES.join(', ')}` }
+    if (typeof summary !== 'string' || !summary.trim()) return { ok: false, error: 'give the summary' }
+    if (!registry.project) return { ok: false, error: 'this swarm has no project path in swarm.json; start a new swarm' }
+    const status = main('status', request)
+    if (!status.ok) return status
+    if (status.board.state === 'ended') return { ok: false, error: 'This swarm has ended.' }
+    const { candidate } = status.board
+    if (outcome === 'complete' && !candidate) {
+      return { ok: false, error: 'no worker declared the goal complete under the current request revision; send a request, or end the swarm as partial' }
+    }
+    const roster = (request.roster ?? []).filter((w) => w.sessionId)
+    const running = () => {
+      const live = new Set(JSON.parse(run(['dispatch', 'list', '--json'])).map((r) => r.session))
+      return roster.filter((w) => live.has(w.sessionId))
+    }
+    for (const w of running()) run(['dispatch', 'end', w.sessionId, '--json'])
+    let left = running()
+    for (const end = Date.now() + waitMs; left.length && Date.now() < end; left = running()) await sleep(pollMs)
+    if (left.length) return { ok: false, error: `${left.map((w) => w.name).join(', ')} still running; the swarm keeps running. End them from the board, then run this again.` }
+    const reason = outcome === 'stopped' ? 'the supervisor stopped the swarm' : `the supervisor ended the swarm as ${outcome}`
+    for (const w of status.board.workers.filter((x) => x.state !== 'stopped')) {
+      const out = main('worker_stop', { ...request, idempotency_key: `swarm-finish-${w.worker}`, worker: w.worker, reason })
+      if (!out.ok) return out
+    }
+    const { project, base } = registry
+    const trees = worktrees(project, roster.map((w) => w.name))
+    if (outcome === 'complete' && !trees[candidate.worker]) return { ok: false, error: `the worktree of ${candidate.worker} is gone; end the swarm as partial` }
+    result = { outcome, summary, worker: candidate?.worker ?? null, artifacts: candidate?.artifacts ?? [], project, base, trees }
+    writeJson(resultFile, result)
   }
-  for (const w of running()) run(['dispatch', 'end', w.sessionId, '--json'])
-  let left = running()
-  for (const end = Date.now() + waitMs; left.length && Date.now() < end; left = running()) await sleep(pollMs)
-  if (left.length) {
-    return { ok: false, error: `${left.map((w) => w.name).join(', ')} still running; the swarm keeps running. End them from the board, then run /swarm-stop again.` }
+  if (!result.delivery) {
+    const { project, base, trees, artifacts } = result
+    let delivery = NOT_DELIVERED
+    if (result.outcome === 'complete') delivery = deliver({ dir: request.dir, project, base, wt: trees[result.worker].path, artifacts })
+    if (!delivery.delivered) delivery = { ...delivery, recovery: preserve({ dir: request.dir, project, base, trees, artifacts }) }
+    result = { ...result, outcome: delivery.conflicts.length ? 'delivery_conflict' : result.outcome, delivery }
+    writeJson(resultFile, result)
   }
-  const reason = 'the supervisor stopped the swarm'
-  for (const w of main('status', request).board.workers.filter((x) => x.state !== 'stopped')) {
-    const out = main('worker_stop', { ...request, idempotency_key: `swarm-stop-${w.worker}`, worker: w.worker, reason })
-    if (!out.ok) return out
+  cleanup(result.project, result.trees)
+  const out = main('end', { ...request, idempotency_key: 'swarm-finish', outcome: result.outcome, summary: result.summary })
+  const { delivery, ...rest } = result
+  return out.ok ? { ok: true, result: { ...rest, ...delivery } } : out
+}
+
+const list = (paths, max = 20) => (paths.length > max ? `${paths.slice(0, max).join(', ')} and ${paths.length - max} more` : paths.join(', '))
+
+// DeLM's final report (src/run/mod.rs:478-510).
+export function resultText(listId, r) {
+  if (r.outcome === 'delivery_conflict') {
+    return `Not delivered. Delivery needs conflict resolution for: ${list(r.conflicts)}. Your edits and the proposed changes are preserved in ${r.recovery}. Swarm ${listId} ended as delivery_conflict.`
   }
-  return main('end', { ...request, idempotency_key: 'swarm-stop', outcome: 'stopped', summary: 'Stopped with /swarm-stop.' })
+  if (!r.delivered) return `Swarm ${listId} ended as ${r.outcome}. Every worker's changes are saved in ${r.recovery}; the worktrees are removed.`
+  const lines = [r.changed.length ? `Delivered ${r.changed.length} file${r.changed.length === 1 ? '' : 's'} from ${r.worker} into ${r.project}: ${list(r.changed)}.` : `The result of ${r.worker} changes no file in ${r.project}.`]
+  if (r.merged.length || r.environment_files_changed.length) {
+    lines.push(`Run the needed local setup or a focused check before you report it ready. Merged with your edits: ${list(r.merged) || 'none'}. Environment files changed: ${list(r.environment_files_changed) || 'none'}.`)
+  }
+  const excluded = Object.keys(r.excluded)
+  if (excluded.length) lines.push(`Not delivered: ${list(excluded)} (recognized credentials).`)
+  if (r.recovery) lines.push(`The versions it replaced are in ${r.recovery}.`)
+  lines.push(`Swarm ${listId} ended as complete; the worktrees are removed.`)
+  return lines.join('\n')
+}
+
+function parseArgs(json) {
+  if (!json) return {}
+  try {
+    return JSON.parse(json)
+  } catch {
+    throw new Error('the arguments must be one JSON object')
+  }
 }
 
 export function command(name, request, json) {
-  let args = {}
-  if (json) {
-    try {
-      args = JSON.parse(json)
-    } catch {
-      throw new Error('the arguments must be one JSON object')
-    }
-  }
-  return main(name, { idempotency_key: randomUUID(), ...args, ...request, cwd: process.cwd() })
+  return main(name, { idempotency_key: randomUUID(), ...parseArgs(json), ...request, cwd: process.cwd() })
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
@@ -150,10 +205,8 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.a
   }
   const own = {
     board: async (listId, request) => boardText(listId, ok(main('status', request)).board),
-    stop: async (listId, request) => {
-      ok(await stop(request))
-      return `Stopped swarm ${listId}. Its workers ended; their worktrees and the board stay.`
-    },
+    stop: async (listId, request) => resultText(listId, ok(await finish(request, { outcome: 'stopped', summary: 'Stopped with /swarm-stop.' })).result),
+    end: async (listId, request) => resultText(listId, ok(await finish(request, parseArgs(json))).result),
   }[name]
   try {
     const listId = given ?? (own ? ownSwarm() : undefined)

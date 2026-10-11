@@ -18,6 +18,16 @@ export function renameRetry(from, to) {
   }
 }
 
+// The parsed file, or null when it is missing.
+export function readJson(file) {
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf8'))
+  } catch (err) {
+    if (err.code === 'ENOENT') return null
+    throw err
+  }
+}
+
 export function writeJson(file, value) {
   const tmp = `${file}.${process.pid}.tmp`
   fs.writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`)

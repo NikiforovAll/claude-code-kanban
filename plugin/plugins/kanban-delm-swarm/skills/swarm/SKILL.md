@@ -58,8 +58,15 @@ Run the board commands with `node "<base directory>/../../scripts/supervisor.mjs
 | `task_close` | `{"task_id", "reason"}` | Closes an open task |
 | `task_release` | `{"task_id", "summary"}` | Frees a worker's claim |
 | `request` | `{"text"}` | Sends a new request revision: a change of scope, or more work after a complete result |
-| `end` | `{"outcome": "complete", "summary"}` (or `partial`, `stopped`) | Ends the swarm |
+| `end` | `{"outcome": "complete", "summary"}` (or `partial`, `stopped`) | Stops the workers, removes their worktrees and ends the swarm. `complete` first brings the candidate's result into the user's project; `partial` and `stopped` save every worker's changes to a recovery bundle |
 
-The user can type `/swarm-status` to see the board and `/swarm-stop` to stop the workers and end the swarm as `stopped`; neither takes a turn of yours. After a stop, the watch prints that the swarm ended.
+The user can type `/swarm-status` to see the board and `/swarm-stop` to end the swarm as `stopped`; neither takes a turn of yours. After a stop, the watch prints that the swarm ended.
 
-On a complete notice, check the result before you end the swarm. A complete result stops the workers' changes until you send a request or end it; a message does not lift it. On a blocked notice, read the worker's summary with `status`, then answer it as above, or ask the user first.
+On a complete notice, check the result in the candidate worker's worktree before you end the swarm. A complete result stops the workers' changes until you send a request or end it; a message does not lift it. When it falls short, send a request. When it is ready, end the swarm as `complete` and report the output to the user as it is:
+
+- **Delivered**: the changed files are in the project. The Git index and HEAD are as they were, so the user reviews and commits them. When the output says to run setup or a focused check (a file merged with the user's edits, or a changed dependency manifest), run it before you call the result ready.
+- **Not delivered** (`delivery_conflict`): the user edited the same lines during the run, so nothing was written to the project. Do not call it delivered. Report the conflicting paths and the recovery bundle. When the user asks, resolve them from the bundle: its `complete.json` names each file's start and result versions, stored as blobs named by their SHA-256.
+
+When `end` fails, it has written nothing it cannot finish: fix the cause it names, then run the same command again.
+
+On a blocked notice, read the worker's summary with `status`, then answer it as above, or ask the user first.

@@ -19,7 +19,7 @@ const KINDS = ['implementation', 'verification', 'integration']
 const TASK_STATES = ['available', 'claimed', 'done']
 const WORKER_STATES = ['working', 'waiting', 'blocked']
 const OUTCOMES = ['complete', 'partial', 'blocked', 'waiting']
-const END_OUTCOMES = ['complete', 'partial', 'stopped']
+export const END_OUTCOMES = ['complete', 'partial', 'stopped', 'delivery_conflict']
 // A waiting worker's dependency has no producer when no one works on it.
 // The same name as CHANGES_FILE in hooks/swarm.ts.
 export const CHANGES_FILE = 'changes'
@@ -460,11 +460,14 @@ class Store {
   view() {
     const { revision, state, outcome } = this.context()
     const workers = this.db.prepare('SELECT * FROM workers ORDER BY rowid').all()
+    const candidate = this.candidate()
+    const declared = candidate && JSON.parse(candidate.payload)
     return {
       sequence: this.lastSeq(),
       request_revision: revision,
       state,
       outcome: outcome && JSON.parse(outcome),
+      candidate: declared && { worker: declared.worker, summary: declared.summary, artifacts: declared.artifacts ?? [], sequence: candidate.seq },
       workers: workers.map((w) => {
         const row = { worker: w.name ?? w.actor, state: w.state, running: !!w.turn, summary: w.summary, dependency: w.dependency, sequence: w.updated }
         if (w.state !== 'waiting') return row

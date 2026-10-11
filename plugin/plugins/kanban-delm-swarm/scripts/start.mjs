@@ -142,9 +142,10 @@ export function start({ goal, spec: rawSpec, n = 2, cwd = process.cwd(), env = p
   if (!Number.isInteger(n) || n < MIN_WORKERS || n > MAX_WORKERS) throw new Error(`--n must be ${MIN_WORKERS} to ${MAX_WORKERS}`)
   const parent = env.CLAUDE_CODE_SESSION_ID
   if (!parent) throw new Error('run /swarm from a Claude Code session')
+  let project
   let base
   try {
-    base = execFileSync('git', ['-C', cwd, 'rev-parse', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+    ;[project, base] = execFileSync('git', ['-C', cwd, 'rev-parse', '--show-toplevel', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim().split(/\r?\n/)
   } catch {
     throw new Error(`${cwd} is not a git repository with a commit: each worker runs in its own worktree`)
   }
@@ -153,7 +154,7 @@ export function start({ goal, spec: rawSpec, n = 2, cwd = process.cwd(), env = p
   const { listId, suffix, dir } = claim(config, goal)
   const group = [groupPath(JSON.parse(cck(['group', 'list', '--all', '--json'])).groups, parent), listId].filter(Boolean).join('/')
   const workers = Array.from({ length: n }, (_, i) => ({ name: `w${i + 1}-${suffix}` }))
-  const registry = { listId, group, goal: goal.trim(), parent, base, workers, state: 'running', startedAt: new Date().toISOString() }
+  const registry = { listId, group, goal: goal.trim(), parent, project, base, workers, state: 'running', startedAt: new Date().toISOString() }
   const stored = main('spec', { ...storeRequest(config, registry), text: spec })
   if (!stored.ok) throw new Error(`the spec: ${stored.error}`)
   writeJson(`${dir}/swarm.json`, registry)
