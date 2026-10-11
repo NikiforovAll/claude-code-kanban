@@ -5534,6 +5534,9 @@ body.show-resizing iframe {
 .rendered-md li {
   margin: 0.2em 0;
 }
+.rendered-md ul > li:has(> input[type='checkbox']) {
+  list-style: none;
+}
 .rendered-md a {
   color: var(--accent);
 }
