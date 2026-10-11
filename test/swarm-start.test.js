@@ -27,26 +27,34 @@ describe('swarm start', () => {
     assert.equal(m.configDir({ USERPROFILE: 'C:\\Users\\a' }), 'C:/Users/a/.claude');
   });
 
-  it('takes a new suffix when the folder or the task list is taken', () => {
+  it('refuses a name that a swarm, a task list or a group holds', () => {
     const config = tempConfig();
-    const suffixes = ['aaaaaa', 'aaaaaa', 'bbbbbb', 'cccccc'];
-    const next = () => suffixes.shift();
-    assert.equal(m.claim(config, 'Fix login', next).listId, 'swarm-fix-login-aaaaaa');
-    fs.mkdirSync(`${config}/tasks/swarm-fix-login-bbbbbb`, { recursive: true });
-    const second = m.claim(config, 'Fix login', next);
-    assert.deepEqual([second.listId, second.suffix], ['swarm-fix-login-cccccc', 'cccccc']);
-    assert.ok(fs.statSync(second.dir).isDirectory());
+    const first = m.claim(config, 'swarm-fix-login');
+    assert.ok(fs.statSync(first.dir).isDirectory());
+    assert.throws(() => m.claim(config, 'swarm-fix-login'), /swarm-fix-login is taken by another swarm; run start again with --name/);
+    fs.mkdirSync(`${config}/tasks/swarm-mine`, { recursive: true });
+    assert.throws(() => m.claim(config, 'swarm-mine'), /taken by a task list/);
+    assert.throws(() => m.claim(config, 'swarm-grouped', [{ name: 'swarm-grouped' }]), /taken by a group/);
+    assert.deepEqual(fs.readdirSync(`${config}/.cck/swarm`), ['swarm-fix-login']);
   });
 
-  it('gives two starts at the same moment two folders', async () => {
+  it('gives one of two starts at the same moment the name', async () => {
     const config = tempConfig();
-    const src = `import(${JSON.stringify(pathToFileURL(START).href)}).then((m) => console.log(m.claim(${JSON.stringify(config)}, 'same goal').listId))`;
-    const run = () => new Promise((resolve, reject) => {
-      execFile(process.execPath, ['--input-type=module', '-e', src], (err, out) => (err ? reject(err) : resolve(out.trim())));
+    const src = `import(${JSON.stringify(pathToFileURL(START).href)}).then((m) => m.claim(${JSON.stringify(config)}, 'swarm-same'))`;
+    const run = () => new Promise((resolve) => {
+      execFile(process.execPath, ['--input-type=module', '-e', src], (err) => resolve(!err));
     });
-    const ids = await Promise.all(Array.from({ length: 6 }, run));
-    assert.equal(new Set(ids).size, 6);
-    assert.equal(fs.readdirSync(`${config}/.cck/swarm`).length, 6);
+    const won = await Promise.all(Array.from({ length: 6 }, run));
+    assert.equal(won.filter(Boolean).length, 1);
+  });
+
+  it('names workers adjective-scientist, distinct and free', async () => {
+    const { workerNames } = await import(pathToFileURL(path.join(path.dirname(START), 'names.mjs')).href);
+    const names = workerNames(4);
+    assert.equal(new Set(names).size, 4);
+    for (const n of names) assert.match(n, /^[a-z]+-[a-z]+$/);
+    const picks = [0, 0, 1, 0, 1, 0, 0, 1];
+    assert.deepEqual(workerNames(2, new Set(['bold-babbage']), () => picks.shift()), ['brave-babbage', 'bold-bohr']);
   });
 
   it('maps the supervisor to the new list only', () => {

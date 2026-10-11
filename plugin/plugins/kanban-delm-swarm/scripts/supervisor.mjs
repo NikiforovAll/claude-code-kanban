@@ -36,11 +36,12 @@ export function swarmRequest(listId, env = process.env) {
 const oneLine = (text) => compact(String(text ?? '').replace(/\s+/g, ' ').trim(), SUMMARY_CHARS)
 // The board view lists open tasks first, so a full view shows every open task it can.
 const openTasks = (board) => board.tasks.filter((t) => t.state !== 'done')
+const taskRows = (tasks) => tasks.map((t) => `#${t.task_id} ${t.state}${t.owner ? ` by ${t.owner}` : ''}: ${oneLine(t.title)}`).join('; ')
 
 export function noticeLine(n) {
   switch (n.kind) {
     case 'complete':
-      return `${n.worker} declared the goal complete under revision ${n.revision}: ${oneLine(n.summary)}`
+      return `${n.worker} declared the goal complete under revision ${n.revision}: ${oneLine(n.summary)}${n.open?.length ? ` Open tasks to review: ${taskRows(n.open)}.` : ''}`
     case 'blocked':
       return `${n.worker} is blocked: ${oneLine(n.summary)}`
     case 'stopped':
@@ -138,8 +139,7 @@ export async function finish(request, { outcome, summary }, { run = cck, waitMs 
     }
     const open = openTasks(status.board)
     if (outcome === 'complete' && open.length) {
-      const rows = open.map((t) => `#${t.task_id} ${t.state}${t.owner ? ` by ${t.owner}` : ''}: ${oneLine(t.title)}`)
-      return { ok: false, error: `review the open tasks first: ${rows.join('; ')}. Close each moot one with task_close and a reason (task_release a claimed one first), or send a request for the work it names.` }
+      return { ok: false, error: `review the open tasks first: ${taskRows(open)}. Close each moot one with task_close and a reason (task_release a claimed one first), or send a request for the work it names.` }
     }
     const roster = (request.roster ?? []).filter((w) => w.sessionId)
     const running = () => {

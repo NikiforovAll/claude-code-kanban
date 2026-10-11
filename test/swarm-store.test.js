@@ -669,11 +669,14 @@ describe('swarm store', { skip: !hasSqlite && 'node:sqlite needs Node 22.5 or la
 
   it('nothing wakes after a complete outcome or the end, or a stopped worker', () => {
     const t = team(world());
+    const held = done(t, 'task_create', parent, { idempotency_key: 'held', title: 'Held', description: 'x', assignee: 'worker-a' }).result;
     done(t, 'complete', b, { idempotency_key: 'done', outcome: 'complete', expected_revision: 1, summary: 'Goal met' });
     assert.match(run(t, 'task_create', b, { idempotency_key: 'late', title: 'Late', description: 'x' }).error, /declared the goal complete/);
     assert.equal(done(t, 'complete', b, { idempotency_key: 'done', outcome: 'complete', expected_revision: 1, summary: 'Goal met' }).result.outcome, 'complete', 'a resent call still replays');
     assert.deepEqual(turn(t, a, false), { wake: false }, 'no repair while a candidate waits');
-    assert.deepEqual(answer(ok(t, 'notices', parent)).notices, [{ kind: 'complete', worker: 'worker-b', summary: 'Goal met', revision: 1 }]);
+    assert.deepEqual(answer(ok(t, 'notices', parent)).notices, [
+      { kind: 'complete', worker: 'worker-b', summary: 'Goal met', revision: 1, open: [{ task_id: held.task_id, state: 'claimed', owner: 'worker-a', title: 'Held' }] },
+    ]);
     done(t, 'worker_stop', a, { idempotency_key: 'stop', reason: 'session ended' });
     done(t, 'request', parent, { idempotency_key: 'r2', text: 'More' });
     assert.deepEqual(wake(t, a), { wake: false }, 'a stopped worker is not woken');

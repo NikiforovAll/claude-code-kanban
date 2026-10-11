@@ -2,11 +2,12 @@
 // stores the supervisor's spec as request revision 1, then has cck dispatch the workers.
 // Run by the swarm skill from the parent session.
 import { execFileSync } from 'node:child_process'
-import { randomBytes } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { worktreeRoot } from './deliver.mjs'
 import { configDir, readJson, writeJson } from './files.mjs'
+import { workerNames } from './names.mjs'
 import { main } from './store.mjs'
 
 // DeLM's research harness runs 2 or 4 workers; its product runs 2.
@@ -21,23 +22,37 @@ export { configDir }
 export const slug = (goal) =>
   goal.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+/, '').slice(0, 24).replace(/-+$/, '') || 'goal'
 
-// The mkdir is the claim, so two starts never share a folder, a store or a registry.
-// A task list of that name already on disk belongs to someone else, so it is skipped too.
-export function claim(config, goal, suffix = () => randomBytes(3).toString('hex')) {
+// The mkdir is the claim, so two starts never share a folder, a store or a registry. The id also
+// names the task list and the group, so a name either already holds is refused too.
+export function claim(config, listId, groups = []) {
   const root = `${config}/.cck/swarm`
   fs.mkdirSync(root, { recursive: true })
-  for (let i = 0; i < 20; i++) {
-    const hex = suffix()
-    const listId = `swarm-${slug(goal)}-${hex}`
-    if (fs.existsSync(`${config}/tasks/${listId}`)) continue
+  let holder = fs.existsSync(`${config}/tasks/${listId}`) ? 'a task list' : groups.some((g) => g.name === listId) ? 'a group' : null
+  if (!holder) {
     try {
       fs.mkdirSync(`${root}/${listId}`)
-      return { listId, suffix: hex, dir: `${root}/${listId}` }
+      return { listId, dir: `${root}/${listId}` }
     } catch (err) {
       if (err.code !== 'EEXIST') throw err
+      holder = 'another swarm'
     }
   }
-  throw new Error('no free swarm id after 20 tries')
+  throw new Error(`the swarm name ${listId} is taken by ${holder}; run start again with --name <another short name>`)
+}
+
+// A worker's name is its peer name and its worktree, so it must be free among the live dispatches
+// and the project's leftover worktrees and worktree-<name> branches.
+function takenWorkerNames(project) {
+  const live = JSON.parse(cck(['dispatch', 'list', '--all', '--json'])).map((d) => d.name)
+  const branches = execFileSync('git', ['-C', project, 'for-each-ref', '--format=%(refname:short)', 'refs/heads/worktree-*'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((b) => b.slice('worktree-'.length))
+  let trees = []
+  try {
+    trees = fs.readdirSync(worktreeRoot(project))
+  } catch {}
+  return new Set([...live, ...branches, ...trees])
 }
 
 // Swarm folders are plugin state under .cck/, kept as long as Claude Code keeps transcripts
@@ -157,7 +172,7 @@ export const dispatchArgs = ({ cwd, specFile, name, listId, model, claudeArgs = 
   ...(claudeArgs.length ? ['--', ...claudeArgs] : []),
 ]
 
-export function start({ goal, spec: rawSpec, n = 2, cwd = process.cwd(), env = process.env, model, claudeArgs = [] }) {
+export function start({ goal, name, spec: rawSpec, n = 2, cwd = process.cwd(), env = process.env, model, claudeArgs = [] }) {
   const spec = rawSpec?.trim()
   if (!goal?.trim()) throw new Error('give the goal')
   if (!spec) throw new Error('give the spec with --spec-file')
@@ -173,9 +188,10 @@ export function start({ goal, spec: rawSpec, n = 2, cwd = process.cwd(), env = p
   }
   const config = configDir(env)
   prune(config)
-  const { listId, suffix, dir } = claim(config, goal)
-  const group = [groupPath(JSON.parse(cck(['group', 'list', '--all', '--json'])).groups, parent), listId].filter(Boolean).join('/')
-  const workers = Array.from({ length: n }, (_, i) => ({ name: `w${i + 1}-${suffix}` }))
+  const { groups } = JSON.parse(cck(['group', 'list', '--all', '--json']))
+  const workers = workerNames(n, takenWorkerNames(project)).map((w) => ({ name: w }))
+  const { listId, dir } = claim(config, `swarm-${slug(name?.trim() || goal)}`, groups)
+  const group = [groupPath(groups, parent), listId].filter(Boolean).join('/')
   const registry = { listId, group, goal: goal.trim(), parent, project, base, workers, state: 'running', startedAt: new Date().toISOString() }
   const stored = main('spec', { ...storeRequest(config, registry), text: spec })
   if (!stored.ok) throw new Error(`the spec: ${stored.error}`)
@@ -225,6 +241,7 @@ function parseArgs(argv) {
     else if (a === '--spec-file') out.spec = fs.readFileSync(argv[++i], 'utf8')
     else if (a === '--cwd') out.cwd = argv[++i]
     else if (a === '--model') out.model = argv[++i]
+    else if (a === '--name') out.name = argv[++i]
     else out.goal.push(a)
   }
   return { ...out, goal: out.goal.join(' ') }

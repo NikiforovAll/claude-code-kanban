@@ -67,10 +67,14 @@ function start(argv) {
   if (!process.env.CLAUDE_CODE_SESSION_ID) throw new Error('run start from the Claude Code session that supervises the swarm')
   const { own, given } = split(argv)
   const claudeArgs = ['--plugin-dir', PLUGIN, ...(given.length ? given : ['--permission-mode', 'auto'])]
-  const out = node('start.mjs', ['--n', opt(own, '--n', '2'), '--model', opt(own, '--model', 'sonnet'), '--cwd', REPO, '--spec-file', `${HERE}/fixture/spec.md`, GOAL, '--', ...claudeArgs])
+  // Every run has the same goal, and an earlier run's folder keeps its name.
+  const config = configDir(process.env)
+  let k = 1
+  while (fs.existsSync(`${config}/.cck/swarm/swarm-e2e-${k}`) || fs.existsSync(`${config}/tasks/swarm-e2e-${k}`)) k++
+  const out = node('start.mjs', ['--n', opt(own, '--n', '2'), '--model', opt(own, '--model', 'sonnet'), '--name', `e2e-${k}`, '--cwd', REPO, '--spec-file', `${HERE}/fixture/spec.md`, GOAL, '--', ...claudeArgs])
   if (out.status !== 0) throw new Error(out.stderr.trim())
   const started = JSON.parse(out.stdout)
-  fs.writeFileSync(RUNS, JSON.stringify([...runs(), { listId: started.listId, config: configDir(process.env), at: new Date().toISOString() }], null, 2))
+  fs.writeFileSync(RUNS, JSON.stringify([...runs(), { listId: started.listId, config, at: new Date().toISOString() }], null, 2))
   return [
     out.stdout.trim(),
     '',

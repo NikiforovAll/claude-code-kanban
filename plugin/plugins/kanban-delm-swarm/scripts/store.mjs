@@ -1002,6 +1002,15 @@ class Store {
         const p = JSON.parse(e.payload)
         return e.kind === 'outcome' ? { kind: p.outcome, worker: p.worker, summary: p.summary, revision: p.expected_revision } : { kind: 'stopped', worker: p.worker, summary: p.reason }
       })
+    // A complete notice names the tasks still open, so the supervisor reviews them with the result.
+    const complete = notices.filter((n) => n.kind === 'complete')
+    if (complete.length) {
+      const open = this.db.prepare("SELECT * FROM tasks WHERE state != 'done' ORDER BY id").all().map((r) => {
+        const t = Store.row(r)
+        return { task_id: t.task_id, state: t.state, owner: this.label(t.owner), title: t.title }
+      })
+      for (const n of complete) n.open = open
+    }
     if (top > since) this.db.prepare('UPDATE context SET notice_seq = ? WHERE id = 1').run(top)
     if (state === 'ended') return { ended: true, notices }
     if (top > stalledAt && !this.candidate()) {

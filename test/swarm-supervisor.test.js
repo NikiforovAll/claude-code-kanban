@@ -64,6 +64,10 @@ describe('swarm supervisor', { skip: !hasSqlite && 'node:sqlite needs Node 22.5 
     assert.equal(await watching, 0);
     assert.deepEqual(lines.slice(1), ['The swarm has ended.']);
     assert.equal(sup.noticeLine({ kind: 'complete', worker: 'w2', revision: 2, summary: 'x'.repeat(700) }).length, 'w2 declared the goal complete under revision 2: '.length + sup.SUMMARY_CHARS + '...'.length);
+    assert.equal(
+      sup.noticeLine({ kind: 'complete', worker: 'w2', revision: 1, summary: 'Done.', open: [{ task_id: 2, state: 'claimed', owner: 'w1', title: 'Slugify' }] }),
+      'w2 declared the goal complete under revision 1: Done. Open tasks to review: #2 claimed by w1: Slugify.',
+    );
   });
 
   it("finds this session's running swarm and shows its board", () => {

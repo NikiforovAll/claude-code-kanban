@@ -24,7 +24,8 @@ The swarm runs in cck's embedded terminal, so the cck server must run with the t
    node "<base directory>/../../scripts/start.mjs" --n 2 --spec-file '<spec file>' '<goal>'
    ```
 
-3. Report the output to the user: the swarm id (`listId`), its group and each worker's name and session id. On an error, report it as it is and stop.
+   The swarm id (`listId`) is `swarm-` and the goal in lowercase words. When start says the name is taken, run it again with `--name '<another short name>'`.
+3. Report the output to the user: the swarm id (`listId`), its group and each worker's name and session id. On any other error, report it as it is and stop.
 4. Open the viewer as a pane: follow the steps in `<base directory>/../swarm-viewer/SKILL.md` with the `listId`. It reuses a viewer that already runs. When it fails, report the error and go on.
 5. Watch the swarm with the `Monitor` tool, `timeout_ms` 1800000, description `swarm <listId>`:
 
@@ -62,7 +63,7 @@ Run the board commands with `node "<base directory>/../../scripts/supervisor.mjs
 
 The user can type `/swarm-status` to see the board and `/swarm-stop` to end the swarm as `stopped`; neither takes a turn of yours. After a stop, the watch prints that the swarm ended.
 
-On a complete notice, check the result in the candidate worker's worktree before you end the swarm. Run the check with a path flag or in a subshell (`npm --prefix <worktree> test`, `(cd <worktree> && …)`), never with a `cd` that stays: `end` removes the worktrees and refuses while your shell is in one. A complete result stops the workers' changes until you send a request or end it; a message does not lift it. When it falls short, send a request. Then review the tasks that are still open: close each one the result makes moot with `task_close` and a reason (`task_release` a claimed one first), and send a request for one that names missing work. `end` as `complete` refuses while a task is open. When it is ready, end the swarm as `complete` and report the output to the user as it is:
+On a complete notice, check the result in the candidate worker's worktree before you end the swarm. Run the check with a path flag or in a subshell (`npm --prefix <worktree> test`, `(cd <worktree> && …)`), never with a `cd` that stays: `end` removes the worktrees and refuses while your shell is in one. A complete result stops the workers' changes until you send a request or end it; a message does not lift it. When it falls short, send a request. Then review the open tasks that the notice lists, a claimed one too, as its work can be missing from the result: close each one the result makes moot with `task_close` and a reason (`task_release` a claimed one first), and send a request for one that names missing work. `end` as `complete` refuses while a task is open. When it is ready, end the swarm as `complete` and report the output to the user as it is:
 
 - **Delivered**: the changed files are in the project. The Git index and HEAD are as they were, so the user reviews and commits them. When the output says to run setup or a focused check (a file merged with the user's edits, or a changed dependency manifest), run it before you call the result ready.
 - **Not delivered** (`delivery_conflict`): the user edited the same lines during the run, so nothing was written to the project. Do not call it delivered. Report the conflicting paths and the recovery bundle. When the user asks, resolve them from the bundle: its `complete.json` names each file's start and result versions, stored as blobs named by their SHA-256.
