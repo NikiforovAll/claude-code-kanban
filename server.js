@@ -3627,7 +3627,6 @@ app.post('/api/tasks/:sessionId', async (req, res) => {
       id,
       subject,
       description: (req.body.description || '').trim(),
-      activeForm: subject,
       status: 'pending',
       blocks: [],
       blockedBy: [],

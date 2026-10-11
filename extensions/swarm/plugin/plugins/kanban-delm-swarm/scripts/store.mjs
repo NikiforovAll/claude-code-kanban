@@ -524,7 +524,6 @@ class Store {
       id: String(t.task_id),
       subject: t.title,
       description: sections.filter(Boolean).join('\n\n'),
-      activeForm: t.title,
       status,
       blocks: [],
       blockedBy: [],
