@@ -121,14 +121,17 @@ export async function build({ out, store = path.join(here, '..', '..', '..', 'sc
   const pubs = {}
   const ids = {}
 
-  await at(0, () => look(w1))
+  await at(0, () => {
+    call('spec', parent, { text: GOAL })
+    look(w1)
+  })
   await at(0.5, () => {
-    create(parent, 'Parse log lines into records', 'Messages may contain spaces and quotes; keep ts, level, message.')
-    create(parent, 'Add CSV writer', 'src/csv.js: rows of records to RFC 4180 text.')
-    create(parent, 'Wire --format csv flag into CLI', 'src/cli.js picks the writer from --format.')
-    create(parent, 'Escape commas and quotes in CSV fields', 'Quote fields with comma, quote or newline; double inner quotes.')
-    create(parent, 'Add tests for CSV export', 'test/csv.test.js plus a parser case for quoted messages.')
-    create(parent, 'Update README usage', 'Document --format csv with an example.')
+    create(w1, 'Parse log lines into records', 'Messages may contain spaces and quotes; keep ts, level, message.')
+    create(w1, 'Add CSV writer', 'src/csv.js: rows of records to RFC 4180 text.')
+    create(w1, 'Wire --format csv flag into CLI', 'src/cli.js picks the writer from --format.')
+    create(w1, 'Escape commas and quotes in CSV fields', 'Quote fields with comma, quote or newline; double inner quotes.')
+    create(w1, 'Add tests for CSV export', 'test/csv.test.js plus a parser case for quoted messages.')
+    create(w1, 'Update README usage', 'Document --format csv with an example.')
   })
   await at(1, () => {
     look(w2)
@@ -226,23 +229,29 @@ export async function build({ out, store = path.join(here, '..', '..', '..', 'sc
     pubs.tests = publish(w2, 'CSV and parser tests pass (5 cases).', ['test/csv.test.js', 'test/parser.test.js'])
     finish(w2, 5, 'CSV and parser tests pass (5 cases).')
   })
-  await at(53, () => call('status', w2, { state: 'waiting', dependency: `task:${ids.bench}`, summary: 'all my tasks are done' }))
+  await at(53, () => call('complete', w2, { outcome: 'waiting', expected_revision: 2, dependency: `task:${ids.bench}`, summary: 'all my tasks are done' }))
   await at(54, () => {
-    wakes.push(endTurn(w1))
     wakes.push(endTurn(w2))
+    wakes.push(endTurn(w1))
   })
-  await at(58, () => {
-    put(wt[w1.name], 'bench/results.txt', 'csv export, 1,000,000 lines\nrun1 3.2 s  run2 3.0 s  run3 3.1 s\npeak rss 210 MB\n')
-    finding(w1, 'Buffered CSV export of 1M lines takes about 3.1 s with 210 MB peak memory (bench/csv.bench.js, three runs).')
-  })
-  await at(59, () => {
-    put(wt[w1.name], 'bench/csv.bench.js', "const { toCsv } = require('../src/csv')\nconst rows = Array.from({ length: 1e6 }, (_, i) => ({ ts: String(i), level: 'INFO', message: `line ${i}` }))\nconsole.time('csv'); toCsv(rows); console.timeEnd('csv')\n")
-    pubs.bench = publish(w1, '1M lines in 3.1 s; script and results in bench/.', ['bench/csv.bench.js', 'bench/results.txt'])
-    finish(w1, ids.bench, '1M lines in 3.1 s; script in bench/.')
+  await at(55, () => {
+    call('complete', w1, { outcome: 'blocked', expected_revision: 2, summary: 'The bench needs a quiet machine; the shared runner is busy.' })
+    wakes.push(endTurn(w1))
+    wakes.push(`w2:${call('wake', w2).reason ?? 'none'}`)
   })
   if (!running) {
+    await at(58, () => {
+      call('turn', w1, { running: true })
+      put(wt[w1.name], 'bench/results.txt', 'csv export, 1,000,000 lines\nrun1 3.2 s  run2 3.0 s  run3 3.1 s\npeak rss 210 MB\n')
+      finding(w1, 'Buffered CSV export of 1M lines takes about 3.1 s with 210 MB peak memory (bench/csv.bench.js, three runs).')
+    })
+    await at(59, () => {
+      put(wt[w1.name], 'bench/csv.bench.js', "const { toCsv } = require('../src/csv')\nconst rows = Array.from({ length: 1e6 }, (_, i) => ({ ts: String(i), level: 'INFO', message: `line ${i}` }))\nconsole.time('csv'); toCsv(rows); console.timeEnd('csv')\n")
+      pubs.bench = publish(w1, '1M lines in 3.1 s; script and results in bench/.', ['bench/csv.bench.js', 'bench/results.txt'])
+      finish(w1, ids.bench, '1M lines in 3.1 s; script in bench/.')
+    })
     await at(60, () => {
-      for (const w of [w1, w2]) call('complete', w, { outcome: 'complete', expected_revision: 2, summary: 'All tasks done; CSV export, tests, README and bench are published.' })
+      call('complete', w1, { outcome: 'complete', expected_revision: 2, summary: 'All tasks done; CSV export, tests, README and bench are published.' })
       call('end', parent, { outcome: 'complete', summary: 'CSV export shipped with tests, README usage and a 1M-line benchmark.' })
     })
     registry.state = 'ended'

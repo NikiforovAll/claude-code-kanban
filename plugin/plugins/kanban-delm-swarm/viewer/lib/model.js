@@ -100,7 +100,8 @@ function buildModel(events, registry = {}, now = Date.now(), running = null) {
         mark('woken', { reason: e.reason, from: e.from, dependency: e.dependency });
         break;
       case 'request':
-        requests.push({ revision: e.revision, text: e.text, who, t });
+        // Revision 1 is the swarm's spec, written by start.mjs; only later revisions change it.
+        if (e.revision > 1) requests.push({ revision: e.revision, text: e.text, who, t });
         break;
       case 'end':
         end = { outcome: e.outcome, summary: e.summary, who, t };
@@ -114,7 +115,7 @@ function buildModel(events, registry = {}, now = Date.now(), running = null) {
   const ref = ended ? Math.max(last, registry.endedAt ? ms(registry.endedAt) : 0) : now;
   const start = registry.startedAt ? Math.min(ms(registry.startedAt), first) : first;
 
-  const isParent = (id) => id === registry.parent || names.get(id) === 'parent';
+  const isParent = (id) => id === registry.parent || ['parent', 'supervisor'].includes(names.get(id));
   const actorIds = [
     ...new Set([...(registry.workers ?? []).map((w) => w.sessionId).filter(Boolean), ...events.map((e) => e.actor)]),
   ].filter((id) => !isParent(id));
@@ -140,8 +141,9 @@ function buildModel(events, registry = {}, now = Date.now(), running = null) {
     if (status?.state === 'stopped') health = 'stopped';
     else if (status?.outcome === 'complete') health = 'finished';
     else if (silence == null) health = 'not started';
-    // A worker between turns sleeps until the store wakes it, so its silence alone is no alarm.
-    else if (turn === false && !(holding && silence >= QUIET_MS)) health = status?.state === 'blocked' || status?.state === 'waiting' ? status.state : 'idle';
+    // A worker between turns sleeps until the store wakes it, so its silence alone is no alarm,
+    // and an outcome it declared explains a claim it still holds.
+    else if (turn === false && (status?.outcome || !(holding && silence >= QUIET_MS))) health = status?.state === 'blocked' || status?.state === 'waiting' ? status.state : 'idle';
     else if (silence >= QUIET_MS) health = holding ? 'stuck' : 'quiet';
     else if (status?.state === 'blocked') health = 'blocked';
     else if (status?.state === 'waiting') health = 'waiting';

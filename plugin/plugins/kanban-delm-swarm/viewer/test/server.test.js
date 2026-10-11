@@ -157,13 +157,14 @@ describe('viewer server, run alone', () => {
 
   it('serves the log as rows, all or after a sequence', async () => {
     const all = (await json(port, `/api/log?swarm=${ENDED}`)).body;
-    assert.equal(all.length, 71);
+    assert.equal(all.length, 73);
     assert.deepEqual(Object.keys(all[0]).sort(), ['group', 'kind', 'payload', 'revision', 'seq', 't', 'text', 'who']);
-    const tail = (await json(port, `/api/log?swarm=${ENDED}&since=68`)).body;
+    assert.deepEqual([all[0].kind, all[0].who, all[0].payload.revision], ['request', 'supervisor', 1]);
+    const tail = (await json(port, `/api/log?swarm=${ENDED}&since=70`)).body;
     assert.deepEqual(tail.map((r) => [r.seq, r.kind]), [
-      [69, 'outcome'],
-      [70, 'outcome'],
-      [71, 'end'],
+      [71, 'task_finish'],
+      [72, 'outcome'],
+      [73, 'end'],
     ]);
   });
 
@@ -203,9 +204,9 @@ describe('viewer server, run alone', () => {
       const seq = first.data.swarm.seq;
       const dir = path.join(config, '.cck', 'swarm', RUNNING);
       const reg = registry(dir);
-      const w1 = { id: reg.workers[0].sessionId, name: reg.workers[0].name };
+      const w2 = { id: reg.workers[1].sessionId, name: reg.workers[1].name };
       const { main } = await store();
-      const r = main('status', { dir, parent: reg.parent, roster: reg.workers, actor: w1, idempotency_key: 'stream-test', summary: 'probe from the test' });
+      const r = main('status', { dir, parent: reg.parent, roster: reg.workers, actor: w2, idempotency_key: 'stream-test', summary: 'probe from the test' });
       assert.equal(r.ok, true, r.error);
       const pushed = await s.next((f) => f.event === 'swarm' && f.data.swarm.seq > seq);
       assert.equal(pushed.data.swarm.seq, seq + 1);

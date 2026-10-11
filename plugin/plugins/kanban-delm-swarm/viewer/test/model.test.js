@@ -33,15 +33,15 @@ describe('buildModel on the fixture swarm, built through the real store', () => 
     assert.deepEqual(m.progress, { total: 9, open: 0, claimed: 0, done: 9, closed: 1, goalReached: true });
     const closed = m.tasks.find((t) => t.closed);
     assert.equal(closed.subject, 'Add JSON export');
-    assert.equal(closed.createdBy, 'parent');
+    assert.equal(closed.createdBy, 'supervisor');
   });
 
-  it('keeps the parent out of the workers', () => {
+  it('keeps the supervisor out of the workers, and finishes only the worker that declared complete', () => {
     assert.deepEqual(
       m.workers.map((w) => [w.name, w.health]),
       [
         ['w1-a3f9c2', 'finished'],
-        ['w2-a3f9c2', 'finished'],
+        ['w2-a3f9c2', 'idle'],
         ['w3-a3f9c2', 'stopped'],
       ],
     );
@@ -64,8 +64,8 @@ describe('buildModel on the fixture swarm, built through the real store', () => 
     );
   });
 
-  it('lists requests, findings, publications and applies', () => {
-    assert.deepEqual(m.requests.map((r) => [r.revision, r.who]), [[2, 'parent']]);
+  it('lists requests after the spec, findings, publications and applies', () => {
+    assert.deepEqual(m.requests.map((r) => [r.revision, r.who]), [[2, 'supervisor']]);
     assert.equal(m.findings.length, 7);
     assert.equal(m.publications.length, 8);
     assert.equal(m.applies.length, 5);
@@ -118,11 +118,11 @@ describe('buildModel on a running swarm with a stalled waiter', () => {
     assert.deepEqual([w2.status.state, w2.status.woken, w2.status.wokeFor], ['working', 'no_producer', 'task:9']);
   });
 
-  it('reads from the store whose turn runs: the woken worker runs, the one that ended its turn sleeps', () => {
+  it('reads from the store whose turn runs: the woken worker runs, the one that declared blocked sleeps', () => {
     assert.deepEqual(
       m.workers.map((w) => [w.name, w.running, w.health]),
       [
-        ['w1-a3f9c2', false, 'idle'],
+        ['w1-a3f9c2', false, 'blocked'],
         ['w2-a3f9c2', true, 'quiet'],
         ['w3-a3f9c2', true, 'stopped'],
       ],
