@@ -118,13 +118,13 @@ describe('buildModel on a running swarm with a stalled waiter', () => {
     assert.deepEqual([w2.status.state, w2.status.woken, w2.status.wokeFor], ['working', 'no_producer', 'task:9']);
   });
 
-  it('reads from the store whose turn runs: the woken worker runs, the one that declared blocked sleeps', () => {
+  it('reads from the store whose turn runs: the woken worker runs, the blocked and the stopped ones do not', () => {
     assert.deepEqual(
       m.workers.map((w) => [w.name, w.running, w.health]),
       [
         ['w1-a3f9c2', false, 'blocked'],
         ['w2-a3f9c2', true, 'quiet'],
-        ['w3-a3f9c2', true, 'stopped'],
+        ['w3-a3f9c2', false, 'stopped'],
       ],
     );
   });
