@@ -6,7 +6,7 @@ import { randomBytes } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { renameRetry } from './files.mjs'
+import { configDir, renameRetry } from './files.mjs'
 import { main } from './store.mjs'
 
 // DeLM's research harness runs 2 or 4 workers; its product runs 2.
@@ -16,9 +16,7 @@ const DAY_MS = 86_400_000
 const DEFAULT_CLEANUP_DAYS = 30
 const WORKER_POLICY = new URL('../worker.md', import.meta.url)
 
-// The same formula as hooks/swarm.ts, so the parent and the workers name the same folder.
-export const configDir = (env = process.env) =>
-  (env.CLAUDE_CONFIG_DIR || `${env.HOME ?? env.USERPROFILE}/.claude`).replaceAll('\\', '/')
+export { configDir }
 
 export const slug = (goal) =>
   goal.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+/, '').slice(0, 24).replace(/-+$/, '') || 'goal'

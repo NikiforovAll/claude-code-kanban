@@ -26,18 +26,30 @@ It prints `Swarm running at http://localhost:<port>` when it is ready.
 | `--port <n>` or `PORT` | 3546 | Port. `0` picks a free one. |
 | `CLAUDE_CONFIG_DIR` | `~/.claude` | The config dir whose swarms it lists. Use the dir the swarm started in. |
 | `--swarm <folder>` | | Show only this swarm folder. The picker and `?swarm=` are then ignored. |
+| `--idle-exit <minutes>` | off | Exit after this long with no HTTP request and no open live stream. Fractions work. |
 | `HOST` | `127.0.0.1` | Bind address. |
 | `ALLOWED_HOSTS` | | More Host header values to accept, comma-separated. Others get 403. |
 
-## Show it in a cck pane
+## One viewer per config dir
 
-With the viewer running, add it to a session as a background tab next to Board:
+The viewer keeps a record at `<config dir>/.cck/swarm-viewer.json`:
 
-```bash
-claude-code-kanban pane add "http://localhost:3546/?swarm=<listId>" --title Swarm
+```json
+{ "pid": 4242, "port": 61258, "configDir": "C:\\Users\\me\\.claude" }
 ```
 
-The pane goes to this session (`$CLAUDE_CODE_SESSION_ID`). Pass `--session <id>` for another session. The user opens the tab when ready.
+- On start, it reads the record. When that viewer still runs and its `GET /api/health` names the same config dir, the new process prints that viewer's `Swarm running at` line and exits 0 without listening.
+- Else it listens, then claims the record with an exclusive create. Of two viewers that start together, the one that loses prints the winner's line and exits 0. A record left by a dead viewer is replaced.
+- It removes the record when it exits, only if the record is its own. A killed viewer leaves the record behind; the next start finds it dead and replaces it.
+- A viewer under the hub (`CLAUDE_HUB=1`) or with `--swarm` does not read or write the record.
+
+`GET /api/health` answers `{ ok, pid, port, configDir, pinned }`. Check `configDir` before using a recorded port, because a port can be reused by another config dir's viewer.
+
+## The viewer the skill starts
+
+`scripts/viewer.mjs` checks the hub first: it reads `hub.json` and `token` in the hub dir (`CLAUDE_HUB_DIR`, else `~/.claude-hub`) and asks the hub's `/api/config` for the Swarm app. When the hub lists it, the script uses it and starts nothing.
+
+Else it starts the viewer on a free port as a detached process, with `--idle-exit`, and reads the port from the `Swarm running at` line. The viewer keeps its own record, so a later run, or a parallel one, reuses it while it answers. To stop it, end the process with the recorded `pid`.
 
 ## Run it as a hub app
 

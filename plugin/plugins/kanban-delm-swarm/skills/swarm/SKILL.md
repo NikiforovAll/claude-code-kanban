@@ -25,7 +25,8 @@ The swarm runs in cck's embedded terminal, so the cck server must run with the t
    ```
 
 3. Report the output to the user: the swarm id (`listId`), its group and each worker's name and session id. On an error, report it as it is and stop.
-4. Watch the swarm with the `Monitor` tool, `timeout_ms` 1800000, description `swarm <listId>`:
+4. Open the viewer as a pane: follow the steps in `<base directory>/../swarm-viewer/SKILL.md` with the `listId`. It reuses a viewer that already runs. When it fails, report the error and go on.
+5. Watch the swarm with the `Monitor` tool, `timeout_ms` 1800000, description `swarm <listId>`:
 
    ```bash
    node "<base directory>/../../scripts/supervisor.mjs" watch <listId> 2>&1
@@ -60,5 +61,3 @@ Run the board commands with `node "<base directory>/../../scripts/supervisor.mjs
 | `end` | `{"outcome": "complete", "summary"}` (or `partial`, `stopped`) | Ends the swarm |
 
 On a complete notice, check the result before you end the swarm. A complete result stops the workers' changes until you send a request or end it; a message does not lift it. On a blocked notice, read the worker's summary with `status`, then answer it as above, or ask the user first.
-
-To watch the swarm, run the viewer and add it as a cck pane or a hub app. See [references/swarm-viewer.md](references/swarm-viewer.md).
