@@ -135,7 +135,12 @@ export function workerSpec({ spec, name, listId, names, transcript }) {
   ].join('\n')
 }
 
-export function start({ goal, spec: rawSpec, n = 2, cwd = process.cwd(), env = process.env }) {
+export const dispatchArgs = ({ cwd, specFile, name, listId, claudeArgs = [] }) => [
+  ...['dispatch', 'start', '--cwd', cwd, '--spec-file', specFile, '--name', name, '--group', listId, '--task-list', listId, '--worktree', name, '--json'],
+  ...(claudeArgs.length ? ['--', ...claudeArgs] : []),
+]
+
+export function start({ goal, spec: rawSpec, n = 2, cwd = process.cwd(), env = process.env, claudeArgs = [] }) {
   const spec = rawSpec?.trim()
   if (!goal?.trim()) throw new Error('give the goal')
   if (!spec) throw new Error('give the spec with --spec-file')
@@ -161,6 +166,8 @@ export function start({ goal, spec: rawSpec, n = 2, cwd = process.cwd(), env = p
   // Made before the first dispatch: a user group named like the dispatch group takes its
   // sessions in from the first frame, so they never jump between groups.
   cck(['group', 'create', group, '--json'])
+  // The workers show indented under the supervisor only when it is in their group.
+  cck(['session', 'group', parent, group, '--json'])
   const names = workers.map((w) => w.name)
   const transcript = transcriptPath(parent)
   for (const w of workers) {
@@ -169,7 +176,7 @@ export function start({ goal, spec: rawSpec, n = 2, cwd = process.cwd(), env = p
     let out
     try {
       out = JSON.parse(
-        cck(['dispatch', 'start', '--cwd', cwd, '--spec-file', specFile, '--name', w.name, '--group', listId, '--task-list', listId, '--worktree', w.name, '--json']),
+        cck(dispatchArgs({ cwd, specFile, name: w.name, listId, claudeArgs })),
       )
     } catch (err) {
       // With no worker running, nothing would ever end the swarm; workers already started keep it.
@@ -192,6 +199,10 @@ function parseArgs(argv) {
   const out = { goal: [] }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
+    if (a === '--') {
+      out.claudeArgs = argv.slice(i + 1)
+      break
+    }
     if (a === '--n') out.n = Number(argv[++i])
     else if (a === '--spec-file') out.spec = fs.readFileSync(argv[++i], 'utf8')
     else if (a === '--cwd') out.cwd = argv[++i]

@@ -85,6 +85,12 @@ describe('swarm start', () => {
     assert.doesNotMatch(second, /conversation with the user/);
   });
 
+  it('passes the claude args after -- to each worker', () => {
+    const at = { cwd: 'C:/p', specFile: 's.md', name: 'w1-abc', listId: 'swarm-x-abc' };
+    assert.equal(m.dispatchArgs(at).includes('--'), false);
+    assert.deepEqual(m.dispatchArgs({ ...at, claudeArgs: ['--plugin-dir', 'C:/plug'] }).slice(-3), ['--', '--plugin-dir', 'C:/plug']);
+  });
+
   it('refuses a start with no spec, outside a session or outside a repository before it claims anything', () => {
     const config = tempConfig();
     const env = { CLAUDE_CONFIG_DIR: config };
