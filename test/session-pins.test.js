@@ -183,7 +183,6 @@ function makePage(local = {}) {
     store: { removeItem: (k) => ls.delete(k) },
     readStoredList: (k) => (ls.has(k) ? JSON.parse(ls.get(k)) : []),
     showToast: (msg, kind) => ctx.toasts.push([msg, kind]),
-    expandPinnedFor() {},
     fetchSessions: () => ctx.fetched++,
     renderSessions: () => ctx.rendered++,
     api: async (url, opts = {}) => {

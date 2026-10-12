@@ -38,7 +38,7 @@ function makePage() {
     },
     apiPath: (strings, ...values) => strings.reduce((a, s, i) => a + s + (i < values.length ? values[i] : ''), ''),
   };
-  for (const f of 'openTerminal terminalOpenMode wantsTerminalFor exitAgentLogMode closeScratchpad closeDetailPanel expandPinnedFor setSwapPair markOpenSessionRead autoRevealLog loadPins resetMessageScrollState resetAgentState updateUrl fetchAgents renderSessions renderMessages'.split(' '))
+  for (const f of 'openTerminal terminalOpenMode wantsTerminalFor exitAgentLogMode closeScratchpad closeDetailPanel setSwapPair markOpenSessionRead autoRevealLog loadPins resetMessageScrollState resetAgentState updateUrl fetchAgents renderSessions renderMessages'.split(' '))
     ctx[f] = () => {};
   ctx.renderSession = () => ctx.rendered.push(ctx.currentTasks.length);
   ctx.log = [];

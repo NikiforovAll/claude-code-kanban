@@ -781,8 +781,7 @@ async function fetchTasks(sessionId) {
   if (revealedStorageSessionId && sessionId !== revealedStorageSessionId) {
     revealedStorageSessionId = null;
   }
-  if (currentSessionId && currentSessionId !== sessionId && deferredPinPlacement.delete(currentSessionId))
-    expandPinnedFor(currentSessionId);
+  if (currentSessionId && currentSessionId !== sessionId) deferredPinPlacement.delete(currentSessionId);
   if (lastSessionId !== sessionId) setSwapPair(sessionId, lastSessionId);
   const switched = sessionId !== currentSessionId;
   currentSessionId = sessionId;
@@ -2194,7 +2193,6 @@ function applyServerPins(pins) {
     before.size === pinnedSessionIds.size && [...before].every(([id, s]) => getSessionPinState(id) === s);
   if (unchanged && !first) return;
   const added = first ? [] : [...pinnedSessionIds].filter((id) => !before.has(id));
-  for (const id of added) expandPinnedFor(id);
   showPinnedSessions(added);
 }
 
@@ -2240,7 +2238,6 @@ function unpinSession(sessionId) {
 function toggleSessionPin(sessionId) {
   if (pinnedSessionIds.has(sessionId)) return unpinSession(sessionId);
   pinnedSessionIds.add(sessionId);
-  expandPinnedFor(sessionId);
   sendPinChange(sessionId);
   renderSessions();
 }
@@ -2266,7 +2263,6 @@ function handleSessionPinEvent({ id, state }) {
     pinnedSessionIds.add(id);
     stickySessionIds.add(id);
   }
-  expandPinnedFor(id);
   showPinnedSessions(isAnyPinned(id) ? [id] : []);
 }
 
@@ -3864,6 +3860,7 @@ function renderSessions() {
   if (sgDrag || sgIsEditing() || zenPanelIsEditing()) return;
   scheduleJustFinishedExpiry();
   refreshProjectList();
+  syncPinPeek();
 
   if (zenGroup && !sgGroupById(zenGroup)) {
     zenGroup = null;
@@ -5819,6 +5816,10 @@ function setGroupCollapsed(header, collapsed) {
   if (!header) return;
   const projectPath = header.dataset.groupPath;
   if (collapsed === collapsedProjectGroups.has(projectPath)) return;
+  if (collapsed && projectPath === pinPeekKey) {
+    pinPeekKey = null;
+    pinPeekClosedFor = currentSessionId;
+  }
   if (collapsed) collapsedProjectGroups.add(projectPath);
   else collapsedProjectGroups.delete(projectPath);
   header.classList.toggle('collapsed', collapsed);
@@ -5828,7 +5829,7 @@ function setGroupCollapsed(header, collapsed) {
 }
 
 function persistCollapsedGroups() {
-  store.writeJson(COLLAPSED_GROUPS_KEY, [...collapsedProjectGroups]);
+  store.writeJson(COLLAPSED_GROUPS_KEY, [...collapsedProjectGroups, ...(pinPeekKey ? [pinPeekKey] : [])]);
 }
 
 let prevActiveSessionIds = null; // null until primed by the first onlyNew pass
@@ -5858,14 +5859,13 @@ function expandActiveGroups({ onlyNew = false } = {}) {
 }
 
 // Drops every collapse key that could hide this session: its project, a named group wrapping
-// the project or the session itself and the project block it renders under there, the pinned sub-section only when the card renders inside
-// it (pinned, not sticky — see renderGroupSessions), and the section header that holds it:
+// the project or the session itself and the project block it renders under there, and the section header that holds it
+// (a collapsed Pinned sub-section opens only for the open session, see syncPinPeek):
 // Groups for a grouped session, else Projects or Sessions, which depends on the view. Returns
 // whether anything changed.
 function uncollapseFor(session) {
   const group = sgGroupForSession(session);
   const keys = [
-    ...pinnedCollapseKeys(session),
     ...(group
       ? [sgKey(group.id), sgHostOf(group, session), SECTION_GROUPS]
       : [sessionProjectKey(session) || '__ungrouped__', SECTION_PROJECTS, SECTION_SESSIONS]),
@@ -5885,15 +5885,20 @@ function pinnedCollapseKeys(session) {
   return [host ? pinKey(host) : `__pinned_group_${group.id}__`];
 }
 
-// A card that moves into a collapsed Pinned sub-section would vanish from under the click.
-function expandPinnedFor(sessionId) {
-  const session = sessions.find((s) => s.id === sessionId);
-  if (!session) return;
-  let changed = false;
-  for (const key of pinnedCollapseKeys(session)) {
-    if (key && collapsedProjectGroups.delete(key)) changed = true;
-  }
-  if (changed) persistCollapsedGroups();
+// A Pinned sub-section the user collapsed opens while the open session is in it and closes once
+// the user leaves that session. The peek is never saved: persistCollapsedGroups writes the key back.
+let pinPeekKey = null;
+let pinPeekClosedFor = null;
+
+function syncPinPeek() {
+  if (pinPeekClosedFor !== currentSessionId) pinPeekClosedFor = null;
+  const session = currentSessionId && !pinPeekClosedFor ? sessions.find((s) => s.id === currentSessionId) : null;
+  const key = session ? (pinnedCollapseKeys(session)[0] ?? null) : null;
+  const want = key && (key === pinPeekKey || collapsedProjectGroups.has(key)) ? key : null;
+  if (want === pinPeekKey) return;
+  if (pinPeekKey) collapsedProjectGroups.add(pinPeekKey);
+  if (want) collapsedProjectGroups.delete(want);
+  pinPeekKey = want;
 }
 
 function isGroupHeader(el) {
