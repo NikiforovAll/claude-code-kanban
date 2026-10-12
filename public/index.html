@@ -751,12 +751,12 @@
           </button>
         </div>
       </div>
-      <div class="storage-tabs">
-        <button class="storage-tab active" data-tab="sessions" onclick="switchStorageTab('sessions')">Sessions</button>
-        <button class="storage-tab" data-tab="dismissed" onclick="switchStorageTab('dismissed')">Dismissed</button>
-        <button class="storage-tab" data-tab="scratchpads" onclick="switchStorageTab('scratchpads')">Scratchpads</button>
-        <button class="storage-tab" data-tab="linked-docs" onclick="switchStorageTab('linked-docs')">Linked Docs</button>
-        <button class="storage-tab" data-tab="groups" onclick="switchStorageTab('groups')">Groups</button>
+      <div class="storage-tabs" role="tablist" aria-label="Storage" title="← → switch tab">
+        <button class="storage-tab active" role="tab" aria-selected="true" data-tab="sessions" onclick="switchStorageTab('sessions')">Sessions</button>
+        <button class="storage-tab" role="tab" aria-selected="false" data-tab="dismissed" onclick="switchStorageTab('dismissed')">Dismissed</button>
+        <button class="storage-tab" role="tab" aria-selected="false" data-tab="scratchpads" onclick="switchStorageTab('scratchpads')">Scratchpads</button>
+        <button class="storage-tab" role="tab" aria-selected="false" data-tab="linked-docs" onclick="switchStorageTab('linked-docs')">Linked Docs</button>
+        <button class="storage-tab" role="tab" aria-selected="false" data-tab="groups" onclick="switchStorageTab('groups')">Groups</button>
       </div>
       <div class="modal-body modal-zoomable" id="storage-modal-body"></div>
       <div class="modal-footer">

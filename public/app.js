@@ -6425,6 +6425,7 @@ const SHORTCUT_TABS = [
           { keys: ['\\'], label: 'Toggle sidebar' },
           { keys: ['T'], label: 'Toggle theme' },
           { keys: ['Shift', 'S'], combo: true, label: 'Storage manager' },
+          { keys: ['←', '→'], label: 'Storage manager: switch tab' },
           {
             keys: ['Ctrl', 'Shift', 'Z'],
             combo: true,
@@ -7045,12 +7046,17 @@ function _renderOrphanGroup(count, innerHtml) {
   return _renderProjectGroup('Orphaned', `<span class="storage-item-badge orphan">${count}</span>`, innerHtml);
 }
 
+function _markStorageTab(tab) {
+  document.querySelectorAll('.storage-tab').forEach((t) => {
+    t.classList.toggle('active', t.dataset.tab === tab);
+    t.setAttribute('aria-selected', String(t.dataset.tab === tab));
+  });
+}
+
 async function showStorageManager() {
   _storageKnownSessions = null;
   _updateStorageTotal();
-  document.querySelectorAll('.storage-tab').forEach((t) => {
-    t.classList.toggle('active', t.dataset.tab === 'sessions');
-  });
+  _markStorageTab('sessions');
   const modal = document.getElementById('storage-modal');
   modal.classList.add('visible');
   const known = await _fetchKnownSessions().catch(() => null);
@@ -7065,9 +7071,14 @@ function closeStorageManager() {
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
 function switchStorageTab(tab) {
-  document.querySelectorAll('.storage-tab').forEach((t) => {
-    t.classList.toggle('active', t.dataset.tab === tab);
-  });
+  _markStorageTab(tab);
+  _renderStorageTab();
+}
+
+function stepStorageTab(step) {
+  const tabs = [...document.querySelectorAll('.storage-tab')];
+  const i = tabs.findIndex((t) => t.classList.contains('active'));
+  _markStorageTab(tabs[(i + step + tabs.length) % tabs.length].dataset.tab);
   _renderStorageTab();
 }
 
@@ -7167,6 +7178,7 @@ function _renderStorageDismissed() {
       <span class="storage-item-id">${_sessionLabel(session, id)}</span>
       <span class="storage-item-meta">dismissed ${formatDate(dismissedSessionIds.get(id))}</span>
       <div class="storage-item-actions">
+        <button onclick="_storageViewSession('${escAttrJs(id)}')">View</button>
         <button onclick="_storageRestoreSession('${escAttrJs(id)}')">Restore</button>
       </div>
     </div>`;
@@ -7715,6 +7727,12 @@ document.addEventListener('keydown', (e) => {
     } else if (e.key === '?' && document.getElementById('help-modal').classList.contains('visible')) {
       e.preventDefault();
       closeHelpModal();
+    } else if (
+      matchKey(e, 'ArrowLeft', 'ArrowRight') &&
+      [...document.querySelectorAll('.modal-overlay.visible')].at(-1)?.id === 'storage-modal'
+    ) {
+      e.preventDefault();
+      stepStorageTab(matchKey(e, 'ArrowLeft') ? -1 : 1);
     } else if (shiftOnly(e, 'KeyM') && document.getElementById('msg-detail-modal').classList.contains('visible')) {
       e.preventDefault();
       closeMsgDetailModal();
