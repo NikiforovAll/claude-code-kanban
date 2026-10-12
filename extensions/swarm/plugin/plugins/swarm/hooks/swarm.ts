@@ -1,6 +1,6 @@
 import type { EngineInterface, Register } from 'claude-code'
 
-export const SERVER = 'mcp__kanban-delm-swarm__'
+export const SERVER = 'mcp__swarm__'
 const RUNTIME_FIELDS = ['dir', 'tasksDir', 'base', 'parent', 'roster', 'actor', 'cwd']
 const ENDED = 'This swarm has ended.'
 export const POLL_MS = 1500

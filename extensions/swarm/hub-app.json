@@ -3,8 +3,8 @@
   "id": "swarm",
   "name": "Swarm",
   "icon": "network",
-  "run": { "entry": "plugin/plugins/kanban-delm-swarm/viewer/server.js", "defaultPort": 3546 },
-  "plugin": { "marketplace": "plugin", "name": "kanban-delm-swarm" },
+  "run": { "entry": "plugin/plugins/swarm/viewer/server.js", "defaultPort": 3546 },
+  "plugin": { "marketplace": "plugin", "name": "swarm" },
   "requires": { "node": "22.13.0", "apps": ["kanban"] },
   "listing": {
     "tagline": "A DeLM implementation built on Claude Code Kanban",

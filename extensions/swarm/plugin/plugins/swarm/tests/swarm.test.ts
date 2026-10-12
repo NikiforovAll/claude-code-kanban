@@ -51,8 +51,8 @@ const call = (name: string, input: Record<string, unknown>) => ({ tool: `${SERVE
 test('helpers: the config dir and the store path', async () => {
   expect(configDir(undefined, 'C:\\Users\\a', undefined)).toBe('C:/Users/a/.claude')
   expect(configDir('C:\\cfg')).toBe('C:/cfg')
-  expect(storePath('C:\\p\\kanban-delm-swarm\\.claude-plugin')).toBe('C:/p/kanban-delm-swarm/scripts/store.mjs')
-  expect(storePath('C:/p/kanban-delm-swarm')).toBe('C:/p/kanban-delm-swarm/scripts/store.mjs')
+  expect(storePath('C:\\p\\swarm\\.claude-plugin')).toBe('C:/p/swarm/scripts/store.mjs')
+  expect(storePath('C:/p/swarm')).toBe('C:/p/swarm/scripts/store.mjs')
 })
 
 test('no task list: no tools, and TaskUpdate runs', async ($, on) => {

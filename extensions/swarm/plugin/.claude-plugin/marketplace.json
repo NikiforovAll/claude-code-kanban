@@ -5,9 +5,9 @@
   },
   "plugins": [
     {
-      "name": "kanban-delm-swarm",
-      "source": "./plugins/kanban-delm-swarm",
-      "description": "Kanban DeLM Swarm: several sessions on one goal through a shared task queue and log of findings. Needs claude-code-kanban."
+      "name": "swarm",
+      "source": "./plugins/swarm",
+      "description": "Swarm, a DeLM implementation: several sessions on one goal through a shared task queue and log of findings. Needs claude-code-kanban."
     }
   ]
 }

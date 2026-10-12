@@ -96,7 +96,7 @@ function supervise(argv) {
     [
       '# Swarm e2e supervisor',
       '',
-      'You supervise one swarm on a toy project, an end-to-end check of the kanban-delm-swarm plugin. The user watches and may step in.',
+      'You supervise one swarm on a toy project, an end-to-end check of the swarm plugin. The user watches and may step in.',
       '',
       `1. Run \`node "${HERE}/e2e.mjs" start ${startArgs}\` and report its output. On an error, report it and stop.`,
       `2. Follow ${PLUGIN}/skills/swarm/SKILL.md from step 3 to the end, with the base directory ${PLUGIN}/skills/swarm.`,
