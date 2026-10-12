@@ -111,8 +111,6 @@ const SESSION_ORDER_KEY = 'session-order';
 let stableGroupOrder = readStoredList(PROJECT_ORDER_KEY);
 let sessionOrder = readStoredList(SESSION_ORDER_KEY);
 let sessionGroups = []; // user-named groups: [{id, name, color, members:[{type,ref}]}]
-// Sessions the user pulled out of their dispatch placement; the server's group map is not theirs to edit.
-let sgReleased = new Set();
 let sgDrag = null; // in-flight sidebar drag: {kind:'session'|'project'|'group', ref}
 let searchQuery = ''; // Search query for fuzzy search
 let allTasksCache = []; // Cache all tasks for search
@@ -192,6 +190,7 @@ function setSessionDismissed(id, dismissed) {
   else dismissedSessionIds.delete(id);
   persistDismissedSessions();
   updateDismissBtnState();
+  if (dismissed) sgSweepTransient();
   renderSessions();
   renderActivityChip();
   return true;
@@ -364,6 +363,7 @@ async function fetchSessions(includeTasks = true, focusId = currentSessionId) {
       lastSessionsHash = sessionsHash;
       sessions = mergePlaceholders(newSessions);
       markOpenSessionRead();
+      sgSweepTransient();
       renderSessions();
       renderActivityChip();
       schedulePublishSession();
@@ -4136,11 +4136,9 @@ function renderSessions() {
       sgRest.push(session);
     }
   }
-  for (const [name, g] of transientGroups) if (!sgBuckets.has(g.id)) transientGroups.delete(name);
   // A group emptied by a filter hides its header; a group the user just created (no filters)
   // shows its drop-here state instead of vanishing.
-  const sgFiltering =
-    !zenGroup && (!!searchQuery || activityFilter.size > 0 || (!!filterProject && filterProject !== '__recent__'));
+  const sgFiltering = !zenGroup && sgListFiltered();
 
   // A group whose parent is gone renders at the top.
   const sgIds = new Set(sessionGroups.map((g) => g.id));
@@ -4162,17 +4160,16 @@ function renderSessions() {
 
   // flat = the "All sessions" view, which has no project sub-blocks.
   const sgSectionHtml = (flat) => {
-    const transient = [...transientGroups.values()];
-    if (sessionGroups.length === 0 && transient.length === 0) return '';
+    if (sessionGroups.length === 0) return '';
     let out = '';
-    for (const group of [...(sgChildren.get(null) || []), ...transient]) out += sgGroupHtml(group, flat);
+    for (const group of sgChildren.get(null) || []) out += sgGroupHtml(group, flat);
     if (!out) return '';
     return sectionHtml(SECTION_GROUPS, 'Groups', false, out);
   };
 
   const sgGroupHtml = (group, flat) => {
     const bucket = sgBuckets.get(group.id) || [];
-    const subtree = group.transient ? bucket : sgSubtreeOf(group);
+    const subtree = sgSubtreeOf(group);
     if (subtree.length === 0 && sgFiltering) return '';
     if (!groupPinned) bucket.sort(pinSort);
     const collapsed = collapsedProjectGroups.has(sgKey(group.id));
@@ -4186,17 +4183,6 @@ function renderSessions() {
       body = nestChildren([...bucket].sort(byMemberOrder))
         .map(renderSessionCard)
         .join('');
-    } else if (group.transient) {
-      // Each session under its own project block, so a worktree session reads as its repo's.
-      const byProject = new Map();
-      for (const s of bucket) {
-        const key = sessionProjectKey(s) || '';
-        if (!byProject.has(key)) byProject.set(key, []);
-        byProject.get(key).push(s);
-      }
-      for (const [p, arr] of byProject) {
-        body += p ? projectBlock(p, arr, true) : renderGroupSessions(arr, `__pinned_group_${group.id}__`);
-      }
     } else {
       const loose = [];
       const byProject = new Map();
@@ -4226,10 +4212,9 @@ function renderSessions() {
       }
     }
     let childHtml = '';
-    if (!group.transient) for (const child of sgChildren.get(group.id) || []) childHtml += sgGroupHtml(child, flat);
+    for (const child of sgChildren.get(group.id) || []) childHtml += sgGroupHtml(child, flat);
     if (!body && !childHtml) body = '<div class="sg-empty">Drop a session or a project here</div>';
-    const idAttr = group.transient ? '' : ` data-group-id="${escapeHtml(group.id)}"`;
-    return `${sgHeaderHtml(group, countHtml(subtree))}<div class="session-group-sessions${collapsed ? ' collapsed' : ''}"${idAttr}>${body}${childHtml}</div>`;
+    return `${sgHeaderHtml(group, countHtml(subtree))}<div class="session-group-sessions${collapsed ? ' collapsed' : ''}" data-group-id="${escapeHtml(group.id)}">${body}${childHtml}</div>`;
   };
 
   let html = '';
@@ -4282,7 +4267,7 @@ function renderSessions() {
     // The section header is rendered even when nothing is left under it: it is the drop target
     // for ungrouping. Its body is skipped while collapsed — nothing would be visible, and this is
     // the whole project list, re-parsed on every live refresh.
-    const sectioned = sessionGroups.length > 0 || transientGroups.size > 0;
+    const sectioned = sessionGroups.length > 0;
     let projectsHtml = '';
     if (!sectioned || !collapsedProjectGroups.has(SECTION_PROJECTS)) {
       for (const [projectPath, projectSessions] of sortedGroups) {
@@ -4311,7 +4296,7 @@ function renderSessions() {
 
     sessionsList.innerHTML = html + outsideHtml;
   } else {
-    const sectioned = sessionGroups.length > 0 || transientGroups.size > 0;
+    const sectioned = sessionGroups.length > 0;
     const restHtml =
       sectioned && collapsedProjectGroups.has(SECTION_SESSIONS) ? '' : sgRest.map(renderSessionCard).join('');
     const tail = sectioned ? sectionHtml(SECTION_SESSIONS, 'Sessions', true, restHtml, sgRest.length === 0) : restHtml;
@@ -4769,7 +4754,8 @@ async function onColumnDrop(e) {
 // User-named groups that hold whole projects and individual sessions, dragged in from the
 // sidebar. They render above the project groups. Membership is a workspace preference kept on
 // the server; an id missing from `sessions` is NOT proof the session is gone (sessionLimit
-// windows the list), so membership is never garbage-collected on load.
+// windows the list), so membership is never garbage-collected on load. Transient groups go only
+// on a full Active list (sgSweepTransient).
 const SESSION_GROUPS_KEY = 'sessionGroups';
 const SG_ACTION_SELECTOR =
   '.session-pin-btn, .team-info-btn, .plan-indicator, .scratchpad-badge, .bookmarks-badge, .linked-docs-badge, .project-view-btn, .project-new-btn, .header-pad-btn, .group-path-toggle, .pinned-ungroup-btn, .sg-action';
@@ -4804,10 +4790,10 @@ let sgSeenRev = 0;
 async function syncSessionGroups() {
   const migrated = !!store.getItem(GROUPS_MIGRATED_AT);
   const local = migrated ? null : store.readJson(SESSION_GROUPS_KEY);
-  const hasLocal = local?.groups?.length > 0 || local?.released?.length > 0;
+  const hasLocal = local?.groups?.length > 0;
   try {
     const res = hasLocal
-      ? await api('/api/groups/import', { method: 'POST', body: { groups: local.groups, released: local.released } })
+      ? await api('/api/groups/import', { method: 'POST', body: { groups: local.groups } })
       : await api('/api/groups');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     sgTakeServer(await res.json());
@@ -4848,6 +4834,7 @@ function sgApplyState(saved) {
       id: g.id,
       name: typeof g.name === 'string' && g.name.trim() ? g.name : 'Group',
       parent: typeof g.parent === 'string' ? g.parent : null,
+      ...(g.transient === true ? { transient: true } : {}),
       members: (Array.isArray(g.members) ? g.members : [])
         .filter((m) => m && (m.type === 'project' || m.type === 'session') && typeof m.ref === 'string')
         .map((m) => {
@@ -4858,8 +4845,6 @@ function sgApplyState(saved) {
           return out;
         }),
     }));
-  const released = saved?.released;
-  sgReleased = new Set(Array.isArray(released) ? released.filter((id) => typeof id === 'string') : []);
 }
 
 function persistSessionGroups() {
@@ -4883,7 +4868,7 @@ async function sgFlush() {
     try {
       res = await api('/api/groups', {
         method: 'PUT',
-        body: { rev: sgRev, groups: sessionGroups, released: [...sgReleased] },
+        body: { rev: sgRev, groups: sessionGroups },
       });
     } catch (e) {
       console.warn('[groups] save failed:', e.message);
@@ -4913,8 +4898,7 @@ async function sgFlush() {
 // The server drops what breaks its rules (a member in two groups, a group past the limit) and
 // trims long names; the board shows what was saved.
 function sgTakeCleaned(data) {
-  const saved = JSON.stringify({ groups: data.groups, released: data.released });
-  if (saved === JSON.stringify({ groups: sessionGroups, released: [...sgReleased] })) return;
+  if (JSON.stringify(data.groups) === JSON.stringify(sessionGroups)) return;
   sgApplyState(data);
   renderSessions();
 }
@@ -4950,26 +4934,30 @@ function sgSessionParent(id) {
 
 // An individually placed session wins over the placement of its project.
 function sgGroupForSession(session) {
-  return sgUserGroupFor(session) || sgDispatchGroupFor(session);
-}
-
-function sgUserGroupFor(session) {
   const project = sessionProjectKey(session);
   return sgGroupOf('session', session.id) || (project ? sgGroupOf('project', project) : null);
 }
 
-// Transient groups come from the server (`dispatch start --group`) and go when their sessions
-// end. They are never written to localStorage; the objects are cached only so collapse state,
-// keyed by id, survives a re-render.
-const transientGroups = new Map();
+function sgListFiltered() {
+  return !!searchQuery || activityFilter.size > 0 || (!!filterProject && filterProject !== '__recent__');
+}
 
-function sgTransientGroup(name) {
-  let group = transientGroups.get(name);
-  if (!group) {
-    group = { id: `t_${name}`, name, transient: true, members: [] };
-    transientGroups.set(name, group);
-  }
-  return group;
+// A transient group (`dispatch start --group` made it) goes once the Active view shows none of its
+// sessions: they ended or were dismissed. A session still starting has no card yet, so its
+// terminal or placeholder counts. Only the full Active list can tell, so other views keep them.
+function sgSweepTransient() {
+  if (sgRev === null || !sessionGroups.some((g) => g.transient)) return;
+  if (zenGroup || zenMode || sessionFilter !== 'active' || sessionsHasMore || sgListFiltered()) return;
+  const shown = new Set(getFilteredSessions().map((s) => s.id));
+  const starting = (id) => !dismissedSessionIds.has(id) && (runningTerminals.has(id) || dispatchSpecs.has(id));
+  const present = (m) => m.type !== 'session' || shown.has(m.ref) || starting(m.ref);
+  const gone = groupTree.cascade(sessionGroups, (g) => !!g.transient && !g.members.some(present));
+  if (!gone.size) return;
+  let collapsed = false;
+  for (const g of gone) collapsed = collapsedProjectGroups.delete(sgKey(g.id)) || collapsed;
+  if (collapsed) persistCollapsedGroups();
+  sessionGroups = sessionGroups.filter((g) => !gone.has(g));
+  persistSessionGroups();
 }
 
 const childDepthClass = (depth) => (depth ? ` sg-child sg-depth-${depth}` : '');
@@ -4980,26 +4968,9 @@ function dispatchedTitle({ parent }) {
   return `Started by ${by}${parent ? ' — click to reveal it' : ''}`;
 }
 
-// A user group with the same name takes the session in, so Keep does not split a group in two.
-function sgDispatchGroupFor(session) {
-  if (sgReleased.has(session.id)) return null;
-  const name = session.dispatchGroup;
-  if (!name) return null;
-  return sessionGroups.find((g) => g.name.toLowerCase() === name) || sgTransientGroup(name);
-}
-
-function sgKeepTransient(name) {
-  const group = sgTransientGroup(name);
-  const members = sessions.filter((s) => sgGroupForSession(s) === group);
-  const kept = sgCreateGroup(name);
-  for (const s of members) kept.members.push({ type: 'session', ref: s.id });
-  persistSessionGroups();
-}
-
-function sgDeleteTransient(name) {
-  const group = sgTransientGroup(name);
-  for (const s of sessions) if (sgGroupForSession(s) === group) sgReleased.add(s.id);
-  persistSessionGroups();
+// A group the user edits is theirs: Keep, a rename or a placement clears the flag.
+function sgKeep(group) {
+  delete group.transient;
 }
 
 function sgDetach(type, ref) {
@@ -5025,6 +4996,7 @@ function sgHostOf(group, session) {
 function sgAssign(groupId, type, ref, opts = {}) {
   const group = sgGroupById(groupId);
   if (!group) return;
+  sgKeep(group);
   const parent = opts.parent !== undefined ? opts.parent : sgMemberOf(group, type, ref)?.parent;
   sgDetach(type, ref);
   // Pulling a whole project in supersedes the individual placements of its sessions.
@@ -5136,13 +5108,10 @@ function sgHeaderHtml(group, countHtml) {
   const nameHtml = editing
     ? `<input class="sg-name-input" type="text" value="${escapeHtml(group.name)}" aria-label="Group name" spellcheck="false">`
     : `<span class="group-name">${escapeHtml(group.name)}</span>`;
-  const attrs = group.transient
-    ? `class="session-group-header sg-transient${collapsed ? ' collapsed' : ''}" data-transient-group="${escapeHtml(group.name)}" title="${escapeHtml(group.name)} — goes when its sessions end"`
-    : `class="session-group-header${collapsed ? ' collapsed' : ''}${group.id === zenGroup ? ' sg-zen' : ''}" draggable="${editing ? 'false' : 'true'}" data-group-id="${escapeHtml(group.id)}" title="${escapeHtml(group.name)} — drop sessions or projects here"`;
-  const actions = group.transient
-    ? `<span class="sg-action sg-keep" title="Keep this group after its sessions end">Keep</span>
-          <span class="sg-action sg-delete" title="Delete group (sessions return to Projects)">&times;</span>`
-    : `<span class="sg-action sg-rename" title="Rename group"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></span>
+  const hint = group.transient ? 'goes when its sessions leave the Active view' : 'drop sessions or projects here';
+  const attrs = `class="session-group-header${group.transient ? ' sg-transient' : ''}${collapsed ? ' collapsed' : ''}${group.id === zenGroup ? ' sg-zen' : ''}" draggable="${editing ? 'false' : 'true'}" data-group-id="${escapeHtml(group.id)}" title="${escapeHtml(group.name)} — ${hint}"`;
+  const actions = `${group.transient ? '<span class="sg-action sg-keep" title="Keep this group after its sessions end">Keep</span>' : ''}
+          <span class="sg-action sg-rename" title="Rename group"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></span>
           <span class="sg-action sg-delete" title="Delete group (members return to Projects)">&times;</span>
           ${headerPadBtnHtml(_groupScratchpadKey(group.id), group.name)}`;
   return `
@@ -5177,6 +5146,7 @@ function sgCommitRename(input, save) {
   sgEditingId = null;
   if (save && group && value && value !== group.name) {
     group.name = value;
+    sgKeep(group);
     persistSessionGroups();
   }
   renderSessions();
@@ -5311,8 +5281,7 @@ function sgGroupDropZone(target) {
       : null;
   }
   const dragSession = sgDrag.kind === 'session' ? sessions.find((x) => x.id === sgDrag.ref) : null;
-  const releasable = !!dragSession && !sgUserGroupFor(dragSession) && !!sgDispatchGroupFor(dragSession);
-  if (zone.classList.contains('sg-ungroup-zone')) return dragGroup || releasable ? { zone } : null;
+  if (zone.classList.contains('sg-ungroup-zone')) return dragGroup ? { zone } : null;
   const fromGroup = dragSession ? sgGroupForSession(dragSession) : dragGroup;
   const fromGroupId = fromGroup?.id || null;
   // A drop that lands on the host the session already has changes nothing, and highlighting it
@@ -5332,8 +5301,7 @@ function sgGroupDropZone(target) {
     const targetSession = sessions.find((s) => s.id === targetSessionId);
     const targetGroup = targetSession ? sgGroupForSession(targetSession) : null;
     const targetGroupId = targetGroup?.id || null;
-    // A transient group holds no members to reorder or place under; a drop there pairs instead.
-    if (targetGroup && !targetGroup.transient) {
+    if (targetGroup) {
       // Stacking onto a card nests the dragged session under it, in that card's placement, project
       // block included.
       if (sgSessionParent(sgDrag.ref) === targetSessionId && fromGroupId === targetGroupId) return null;
@@ -5440,7 +5408,6 @@ function sgOnDrop(e) {
     }
   } else {
     sgDetach(drag.kind, drag.ref);
-    if (drag.kind === 'session') sgReleased.add(drag.ref);
     persistSessionGroups();
   }
   sgFinishDrag();
@@ -11431,37 +11398,23 @@ document.addEventListener('click', (e) => {
   if (sgHeader) {
     if (e.target.closest('.sg-name-input')) return;
     e.stopPropagation();
+    const groupId = sgHeader.dataset.groupId;
+    const group = sgGroupById(groupId);
+    if (!group) return;
     if (e.target.closest('.sg-keep')) {
-      sgKeepTransient(sgHeader.dataset.transientGroup);
+      sgKeep(group);
+      persistSessionGroups();
       renderSessions();
       return;
     }
-    if (sgHeader.dataset.transientGroup && e.target.closest('.sg-delete')) {
-      const name = sgHeader.dataset.transientGroup;
-      confirmModal({
-        title: 'Delete this group?',
-        message: 'Its sessions go back to Projects.',
-        chip: name,
-        okLabel: 'Delete group',
-      }).then((ok) => {
-        if (!ok) return;
-        sgDeleteTransient(name);
-        renderSessions();
-      });
+    if (e.target.closest('.sg-rename')) {
+      sgBeginRename(groupId);
       return;
     }
-    const groupId = sgHeader.dataset.groupId;
-    const group = sgGroupById(groupId);
-    if (group) {
-      if (e.target.closest('.sg-rename')) {
-        sgBeginRename(groupId);
-        return;
-      }
-      if (e.target.closest('.sg-delete')) {
-        sgConfirmDelete(group);
-        return;
-      }
-    } else if (!sgHeader.dataset.transientGroup) return;
+    if (e.target.closest('.sg-delete')) {
+      sgConfirmDelete(group);
+      return;
+    }
   }
 
   const header = e.target.closest(COLLAPSIBLE_HEADER_SELECTOR);
@@ -16490,7 +16443,6 @@ function placeholderSession(id, spec) {
     mode: spec.mode,
     edit: !!spec.edit,
     name: spec.name || (spec.forkOf && forkLabel(spec.forkOf)) || PLACEHOLDER_NAMES[spec.mode] || PLACEHOLDER_NAMES.new,
-    dispatchGroup: spec.group || undefined,
     dispatched: spec.mode === 'dispatch' ? { parent: spec.parent || null } : undefined,
     project: spec.cwd,
     worktree: spec.worktree ? { repo: spec.cwd, name: spec.worktree === true ? 'new' : spec.worktree } : null,

@@ -106,7 +106,7 @@ export function checkCck() {
 export function groupPath(groups, sessionId) {
   const byId = new Map(groups.map((g) => [g.id, g]))
   const names = []
-  let g = groups.find((x) => !x.dispatch && x.members?.some((m) => m.type === 'session' && m.ref === sessionId))
+  let g = groups.find((x) => x.members?.some((m) => m.type === 'session' && m.ref === sessionId))
   for (; g; g = byId.get(g.parent)) names.unshift(g.name)
   return names.join('/')
 }
@@ -165,8 +165,8 @@ export function workerSpec({ spec, name, listId, names, transcript }) {
   ].join('\n')
 }
 
-export const dispatchArgs = ({ cwd, specFile, name, listId, model, claudeArgs = [] }) => [
-  ...['dispatch', 'start', '--cwd', cwd, '--spec-file', specFile, '--name', name, '--group', listId, '--task-list', listId, '--worktree', name, '--json'],
+export const dispatchArgs = ({ cwd, specFile, name, listId, group, model, claudeArgs = [] }) => [
+  ...['dispatch', 'start', '--cwd', cwd, '--spec-file', specFile, '--name', name, '--group', group, '--task-list', listId, '--worktree', name, '--json'],
   ...(model ? ['--model', model] : []),
   ...(claudeArgs.length ? ['--', ...claudeArgs] : []),
 ]
@@ -203,11 +203,6 @@ export function start({ goal, name, spec: rawSpec, tasks, n = 2, cwd = process.c
   }
   writeJson(`${dir}/swarm.json`, registry)
   mapSupervisor(config, listId, parent, project)
-  // Made before the first dispatch: a user group named like the dispatch group takes its
-  // sessions in from the first frame, so they never jump between groups.
-  cck(['group', 'create', group, '--json'])
-  // The workers show indented under the supervisor only when it is in their group.
-  cck(['session', 'group', parent, group, '--json'])
   const names = workers.map((w) => w.name)
   const transcript = transcriptPath(parent)
   for (const w of workers) {
@@ -216,20 +211,19 @@ export function start({ goal, name, spec: rawSpec, tasks, n = 2, cwd = process.c
     let out
     try {
       out = JSON.parse(
-        cck(dispatchArgs({ cwd, specFile, name: w.name, listId, model, claudeArgs })),
+        cck(dispatchArgs({ cwd, specFile, name: w.name, listId, group, model, claudeArgs })),
       )
     } catch (err) {
       // With no worker running, nothing would ever end the swarm; workers already started keep it.
-      if (!workers.some((x) => x.sessionId)) {
-        writeJson(`${dir}/swarm.json`, { ...registry, state: 'ended' })
-        try {
-          cck(['group', 'rm', group, '--json'])
-        } catch {}
-      }
+      if (!workers.some((x) => x.sessionId)) writeJson(`${dir}/swarm.json`, { ...registry, state: 'ended' })
       throw err
     }
     w.sessionId = out.session
     writeJson(`${dir}/swarm.json`, registry)
+    // The first dispatch makes the transient group with its worker in it, so the board never sees
+    // it empty and sweeps it before the supervisor joins. The workers show indented under the
+    // supervisor only when it is in their group.
+    if (w === workers[0]) cck(['session', 'group', parent, group, '--json'])
     cck(['session', 'group', w.sessionId, group, '--parent', parent, '--json'])
   }
   return { listId, dir, group, workers }

@@ -169,46 +169,23 @@ describe('group list', () => {
   });
 });
 
-describe('group list with dispatch groups', () => {
-  const at = (n) => `eeeeeeee-0000-0000-0000-00000000000${n}`;
-  const DISPATCHED = [
-    { id: at(1), name: 'worker one', project: '/p/gamma', modifiedAt: now, active: true, dispatchGroup: 'cli-active-pins' },
-    { id: at(2), name: 'worker two', project: '/p/gamma', modifiedAt: now, active: false, dispatchGroup: 'cli-active-pins' },
-    { id: at(3), name: 'released', project: '/p/gamma', modifiedAt: now, active: true, dispatchGroup: 'cli-active-pins' },
-    { ...SESSIONS[0], dispatchGroup: 'cli-active-pins' },
-  ];
-  const sessions = [...DISPATCHED, ...SESSIONS.slice(1)];
-  const dispatch = Object.fromEntries(DISPATCHED.map((s) => [s.id, s.dispatchGroup]));
-  const board = (groups) => ({ sessions, groups: { ...GROUPS, groups, released: [at(3)], dispatch } });
-
-  it('lists a dispatch group after the user groups, without a released session or one a user group holds', async () => {
+describe('group list members', () => {
+  it('marks a transient group and asks the board for its members by id', async () => {
+    const at = (n) => `eeeeeeee-0000-0000-0000-00000000000${n}`;
+    const workers = [
+      { id: at(1), name: 'worker one', project: '/p/gamma', modifiedAt: now, active: true },
+      { id: at(2), name: 'worker two', project: '/p/gamma', modifiedAt: now, active: false },
+    ];
+    const swarm = { id: 'g2', name: 'swarm-1', parent: 'g1', transient: true, members: workers.map((s) => ({ type: 'session', ref: s.id })) };
     await withBoard(async (run, hits) => {
       const { code, stdout } = await run(['group', 'list', '--json']);
       assert.equal(code, 0);
       const groups = JSON.parse(stdout).groups;
-      assert.deepEqual(groups.map((g) => [g.id, g.name, g.dispatch, g.visible, g.total]), [
-        ['g1', 'Work', undefined, 1, 3],
-        ['dispatch:cli-active-pins', 'cli-active-pins', true, 1, 2],
-      ]);
-      assert.deepEqual(groups[1].members.map((m) => [m.ref, m.title]), [[at(1), 'worker one']]);
-      assert.equal(hits.find((u) => u.pathname === '/api/groups').searchParams.get('dispatch'), '1');
-      const include = sessionHits(hits).find((u) => u.searchParams.get('include')).searchParams.get('include').split(',');
-      assert.ok([at(1), at(2)].every((id) => include.includes(id)), 'asks for the dispatched sessions');
+      assert.deepEqual(groups.map((g) => [g.id, g.transient, g.visible, g.total]), [['g1', undefined, 1, 3], ['g2', true, 1, 2]]);
+      assert.equal(hits.find((u) => u.pathname === '/api/groups').search, '');
       const all = await run(['group', 'list', '--all']);
-      assert.match(all.stdout, /-\s+cli-active-pins \(dispatch\) \(2\/2\)/);
-      assert.doesNotMatch(all.stdout, /released/);
-    }, board(GROUPS.groups));
-  });
-
-  it('puts a dispatched session in the user group with the same name, in any case', async () => {
-    const named = { id: 'g2', name: 'CLI-Active-Pins', parent: null, members: [{ type: 'session', ref: SESSIONS[1].id }] };
-    await withBoard(async (run) => {
-      const { stdout } = await run(['group', 'list', '--all', '--json']);
-      const groups = JSON.parse(stdout).groups;
-      assert.deepEqual(groups.map((g) => g.id), ['g1', 'g2']);
-      assert.deepEqual(groups[1].members.map((m) => m.ref), [SESSIONS[1].id, at(1), at(2)]);
-      assert.equal(groups[1].total, 3);
-    }, board([GROUPS.groups[0], named]));
+      assert.match(all.stdout, /g2\s+swarm-1 \(transient\) \(2\/2\)/);
+    }, { sessions: [...SESSIONS, ...workers], groups: { rev: 1, groups: [GROUPS.groups[0], swarm] } });
   });
 
   it('counts a project member as the sidebar does, from one lite request', async () => {
@@ -246,16 +223,5 @@ describe('group list with dispatch groups', () => {
       assert.ok(batches.every((b) => b.length <= 100));
       assert.equal(new Set(batches.flat()).size, 450);
     }, { groups: { rev: 1, groups } });
-  });
-
-  it('leaves a dispatched session in the user group that holds its project', async () => {
-    const byProject = { id: 'g3', name: 'Gamma', parent: null, members: [{ type: 'project', ref: '/p/gamma' }] };
-    await withBoard(async (run) => {
-      const { stdout } = await run(['group', 'list', '--all', '--json']);
-      const groups = JSON.parse(stdout).groups;
-      assert.deepEqual(groups.map((g) => g.id), ['g3', 'dispatch:cli-active-pins']);
-      assert.equal(groups[0].members[0].sessions, 3);
-      assert.deepEqual(groups[1].members.map((m) => m.ref), [SESSIONS[0].id], 'a session of another project still goes to the dispatch group');
-    }, board([byProject]));
   });
 });

@@ -15,7 +15,7 @@ claude-code-kanban dispatch start --cwd <dir> --spec-file <spec.md> --name <name
 ```
 
 - `--name` is the sidebar name and the session's peer name. Kebab-case and unique: `fix-login-redirect`.
-- `--group` names the effort in kebab-case (`auth-refactor`) and shows the session under that sidebar group. Pass it on every dispatch that belongs to the effort; a dispatch without it goes to its project.
+- `--group` names the effort (`auth-refactor`, or a path like `auth-refactor/api`) and shows the session under that sidebar group. Pass it on every dispatch that belongs to the effort; a dispatch without it goes to its project. A group it makes goes when none of its sessions shows as active; an existing group stays.
 - `--spec-file` keeps a long spec out of shell quoting.
 - Everything after `--` goes to `claude` as it is: any flag in `claude --help`, e.g. `-- --permission-mode auto --add-dir ../shared`. Keep each value one shell word of plain characters (no quotes, `%` or control characters); long text belongs in the spec. cck owns the session id, name, model and worktree, so pass those with its own flags.
 - After a cck restart the terminal comes back with `claude --resume <id>` alone, so the args after `--` apply to the first run only.

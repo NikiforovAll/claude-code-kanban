@@ -59,7 +59,7 @@ Run the board commands with `node "<base directory>/../../scripts/supervisor.mjs
 | `task_close` | `{"task_id", "reason"}` | Closes an open task |
 | `task_release` | `{"task_id", "summary"}` | Frees a worker's claim |
 | `request` | `{"text"}` | Sends a new request revision: a change of scope, or more work after a complete result |
-| `end` | `{"outcome": "complete", "summary"}` (or `partial`, `stopped`) | Stops the workers, removes their worktrees and the swarm's group, and ends the swarm. `complete` first brings the candidate's result into the user's project and saves the other workers' changes to a recovery bundle; `partial` and `stopped` save every worker's changes to a recovery bundle |
+| `end` | `{"outcome": "complete", "summary"}` (or `partial`, `stopped`) | Stops the workers, removes their worktrees, moves you back out of the swarm's group (the board deletes it once its workers leave the Active view), and ends the swarm. `complete` first brings the candidate's result into the user's project and saves the other workers' changes to a recovery bundle; `partial` and `stopped` save every worker's changes to a recovery bundle |
 
 ### On a complete notice
 

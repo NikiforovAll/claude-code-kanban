@@ -197,21 +197,26 @@ export async function finish(request, { outcome, summary }, { run = cck, waitMs 
   }
   cleanup(result.project, result.trees)
   const out = main('end', { ...request, idempotency_key: 'swarm-finish', outcome: result.outcome, summary: result.summary })
-  if (out.ok) removeGroup(registry, run)
+  if (out.ok) moveSupervisorHome(registry, run)
   const { delivery, ...rest } = result
   return out.ok ? { ok: true, result: { ...rest, ...delivery } } : out
 }
 
 // Start moved the supervisor into the swarm group, nested under the group it was in; it goes
-// back there. A group already gone, after a rerun or by hand, is not an error.
-function removeGroup({ group, parent }, run) {
-  if (!group) return false
-  const home = group.split('/').slice(0, -1).join('/')
+// back there. The group is transient, so the board deletes it once its workers leave the
+// Active view. A group already gone, after a rerun or by hand, is not an error.
+function moveSupervisorHome({ group, parent }, run) {
+  const home = group?.split('/').slice(0, -1).join('/')
   try {
     if (home && parent) run(['session', 'group', parent, home, '--json'])
   } catch {}
+}
+
+function removeGroup(registry, run) {
+  if (!registry.group) return false
+  moveSupervisorHome(registry, run)
   try {
-    run(['group', 'rm', group, '--json'])
+    run(['group', 'rm', registry.group, '--json'])
     return true
   } catch {
     return false

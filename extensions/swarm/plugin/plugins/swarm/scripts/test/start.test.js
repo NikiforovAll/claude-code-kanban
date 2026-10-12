@@ -87,7 +87,6 @@ describe('swarm start', () => {
     const groups = [
       { id: 'g1', name: 'work', parent: null, members: [] },
       { id: 'g2', name: 'auth', parent: 'g1', members: [{ type: 'session', ref: 'sid-p' }] },
-      { id: 'dispatch:x', name: 'x', dispatch: true, members: [{ type: 'session', ref: 'sid-q' }] },
     ];
     assert.equal(m.groupPath(groups, 'sid-p'), 'work/auth');
     assert.equal(m.groupPath(groups, 'sid-q'), '');
@@ -107,8 +106,11 @@ describe('swarm start', () => {
   });
 
   it('passes the claude args after -- to each worker', () => {
-    const at = { cwd: 'C:/p', specFile: 's.md', name: 'w1-abc', listId: 'swarm-x-abc' };
-    assert.equal(m.dispatchArgs(at).includes('--'), false);
+    const at = { cwd: 'C:/p', specFile: 's.md', name: 'w1-abc', listId: 'swarm-x-abc', group: 'home/swarm-x-abc' };
+    const args = m.dispatchArgs(at);
+    assert.equal(args[args.indexOf('--group') + 1], 'home/swarm-x-abc');
+    assert.equal(args[args.indexOf('--task-list') + 1], 'swarm-x-abc');
+    assert.equal(args.includes('--'), false);
     assert.deepEqual(m.dispatchArgs({ ...at, claudeArgs: ['--plugin-dir', 'C:/plug'] }).slice(-3), ['--', '--plugin-dir', 'C:/plug']);
     assert.deepEqual(m.dispatchArgs({ ...at, model: 'haiku' }).slice(-2), ['--model', 'haiku']);
     assert.equal(m.dispatchArgs(at).includes('--model'), false);

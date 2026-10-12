@@ -123,14 +123,42 @@ describe('user groups', () => {
     assert.equal(status(() => s.place('a', { type: 'task', ref: 'x' })), 400);
   });
 
-  it('ungroups and releases a session', () => {
+  it('ungroups a session', () => {
     const s = harness().store();
     s.create({ id: 'a', members: [{ type: 'session', ref: 's1' }] });
-    s.ungroup({ type: 'session', ref: 's1', release: true });
-    s.release(['s2', 's1']);
-    const st = s.state();
-    assert.deepEqual(st.groups[0].members, []);
-    assert.deepEqual(st.released, ['s2', 's1']);
+    s.ungroup({ type: 'session', ref: 's1' });
+    assert.deepEqual(s.state().groups[0].members, []);
+  });
+
+  it('joins a dispatched session to a group, and marks only the groups it made transient', () => {
+    const { store } = harness();
+    const s = store();
+    s.create({ id: 'a', name: 'Work', members: [{ type: 'session', ref: 's9' }] });
+    const kept = s.joinDispatch('work', 's1');
+    assert.deepEqual([kept.group, kept.transient], ['a', false]);
+    const made = s.joinDispatch('work/swarm-1', 's2');
+    assert.deepEqual([made.path, made.transient], ['Work/swarm-1', true]);
+    const deep = s.joinDispatch('ops/api', 's1');
+    assert.deepEqual(s.state().groups.map((g) => [g.name, !!g.transient, g.members.map((m) => m.ref)]), [
+      ['Work', false, ['s9']],
+      ['swarm-1', true, ['s2']],
+      ['ops', true, []],
+      ['api', true, ['s1']],
+    ]);
+    assert.equal(s.joinDispatch(deep.group, 's3').group, deep.group, 'takes a group id');
+    assert.equal(store().state().groups.find((g) => g.name === 'api').transient, true, 'the flag is saved');
+    assert.equal(status(() => s.joinDispatch('x', '')), 400);
+  });
+
+  it('marks the groups that create --transient makes, and a rename clears the flag', () => {
+    const s = harness().store();
+    s.createPath('ops');
+    s.createPath('ops/swarm-1', true);
+    assert.deepEqual(s.state().groups.map((g) => [g.name, !!g.transient]), [['ops', false], ['swarm-1', true]]);
+    assert.equal(status(() => s.rename('ops/swarm-1', ' ')), 400);
+    assert.equal(s.state().groups[1].transient, true, 'a refused rename keeps the flag');
+    s.rename('ops/swarm-1', 'swarm-2');
+    assert.equal(s.state().groups[1].transient, undefined);
   });
 
   it('imports the board groups once and keeps members the server holds', () => {
@@ -143,7 +171,6 @@ describe('user groups', () => {
         { id: 'g_x', name: 'Local', members: [{ type: 'session', ref: 's1' }, { type: 'project', ref: 'C:/p' }, { type: 'bad' }] },
         { id: 'srv', name: 'Clash', members: [] },
       ],
-      released: ['r1', 7],
     };
     const out = s.importLocal(local);
     assert.equal(out.groupsMigratedAt, '2026-10-09T00:00:00.000Z');
@@ -151,7 +178,6 @@ describe('user groups', () => {
       out.groups.map((g) => [g.id, g.name, g.members.map((m) => m.ref)]),
       [['srv', 'Server', ['s1']], ['g_x', 'Local', ['C:/p']], ['g1', 'Clash', []]],
     );
-    assert.deepEqual(out.released, ['r1']);
     assert.equal(out.imported, true);
     const again = store().importLocal(local);
     assert.equal(again.imported, false);
@@ -181,9 +207,9 @@ describe('user groups', () => {
   it('replaces the whole document only at the current rev', () => {
     const s = harness().store();
     s.create({ id: 'a', name: 'A' });
-    const out = s.replace({ rev: 1, groups: [{ id: 'b', name: 'B', parent: null, members: [] }, { id: 'c', name: 'C', parent: 'b' }], released: ['r'] });
+    const out = s.replace({ rev: 1, groups: [{ id: 'b', name: 'B', parent: null, members: [] }, { id: 'c', name: 'C', parent: 'b', transient: true }] });
     assert.equal(out.rev, 2);
-    assert.deepEqual(out.groups.map((g) => [g.id, g.parent]), [['b', null], ['c', 'b']]);
+    assert.deepEqual(out.groups.map((g) => [g.id, g.parent, g.transient]), [['b', null, undefined], ['c', 'b', true]]);
     assert.equal(status(() => s.replace({ rev: 1, groups: [] })), 409);
     assert.equal(s.state().groups.length, 2);
   });
@@ -218,7 +244,7 @@ describe('user groups', () => {
     assert.equal(again.left, 'Auth Work');
     assert.deepEqual(again.groups.map((g) => g.members.map((m) => m.ref)), [[], ['s1']]);
     const out = s.groupSession('s1', { group: null });
-    assert.deepEqual([out.group, out.left, out.released], [null, 'B', ['s1']]);
+    assert.deepEqual([out.group, out.left], [null, 'B']);
     assert.deepEqual(out.groups.map((g) => g.members.length), [0, 0]);
   });
 
@@ -260,7 +286,6 @@ describe('user groups', () => {
     assert.equal(s.state().groups.length, 2);
     assert.equal(status(() => s.createPath('OPS/swarm-1')), 400);
     assert.equal(status(() => s.createPath('ops')), 400);
-    assert.equal(s.createPath('dispatch:auth').name, 'auth');
   });
 
   it('renames a group by name or path and keeps its place', () => {
@@ -280,16 +305,6 @@ describe('user groups', () => {
     const out = s.removeByKey('ops');
     assert.deepEqual([out.removed.name, out.removed.path, out.ungrouped], ['ops', 'ops', 1]);
     assert.deepEqual(s.state().groups.map((g) => [g.name, g.parent]), [['swarm-1', null]]);
-  });
-
-  it('refuses a dispatch key for rename and rm', () => {
-    const s = harness().store();
-    s.createPath('auth');
-    assert.equal(status(() => s.rename('dispatch:auth', 'x')), 400);
-    assert.equal(status(() => s.removeByKey('dispatch:auth')), 400);
-    assert.equal(s.state().groups[0].name, 'auth');
-    const joined = s.groupSession('s1', { group: 'dispatch:ops' });
-    assert.deepEqual([joined.name, joined.created], ['ops', true]);
   });
 
   it('prunes empty groups from the bottom up and counts gone sessions as empty', () => {
@@ -382,10 +397,8 @@ describe('user groups', () => {
     const s = harness().store();
     s.create({ id: 'a', name: 'A', members: [{ type: 'session', ref: 'p1' }] });
     s.create({ id: 'b', name: 'B', members: [{ type: 'project', ref: 'C:/repo' }] });
-    s.create({ id: 'c', name: 'api-work' });
     assert.equal(s.groupSession('s1', { peer: { ref: 'p1', project: 'C:/repo' } }).group, 'a');
     assert.equal(s.groupSession('s1', { peer: { ref: 'p2', project: 'C:/repo' } }).group, 'b');
-    assert.equal(s.groupSession('s1', { peer: { ref: 'p3', dispatchGroup: 'api-work' } }).group, 'c');
     assert.equal(status(() => s.groupSession('s1', { peer: { ref: 'p4' } })), 404);
     assert.equal(status(() => s.groupSession('s1', { peer: { ref: 's1' } })), 400);
     const made = s.groupSession('s1', { peer: { ref: 'p4', name: 'Fix login' }, create: true });

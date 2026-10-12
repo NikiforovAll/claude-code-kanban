@@ -254,7 +254,7 @@ Moves the session into a group in the sidebar. `<group>` is a group name, in any
 
 `--parent <session>` shows the session indented under another session, when both show in the same list of the group. Any session can be a parent; the kind of session does not matter. With no `<group>` or `--with`, the session also joins the parent's group. A move inside the group keeps the parent; a move to another group drops it. `--no-parent` drops it.
 
-`--with <session>` puts the session in the group that another session shows in: the group that holds that session, else the group that holds its project, else a group named like its dispatch group. When that session is in no group, the command fails; `--create` makes a group named after it that holds both sessions. `--json` prints `{group, name, path, created, left, rev}`, where `path` is the group's path from the top and `left` is the name of the group the session was in.
+`--with <session>` puts the session in the group that another session shows in: the group that holds that session, else the group that holds its project. When that session is in no group, the command fails; `--create` makes a group named after it that holds both sessions. `--json` prints `{group, name, path, created, left, rev}`, where `path` is the group's path from the top and `left` is the name of the group the session was in.
 
 ### session ungroup
 
@@ -262,7 +262,7 @@ Moves the session into a group in the sidebar. `<group>` is a group name, in any
 claude-code-kanban session ungroup <id> [--json]
 ```
 
-Takes the session out of its group and out of its dispatch group, as dragging it to Ungrouped does. A session whose project is in a group still shows in that group: move the project on the board. `--json` prints `{left, rev}`.
+Takes the session out of its group, as dragging it to Ungrouped does. A session whose project is in a group still shows in that group: move the project on the board. `--json` prints `{left, rev}`.
 
 The server keeps groups in `<config-dir>/.cck/groups.json`, and connected board tabs show a change at once.
 
@@ -290,17 +290,17 @@ claude-code-kanban group list [--all] [--json]
 
 Lists the session groups in sidebar order, each with the members the sidebar's Active view shows (active, pinned or sticky), and the projects that have such a session. Each group line ends with `visible/total`, the members shown and all members. `--all` shows every member. The table has the columns `ID`, `STATUS`, `AGE`, `PIN` and `NAME`. A nested group is indented under its parent, and its members under it. Pass a name, a path or an id from this list to `session group`.
 
-A session started with `dispatch start --group` shows in its dispatch group, as in the sidebar: after the user groups, with `(dispatch)` after the name and `-` as the ID. A user group that holds the session or its project keeps it, and a user group with the same name, in any case, takes it in. A session removed from its dispatch group in the sidebar does not show there. A dispatch group goes when its sessions end.
+A temporary group, made by `dispatch start --group` or `group create --transient`, has `(transient)` after its name. The board removes it when its Active view shows none of its sessions. See [Groups from dispatch](/claude-code-kanban/guides/session-groups/#groups-from-dispatch).
 
-`--json` prints `{rev, groups}`, each group as `{id, name, parent, visible, total, members}`. A dispatch group has `dispatch: true` and the id `dispatch:<name>`. A `<group>` argument of `dispatch:<name>` names the user group `<name>`, and `session group` creates it, so the sessions stay in it after they end. A session member has `title`, `branch`, `status`, `pinned` and `age`, so you do not need `session list` to describe it. A session member whose session is gone has `missing: true`. A project member has `sessions`, the count of its sessions shown.
+`--json` prints `{rev, groups}`, each group as `{id, name, parent, visible, total, members}`, plus `transient: true` for a temporary group. A session member has `title`, `branch`, `status`, `pinned` and `age`, so you do not need `session list` to describe it. A session member whose session is gone has `missing: true`. A project member has `sessions`, the count of its sessions shown.
 
 ## group create
 
 ```bash
-claude-code-kanban group create <name|path> [--json]
+claude-code-kanban group create <name|path> [--transient] [--json]
 ```
 
-Makes a group. A path, such as `auth-refactor/swarm-1`, also makes the parents that are missing. The command fails when the group exists. `--json` prints `{group, name, path, rev}`.
+Makes a group. A path, such as `auth-refactor/swarm-1`, also makes the parents that are missing. The command fails when the group exists. `--transient` makes the new groups temporary: the board removes them when its Active view shows none of their sessions. `--json` prints `{group, name, path, rev}`.
 
 ## group rename
 
@@ -308,7 +308,7 @@ Makes a group. A path, such as `auth-refactor/swarm-1`, also makes the parents t
 claude-code-kanban group rename <group> <new name> [--json]
 ```
 
-Renames a group. It keeps its place, its parent and its members. `<group>` is a name, a path or an id, as for `session group`. `--json` prints `{group, name, path, rev}`.
+Renames a group. It keeps its place, its parent and its members. A temporary group becomes a group that stays. `<group>` is a name, a path or an id, as for `session group`. `--json` prints `{group, name, path, rev}`.
 
 ## group rm
 
@@ -316,9 +316,7 @@ Renames a group. It keeps its place, its parent and its members. `<group>` is a 
 claude-code-kanban group rm <group> [--json]
 ```
 
-Removes a group, as Delete on the board does. Its sessions show where they would show with no group: in their project's group, their dispatch group or the top level. Its child groups move up one level. `--json` prints `{removed: {id, name, path}, ungrouped, rev}`.
-
-`rename` and `rm` do not take `dispatch:<name>`: a dispatch group goes when its sessions end, and `session ungroup` takes a session out.
+Removes a group, as Delete on the board does. Its sessions show where they would show with no group: in their project's group or the top level. Its child groups move up one level. `--json` prints `{removed: {id, name, path}, ungrouped, rev}`.
 
 ## group prune
 
@@ -360,7 +358,7 @@ claude-code-kanban dispatch start --cwd <dir> (--spec <text> | --spec-file <path
 | `--spec <text>` | The task. Write it so that it makes sense with no other context. |
 | `--spec-file <path>` | Reads the task from a file. |
 | `--name <n>` | Session name: up to 80 letters, digits, spaces, `.`, `_` and `-`. The first character must be a letter or a digit. It is also the session's peer name for `SendMessage`. |
-| `--group <g>` | Shows the new session in this [session group](/claude-code-kanban/guides/session-groups/). The name must be kebab-case, for example `auth-refactor`. Default is the group of the session that runs the command. |
+| `--group <g>` | Adds the new session to this [session group](/claude-code-kanban/guides/session-groups/#groups-from-dispatch): a name, a path such as `auth-refactor/api`, or an id. A missing group is made as a temporary group. Without it, the session goes to its project. |
 | `--model <m>` | `fable`, `opus`, `sonnet` or `haiku`. |
 | `--worktree [name]` | Runs the session in a new git worktree. |
 | `--task-list [id]` | The session uses this task list instead of its own. With no value, it uses the current session's list. Off unless given. See [Share one task list](/claude-code-kanban/guides/dispatch/#share-one-task-list). |
@@ -380,7 +378,6 @@ cck sends no report back. Say in the spec how the session reports, for example w
 - `404 folder does not exist` when the folder does not exist.
 - `429 30 terminals are open; end one first` when all terminals are in use (30 by default).
 - `400 invalid name`, `invalid worktree name`, `invalid task list id`, `invalid model` or `invalid prompt` when a value is not valid or the spec is longer than 32 KB.
-- A group name that is not kebab-case. The CLI suggests a fixed name, for example `try --group auth-refactor`.
 - `invalid claude arg: no quotes, % or control characters`, or `cck sets <flag>` for a flag cck owns, after `--`.
 
 The command records the session that ran it, from `CLAUDE_CODE_SESSION_ID`, as the parent. `dispatch list` uses it.

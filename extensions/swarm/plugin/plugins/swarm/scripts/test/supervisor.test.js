@@ -99,7 +99,7 @@ describe('swarm supervisor', { skip: !hasSqlite && 'node:sqlite needs Node 22.5 
     return { run, calls };
   }
 
-  it('stops the workers, waits until they end, saves their changes, removes the worktrees and the group, then ends the swarm', async () => {
+  it('stops the workers, waits until they end, saves their changes, removes the worktrees, moves the supervisor home, then ends the swarm', async () => {
     const env = config();
     const p = project(env);
     const file = `${env.CLAUDE_CONFIG_DIR}/.cck/swarm/${LIST}/swarm.json`;
@@ -112,7 +112,8 @@ describe('swarm supervisor', { skip: !hasSqlite && 'node:sqlite needs Node 22.5 
     const out = await sup.finish(request, stopped, { run, pollMs: 1 });
     assert.equal(out.ok, true);
     assert.deepEqual(calls.filter((c) => c.startsWith('dispatch end')), ['dispatch end sid-1', 'dispatch end sid-2']);
-    assert.deepEqual(calls.slice(-2), ['session group sid-p', `group rm work/${LIST}`], 'the supervisor goes back to its own group first');
+    assert.equal(calls.at(-1), 'session group sid-p', 'the supervisor goes back to its own group');
+    assert.ok(!calls.some((c) => c.startsWith('group rm')), 'the board deletes the transient group');
     const board = store.main('status', request).board;
     assert.deepEqual([board.state, board.outcome.outcome, board.tasks[0].state], ['ended', 'stopped', 'done']);
     const mirrored = JSON.parse(fs.readFileSync(path.join(request.tasksDir, '1.json'), 'utf8'));

@@ -3,7 +3,7 @@ title: Dispatch tasks to other sessions
 description: Start a new Claude Code session with a written task in the board's terminal, with any claude flags, from the command line or from Claude.
 ---
 
-A dispatch is a Claude Code session that Claude Code Kanban starts for you in its embedded terminal. You give it a task, called a spec, which it gets as its first message. The new session is an ordinary session. It shows in the sidebar like any other, and you can open its terminal at any time. Until its transcript appears, the sidebar shows it as a placeholder with the hint `starting`. Without a group of its own, it shows in the group of the session that started it.
+A dispatch is a Claude Code session that Claude Code Kanban starts for you in its embedded terminal. You give it a task, called a spec, which it gets as its first message. The new session is an ordinary session. It shows in the sidebar like any other, and you can open its terminal at any time. Until its transcript appears, the sidebar shows it as a placeholder with the hint `starting`.
 
 `dispatch start` is a thin wrapper around `claude`. It starts the session and links it to the session that started it. It does not track a result. The two sessions talk with Claude Code's own `SendMessage` tool. For ways to combine dispatches, see [Orchestration patterns](/claude-code-kanban/guides/dispatch-patterns/).
 
@@ -78,7 +78,7 @@ When you move a card, the board tells the sessions about it:
 
 Pass `--group` to show the new session under that group in the sidebar. Pass it on each dispatch that belongs in the group: a dispatch without it goes to its project. The session that ran `dispatch start` stays where it is.
 
-A dispatch group is temporary. Select **Keep** on the group header to turn it into a named group. For how long it lives and where a started session goes, see [Groups from dispatch](/claude-code-kanban/guides/session-groups/#groups-from-dispatch).
+A group that `--group` makes is temporary: it goes when the Active view shows none of its sessions. Select **Keep** on the group header to keep it. For details, see [Groups from dispatch](/claude-code-kanban/guides/session-groups/#groups-from-dispatch).
 
 ## Talk to a dispatch
 

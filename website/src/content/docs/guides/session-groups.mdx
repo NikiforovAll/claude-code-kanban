@@ -47,25 +47,19 @@ Groups hold references to sessions and projects. A session that the sidebar filt
 
 ## Groups from dispatch
 
-When a session starts another session with `dispatch start --group <name>`, the board shows a temporary group with that name. The name must be kebab-case and 64 characters or fewer, for example `site-docs`. See [Dispatch tasks to other sessions](/claude-code-kanban/guides/dispatch/).
+When a session starts another session with `dispatch start --group <group>`, the started session joins that group. `<group>` is a group name, a path such as `auth-refactor/api`, or a group id. See [Dispatch tasks to other sessions](/claude-code-kanban/guides/dispatch/).
 
-A temporary group works like this:
+- When the group exists, the session joins it, and the group stays as it is.
+- When it does not exist, the board makes it, and the missing groups of the path, as temporary groups. The name of a temporary group shows dimmed, with a **Keep** button on its header.
+- The starting session stays where it is.
 
-- It holds the started sessions. The starting session stays where it is.
-- The server saves it in `<config-dir>/.cck/dispatch-groups.json`, so it is not stored in the browser.
-- It stays while the Claude process of any member runs, and for 60 seconds after the last one stops.
-- After that, only pinned members stay in the group. The other sessions go back to their project block. Because pinned members stay, a group with a pinned session is still there after a server restart.
+A temporary group goes when the Active view shows none of its sessions: they ended, or you dismissed them. A session that still starts counts as shown. The board checks this only on the full Active list, so a search, a project filter or another view does not remove a group.
 
-A temporary group header has a **Keep** button and no rename or delete controls. **Keep** makes a named group with the same name and the same sessions. Later dispatches with that `--group` name go into the named group.
-
-If a named group already has the same name as a temporary group, the named group takes its sessions.
+To keep a temporary group, select **Keep** on its header, rename it, or move a session or project into it. It is then a group like any other. `group create --transient` makes a temporary group from the CLI.
 
 ### Where a started session goes
 
 Claude Code Kanban picks the place for a started session when it starts, so the card does not move after it shows. A session started with `--group` goes to that group. A session started without it goes to its project block, even when the starting session is in a group.
 
 Until the first transcript line arrives, the board shows a "starting" placeholder card in that place.
-
-A session or project that you put in a named group stays there. A dispatch group does not move it.
-
 <Lightbox />

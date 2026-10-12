@@ -50,9 +50,8 @@ const { readTerminalConfig } = require('./lib/terminal');
 const { createTerminalClient } = require('./lib/terminal-client');
 const { kanbotOn, kanbotModel, createKanbot } = require('./lib/kanbot');
 const { createShowStore, mountShowRoutes, showBodyParser, SHOW_PATH } = require('./lib/show');
-const { readLiveSessions, isPidAlive, isSessionLive } = require('./lib/live-sessions');
+const { readLiveSessions, isPidAlive } = require('./lib/live-sessions');
 const { createProcStats } = require('./lib/proc-stats');
-const { createGroupStore, isGroupName, suggestGroupName } = require('./lib/dispatch-groups');
 const { createUserGroupStore } = require('./lib/user-groups');
 const { createSessionPinStore } = require('./lib/session-pins');
 const { stampedJsonFile } = require('./lib/stamped-json-file');
@@ -115,7 +114,6 @@ const CCK_DIR = path.join(CLAUDE_DIR, '.cck');
 const AGENT_ACTIVITY_DIR = path.join(CCK_DIR, 'agent-activity');
 const CONTEXT_STATUS_DIR = path.join(CCK_DIR, 'context-status');
 const PINS_FILE = path.join(CCK_DIR, 'pins.json');
-const DISPATCH_GROUPS_FILE = path.join(CCK_DIR, 'dispatch-groups.json');
 const USER_GROUPS_FILE = path.join(CCK_DIR, 'groups.json');
 const DISPATCHED_FILE = path.join(CCK_DIR, 'dispatched.json');
 const WORKTREES_FILE = path.join(CCK_DIR, 'worktrees.json');
@@ -1659,7 +1657,7 @@ app.get('/api/sessions', async (req, res) => {
       s.autoCompact = autoCompactByProject.get(s.project);
     }
 
-    res.json(withDispatchPlacement(sessions));
+    res.json(withDispatchMarker(sessions));
     startPrewarm();
   } catch (error) {
     console.error('Error listing sessions:', error);
@@ -3456,26 +3454,12 @@ app.get('/vendor/xterm/:file', (req, res) => {
 // #region DISPATCH
 const dispatched = createDispatchedStore(jsonFile(DISPATCHED_FILE));
 
-const dispatchGroups = createGroupStore({
-  ...jsonFile(DISPATCH_GROUPS_FILE),
-  isAlive: (id) => terminal.isRunning(id) || isSessionLive(loadLiveSessions(), id),
-  pinnedIds: () => new Set(Object.keys(sessionPins.state().pins)),
-});
-
 const linkedDocs = createLinkedDocStore(jsonFile(LINKED_DOCS_FILE));
 
-// The board places a session from these alone, so it never has to move it later.
-function withDispatchPlacement(sessions) {
-  const groups = dispatchGroups.snapshot();
+function withDispatchMarker(sessions) {
   return sessions.map((s) => {
-    const dispatchGroup = groups.get(s.id);
     const marker = dispatched.get(s.id);
-    if (!dispatchGroup && !marker) return s;
-    return {
-      ...s,
-      dispatchGroup,
-      dispatched: marker ? { parent: marker.parent } : undefined,
-    };
+    return marker ? { ...s, dispatched: { parent: marker.parent } } : s;
   });
 }
 
@@ -3486,16 +3470,31 @@ app.post('/api/dispatch', terminalRoute(async (req, res) => {
   const { cwd, spec, name, model, worktree, taskList, parent, group, claudeArgs } = req.body || {};
   if (typeof spec !== 'string' || !spec.trim()) return res.status(400).json({ error: 'spec is required' });
   if (parent != null && !(typeof parent === 'string' && isUUID(parent))) return res.status(400).json({ error: 'invalid parent' });
-  if (group != null && !isGroupName(group)) {
-    return res.status(400).json({ error: `group must be kebab-case, e.g. ${suggestGroupName(group) || 'my-group'}` });
-  }
+  if (group != null && !(typeof group === 'string' && group.trim())) return res.status(400).json({ error: 'group must be a group name, path or id' });
   const started = await terminal.startNew({ cwd, name, model, worktree, taskList, prompt: spec.trim(), extraArgs: claudeArgs });
   if (started.error) return res.status(started.status).json({ error: started.error });
   dispatched.record(started.id, { parent, cwd: started.cwd, name, group, worktree });
-  // The starter stays where it is: moving it would jump it under the user.
-  if (group) dispatchGroups.join(group, [started.id]);
+  // Joined before dispatch-update, so the board places the session from its first frame. The
+  // starter stays where it is: moving it would jump it under the user.
+  let joined = null;
+  let groupError;
+  if (group) {
+    try {
+      userGroups.reload();
+      joined = userGroups.joinDispatch(group, started.id);
+      broadcast({ type: 'group:changed', rev: joined.rev });
+    } catch (e) {
+      groupError = e.message;
+    }
+  }
   broadcast({ type: 'dispatch-update' });
-  res.status(201).json({ session: started.id, cwd: started.cwd, group: group || null });
+  res.status(201).json({
+    session: started.id,
+    cwd: started.cwd,
+    group: joined?.path ?? null,
+    ...(joined ? { groupId: joined.group, transient: joined.transient } : {}),
+    ...(groupError ? { groupError } : {}),
+  });
 }));
 
 app.get('/api/dispatch', (req, res) => {
@@ -4052,21 +4051,19 @@ function groupRoute(fn) {
   };
 }
 
-app.get('/api/groups', (req, res) => {
+app.get('/api/groups', (_req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   userGroups.reload();
-  const state = userGroups.state();
-  res.json(req.query.dispatch === '1' ? { ...state, dispatch: Object.fromEntries(dispatchGroups.snapshot()) } : state);
+  res.json(userGroups.state());
 });
 app.post('/api/groups', groupRoute((b) => userGroups.create(b)));
 app.put('/api/groups', groupRoute((b) => userGroups.replace(b)));
 app.post('/api/groups/import', groupRoute((b) => userGroups.importLocal(b)));
 app.post('/api/groups/ungroup', groupRoute((b) => userGroups.ungroup(b)));
-app.post('/api/groups/release', groupRoute((b) => userGroups.release(b.ids)));
 app.patch('/api/groups/:id', groupRoute((b, p) => userGroups.update(p.id, b)));
 app.delete('/api/groups/:id', groupRoute((_b, p) => userGroups.remove(p.id)));
 app.put('/api/groups/:id/members', groupRoute((b, p) => userGroups.place(p.id, b)));
-app.post('/api/groups/path', groupRoute((b) => userGroups.createPath(b.path)));
+app.post('/api/groups/path', groupRoute((b) => userGroups.createPath(b.path, b.transient === true)));
 app.post('/api/groups/rename', groupRoute((b) => userGroups.rename(b.group, b.name)));
 app.post('/api/groups/remove', groupRoute((b) => userGroups.removeByKey(b.group)));
 app.post('/api/groups/prune', groupRoute((b) => {
@@ -4087,7 +4084,7 @@ app.post('/api/groups/clean', groupRoute((b) => {
 
 // A session that runs in the terminal or is still starting has no transcript yet.
 function liveGroupMember(isKnown) {
-  const live = new Set([...terminal.ids(), ...dispatchGroups.snapshot().keys(), ...Object.keys(sessionPins.state().pins)]);
+  const live = new Set([...terminal.ids(), ...Object.keys(sessionPins.state().pins)]);
   return (m) => m.type !== 'session' || isKnown(m.ref) || live.has(m.ref);
 }
 
@@ -4114,7 +4111,6 @@ function groupPeer(id) {
   return {
     ref: id,
     project: sessionProjectKey({ project: meta.project, worktree: worktrees.resolve(meta.project) }),
-    dispatchGroup: dispatchGroups.snapshot().get(id) || null,
     name: getSessionDisplayName(id, meta) || `Session ${id.slice(0, 8)}`,
   };
 }

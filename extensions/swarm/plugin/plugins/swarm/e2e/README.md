@@ -2,7 +2,7 @@
 
 A trivial end-to-end run of the swarm on a toy Node project: two stub string functions in separate files and a test file. It touches every step: start, dispatch and group, the viewer, claims, publish and apply, a complete candidate, the watch notices, `/swarm-status`, delivery, a delivery conflict, `/swarm-stop` and the worktree cleanup.
 
-It runs on the real board (the cck that runs in the hub, on your `~/.claude`), because a second board on the same config dir clobbers `.cck/dispatch-groups.json` and takes `server.json`. Nothing is installed: the supervisor and the workers load this checkout's plugin with `--plugin-dir`, and run with `--permission-mode auto` unless you pass other claude args after `--`. Every session runs on `--model`, sonnet by default.
+It runs on the real board (the cck that runs in the hub, on your `~/.claude`), because a second board on the same config dir takes `server.json`. Nothing is installed: the supervisor and the workers load this checkout's plugin with `--plugin-dir`, and run with `--permission-mode auto` unless you pass other claude args after `--`. Every session runs on `--model`, sonnet by default.
 
 The toy repo and the reports go to `SWARM_E2E_ROOT`, else `kanban-swarm-e2e` in the temp dir.
 

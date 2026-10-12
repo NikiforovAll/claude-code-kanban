@@ -25,17 +25,16 @@ started  SendMessage to the starter, as the spec says
 
 ## Placement
 
-A started session must not jump into a group after it appears, so its place is decided when it starts. Only an explicit `--group <g>` (kebab-case, `^[a-z0-9]+(-[a-z0-9]+)*$`) puts it in a group; without the flag it goes to its project block. The starter's own group is never inherited, so each dispatch states its group.
+A started session must not jump into a group after it appears, so its place is decided when it starts. Only an explicit `--group <g>` puts it in a group; without the flag it goes to its project block. The starter's own group is never inherited, so each dispatch states its group.
 
-`dispatch-update` makes the board fetch `GET /api/dispatch` and show a "starting" placeholder in that place until the transcript appears. A new placeholder expands the collapsed sections that would hide it once, and the Recent project filter keeps any session modified in its window, because a new folder is in no recent project until the project list reloads. `/api/sessions` then carries `dispatchGroup`, so the real card lands in the same place.
+`POST /api/dispatch` adds the started id to the group (`joinDispatch` in `lib/user-groups.js`) and broadcasts `group:changed` before `dispatch-update`. `dispatch-update` makes the board fetch `GET /api/dispatch` and show a "starting" placeholder in that place until the transcript appears. A new placeholder expands the collapsed sections that would hide it once, and the Recent project filter keeps any session modified in its window, because a new folder is in no recent project until the project list reloads. The real card is a member of the group, so it lands in the same place.
 
 ## Transient groups
 
-`lib/dispatch-groups.js`, persisted in `<config dir>/.cck/dispatch-groups.json` as `{version: 1, sessions: {<id>: <group>}}`.
+A dispatch group is a user group in `.cck/groups.json` with `transient: true`.
 
-- `--group` puts the started session in the group. The starter stays where it is, because moving it would jump it under the user.
-- A group lives while any member's claude runs (a cck terminal or a live registry pid), and for 60 s after (a claude that has not registered yet, a resume, registry lag).
-- After that, only pinned members (`pins.json`) stay. So a pinned group survives a server restart; everything else returns to its project block, once its session has ended.
-- Named groups (`.cck/groups.json`) win: a session the user placed, or whose project sits in a named group, stays there. A named group with the transient group's name takes its sessions in.
-- **Keep** on a transient group header creates a named group with the same name and its sessions. Later dispatches with that `--group` land in it by name.
-- `GET /api/groups?dispatch=1` adds the map as `dispatch: {<id>: <group>}`, so `group list` can ask `/api/sessions` for those sessions and place them as the sidebar does (`placeSession` in `lib/user-groups.js`). The board does not ask for it.
+- `--group` takes a group name (any case), path (`parent/child`) or id. An existing group is joined as it is; the missing steps of the path are made, marked transient. The starter stays where it is, because moving it would jump it under the user.
+- The session leaves the group it was in. A grouping error does not fail the dispatch: the response carries `groupError` and the CLI prints it.
+- The board deletes a transient group when its Active view shows none of its sessions and none of its child groups stay (`sgSweepTransient` in `public/app.js`). A dismissed session counts as not shown. A session that runs in the terminal or has a placeholder counts as shown, so a group is not deleted before its first card appears. The sweep runs only on a full Active list (no search, no activity filter, all projects or Recent, every page loaded), because a paged or filtered list does not prove a session left.
+- **Keep** on the header, a rename (board or `group rename`) or a placement by the user clears the flag, and the group stays like any other.
+- `group create --transient` makes transient groups too. A group with no session goes at the board's next sweep, so a script that needs a group to hold its sessions makes it with `dispatch start --group` instead: the swarm's first worker makes the swarm group with itself in it, and the supervisor joins after.
