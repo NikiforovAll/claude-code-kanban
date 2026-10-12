@@ -828,15 +828,31 @@
           </div>
         </div>
         <div class="ns-row ns-extra">
-          <label class="ns-label" for="ns-model">Model</label>
+          <span class="ns-label"></span>
           <div class="ns-field">
-            <select id="ns-model" class="form-input">
-              <option value="">Default</option>
-              <option value="fable">Fable</option>
-              <option value="opus">Opus</option>
-              <option value="sonnet">Sonnet</option>
-              <option value="haiku">Haiku</option>
-            </select>
+            <div class="ns-inline">
+              <fieldset class="ns-notched">
+                <legend><label for="ns-model">Model</label></legend>
+                <select id="ns-model" class="form-input">
+                  <option value="">Default</option>
+                  <option value="fable">Fable</option>
+                  <option value="opus">Opus</option>
+                  <option value="sonnet">Sonnet</option>
+                  <option value="haiku">Haiku</option>
+                </select>
+              </fieldset>
+              <fieldset class="ns-notched">
+                <legend><label for="ns-effort">Effort</label></legend>
+                <select id="ns-effort" class="form-input">
+                  <option value="">Default</option>
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                  <option value="xhigh">XHigh</option>
+                  <option value="max">Max</option>
+                </select>
+              </fieldset>
+            </div>
           </div>
         </div>
         <div id="ns-error" class="ns-error" hidden></div>

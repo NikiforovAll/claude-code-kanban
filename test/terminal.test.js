@@ -159,9 +159,9 @@ describe('shellArgs', () => {
 
 describe('new session options', () => {
   it('builds the claude flags, with the optional worktree value last', () => {
-    const spec = parseNewSpec({ cwd: '/p', name: ' Fix login ', worktree: 'fix-login', model: 'haiku' });
+    const spec = parseNewSpec({ cwd: '/p', name: ' Fix login ', worktree: 'fix-login', model: 'haiku', effort: 'xhigh' });
     assert.deepEqual(claudeArgsFor('new', SESSION, spec),
-      ['--session-id', SESSION, '--name', 'Fix login', '--model', 'haiku', '-w', 'fix-login']);
+      ['--session-id', SESSION, '--name', 'Fix login', '--model', 'haiku', '--effort', 'xhigh', '-w', 'fix-login']);
     assert.deepEqual(claudeArgsFor('new', SESSION, parseNewSpec({ cwd: '/p', worktree: true })), ['--session-id', SESSION, '-w']);
     assert.deepEqual(claudeArgsFor('new', SESSION, parseNewSpec({ cwd: '/p' })), ['--session-id', SESSION]);
   });
@@ -180,6 +180,7 @@ describe('new session options', () => {
     assert.equal(parseNewSpec({ cwd: '/p', worktree: '../up' }), 'worktree name');
     assert.equal(parseNewSpec({ cwd: '/p', worktree: 1 }), 'worktree name');
     assert.equal(parseNewSpec({ cwd: '/p', model: 'opus; x' }), 'model');
+    assert.equal(parseNewSpec({ cwd: '/p', effort: 'ultra' }), 'effort');
     assert.equal(parseNewSpec({ cwd: '/p', taskList: '../up' }), 'task list id');
     assert.equal(parseNewSpec({ cwd: '/p', taskList: 'a/b' }), 'task list id');
   });

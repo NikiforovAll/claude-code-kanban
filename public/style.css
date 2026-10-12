@@ -8908,6 +8908,57 @@ select.form-input option:checked {
   min-width: 0;
 }
 
+.ns-body select.form-input {
+  appearance: none;
+  padding-right: 30px;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238b8d95' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+
+.ns-notched {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.ns-notched:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-dim);
+}
+
+.ns-notched legend {
+  margin: 0 8px 0 auto;
+  padding: 0 4px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 13px;
+  color: var(--text-secondary);
+}
+
+.ns-notched:focus-within legend {
+  color: var(--accent-text);
+}
+
+/* The legend's lower half sits inside the box, so less top padding keeps the box as tall as a plain input. */
+.ns-body .ns-notched select.form-input,
+.ns-body .ns-notched select.form-input:focus {
+  padding-top: 2px;
+  font-size: 12px;
+  background-position: right 10px top calc(50% - 3px);
+  border: none;
+  background-color: transparent;
+  box-shadow: none;
+}
+
 .ns-body .btn.ns-browse {
   flex: none;
   padding: 8px 12px;

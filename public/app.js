@@ -15242,6 +15242,7 @@ async function openTerminal(sessionId, mode, attempt = 0) {
         name: spec.name,
         worktree: spec.worktree,
         model: spec.model,
+        effort: spec.effort,
         prompt: spec.prompt,
         edit: spec.edit,
         forkOf: spec.forkOf,
@@ -16663,10 +16664,12 @@ function openNewSession(folder, resume = false) {
   for (const id of ['ns-name', 'ns-wt-name', 'ns-prompt']) document.getElementById(id).value = '';
   document.getElementById('ns-wt').checked = false;
   document.getElementById('ns-model').value = '';
+  document.getElementById('ns-effort').value = '';
   document.getElementById('ns-stay').checked = store.getItem(NEW_SESSION_STAY_KEY) === 'true';
   document.getElementById('ns-edit').checked = store.getItem(NEW_SESSION_EDIT_KEY) === 'true';
   setNewSessionError('');
-  const current = viewMode === 'session' ? sessions.find((s) => s.id === currentSessionId)?.project : null;
+  const session = viewMode === 'session' ? sessions.find((s) => s.id === currentSessionId) : null;
+  const current = session?.worktree?.repo || session?.project;
   setNewSessionFolder(folder || current || '');
   document.getElementById('new-session-modal').classList.add('visible');
   const input = document.getElementById('ns-folder');
@@ -16770,6 +16773,7 @@ function newSessionValues() {
     name: document.getElementById('ns-name').value.trim() || null,
     worktree: wtOn ? wtName || true : false,
     model: document.getElementById('ns-model').value || null,
+    effort: document.getElementById('ns-effort').value || null,
     prompt: document.getElementById('ns-prompt').value.trim() || null,
     edit,
     stay: !ns.resume && !edit && document.getElementById('ns-stay').checked,
@@ -16978,7 +16982,7 @@ function initNewSession() {
     store.setItem(NEW_SESSION_EDIT_KEY, String(e.target.checked));
     renderNewSessionForm();
   });
-  for (const id of ['ns-name', 'ns-wt-name', 'ns-prompt', 'ns-model']) {
+  for (const id of ['ns-name', 'ns-wt-name', 'ns-prompt', 'ns-model', 'ns-effort']) {
     document.getElementById(id).addEventListener('input', renderNewSessionForm);
   }
   if (SpeechRecognitionApi) {
