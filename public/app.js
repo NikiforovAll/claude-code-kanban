@@ -2240,7 +2240,6 @@ function unpinSession(sessionId) {
 function toggleSessionPin(sessionId) {
   if (pinnedSessionIds.has(sessionId)) return unpinSession(sessionId);
   pinnedSessionIds.add(sessionId);
-  if (sessionId === currentSessionId) deferredPinPlacement.add(sessionId);
   expandPinnedFor(sessionId);
   sendPinChange(sessionId);
   renderSessions();
@@ -4062,8 +4061,8 @@ function renderSessions() {
   const pinSort = (a, b) => pinWeight(b) - pinWeight(a);
   const renderGroupSessions = (list, pinKey) => {
     if (!groupPinned || pinnedSessionIds.size === 0) return nestChildren(list).map(renderSessionCard).join('');
-    const gIdlePinned = nestChildren(list.filter(isInPinnedGroup));
-    if (gIdlePinned.length === 0) return nestChildren(list).map(renderSessionCard).join('');
+    const gPinned = nestChildren(list.filter(isInPinnedGroup));
+    if (gPinned.length === 0) return nestChildren(list).map(renderSessionCard).join('');
     const gUnpinned = nestChildren(list.filter((s) => !isInPinnedGroup(s)));
     const pinCollapsed = collapsedProjectGroups.has(pinKey);
     return (
@@ -4076,14 +4075,14 @@ function renderSessions() {
       groupChevronSvg(10) +
       '<span class="pinned-sub-label">Pinned</span>' +
       '<span class="group-count">' +
-      gIdlePinned.length +
+      gPinned.length +
       '</span>' +
       '<span class="pinned-ungroup-btn" title="Ungroup pinned sessions">&times;</span>' +
       '</div>' +
       '<div class="pinned-sub-items' +
       (pinCollapsed ? ' collapsed' : '') +
       '">' +
-      gIdlePinned.map(renderSessionCard).join('') +
+      gPinned.map(renderSessionCard).join('') +
       '</div>' +
       '</div>' +
       gUnpinned.map(renderSessionCard).join('')
@@ -5860,7 +5859,7 @@ function expandActiveGroups({ onlyNew = false } = {}) {
 
 // Drops every collapse key that could hide this session: its project, a named group wrapping
 // the project or the session itself and the project block it renders under there, the pinned sub-section only when the card renders inside
-// it (pinned, not sticky, idle — see renderGroupSessions), and the section header that holds it:
+// it (pinned, not sticky — see renderGroupSessions), and the section header that holds it:
 // Groups for a grouped session, else Projects or Sessions, which depends on the view. Returns
 // whether anything changed.
 function uncollapseFor(session) {
@@ -7576,15 +7575,17 @@ function dismissSessionFromList(sid) {
 }
 
 async function confirmDismissBlockers(sid) {
-  const sticky = stickySessionIds.has(sid);
+  const pinState = getSessionPinState(sid);
+  const pinned = pinState !== 'none';
   const terminal = runningTerminals.has(sid);
-  if (!sticky && !terminal) return true;
+  if (!pinned && !terminal) return true;
   const session = sessions.find((s) => s.id === sid);
   const name = session ? sessionDisplayName(session) : sid.slice(0, 8);
-  const has = [sticky && 'a sticky pin', terminal && 'a running terminal'].filter(Boolean).join(' and ');
-  const okLabel = sticky && terminal ? 'Unpin, end and dismiss' : sticky ? 'Unpin and dismiss' : 'End and dismiss';
+  const pinLabel = pinState === 'sticky' ? 'sticky pin' : 'pin';
+  const has = [pinned && `a ${pinLabel}`, terminal && 'a running terminal'].filter(Boolean).join(' and ');
+  const okLabel = pinned && terminal ? 'Unpin, end and dismiss' : pinned ? 'Unpin and dismiss' : 'End and dismiss';
   const steps = [
-    sticky && 'Remove the sticky pin',
+    pinned && `Remove the ${pinLabel}`,
     terminal && 'End the terminal',
     'Hide the session from the sidebar',
   ].filter(Boolean);
@@ -7595,7 +7596,7 @@ async function confirmDismissBlockers(sid) {
     okLabel,
   });
   if (!ok) return false;
-  if (sticky) unpinSession(sid);
+  if (isAnyPinned(sid)) unpinSession(sid);
   if (terminal) closeTerminalSession(sid);
   return true;
 }
@@ -10559,9 +10560,8 @@ function isSessionActive(s) {
   return s.hasRecentLog || s.inProgress > 0 || s.hasActiveAgents || s.hasWaitingForUser;
 }
 
-// An active pinned session renders outside the Pinned group until the user dismisses it.
 function isInPinnedGroup(s) {
-  return isPlacedPinned(s.id) && !isPlacedSticky(s.id) && (!isSessionActive(s) || dismissedSessionIds.has(s.id));
+  return isPlacedPinned(s.id) && !isPlacedSticky(s.id);
 }
 
 const SESSION_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -11769,7 +11769,7 @@ function updateStickyBtnState() {
   const isSticky = stickySessionIds.has(_infoModalSessionId);
   stickyBtn.style.display = '';
   stickyBtn.classList.toggle('active', isSticky);
-  stickyBtn.title = isSticky ? 'Remove sticky pin' : 'Sticky pin — always show at top';
+  stickyBtn.title = isSticky ? 'Remove sticky pin' : 'Sticky pin — always show in the list';
   const svg = stickyBtn.querySelector('svg');
   if (svg) svg.setAttribute('fill', isSticky ? 'currentColor' : 'none');
 }

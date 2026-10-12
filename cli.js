@@ -178,7 +178,7 @@ const COMMANDS = {
         usage: 'claude-code-kanban session pin <id> [--sticky] [--unpin]',
         flags: {
           '<id>': 'Full session id, or a unique prefix',
-          '--sticky': 'Set sticky state (always shown, top of list)',
+          '--sticky': 'Set sticky state (always shown in the list)',
           '--unpin': 'Clear pin/sticky state',
         },
         examples: [

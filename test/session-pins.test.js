@@ -219,6 +219,7 @@ function makePage(local = {}) {
         'postPins',
         'clearSessionPin',
         'toggleSessionPin',
+        'toggleSessionSticky',
         'unpinSession',
         'handleSessionPinEvent',
         'getSessionPinState',
@@ -272,17 +273,25 @@ describe('board pins', () => {
     assert.equal(page.ctx.getSessionPinState('a'), 'sticky', 'the page still shows it sticky');
   });
 
-  it("the echo of the page's own change keeps the selected session in place", async () => {
+  it('pinning the selected session moves it at once', async () => {
     const page = makePage();
     await page.ctx.syncSessionPins();
     page.ctx.currentSessionId = 'a';
     page.ctx.toggleSessionPin('a');
+    assert.ok(!page.ctx.deferredPinPlacement.has('a'));
+  });
+
+  it("the echo of the page's own sticky change keeps the selected session in place", async () => {
+    const page = makePage();
+    await page.ctx.syncSessionPins();
+    page.ctx.currentSessionId = 'a';
+    page.ctx.toggleSessionSticky('a');
     assert.ok(page.ctx.deferredPinPlacement.has('a'));
     const rendered = page.ctx.rendered;
-    page.ctx.handleSessionPinEvent({ id: 'a', state: 'pinned' });
+    page.ctx.handleSessionPinEvent({ id: 'a', state: 'sticky' });
     assert.ok(page.ctx.deferredPinPlacement.has('a'));
     assert.equal(page.ctx.rendered, rendered);
-    page.ctx.handleSessionPinEvent({ id: 'a', state: 'sticky' });
+    page.ctx.handleSessionPinEvent({ id: 'a', state: 'pinned' });
     assert.ok(!page.ctx.deferredPinPlacement.has('a'), 'a change from elsewhere still applies');
   });
 
