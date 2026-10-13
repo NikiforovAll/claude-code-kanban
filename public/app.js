@@ -14588,7 +14588,7 @@ function setSwapPair(last, previous) {
 async function swapToPreviousSession() {
   const target = currentSessionId === lastSessionId ? previousSessionId : lastSessionId;
   if (!target || target === currentSessionId) return;
-  if (terminalPaneFocused()) termState.focusNext = true;
+  if (terminalPaneFocused() || isShowCardFocused()) termState.focusNext = true;
   await revealSession(target);
 }
 
