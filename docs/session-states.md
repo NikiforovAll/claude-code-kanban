@@ -23,6 +23,8 @@ The server builds these fields on every session object (`buildSessionObject` and
 
 When the transcript is older than `AGENT_STALE_MS` (30 min), the server skips the agent check for a non-team session. The waiting check still runs.
 
+`/clear` and `/resume` keep the claude process and its registry file and change the file's `sessionId`. When a registry read shows a pid with a new id, the server marks the id that pid had before as replaced (`noteReplacedSessions`, `lib/live-sessions.js`). A replaced session has `hasRecentLog` and `hasRecentActivity` false, so its card leaves Active at once, not after the recency windows. The mark is kept for `SESSION_STALE_MS` and goes when the id shows in the registry again. It is in memory: a board that starts after the `/clear` falls back to the windows. The embedded terminal follows the same change: it moves to the new id once that id has a transcript, so the terminal icon goes to the new card.
+
 The client adds one more signal. `isSessionLive` (`public/app.js`) is `hasRecentLog` with a transcript write in the last `LIVE_INDICATOR_MS` (10 s).
 
 ## Active filter

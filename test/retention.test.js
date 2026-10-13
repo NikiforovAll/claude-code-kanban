@@ -102,6 +102,18 @@ describe('createDispatchedStore', () => {
     assert.deepEqual(s.running((id) => id === 's-2').map((r) => r.session), ['s-2']);
   });
 
+  it('moves a marker to the id its terminal moved to', () => {
+    const { s, writes } = store();
+    s.record('a', { parent: 'p', name: 'w' });
+    s.record('taken');
+    assert.equal(s.move('a', 'b'), true);
+    assert.equal(s.get('a'), null);
+    assert.deepEqual([s.get('b').parent, s.get('b').name], ['p', 'w']);
+    assert.equal(s.move('b', 'taken'), false);
+    assert.equal(s.move('none', 'c'), false);
+    assert.equal(writes.length, 3);
+  });
+
   it('lists a dispatch again after a restart resumes its terminal', () => {
     const before = store();
     before.s.record('s-1', { parent: 'p-1', name: 'one', worktree: 'wt' });

@@ -68,6 +68,8 @@ If the session already runs in another terminal, a prompt asks what to do, becau
 
 To start a new session from a session's history, right-click its card in the sidebar and choose **Fork**. The fork gets its own card and terminal.
 
+`/clear` and `/resume` in the terminal start or open another session in the same Claude Code process. The terminal moves to that session's card, and the card of the session you left leaves the Active list.
+
 When Claude Code exits, the terminal stays open as a shell. When the shell exits or you end the terminal, a prompt offers **Resume** and **Shell**. For a new session that has no first message yet, the prompt offers **Start again** and **Shell**.
 
 If the connection drops, the page tries to connect again five times, from 0.5 to 8 seconds apart. After that it shows a **Reconnect** button.

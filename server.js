@@ -50,7 +50,7 @@ const { readTerminalConfig } = require('./lib/terminal');
 const { createTerminalClient } = require('./lib/terminal-client');
 const { kanbotOn, kanbotModel, createKanbot } = require('./lib/kanbot');
 const { createShowStore, mountShowRoutes, showBodyParser, SHOW_PATH } = require('./lib/show');
-const { readLiveSessions, isPidAlive } = require('./lib/live-sessions');
+const { readLiveSessions, isPidAlive, noteReplacedSessions } = require('./lib/live-sessions');
 const { createProcStats } = require('./lib/proc-stats');
 const { createUserGroupStore } = require('./lib/user-groups');
 const { createSessionPinStore } = require('./lib/session-pins');
@@ -546,12 +546,15 @@ const SELF_TEAM_BOOT_WINDOW_MS = 60 * 1000;
 let liveSessionsCache = null;
 let lastLiveSessionsScan = 0;
 const LIVE_SESSIONS_TTL = 5000;
+const replacedSessions = new Map();
 
 function loadLiveSessions() {
   const now = Date.now();
   if (liveSessionsCache && now - lastLiveSessionsScan < LIVE_SESSIONS_TTL) return liveSessionsCache;
+  const prev = liveSessionsCache;
   liveSessionsCache = readLiveSessions(SESSIONS_DIR);
   lastLiveSessionsScan = now;
+  noteReplacedSessions(prev, liveSessionsCache, replacedSessions, now, SESSION_STALE_MS);
   return liveSessionsCache;
 }
 
@@ -572,13 +575,14 @@ function getPeerName(sessionId) {
 }
 
 function hasRecentLogActivity(sessionId, logAge) {
-  return logAge <= SESSION_STALE_MS && !isRegistryIdle(sessionId);
+  return logAge <= SESSION_STALE_MS && !isRegistryIdle(sessionId) && !replacedSessions.has(sessionId);
 }
 
 // Visibility-only recency: hasRecentLogActivity widened by the post-turn grace
 // window (ungated by registry-idle). Drives whether a session appears in the
 // active list — never the "active" status badges, which stay on hasRecentLog.
 function hasVisibleLogActivity(sessionId, logAge) {
+  if (replacedSessions.has(sessionId)) return false;
   return logAge <= SESSION_GRACE_MS || hasRecentLogActivity(sessionId, logAge);
 }
 
@@ -3347,6 +3351,9 @@ const terminal = createTerminalClient({
   onChange: () => broadcast({ type: 'terminals-update', ids: terminal.ids(), awaitingTrust: terminal.awaitingTrust() }),
   onExit: (id) => {
     if (dispatched.get(id)) broadcast({ type: 'dispatch-update' });
+  },
+  onRekey: (from, to) => {
+    if (dispatched.move(from, to)) broadcast({ type: 'dispatch-update' });
   },
 });
 

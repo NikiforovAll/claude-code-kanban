@@ -719,7 +719,7 @@ describe('terminal restore', () => {
   const GAP_MS = 60;
   const SAVE_MS = 20;
 
-  function service(restore, initial, { live = [], dead = new Set() } = {}) {
+  function service(restore, initial, { live = [], dead = new Set(), rekeys = [] } = {}) {
     const store = { data: initial, loads: 0, saves: 0 };
     const pty = fakePty();
     const t = createTerminalService({
@@ -739,6 +739,7 @@ describe('terminal restore', () => {
       liveSessions: () => live,
       isPidAlive: (pid) => !dead.has(pid),
       exitPollMs: SAVE_MS,
+      onRekey: (from, to) => rekeys.push([from, to]),
     });
     return { t, pty, store };
   }
@@ -783,6 +784,29 @@ describe('terminal restore', () => {
     assert.equal(t.list()[0].claudeExited, false);
     live.length = 0;
     await until(() => t.list()[0].claudeExited, 'claude exit');
+    t.shutdown();
+  });
+
+  it('follows /clear to the new session id and keeps the terminal id', async () => {
+    const FRESH = 'aaaaaaaa-0000-0000-0000-000000000007';
+    const live = [{ pid: 4242, sessionId: FRESH, startedAt: Date.now() + 1000 }];
+    const rekeys = [];
+    const { t, store } = service(true, null, { live, rekeys });
+    assert.equal((await t.startNew({ id: FRESH, cwd: os.tmpdir() })).id, FRESH);
+    await until(() => t.claudePids()[FRESH] === 4242);
+    assert.equal(t.claudePids()[FRESH], 4242);
+    const tid = t.list()[0].terminalId;
+    live[0] = { ...live[0], sessionId: UNKNOWN };
+    await wait(SAVE_MS * 4);
+    assert.deepEqual(t.list().map((s) => s.id), [FRESH], 'no transcript yet, so the terminal waits');
+    live[0] = { ...live[0], sessionId: B };
+    await until(() => t.list()[0].id === B);
+    assert.equal(t.list()[0].id, B);
+    assert.equal(t.list()[0].terminalId, tid);
+    assert.equal(t.list()[0].claudeExited, false);
+    assert.deepEqual(rekeys, [[FRESH, B]]);
+    await until(() => store.data?.sessions?.[0] === B);
+    assert.deepEqual(store.data.sessions, [B]);
     t.shutdown();
   });
 
@@ -868,8 +892,8 @@ describe('terminal restore', () => {
     await until(() => t.claudePids()[A] === 6000);
     live[0] = { ...live[0], sessionId: B };
     await wait(SAVE_MS * 4);
-    assert.deepEqual(store.data.sessions, [A]);
-    assert.equal(t.claudePids()[A], 6000);
+    assert.deepEqual(store.data.sessions, [B]);
+    assert.equal(t.claudePids()[B], 6000);
     t.shutdown();
   });
 
