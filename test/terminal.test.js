@@ -290,31 +290,36 @@ describe('edit before run', () => {
   });
 });
 
+async function startWithPrompt(id, overrides) {
+  const pty = fakePty();
+  const t = createTerminalService({
+    config: { enabled: true, restore: false, shell: 'bash', maxSessions: 30, scrollback: 100 },
+    net: { EXPOSED: false },
+    pty,
+    token: TOKEN,
+    claudeDir: os.tmpdir(),
+    which: (n) => n,
+    isLiveElsewhere: () => false,
+    resolveCwd: () => null,
+    isAllowedFolder: () => true,
+    liveSessions: () => [],
+    isPidAlive: () => true,
+    exitPollMs: 20,
+    ...overrides,
+  });
+  await t.startNew({ id, cwd: os.tmpdir(), prompt: 'do the task' });
+  return { t, p: pty.spawned[0] };
+}
+
 describe('folder trust dialog', () => {
   const A = 'aaaaaaaa-0000-0000-0000-000000000001';
   const DIALOG = '\x1b[?2004hDo you trust the files in this folder?\r\n❯ 1. Yes, I trust this folder\r\n  2. No, exit\r\n';
   const INPUT_BOX = '\x1b[2J\x1b[H\x1b[?2004h> ';
 
   async function started() {
-    const pty = fakePty();
     let changes = 0;
-    const t = createTerminalService({
-      config: { enabled: true, restore: false, shell: 'bash', maxSessions: 30, scrollback: 100 },
-      net: { EXPOSED: false },
-      pty,
-      token: TOKEN,
-      claudeDir: os.tmpdir(),
-      which: (n) => n,
-      isLiveElsewhere: () => false,
-      resolveCwd: () => null,
-      isAllowedFolder: () => true,
-      liveSessions: () => [],
-      isPidAlive: () => true,
-      exitPollMs: 20,
-      onChange: () => { changes++; },
-    });
-    await t.startNew({ id: A, cwd: os.tmpdir(), prompt: 'do the task' });
-    return { t, p: pty.spawned[0], changes: () => changes };
+    const { t, p } = await startWithPrompt(A, { onChange: () => { changes++; } });
+    return { t, p, changes: () => changes };
   }
 
   const awaiting = (t) => t.list()[0].awaitingTrust;
@@ -350,6 +355,45 @@ describe('folder trust dialog', () => {
     assert.equal(awaiting(t), false);
     assert.equal(changes(), before);
     t.shutdown();
+  });
+});
+
+describe('prompt submit', () => {
+  const A = 'aaaaaaaa-0000-0000-0000-000000000002';
+
+  async function started(reg) {
+    const { t, p } = await startWithPrompt(A, {
+      liveSessions: () => [{ sessionId: A, pid: 7, startedAt: Date.now(), ...reg }],
+      submitPollMs: 10,
+    });
+    p.emit('\x1b[?2004h> ');
+    return { t, enters: () => p.written.filter((d) => d === '\r').length };
+  }
+
+  async function entersAfter(reg, change) {
+    const { t, enters } = await started(reg);
+    await until(() => enters() === 1);
+    change?.();
+    await wait(200);
+    t.shutdown();
+    return enters();
+  }
+
+  it('presses Enter again while the entry stays idle and older than the Enter, then gives up', async () => {
+    assert.equal(await entersAfter({ status: 'idle', statusUpdatedAt: 1 }), 3);
+  });
+
+  it('presses Enter once when the turn starts', async () => {
+    const reg = { status: 'idle', statusUpdatedAt: 1 };
+    assert.equal(await entersAfter(reg, () => Object.assign(reg, { status: 'busy', statusUpdatedAt: Date.now() })), 1);
+  });
+
+  it('presses Enter once when the entry is not idle, as with a dialog in a running turn', async () => {
+    assert.equal(await entersAfter({ status: 'busy', statusUpdatedAt: 1 }), 1);
+  });
+
+  it('presses Enter once when the registry has no status time', async () => {
+    assert.equal(await entersAfter({ status: 'idle' }), 1);
   });
 });
 
