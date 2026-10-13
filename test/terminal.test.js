@@ -290,7 +290,7 @@ describe('edit before run', () => {
   });
 });
 
-async function startWithPrompt(id, overrides) {
+async function startWithPrompt(id, overrides, spec) {
   const pty = fakePty();
   const t = createTerminalService({
     config: { enabled: true, restore: false, shell: 'bash', maxSessions: 30, scrollback: 100 },
@@ -307,7 +307,7 @@ async function startWithPrompt(id, overrides) {
     exitPollMs: 20,
     ...overrides,
   });
-  await t.startNew({ id, cwd: os.tmpdir(), prompt: 'do the task' });
+  await t.startNew({ id, cwd: os.tmpdir(), prompt: 'do the task', ...spec });
   return { t, p: pty.spawned[0] };
 }
 
@@ -335,6 +335,29 @@ describe('folder trust dialog', () => {
     assert.equal(awaiting(t), false);
     assert.equal(p.written[0], '\x1b[200~do the task\x1b[201~');
     t.shutdown();
+  });
+
+  it('holds the prompt while claude restarts its screen with paste mode off after the answer', async () => {
+    const { t, p } = await started();
+    p.emit(DIALOG);
+    await until(() => awaiting(t));
+    p.emit('\x1b[2J\x1b[H\x1b[?2031l\x1b[?2004l\x1b[?1016l\r\n');
+    await wait(800);
+    assert.deepEqual(p.written, []);
+    p.emit(INPUT_BOX);
+    await until(() => p.written.length > 0);
+    assert.equal(p.written[0], '\x1b[200~do the task\x1b[201~');
+    t.shutdown();
+  });
+
+  it('sends the prompt when only the folder or session name says trust', async () => {
+    const cwd = mkdtempSync(path.join(os.tmpdir(), 'trust-'));
+    const { t, p } = await startWithPrompt(A, {}, { cwd, name: 'trust-check' });
+    p.emit(`\x1b[?2004h~\\${path.basename(cwd)}\r\ntrust-check\r\n> `);
+    await until(() => p.written.length > 0);
+    assert.equal(p.written[0], '\x1b[200~do the task\x1b[201~');
+    t.shutdown();
+    rmSync(cwd, { recursive: true, force: true });
   });
 
   it('does not flag a screen that only says trust', async () => {
