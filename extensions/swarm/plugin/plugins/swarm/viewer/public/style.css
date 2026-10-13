@@ -405,15 +405,15 @@ code {
 /* app.js reads --content-max to size the timeline. */
 @media (min-width: 1700px) {
   .main {
-    --content-max: 1520px;
-    zoom: 1.1;
+    --content-max: 1600px;
+    zoom: 1.05;
   }
 }
 
 @media (min-width: 2200px) {
   .main {
-    --content-max: 1680px;
-    zoom: 1.2;
+    --content-max: 1830px;
+    zoom: 1.1;
   }
 }
 
@@ -1131,6 +1131,49 @@ details.sec .md {
   overflow-x: auto;
 }
 
+.tl-chart {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.tl-log {
+  margin-top: 12px;
+}
+
+.tl-log .section-title {
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+svg.tl .lane-name {
+  cursor: pointer;
+}
+
+svg.tl .lane-name:hover {
+  text-decoration: underline;
+}
+
+svg.tl [data-seq] {
+  cursor: pointer;
+}
+
+svg.tl .seq-on > * {
+  stroke: var(--text-primary) !important;
+  stroke-width: 2 !important;
+}
+
+svg.tl .tl-cursor {
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  stroke-dasharray: 3 3;
+  pointer-events: none;
+}
+
+.log tr.seq-on td {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
 svg.tl {
   display: block;
   width: 100%;
@@ -1484,6 +1527,19 @@ code.path {
 .log td.payload {
   color: var(--text-tertiary);
   word-break: break-word;
+}
+
+.log.compact td {
+  padding-top: 3px;
+  padding-bottom: 3px;
+  white-space: nowrap;
+}
+
+.log.compact td.payload {
+  width: 100%;
+  max-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 /* #endregion LOG */
 

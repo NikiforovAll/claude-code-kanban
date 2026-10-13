@@ -7,15 +7,15 @@ const helpModal = $('helpModal');
 const swarmsModal = $('swarmsModal');
 
 // `clockless`: the view draws nothing from the clock, so a resend with no new event changes nothing
-// in it. `byWidth`: the view draws to the width of the page.
+// in it. `byWidth`: the view draws to the width of the page. `needsLog`: the view shows the event log.
 const VIEWS = [
   { id: 'summary', label: 'Summary', needsRequest: true },
   { id: 'request', label: 'Request', needsRequest: true, byWidth: true },
   { id: 'queue', label: 'Queue' },
-  { id: 'timeline', label: 'Timeline', byWidth: true },
+  { id: 'timeline', label: 'Timeline', byWidth: true, needsLog: true },
   { id: 'knowledge', label: 'Knowledge', clockless: true },
   { id: 'changes', label: 'Changes', clockless: true },
-  { id: 'log', label: 'Log', clockless: true },
+  { id: 'log', label: 'Log', clockless: true, needsLog: true },
 ];
 const viewOf = (id) => VIEWS.find((v) => v.id === id);
 
@@ -27,6 +27,7 @@ const state = {
   model: null,
   view: 'summary',
   scope: null,
+  lane: null,
   diff: null,
   focus: null,
   log: null,
@@ -243,9 +244,9 @@ async function loadLog() {
     const r = await fetch(api('/api/log', { since: state.log?.at(-1)?.seq ?? 0 }));
     const rows = await r.json();
     if (!r.ok) throw new Error(rows.error);
-    if (gen === logGen) {
+    if (gen === logGen && (rows.length || !state.log)) {
       state.log = (state.log ?? []).concat(rows);
-      if (state.view === 'log') render();
+      if (viewOf(state.view).needsLog) render();
     }
   } catch (err) {
     toast(`The log did not load: ${err.message}`);
@@ -311,7 +312,7 @@ function setSwarmParam(id) {
 
 function pickSwarm(id) {
   if (!id || id === state.swarm) return;
-  Object.assign(state, { swarm: id, model: null, diff: null, scope: null, focus: null, request: null, rev: null, sec: null, pending: null });
+  Object.assign(state, { swarm: id, model: null, diff: null, scope: null, lane: null, focus: null, request: null, rev: null, sec: null, pending: null });
   state.closed.clear();
   reqBusy = null;
   reqFailed = null;
@@ -630,7 +631,8 @@ function render() {
   main.innerHTML = `${tabs}<div class="view">${RENDER[state.view]()}</div>`;
   main.scrollTop = scroll;
   if (flashing && Date.now() < flashing.until) document.getElementById(flashing.id)?.classList.add('flash');
-  if (state.view === 'log' && !state.log) loadLog();
+  if (hoverSeq != null) markHover();
+  if (viewOf(state.view).needsLog && !state.log) loadLog();
   if (viewOf(state.view).needsRequest) loadRequest();
 }
 
@@ -1079,22 +1081,34 @@ function taskCard(t, s) {
 }
 
 function timelineView() {
-  return `<div class="card">${laneChart(false)}</div>`;
+  const lane = state.model.workers.some((w) => w.name === state.lane) ? state.lane : null;
+  const drawn = new Set();
+  for (const [name, marks] of Object.entries(state.model.timeline))
+    if (!lane || name === lane) for (const m of marks) drawn.add(m.seq);
+  const log = state.log ? eventList(state.log.filter((e) => drawn.has(e.seq))) : '<p class="loading">Reading the log…</p>';
+  return `<div class="card tl-chart">${laneChart(false)}</div>
+    <div class="card tl-log"><div class="section-title"><span>Events</span>${filterChips(state.model.workers.map((w) => w.name), lane, 'lane')}</div>${log}</div>`;
 }
 
-function laneChart(revs) {
-  const { swarm: s, workers, timeline, tasks, revisions } = state.model;
+function tlScale() {
+  const { swarm: s, workers } = state.model;
   const width = tlWidth();
   const narrow = width < 560;
   const W = Math.max(300, width);
   const left = narrow ? 8 : Math.max(96, 16 + 7 * Math.max(0, ...workers.map((w) => w.name.length)));
   const right = 12;
-  const laneH = narrow ? 44 : 40;
-  const top = revs ? 40 : 22;
-  const labelH = narrow ? 14 : 0;
   const t0 = s.startedAt;
   const t1 = Math.max(s.ref, t0 + 60000);
   const x = (t) => left + ((Math.max(t, t0) - t0) / (t1 - t0)) * (W - left - right);
+  return { narrow, W, left, right, t0, t1, x };
+}
+
+function laneChart(revs) {
+  const { workers, timeline, tasks, revisions } = state.model;
+  const { narrow, W, left, right, t0, t1, x } = tlScale();
+  const laneH = narrow ? 44 : 40;
+  const top = revs ? 40 : 22;
+  const labelH = narrow ? 14 : 0;
   const H = top + workers.length * (laneH + labelH) + 6;
   const under = [];
   const parts = [];
@@ -1111,10 +1125,11 @@ function laneChart(revs) {
     const y = top + i * (laneH + labelH) + labelH;
     const mid = y + laneH / 2;
     const color = wc(w.name);
+    const pick = revs ? '' : ` class="lane-name" data-lane="${esc(w.name)}"`;
     under.push(
       narrow
-        ? `<text x="${left}" y="${y - 3}" style="fill:${color};font-weight:500">${esc(w.name)}</text>`
-        : `<text x="${left - 8}" y="${mid + 4}" text-anchor="end" style="fill:${color};font-weight:500">${esc(w.name)}</text>`,
+        ? `<text${pick} x="${left}" y="${y - 3}" style="fill:${color};font-weight:500">${esc(w.name)}</text>`
+        : `<text${pick} x="${left - 8}" y="${mid + 4}" text-anchor="end" style="fill:${color};font-weight:500">${esc(w.name)}</text>`,
       `<rect class="lane-bg" x="${left}" y="${y + 4}" width="${W - left - right}" height="${laneH - 8}" rx="4"></rect>`,
     );
     for (const g of w.gaps)
@@ -1153,7 +1168,10 @@ function laneChart(revs) {
       if (x(end) - x(t.claimedAt) > 26)
         parts.push(`<text class="bar-label" x="${x(t.claimedAt) + 5}" y="${mid + 4}">#${t.id}</text>`);
     }
-    for (const m of timeline[w.name] ?? []) parts.push(marker(m, x(m.t), y, laneH));
+    for (const m of timeline[w.name] ?? []) {
+      const mark = marker(m, x(m.t), y, laneH);
+      if (mark) parts.push(`<g data-seq="${m.seq}" data-t="${m.t}">${mark}</g>`);
+    }
   });
   if (revs) {
     const sel = selRev();
@@ -1173,6 +1191,7 @@ function laneChart(revs) {
     });
   }
   const swatch = (css) => `<i style="${css}"></i>`;
+  parts.push(`<line class="tl-cursor" y1="${top - 6}" y2="${H - 6}" style="display:none"></line>`);
   return `<div class="tl-wrap"><svg class="tl" viewBox="0 0 ${W} ${H}" height="${H}">
     <defs>
       <pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" style="stroke:var(--hatch);stroke-width:2"></line></pattern>
@@ -1267,11 +1286,16 @@ const findingNote = (f, clamp) => `<div class="note${clamp ? ' clamp' : ''}" sty
         <div class="text">${hl(f.text)}</div>
       </div>`;
 
+const filterChips = (names, current, attr) =>
+  `<div class="filters">${[null, ...names]
+    .map((n) => `<button class="filter${n === current ? ' on' : ''}" data-${attr}="${esc(n ?? '')}">${esc(n ?? 'all')}</button>`)
+    .join('')}</div>`;
+
 function knowledgeView() {
   const { findings, releases, workers } = state.model;
   const authors = workers.map((w) => w.name).filter((n) => findings.some((f) => f.actor === n));
   const shown = findings.filter((f) => !state.scope || f.actor === state.scope);
-  const filters = `<div class="filters"><button class="filter${state.scope ? '' : ' on'}" data-scope="">all</button>${authors.map((a) => `<button class="filter${state.scope === a ? ' on' : ''}" data-scope="${esc(a)}">${esc(a)}</button>`).join('')}</div>`;
+  const filters = filterChips(authors, state.scope, 'scope');
   const list = shown
     .slice()
     .reverse()
@@ -1351,19 +1375,27 @@ function changesView() {
 
 function logView() {
   if (!state.log) return '<p class="loading">Reading the log…</p>';
-  const { rows } = markup();
-  const row = (e) => {
-    let html = rows.get(e.seq);
-    if (html == null) {
-      html = `<tr><td>${e.seq}</td><td class="hide-narrow">${clock(e.t)}</td><td>${who(e.who)}</td><td><span class="kind k-${esc(e.group)}">${esc(e.kind)}</span></td><td class="payload" data-tip="${esc(JSON.stringify(e.payload, null, 2))}">${hl(e.text)}</td></tr>`;
-      rows.set(e.seq, html);
-    }
-    return html;
-  };
   return `<div class="card">
     <div class="scroll"><table class="data-table log"><thead><tr><th>seq</th><th class="hide-narrow">time</th><th>worker</th><th>kind</th><th>what happened</th></tr></thead><tbody>
-    ${state.log.map(row).reverse().join('')}
+    ${state.log.map((e) => eventRow(e, false)).reverse().join('')}
     </tbody></table></div></div>`;
+}
+
+function eventList(list) {
+  return `<div class="scroll"><table class="data-table log compact"><tbody>${list.map((e) => eventRow(e, true)).reverse().join('')}</tbody></table></div>`;
+}
+
+// `linked`: the seq opens the event in the log, and the row is tied to its mark on the timeline.
+function eventRow(e, linked) {
+  const { rows } = markup();
+  const key = linked ? -e.seq : e.seq;
+  let html = rows.get(key);
+  if (html == null) {
+    const seq = linked ? `<a class="ref" href="#" data-ev="${e.seq}" title="Open in the log">${e.seq}</a>` : e.seq;
+    html = `<tr id="ev-${e.seq}"${linked ? ` data-seq="${e.seq}" data-t="${e.t}"` : ''}><td>${seq}</td><td class="hide-narrow">${clock(e.t)}</td><td>${who(e.who)}</td><td><span class="kind k-${esc(e.group)}">${esc(e.kind)}</span></td><td class="payload">${hl(e.text)}</td></tr>`;
+    rows.set(key, html);
+  }
+  return html;
 }
 
 const RENDER = {
@@ -1418,6 +1450,30 @@ document.addEventListener('pointermove', (e) => {
   tip.style.top = `${e.clientY + 14}px`;
 });
 
+// The hovered event is kept, because the timeline redraws on every clock tick.
+let hoverSeq = null;
+document.addEventListener('pointerover', (e) => {
+  const seq = e.target.closest?.('[data-seq]')?.dataset.seq ?? null;
+  if (seq === hoverSeq) return;
+  hoverSeq = seq;
+  markHover();
+});
+
+let hovered = [];
+function markHover() {
+  for (const x of hovered) x.classList.remove('seq-on');
+  const cursor = document.querySelector('.tl-cursor');
+  if (cursor) cursor.style.display = 'none';
+  hovered = hoverSeq == null ? [] : [...document.querySelectorAll(`[data-seq="${hoverSeq}"]`)];
+  for (const x of hovered) x.classList.add('seq-on');
+  const t = hovered[0]?.dataset.t;
+  if (!cursor || t == null) return;
+  const at = tlScale().x(Number(t));
+  cursor.setAttribute('x1', at);
+  cursor.setAttribute('x2', at);
+  cursor.style.display = '';
+}
+
 // A frame drawn while hidden, such as a background pane tab, gets no window resize when shown.
 let resizeTimer = null;
 let mainWidth = main.clientWidth;
@@ -1442,7 +1498,7 @@ document.addEventListener(
 document.addEventListener('click', (e) => {
   if (!e.target.closest('#themePickerBtn')) toggleThemeMenu(false);
   const el = e.target.closest(
-    '[data-view],[data-scope],[data-diff],[data-task],[data-pub],[data-act],[data-rev],[data-sec],[data-mode],[data-fold],[data-color-theme-id],#themePickerBtn',
+    '[data-view],[data-scope],[data-lane],[data-diff],[data-task],[data-pub],[data-act],[data-rev],[data-sec],[data-mode],[data-fold],[data-color-theme-id],#themePickerBtn,[data-ev],svg.tl [data-seq]',
   );
   if (!el) return;
   if (el.classList.contains('ref') || el.classList.contains('req-row')) e.preventDefault();
@@ -1476,6 +1532,13 @@ document.addEventListener('click', (e) => {
   } else if (el.dataset.scope != null) {
     state.scope = el.dataset.scope || null;
     render();
+  } else if (el.dataset.lane != null) {
+    state.lane = el.dataset.lane && el.dataset.lane !== state.lane ? el.dataset.lane : null;
+    render();
+  } else if (el.dataset.ev) {
+    reveal('log', `ev-${el.dataset.ev}`);
+  } else if (el.dataset.seq) {
+    reveal(state.view, `ev-${el.dataset.seq}`);
   } else {
     act(el.dataset.act, el);
   }
