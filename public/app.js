@@ -2565,20 +2565,28 @@ function unmountMsgReview() {
 
 // Only the main session's replies: the agent has them in context, so a quote is enough.
 function mountReplyReview(m, body, modal) {
-  if (m.type !== 'assistant' || agentLogMode || !m.timestamp) return unmountMsgReview();
+  const opts = !agentLogMode && replyReviewOpts(m, body, currentSessionId);
+  if (!opts) return unmountMsgReview();
   mountReview({
-    contentEl: body,
+    ...opts,
     panelEl: document.getElementById('msg-review-panel'),
     hostEl: modal,
+    onComment: () => setMsgDetailFollow(false),
+    onSent: closeMsgDetailModal,
+  });
+}
+
+function replyReviewOpts(m, contentEl, sid) {
+  if (m.type !== 'assistant' || !m.timestamp) return null;
+  return {
+    contentEl,
     source: {
       kind: 'reply',
       id: m.timestamp,
       label: replyReviewLabel(m.timestamp),
-      locate: replyLocateHint(m.timestamp),
+      locate: replyLocateHint(m.timestamp, sid),
     },
-    onComment: () => setMsgDetailFollow(false),
-    onSent: closeMsgDetailModal,
-  });
+  };
 }
 
 function replyReviewLabel(timestamp) {
@@ -2590,8 +2598,8 @@ function replyReviewLabel(timestamp) {
   return `your reply${day} at ${d.toLocaleTimeString()}`;
 }
 
-function replyLocateHint(timestamp) {
-  const transcript = sessions.find((s) => s.id === currentSessionId)?.jsonlPath;
+function replyLocateHint(timestamp, sid) {
+  const transcript = sessions.find((s) => s.id === sid)?.jsonlPath;
   if (!transcript) return undefined;
   return `If that reply is not in your context, it is in ${transcript}, the assistant entry with timestamp ${timestamp}.`;
 }
@@ -13679,7 +13687,9 @@ async function loadMessagePaneView(sid, pane, view) {
     return;
   }
   const meta = [msgDetailTitle(m), ...msgDetailMeta(m)].join(' · ');
-  appendPaneDoc(view).innerHTML = `<div class="pane-msg-meta">${escapeHtml(meta)}</div>${msgDetailContent(m)}`;
+  const body = appendPaneDoc(view);
+  body.innerHTML = `<div class="pane-msg-meta">${escapeHtml(meta)}</div>${msgDetailContent(m)}`;
+  attachPaneReview(view, sid, replyReviewOpts(m, body, sid));
 }
 
 function onPaneFileChanged(filePath) {
