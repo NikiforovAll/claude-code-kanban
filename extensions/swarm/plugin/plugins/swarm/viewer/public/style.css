@@ -246,6 +246,16 @@ code {
   color: var(--warning);
 }
 
+.wall {
+  flex: none;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
 .live {
   flex: none;
   width: 7px;
@@ -567,6 +577,33 @@ code {
   margin: 8px 0;
   font-size: 13px;
   color: var(--text-secondary);
+}
+
+.wall[data-kind='live'] {
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+.wall[data-kind='ok'] {
+  border-color: var(--success);
+  color: var(--success);
+}
+
+.wall[data-kind='warn'] {
+  border-color: var(--warning);
+  color: var(--warning);
+}
+
+.goal-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.wall.big {
+  padding: 1px 8px;
+  font: 500 14px / 1.5 var(--font-mono);
 }
 
 .goal {

@@ -567,11 +567,41 @@ async function deleteRun(btn) {
   renderRuns();
 }
 
+function stopwatch(ms) {
+  const t = Math.max(0, Math.floor(ms / 1000));
+  const pad = (n) => String(n).padStart(2, '0');
+  const mmss = `${pad(Math.floor(t / 60) % 60)}:${pad(t % 60)}`;
+  return t >= 3600 ? `${Math.floor(t / 3600)}:${mmss}` : mmss;
+}
+
+const wallText = (s) => stopwatch((s.endedAt ?? Date.now()) - s.startedAt);
+const wallTitle = (s) => (s.endedAt ? 'Wall time, start to end' : 'Wall time so far');
+const wallKind = (m) => (!m.swarm.endedAt ? 'live' : m.progress.goalReached ? 'ok' : 'warn');
+
+let wallTimer = null;
+function tickWall() {
+  const s = state.model?.swarm;
+  $('swarmWall').hidden = !s;
+  if (s)
+    for (const el of document.querySelectorAll('[data-wall]')) {
+      el.textContent = wallText(s);
+      el.title = wallTitle(s);
+      el.dataset.kind = wallKind(state.model);
+    }
+  const live = !!s && !s.endedAt;
+  if (live && !wallTimer) wallTimer = setInterval(tickWall, 1000);
+  if (!live && wallTimer) {
+    clearInterval(wallTimer);
+    wallTimer = null;
+  }
+}
+
 function renderTopbar() {
   const s = state.model?.swarm;
   $('swarmName').textContent = s?.listId ?? 'No swarm';
   $('swarmBox').title = s?.goal ?? '';
   const el = $('swarmState');
+  tickWall();
   if (!s) {
     el.textContent = '';
     return;
@@ -682,11 +712,10 @@ function summaryView() {
 
   return `<div class="stack">
   <div class="card">
-    <h1 class="goal">${esc(s.goal ?? 'No goal recorded')}</h1>
+    <div class="goal-row"><h1 class="goal">${esc(s.goal ?? 'No goal recorded')}</h1><span class="wall big" data-wall data-kind="${wallKind(state.model)}" title="${wallTitle(s)}">${wallText(s)}</span></div>
     <div class="facts">
       <span>base <code>${esc(short(s.base))}</code></span>
       <span>started ${clock(s.startedAt)}</span>
-      <span>${s.endedAt ? `ran ${dur(s.endedAt - s.startedAt)}` : `running for ${dur(s.ref - s.startedAt)}`}</span>
       <span>${plural(s.events, 'event')}</span>
       ${specLink()}
     </div>
