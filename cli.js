@@ -637,11 +637,14 @@ async function runPreviewCli(args) {
   if (url) return previewUrlCli(url, args);
   // No $CLAUDE_CODE_SESSION_ID fallback: a session here switches the board's focus, and the
   // agent must not move the board unless asked.
-  const sessionId = getArgValue(args, 'session') || process.env.PREVIEW_SESSION || null;
+  const sessionArg = getArgValue(args, 'session') || process.env.PREVIEW_SESSION || null;
+  const resolved = sessionArg && await resolveSessionByIdOrPrefix(sessionArg);
+  if (sessionArg && !resolved) return 1;
+  const sessionId = resolved?.id || null;
   const abs = cliPath(filePathArg);
   try {
     if (!await cliPostJson('/api/preview', { path: abs, sessionId }, 'Preview')) return 1;
-    console.log(`Preview opened: ${abs}${sessionId ? ` (session ${sessionId})` : ''}`);
+    console.log(`Preview opened: ${abs}${sessionId ? ` (session ${sessionId.slice(0, 8)})` : ''}`);
     return 0;
   } catch (e) { reportCliError(e); return 1; }
 }

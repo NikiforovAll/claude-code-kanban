@@ -35,6 +35,8 @@ In a text file, each comment records its line number. In an HTML file, it record
 
 Comments you have not sent stay with the file and the session. Close the dialog and open the file again, and they are still there. A page reload removes them.
 
+When the file changes on disk, the board finds each comment's text again and puts its highlight back. A comment whose text is gone shows **not found** and is still sent. A comment you are typing, or an edit you have not saved, also comes back after the file changes or after another dialog opens on top and closes. If its text is gone, a message offers to copy it. Press <kbd>Esc</kbd> or close the file to throw it away.
+
 ## Send
 
 Click **Send**, or press <kbd>Ctrl+Enter</kbd> when the comment editor is closed. The board writes the comments to a Markdown file in `<config-dir>/.cck/reviews/<session id>/`. Then it gives them to the session in the first way that works:

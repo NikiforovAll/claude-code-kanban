@@ -8639,6 +8639,15 @@ select.form-input option:checked {
 .review-card-edit {
   border-color: var(--accent);
 }
+
+.review-orphan {
+  margin-right: 6px;
+  padding: 0 4px;
+  font-size: 10px;
+  color: var(--warning);
+  border: 1px solid var(--warning-dim);
+  border-radius: 3px;
+}
 /* #endregion */
 
 /* #region SESSION_PICKER */

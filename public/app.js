@@ -8068,6 +8068,9 @@ document.addEventListener('keydown', (e) => {
 // the frame keeps its own ranges and marks them by id. A page whose CSP forbids inline
 // scripts gets no comments.
 const reviewDrafts = new Map();
+// Text typed but not added, kept across a teardown the user did not ask for (the content
+// refreshed, a modal opened on top) until its review is unmounted.
+const reviewUnsent = new Map();
 const reviewHighlight = typeof Highlight === 'function' && CSS.highlights ? new Highlight() : null;
 const reviewHotHighlight = reviewHighlight ? new Highlight() : null;
 const reviewPendingHighlight = reviewHighlight ? new Highlight() : null;
@@ -8124,9 +8127,13 @@ function dropReviewEntry(panelEl) {
 
 function showTopReview() {
   const opts = reviewStack.at(-1) || reviewBase;
-  if (activeReview && activeReview.opts === opts) return;
-  stopReview();
-  if (opts) startReview(opts);
+  if (!activeReview || activeReview.opts !== opts) {
+    stopReview();
+    if (opts) startReview(opts);
+  }
+  if (!reviewUnsent.size) return;
+  const mounted = new Set([...reviewStack, reviewBase].filter(Boolean).map((o) => reviewKey(o.sessionId, o.source)));
+  for (const key of reviewUnsent.keys()) if (!mounted.has(key)) reviewUnsent.delete(key);
 }
 
 function startReview(opts) {
@@ -8164,10 +8171,13 @@ function startReview(opts) {
   panelEl.addEventListener('keydown', onReviewPanelKey, { signal });
   panelEl.addEventListener('input', onReviewPanelInput, { signal });
   panelEl.addEventListener('mouseleave', () => setReviewHot(null), { signal });
+  if (!frame) anchorReviewItems(contentEl);
   renderReviewPanel();
+  restoreUnsentReview();
 }
 
 function stopReview() {
+  if (activeReview) keepUnsentReview();
   closeReviewPop();
   if (!activeReview) return;
   const { ctl, panelEl, hostEl } = activeReview;
@@ -8251,6 +8261,100 @@ function reviewSelection() {
   const quote = sel.toString().trim();
   if (!quote) return null;
   return { quote, range: range.cloneRange(), rect: range.getBoundingClientRect() };
+}
+
+// A re-render replaces the nodes a range points at, so a comment keeps its text and the
+// 32 chars around it, and is found again after a refresh. Port of scratchpad's cmtFindAnchor.
+function reviewAnchorOf(root, range) {
+  const before = reviewTextBefore(root, range.startContainer, range.startOffset);
+  const after = root.ownerDocument.createRange();
+  after.selectNodeContents(root);
+  after.setStart(range.endContainer, range.endOffset);
+  return {
+    exact: range.toString(),
+    pos: before.length,
+    prefix: before.slice(-32),
+    suffix: after.toString().slice(0, 32),
+  };
+}
+
+// The best match scores the most prefix and suffix chars that match outward from the quote;
+// a tie goes to the one nearest the old offset. -1 when the quote is gone.
+function reviewQuoteAt(text, { exact, pos, prefix, suffix }) {
+  let best = -1;
+  let bestScore = -1;
+  if (!exact) return best;
+  for (let at = text.indexOf(exact); at !== -1; at = text.indexOf(exact, at + 1)) {
+    let score = 0;
+    for (let k = 1; k <= prefix.length && text[at - k] === prefix[prefix.length - k]; k++) score++;
+    for (let k = 0; k < suffix.length && text[at + exact.length + k] === suffix[k]; k++) score++;
+    if (score > bestScore || (score === bestScore && Math.abs(at - pos) < Math.abs(best - pos))) {
+      best = at;
+      bestScore = score;
+    }
+  }
+  return best;
+}
+
+function reviewTextIndex(root) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes = [];
+  let text = '';
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    nodes.push({ n, start: text.length });
+    text += n.nodeValue;
+  }
+  return { nodes, text };
+}
+
+function reviewFindAnchor({ nodes, text }, anchor) {
+  const at = reviewQuoteAt(text, anchor);
+  if (at < 0) return null;
+  const end = at + anchor.exact.length;
+  const first = nodes.findLast((x) => x.start <= at);
+  const last = nodes.find((x) => end <= x.start + x.n.nodeValue.length);
+  const range = document.createRange();
+  range.setStart(first.n, at - first.start);
+  range.setEnd(last.n, end - last.start);
+  return { range, at };
+}
+
+function anchorReviewItems(root) {
+  const items = reviewItems().filter((c) => c.anchor);
+  if (!items.length) return;
+  const index = reviewTextIndex(root);
+  for (const c of items) {
+    const found = reviewFindAnchor(index, c.anchor);
+    c.range = found?.range || null;
+    if (!found) continue;
+    c.pos = c.anchor.pos = found.at;
+    reviewHighlight?.add(c.range);
+  }
+}
+
+function keepUnsentReview() {
+  const { key, picked, editing } = activeReview;
+  const text = reviewPopMode === 'editor' ? reviewPopEl().querySelector('textarea').value : '';
+  if (text.trim()) reviewUnsent.set(key, { picked, text });
+  else if (editing) reviewUnsent.set(key, { editing });
+}
+
+function restoreUnsentReview() {
+  const u = reviewUnsent.get(activeReview.key);
+  if (!u) return;
+  reviewUnsent.delete(activeReview.key);
+  if (u.editing) {
+    if (reviewItems().includes(u.editing.c)) startReviewEdit(u.editing.c, u.editing.draft);
+    return;
+  }
+  const { anchor } = u.picked;
+  const range = anchor && reviewFindAnchor(reviewTextIndex(activeReview.contentEl), anchor)?.range;
+  if (range) return openReviewEditor({ ...u.picked, range, rect: range.getBoundingClientRect() }, u.text);
+  const why = anchor ? 'The text you commented on changed' : 'The page reloaded';
+  showToast(`${why}, so the comment was not added`, 'info', {
+    label: 'Copy',
+    onClick: () => copyText(u.text, 'the comment'),
+  });
 }
 
 function onReviewFrameMessage(e) {
@@ -8588,15 +8692,19 @@ function isReviewSendKey(e) {
   return !e.target.closest?.(TEXT_FIELD_SELECTOR);
 }
 
-function openReviewEditor(picked) {
+function openReviewEditor(picked, text = '') {
   const el = reviewPopEl();
   reviewPopMode = 'editor';
   el.className = 'visible editor';
-  if (picked.range) reviewPendingHighlight?.add(picked.range);
-  else if (picked.inFrame) postToReviewFrame('pend');
+  if (picked.range) {
+    picked.anchor = reviewAnchorOf(activeReview.contentEl, picked.range);
+    reviewPendingHighlight?.add(picked.range);
+  } else if (picked.inFrame) postToReviewFrame('pend');
+  activeReview.picked = picked;
   el.innerHTML = `<textarea rows="3" placeholder="Comment (Ctrl+Enter to add)"></textarea>
     <div class="review-pop-actions"><button type="button" data-act="cancel">Cancel</button><button type="button" data-act="add" class="primary">Add</button></div>`;
   const ta = el.querySelector('textarea');
+  ta.value = text;
   const add = (comment) => addReviewComment(picked, comment);
   ta.addEventListener('keydown', (e) => onReviewEditorKey(e, add, closeReviewPop));
   el.querySelector('[data-act="cancel"]').addEventListener('click', closeReviewPop);
@@ -8643,8 +8751,8 @@ function addReviewComment(picked, comment) {
       heading: reviewHeadingBefore(contentEl, range.startContainer),
       ...activeReview.context?.(range),
     };
-    const pos = reviewTextBefore(contentEl, range.startContainer, range.startOffset).length;
-    item = { quote: picked.quote, comment, context, pos, range, frameId: 0 };
+    const { anchor } = picked;
+    item = { quote: picked.quote, comment, context, pos: anchor.pos, anchor, range, frameId: 0 };
     reviewHighlight?.add(range);
     window.getSelection()?.removeAllRanges();
   }
@@ -8709,8 +8817,8 @@ function onReviewPanelDblClick(e) {
 }
 
 // `draft` keeps the typed text when the panel renders again during the edit.
-function startReviewEdit(c) {
-  activeReview.editing = { c, draft: c.comment };
+function startReviewEdit(c, draft = c.comment) {
+  activeReview.editing = { c, draft };
   renderReviewPanel();
   const ta = activeReview.panelEl.querySelector('.review-card-edit');
   ta.focus();
@@ -8770,7 +8878,7 @@ function renderReviewPanel() {
         return `<li class="review-card${c === activeReview.hot ? ' hot' : ''}" data-i="${i}" title="Show in the document">
         <button type="button" class="review-edit" title="Edit" aria-label="Edit">${DETAIL_EDIT_SVG}</button>
         <button type="button" class="review-remove" title="Remove" aria-label="Remove">×</button>
-        <div class="review-card-quote">${escapeHtml(c.quote.slice(0, 300))}</div>
+        <div class="review-card-quote">${c.anchor && !c.range ? '<span class="review-orphan" title="The file changed and this text is no longer in it">not found</span>' : ''}${escapeHtml(c.quote.slice(0, 300))}</div>
         ${body}</li>`;
       })
       .join('')}</ol>`;
@@ -8854,6 +8962,8 @@ async function sendPreviewAction(frame, msg) {
 //#region MARKDOWN_PREVIEW
 const PREVIEW_STORAGE_PREFIX = 'preview-paths-';
 let currentPreviewPath = null;
+// The session a CLI preview was sent for, which need not be the one on screen.
+let previewSessionId = null;
 let previewFromTerminal = false;
 
 function readStoredList(key) {
@@ -9075,8 +9185,9 @@ function localImageUrl(src, base) {
   return `/api/preview/image?${new URLSearchParams({ path: p, base })}`;
 }
 
-function openPreviewModal(filePath, content, kind) {
+function openPreviewModal(filePath, content, kind, sessionId) {
   currentPreviewPath = filePath;
+  previewSessionId = sessionId;
   const fileName = filePath.split(/[\\/]/).pop();
   document.getElementById('preview-modal-title').textContent = fileName;
   const bodyEl = document.getElementById('preview-modal-body');
@@ -9094,7 +9205,13 @@ function openPreviewModal(filePath, content, kind) {
   const panelEl = document.getElementById('preview-review-panel');
   const opts = fileReviewOpts(filePath, kind, bodyEl, isHtml ? bodyEl.querySelector('iframe') : null);
   if (!opts) return unmountReview(panelEl);
-  mountReview({ ...opts, panelEl, hostEl: document.querySelector('#preview-modal .modal'), onSent: closePreviewModal });
+  mountReview({
+    ...opts,
+    sessionId,
+    panelEl,
+    hostEl: document.querySelector('#preview-modal .modal'),
+    onSent: closePreviewModal,
+  });
 }
 
 // Null for an image, which takes no comments.
@@ -9114,35 +9231,35 @@ function sourceLineOf(bodyEl, range) {
   return reviewTextBefore(code, range.startContainer, range.startOffset).split('\n').length;
 }
 
-function isPreviewLinkedToCurrentSession() {
-  if (!currentPreviewPath || !currentSessionId) return false;
+function isPreviewLinkedToSession() {
+  if (!currentPreviewPath || !previewSessionId) return false;
   const key = canonicalPath(currentPreviewPath);
-  return getSessionPreviewPaths(currentSessionId).some((p) => canonicalPath(p) === key);
+  return getSessionPreviewPaths(previewSessionId).some((p) => canonicalPath(p) === key);
 }
 
 function updatePreviewLinkBtn() {
   const paneBtn = document.getElementById('preview-pane-btn');
-  if (paneBtn) paneBtn.style.display = paneSessionId() ? '' : 'none';
+  if (paneBtn) paneBtn.style.display = previewSessionId ? '' : 'none';
   const btn = document.getElementById('preview-link-btn');
   if (!btn) return;
-  if (!currentSessionId) {
+  if (!previewSessionId) {
     btn.style.display = 'none';
     return;
   }
   btn.style.display = '';
-  const linked = isPreviewLinkedToCurrentSession();
-  btn.title = linked ? 'Unlink from current session' : 'Link to current session';
+  const linked = isPreviewLinkedToSession();
+  btn.title = linked ? 'Unlink from the session' : 'Link to the session';
   btn.style.color = linked ? 'var(--accent)' : '';
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
 function togglePreviewSessionLink() {
-  if (!currentPreviewPath || !currentSessionId) {
+  if (!currentPreviewPath || !previewSessionId) {
     showToast('Select a session first');
     return;
   }
-  const unlink = isPreviewLinkedToCurrentSession();
-  setSessionDocLink(currentSessionId, currentPreviewPath, unlink);
+  const unlink = isPreviewLinkedToSession();
+  setSessionDocLink(previewSessionId, currentPreviewPath, unlink);
   showToast(unlink ? 'Unlinked from session' : 'Linked to session');
 }
 
@@ -9169,6 +9286,7 @@ function closePreviewModal() {
   // Empty the body so an iframe preview is destroyed and its scripts/timers stop.
   document.getElementById('preview-modal-body').innerHTML = '';
   currentPreviewPath = null;
+  previewSessionId = null;
   if (previewFromTerminal) focusTerminalPane();
   previewFromTerminal = false;
 }
@@ -9186,7 +9304,8 @@ function openPreviewInEditor() {
 // The server is the only place that knows what it can render, so a null `kind` is its
 // answer to "not previewable" rather than a failure: callers that have a fallback
 // destination pass `onUnsupported` instead of keeping a copy of the extension list here.
-async function openPreviewByPath(filePath, base, onUnsupported) {
+// A link followed inside an open preview keeps the preview's session.
+async function openPreviewByPath(filePath, base, onUnsupported, sessionId = previewSessionId || currentSessionId) {
   if (!filePath) return;
   try {
     const r = await api('/api/preview', { query: { path: filePath, base: base || null } });
@@ -9204,7 +9323,7 @@ async function openPreviewByPath(filePath, base, onUnsupported) {
       else showToast('Nothing to preview in this file');
       return;
     }
-    openPreviewModal(data.path, data.content, data.kind);
+    openPreviewModal(data.path, data.content, data.kind, sessionId);
   } catch {
     showToast('Failed to load preview', 'error');
   }
@@ -9243,7 +9362,7 @@ async function handlePreviewOpenEvent(data) {
     }
   }
   // The broadcast carries the path only — each tab fetches the document itself.
-  openPreviewByPath(filePath);
+  openPreviewByPath(filePath, undefined, undefined, currentSessionId);
 }
 
 // Linked docs live in localStorage, so the CLI can only reach them through a tab:
@@ -13571,7 +13690,9 @@ let paneUpdatedToastTimer = 0;
 async function autoReloadPaneView(sid, pane, view) {
   if (!(await reloadPaneView(sid, pane, view))) return;
   clearTimeout(paneUpdatedToastTimer);
-  paneUpdatedToastTimer = setTimeout(() => showToast('Pane updated', 'info'), 1000);
+  paneUpdatedToastTimer = setTimeout(() => {
+    if (!document.getElementById('toast').classList.contains('has-action')) showToast('Pane updated', 'info');
+  }, 1000);
 }
 
 // Builds the new view hidden over the old one and swaps them once it has loaded and scrolled,
@@ -14081,15 +14202,13 @@ function markSourceLine(bodyEl, line) {
   band.scrollIntoView({ block: 'center', inline: 'nearest' });
 }
 
-function openFileInPane(filePath, closeModal) {
-  if (!filePath || !paneSessionId()) return;
-  closeModal();
-  addPane(filePath);
-}
-
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
 function openPreviewInPane() {
-  openFileInPane(currentPreviewPath, closePreviewModal);
+  if (!currentPreviewPath || !previewSessionId) return;
+  const sid = previewSessionId;
+  const target = currentPreviewPath;
+  closePreviewModal();
+  addPaneToSession(sid, target, pathBasename(target));
 }
 
 // The plan modal also opens other sessions' plans; the pane goes to the plan's session, wherever it is.
@@ -14100,15 +14219,19 @@ function syncPlanPaneBtn() {
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
-async function openPlanInPane() {
+function openPlanInPane() {
   if (!planPaneAllowed()) return;
   const sid = _planSessionId;
   const target = _pendingPlanPath;
   closePlanModal();
+  addPaneToSession(sid, target, 'Plan');
+}
+
+async function addPaneToSession(sid, target, label) {
   if (sid === paneSessionId()) return addPane(target);
   if ((await postPane(sid, { target, base: getSessionBaseDir(sid) || undefined })) !== false) return;
   const s = sessions.find((x) => x.id === sid);
-  showToast(`Plan added to ${s ? sessionDisplayName(s) : 'its session'}`, 'success', {
+  showToast(`${label} added to ${s ? sessionDisplayName(s) : 'its session'}`, 'success', {
     label: 'Open',
     onClick: () => openSession(sid),
   });
