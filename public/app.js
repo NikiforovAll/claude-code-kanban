@@ -7610,6 +7610,17 @@ async function dismissSession(sid) {
   if (await confirmDismissBlockers(sid)) dismissSessionFromList(sid);
 }
 
+function contextSessionId() {
+  if (terminalPaneFocused()) return termState.sessionId || currentSessionId;
+  if (focusZone !== 'sidebar') return selectedSessionId || currentSessionId;
+  return sessionsList.querySelector('.kb-selected')?.dataset.sessionId || currentSessionId;
+}
+
+function dismissContextSession() {
+  const sid = contextSessionId();
+  if (sid) dismissSession(sid);
+}
+
 const MODAL_ESC_PRIORITY = [
   'preview-modal',
   'msg-detail-modal',
@@ -7968,9 +7979,7 @@ document.addEventListener('keydown', (e) => {
   }
 
   // Shared actions — work in both sidebar and board
-  const cursorEl = focusZone === 'sidebar' ? sessionsList.querySelector('.kb-selected') : null;
-  const contextSid =
-    focusZone === 'sidebar' ? cursorEl?.dataset.sessionId || currentSessionId : selectedSessionId || currentSessionId;
+  const contextSid = contextSessionId();
   if (matchKey(e, 'KeyP')) {
     e.preventDefault();
     if (contextSid) openPlanForSession(contextSid);
@@ -7983,7 +7992,7 @@ document.addEventListener('keydown', (e) => {
   }
   if (matchKey(e, 'KeyN')) {
     e.preventDefault();
-    const cursorKey = _scratchpadKeyOf(cursorEl);
+    const cursorKey = _scratchpadKeyOf(focusZone === 'sidebar' ? sessionsList.querySelector('.kb-selected') : null);
     if (cursorKey) showScratchpad(cursorKey);
     else toggleScratchpad();
     return;
@@ -8007,8 +8016,7 @@ document.addEventListener('keydown', (e) => {
   }
   if (ClaudeHub.comboOf(e) === 'ctrl+d') {
     e.preventDefault();
-    if (!contextSid) return;
-    dismissSession(contextSid);
+    dismissContextSession();
     return;
   }
   if (e.code === 'KeyC' && e.shiftKey && !e.altKey && !e.metaKey) {
@@ -14738,6 +14746,7 @@ function terminalShortcut(e, probe = false) {
   // Ctrl+Shift+Z is redo in a text field, so only the terminal's own textarea gives it up.
   if (ctrlShift && e.code === 'KeyZ') return inPageField(e) ? null : toggleZenMode;
   if (ctrlShift && e.code === 'KeyK') return kanbotAvailable() ? () => toggleKanbot() : null;
+  if (ctrlShift && e.code === 'KeyD') return dismissContextSession;
   if (ctrlAlt && (e.code === 'KeyN' || e.code === 'KeyR') && terminalAvailable()) {
     return () => openNewSession(null, e.code === 'KeyR');
   }
