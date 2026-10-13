@@ -36,7 +36,7 @@ const state = {
   sec: null,
   pending: null,
   reqMode: 'spec',
-  closed: new Set(),
+  fold: new Map(),
 };
 // #endregion STATE
 
@@ -313,7 +313,7 @@ function setSwarmParam(id) {
 function pickSwarm(id) {
   if (!id || id === state.swarm) return;
   Object.assign(state, { swarm: id, model: null, diff: null, scope: null, lane: null, focus: null, request: null, rev: null, sec: null, pending: null });
-  state.closed.clear();
+  state.fold.clear();
   reqBusy = null;
   reqFailed = null;
   resetLog();
@@ -475,7 +475,7 @@ function showRev(n) {
 // A section exists only once the request text is in, so a jump before that waits for it.
 function showSec(id) {
   state.sec = id;
-  state.closed.delete(id);
+  state.fold.set(id, true);
   if (state.request) return reveal('request', id);
   state.pending = id;
   setView('request');
@@ -926,7 +926,7 @@ function specCard() {
   const body = doc.sections
     .map((x) =>
       x.name
-        ? `<details class="sec" id="${x.id}" data-part="${x.id}"${state.closed.has(x.id) ? '' : ' open'}><summary><h2>${esc(x.name)}</h2><span class="sub">${plural(x.words, 'word')}</span></summary><div class="md">${md(x.body)}</div></details>`
+        ? `<details class="sec" id="${x.id}" data-part="${x.id}"${(state.fold.get(x.id) ?? x.name.toLowerCase() === 'goal') ? ' open' : ''}><summary><h2>${esc(x.name)}</h2><span class="sub">${plural(x.words, 'word')}</span></summary><div class="md">${md(x.body)}</div></details>`
         : `<div class="md intro" id="${x.id}">${md(x.body)}</div>`,
     )
     .join('');
@@ -1489,8 +1489,7 @@ document.addEventListener(
   (e) => {
     const part = e.target.dataset?.part;
     if (!part) return;
-    if (e.target.open) state.closed.delete(part);
-    else state.closed.add(part);
+    state.fold.set(part, e.target.open);
   },
   true,
 );
@@ -1510,8 +1509,7 @@ document.addEventListener('click', (e) => {
     state.reqMode = el.dataset.mode;
     render();
   } else if (el.dataset.fold) {
-    if (el.dataset.fold === 'open') state.closed.clear();
-    else for (const x of state.request?.doc.sections ?? []) if (x.name) state.closed.add(x.id);
+    for (const x of state.request?.doc.sections ?? []) if (x.name) state.fold.set(x.id, el.dataset.fold === 'open');
     render();
   } else if (el.dataset.task) {
     reveal('queue', `task-${el.dataset.task}`);
