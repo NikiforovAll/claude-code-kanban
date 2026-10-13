@@ -14687,10 +14687,12 @@ function takeTerminalFocus(sessionId) {
 }
 
 // The terminal attaches asynchronously; by then the user may be typing elsewhere or reading a modal.
+// A session on the trust dialog has no transcript yet, so it may not be in `sessions`.
 function promptAwaitsUser(sessionId) {
+  if (isAnyModalOpen() || document.activeElement?.matches(TEXT_FIELD_SELECTOR)) return false;
+  if (trustWaiting.has(sessionId)) return true;
   const session = sessions.find((s) => s.id === sessionId);
-  if (!session || !isWaitingSession(session) || isAnyModalOpen()) return false;
-  return !document.activeElement?.matches(TEXT_FIELD_SELECTOR);
+  return !!session && isWaitingSession(session);
 }
 
 function onTerminalShown(focus = true) {
@@ -16535,7 +16537,7 @@ function renderPlaceholderCard(session, depth) {
   const isActive = session.id === currentSessionId && viewMode === 'session';
   const projectHtml = renderProjectIdentity(session);
   return `
-          <button onclick="fetchTasks('${escAttrJs(session.id)}')" data-session-id="${escapeHtml(session.id)}" class="session-item session-placeholder ${isActive ? 'active' : ''}${childDepthClass(depth)}" title="${escapeHtml(`${session.id} | ${session.project}`)}">
+          <button onclick="openSession('${escAttrJs(session.id)}')" data-session-id="${escapeHtml(session.id)}" class="session-item session-placeholder ${isActive ? 'active' : ''}${childDepthClass(depth)}" title="${escapeHtml(`${session.id} | ${session.project}`)}">
             <div class="session-name">${escapeHtml(session.name)}</div>
             ${projectHtml ? `<div class="session-secondary">${projectHtml}</div>` : ''}
             ${
@@ -16591,7 +16593,13 @@ function setTrustWaiting(ids) {
   for (const id of trustWaiting) {
     if (before.has(id)) continue;
     setTerminalMode(id, true);
-    if (id === currentSessionId && viewMode === 'session') syncTerminal();
+    if (id !== currentSessionId || viewMode !== 'session') continue;
+    if (termState.shown && termState.attached) {
+      if (promptAwaitsUser(id)) focusTerminalPane();
+    } else {
+      termState.openedByUser = id;
+      syncTerminal();
+    }
   }
 }
 
