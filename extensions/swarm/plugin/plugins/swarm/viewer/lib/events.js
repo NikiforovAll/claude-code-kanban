@@ -19,6 +19,8 @@ function parseEvent(e) {
       return { ...base, kind: 'stopped', worker: p.worker, reason: p.reason, released: p.released ?? [] };
     case 'outcome':
       return { ...base, kind: 'outcome', outcome: p.outcome, summary: p.summary ?? '', dependency: p.dependency ?? null };
+    case 'outcome_refused':
+      return { ...base, kind: 'refused', outcome: p.outcome ?? null, expected: p.expected_revision ?? null };
     case 'request':
       return { ...base, kind: 'request', revision: p.revision ?? base.revision, text: p.text };
     case 'end':
@@ -97,6 +99,8 @@ function describeEvent(e, label = (id) => id) {
       return `${label(p.worker)} stopped: ${cut(p.reason, 100)}${p.released?.length ? `; released ${p.released.map((i) => `#${i}`).join(', ')}` : ''}`;
     case 'outcome':
       return `outcome ${p.outcome}${p.dependency ? ` for ${cut(p.dependency, 60)}` : ''}: ${cut(p.summary, 120)}`;
+    case 'outcome_refused':
+      return `outcome ${p.outcome ?? '?'} refused: declared under revision ${p.expected_revision ?? '?'}, current is ${p.revision}`;
     case 'request':
       return `request revision ${p.revision}: ${cut(p.text)}`;
     case 'end':
@@ -116,6 +120,7 @@ const GROUPS = {
   outcome: 'status',
   worker_woken: 'status',
   claim_lost: 'lost',
+  outcome_refused: 'lost',
   task_owner_stopped: 'lost',
   worker_stopped: 'lost',
   request: 'parent',
@@ -136,12 +141,16 @@ function logRow(e, names) {
   return { seq: e.seq, t: ms(e.ts), who: label(e.actor), revision: e.revision ?? 1, kind: e.kind, group: groupOf(e.kind), text: describeEvent(e, label), payload: e.payload };
 }
 
-// `running` is store state, not an event: true while the worker's turn runs. Null when the export
-// does not carry the workers.
+// `running` and `acked` are store state, not events: true while the worker's turn runs, and the
+// last request revision its responses carried. Null when the export does not carry the workers.
 function parseExport(result) {
   const raw = result.events ?? [];
-  const running = Array.isArray(result.workers) ? new Map(result.workers.map((w) => [w.worker, !!w.running])) : null;
-  return { events: raw.map(parseEvent).filter(Boolean), raw, sequence: result.sequence ?? 0, running };
+  const list = Array.isArray(result.workers) ? result.workers : null;
+  const running = list && new Map(list.map((w) => [w.worker, !!w.running]));
+  const acked = list && new Map(list.filter((w) => Number.isInteger(w.acked)).map((w) => [w.worker, w.acked]));
+  return { events: raw.map(parseEvent).filter(Boolean), raw, sequence: result.sequence ?? 0, running, acked };
 }
 
-module.exports = { parseExport, describeEvent, nameMap, logRow, ms };
+const requestTexts = (events) => events.filter((e) => e.kind === 'request').map((e) => ({ revision: e.revision, text: e.text ?? '' }));
+
+module.exports = { parseExport, describeEvent, nameMap, logRow, requestTexts, ms };

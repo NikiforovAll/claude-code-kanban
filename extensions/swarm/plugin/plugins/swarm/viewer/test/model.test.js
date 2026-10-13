@@ -16,8 +16,8 @@ describe('buildModel on the fixture swarm, built through the real store', () => 
     config = configDir();
     const { dir } = await buildSwarm(config);
     const { main } = await store();
-    const r = main('export', { dir, since: 0 });
-    m = buildModel(parseExport(r).events, { listId: path.basename(dir), ...registry(dir) });
+    const { events, acked } = parseExport(main('export', { dir, since: 0 }));
+    m = buildModel(events, { listId: path.basename(dir), ...registry(dir) }, Date.now(), { acked });
   });
 
   after(() => fs.rmSync(config, { recursive: true, force: true }));
@@ -64,8 +64,24 @@ describe('buildModel on the fixture swarm, built through the real store', () => 
     );
   });
 
-  it('lists requests after the spec, findings, publications and applies', () => {
-    assert.deepEqual(m.requests.map((r) => [r.revision, r.who]), [[2, 'supervisor']]);
+  it('keeps the spec and each revision with what was done under it, and no request text', () => {
+    assert.deepEqual(m.spec, { revision: 1, seq: 1, who: 'supervisor', t: Date.parse('2026-10-10T09:00:00Z') });
+    assert.deepEqual(m.revisions.map((r) => [r.revision, r.who, r.tasks]), [[1, 'supervisor', [1, 2, 3, 4, 5, 6, 7]], [2, 'supervisor', [8, 9]]]);
+    assert.ok(m.revisions.every((r) => !('text' in r)));
+    const [one, two] = m.revisions;
+    assert.deepEqual([one.publications.length, two.publications.length], [2, 6]);
+    assert.deepEqual(two.woken.map((x) => x.who), ['w2-a3f9c2']);
+    assert.deepEqual(two.outcomes.map((x) => [x.who, x.outcome]), [['w2-a3f9c2', 'waiting'], ['w1-a3f9c2', 'blocked'], ['w1-a3f9c2', 'complete']]);
+    assert.deepEqual(two.first.map((x) => x.who), ['w3-a3f9c2', 'w1-a3f9c2', 'w2-a3f9c2'], 'a wake is the store acting, not the worker');
+    assert.deepEqual(m.tasks.map((t) => t.revision), [1, 1, 1, 1, 1, 1, 1, 2, 2]);
+    assert.ok(m.timeline['w1-a3f9c2'].every((x) => x.rev === (x.t < m.revisions[1].t ? 1 : 2)));
+  });
+
+  it('reads from the store the last revision each worker acknowledged', () => {
+    assert.deepEqual(m.workers.map((w) => [w.name, w.acked]), [['w1-a3f9c2', 2], ['w2-a3f9c2', 2], ['w3-a3f9c2', 2]]);
+  });
+
+  it('lists findings, publications and applies', () => {
     assert.equal(m.findings.length, 7);
     assert.equal(m.publications.length, 8);
     assert.equal(m.applies.length, 5);
@@ -108,7 +124,7 @@ describe('buildModel on a running swarm with a stalled waiter', () => {
     const { dir } = await buildSwarm(config, undefined, { running: true });
     const { main } = await store();
     const { events, running } = parseExport(main('export', { dir, since: 0 }));
-    m = buildModel(events, { listId: path.basename(dir), ...registry(dir) }, Date.now(), running);
+    m = buildModel(events, { listId: path.basename(dir), ...registry(dir) }, Date.now(), { running });
   });
 
   after(() => fs.rmSync(config, { recursive: true, force: true }));
@@ -151,7 +167,7 @@ describe('buildModel on a running swarm', () => {
       { seq: 3, t: t(2), actor: 'b', name: 'w2', kind: 'status', state: 'waiting', summary: '', dependency: 'task:1' },
       { seq: 4, t: t(2), actor: 'c', name: 'w3', kind: 'status', state: 'working', summary: '' },
     ];
-    const at = (running) => buildModel(events, { state: 'running' }, t(30), running).workers.map((w) => [w.name, w.health, w.running]);
+    const at = (running) => buildModel(events, { state: 'running' }, t(30), { running }).workers.map((w) => [w.name, w.health, w.running]);
     assert.deepEqual(at(new Map([['w1', false], ['w2', false], ['w3', false]])), [
       ['w1', 'stuck', false],
       ['w2', 'waiting', false],
@@ -162,5 +178,38 @@ describe('buildModel on a running swarm', () => {
       ['w2', 'quiet', true],
       ['w3', 'quiet', null],
     ]);
+  });
+});
+
+describe('buildModel per request revision', () => {
+  const ts = (s) => `2026-10-10 09:00:${String(s).padStart(2, '0')}`;
+  const ev = (seq, revision, actor, name, kind, payload) => ({ seq, ts: ts(seq), actor, name, kind, payload, revision });
+  const raw = [
+    ev(1, 1, 'p', 'supervisor', 'request', { revision: 1, text: '# Spec' }),
+    ev(2, 1, 'p', 'supervisor', 'task_create', { task_id: 1, title: 'Old title', description: 'd' }),
+    ev(3, 1, 'a', 'wa', 'task_claim', { task_id: 1 }),
+    ev(4, 2, 'p', 'supervisor', 'request', { revision: 2, text: 'Change' }),
+    ev(5, 2, 'p', 'supervisor', 'task_update', { task_id: 1, title: 'New title' }),
+    ev(6, 2, 'a', 'wa', 'worker_woken', { worker: 'wa', reason: 'request', state: 'working' }),
+    ev(7, 2, 'a', 'wa', 'outcome_refused', { worker: 'wa', outcome: 'complete', expected_revision: 1, revision: 2 }),
+    ev(8, 2, 'a', 'wa', 'outcome', { worker: 'wa', outcome: 'complete', summary: 'Done', expected_revision: 2 }),
+  ];
+  const { events, acked } = parseExport({ events: raw, workers: [{ worker: 'wa', running: false, acked: 2 }] });
+  const m = buildModel(events, { parent: 'p', state: 'running' }, Date.parse('2026-10-10T09:01:00Z'), { acked });
+
+  it('records a retitle under the revision it was made in, with the old title', () => {
+    const [task] = m.tasks;
+    assert.equal(task.subject, 'New title');
+    assert.deepEqual(task.retitles.map((r) => [r.from, r.to, r.revision, r.who]), [['Old title', 'New title', 2, 'supervisor']]);
+    assert.deepEqual(m.revisions[1].retitles.map((r) => r.taskId), [1]);
+  });
+
+  it('shows a refused declaration under the revision that refused it, on the timeline too', () => {
+    assert.deepEqual(m.revisions[1].refused.map((r) => [r.who, r.outcome, r.expected]), [['wa', 'complete', 1]]);
+    assert.deepEqual(m.revisions[0].refused, []);
+    assert.ok(m.timeline.wa.some((x) => x.type === 'refused' && x.rev === 2));
+    assert.deepEqual(m.revisions[1].first.map((x) => x.who), ['wa']);
+    assert.equal(m.workers[0].acked, 2);
+    assert.equal(m.swarm.revision, 2);
   });
 });

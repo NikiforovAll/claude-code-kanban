@@ -151,7 +151,7 @@ describe('viewer server, run alone', () => {
 
   it('answers 404 for a swarm that does not exist or is not a plain folder name', async () => {
     for (const id of ['nope', '..', '.', '..%2F..', 'a%2Fb']) {
-      for (const route of ['/api/swarm', '/api/log', '/api/diff']) {
+      for (const route of ['/api/swarm', '/api/log', '/api/diff', '/api/request']) {
         const r = await json(port, `${route}?swarm=${id}`);
         assert.equal(r.status, 404, `${route} ${id}`);
         assert.equal(r.body.error, 'no such swarm');
@@ -170,6 +170,18 @@ describe('viewer server, run alone', () => {
       [72, 'outcome'],
       [73, 'end'],
     ]);
+  });
+
+  it('serves the spec and every revision in full, which the model leaves out', async () => {
+    const { status, body } = await json(port, `/api/request?swarm=${ENDED}`);
+    assert.equal(status, 200);
+    assert.deepEqual(body.revisions.map((r) => Object.keys(r)), [['revision', 'text'], ['revision', 'text']]);
+    assert.deepEqual(body.revisions.map((r) => r.revision), [1, 2]);
+    assert.match(body.revisions[0].text, /^Add CSV export to the logview CLI/);
+    assert.equal(body.revisions[1].text, 'Also measure the export on a 1M-line file and keep the bench script.');
+    const model = (await json(port, `/api/swarm?swarm=${ENDED}`)).body;
+    assert.deepEqual(model.revisions.map((r) => r.seq), [1, 33]);
+    assert.doesNotMatch(JSON.stringify(model.revisions), /1M-line file/);
   });
 
   it('serves a published file as a diff against its base', async () => {

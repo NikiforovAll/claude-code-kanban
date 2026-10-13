@@ -647,8 +647,9 @@ class Store {
         return result
       })
     } catch (err) {
-      // A refusal the viewer needs to see is logged after the rollback, in its own transaction.
-      if (err instanceof BoardError && err.event) this.tx(() => this.append(actor, err.event.kind, err.event.payload))
+      // A refusal the viewer needs to see is logged after the rollback, in its own transaction. It
+      // acknowledges no request revision: an error response carries no request_updates.
+      if (err instanceof BoardError && err.event) this.tx(() => this.append(actor, err.event.kind, err.event.payload, null))
       throw err
     }
   }
@@ -861,8 +862,13 @@ class Store {
   // the supervisor, not validated. Unlike DeLM, a complete result must be on the board: in run
   // swarm-cargo-flight-dispatch an unpublished one was lost when a request revision replaced it.
   complete(actor, args, changes) {
-    if (args.expected_revision !== this.context().revision) {
-      throw new BoardError('completion must acknowledge the current board request_revision; this declaration is stale')
+    const { revision } = this.context()
+    if (args.expected_revision !== revision) {
+      const err = new BoardError('completion must acknowledge the current board request_revision; this declaration is stale')
+      const outcome = OUTCOMES.includes(args.outcome) ? args.outcome : null
+      const expected = Number.isInteger(args.expected_revision) ? args.expected_revision : null
+      err.event = { kind: 'outcome_refused', payload: { worker: display(actor), outcome, expected_revision: expected, revision } }
+      throw err
     }
     const { outcome } = args
     if (!OUTCOMES.includes(outcome)) throw new BoardError('invalid completion outcome')
@@ -1223,11 +1229,11 @@ class Store {
         .prepare('SELECT * FROM events WHERE seq > ? ORDER BY seq')
         .all(after)
         .map((r) => ({ ...r, payload: JSON.parse(r.payload) })),
-      // Turns are not events, so the viewer reads whether each worker runs one here.
+      // Turns and acknowledged revisions are not events, so the viewer reads them here.
       workers: this.db
-        .prepare('SELECT name, actor, state, turn FROM workers ORDER BY rowid')
+        .prepare('SELECT name, actor, state, turn, acked FROM workers ORDER BY rowid')
         .all()
-        .map((w) => ({ worker: w.name ?? w.actor, state: w.state, running: !!w.turn })),
+        .map((w) => ({ worker: w.name ?? w.actor, state: w.state, running: !!w.turn, acked: w.acked })),
     }
   }
 

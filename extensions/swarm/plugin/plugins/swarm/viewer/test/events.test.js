@@ -41,6 +41,13 @@ describe('parseExport', () => {
     assert.deepEqual([...r], [['w1', true], ['w2', false]]);
   });
 
+  it('reads the revision each worker acknowledged, and a refused declaration', () => {
+    const r = parseExport({ sequence: 1, events: [ev(1, 'outcome_refused', { worker: 'w1', outcome: 'complete', expected_revision: 1, revision: 2 })], workers: [{ worker: 'w1', running: false, acked: 2 }, { worker: 'w2', running: false }] });
+    assert.deepEqual([...r.acked], [['w1', 2]]);
+    assert.deepEqual([r.events[0].kind, r.events[0].outcome, r.events[0].expected], ['refused', 'complete', 1]);
+    assert.equal(parseExport({ events: [] }).acked, null);
+  });
+
   it('keeps the reason and the state before a wake', () => {
     const w = events.find((e) => e.kind === 'woken');
     assert.deepEqual([w.reason, w.from, w.dependency], ['no_producer', 'waiting', 'task:1']);
@@ -86,6 +93,12 @@ describe('describeEvent', () => {
 
   it('keeps #N for tasks only, so the page can link every #N to a task', () => {
     for (const seq of [4, 5, 6]) assert.doesNotMatch(text(seq), /#\d/);
+  });
+
+  it('names both revisions of a refused declaration', () => {
+    const e = ev(16, 'outcome_refused', { worker: 'w1', outcome: 'complete', expected_revision: 1, revision: 3 });
+    assert.equal(describeEvent(e), 'outcome complete refused: declared under revision 1, current is 3');
+    assert.equal(describeEvent({ ...e, payload: { worker: 'w1', outcome: null, expected_revision: null, revision: 3 } }), 'outcome ? refused: declared under revision ?, current is 3');
   });
 
   it('falls back to the payload for an unknown kind', () => {

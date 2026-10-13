@@ -27,3 +27,11 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+## marked
+
+`viewer/public/vendor/marked.min.js` is marked 15.0.12 (https://github.com/markedjs/marked), copyright (c) 2018+ MarkedJS and (c) 2011-2018 Christopher Jeffrey, under the MIT License. The full license is in `viewer/public/vendor/marked.LICENSE.md`.
+
+## DOMPurify
+
+`viewer/public/vendor/purify.min.js` is DOMPurify 3.4.16 (https://github.com/cure53/DOMPurify), copyright (c) Cure53 and other contributors, under the Apache License 2.0 or the Mozilla Public License 2.0, at your choice. The full license is in `viewer/public/vendor/purify.LICENSE`.

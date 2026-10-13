@@ -6,18 +6,18 @@ const main = $('main');
 const helpModal = $('helpModal');
 const swarmsModal = $('swarmsModal');
 
+// `clockless`: the view draws nothing from the clock, so a resend with no new event changes nothing
+// in it. `byWidth`: the view draws to the width of the page.
 const VIEWS = [
-  { id: 'summary', label: 'Summary', question: 'Is the swarm on track, and does any worker need me?' },
-  { id: 'queue', label: 'Queue', question: 'Who works on what, for how long, and where did workers collide?' },
-  { id: 'timeline', label: 'Timeline', question: 'What did each worker do over time, and who went quiet?' },
-  { id: 'knowledge', label: 'Knowledge', question: 'What did the workers find out, and what did they hand off?' },
-  {
-    id: 'changes',
-    label: 'Changes',
-    question: 'Which files changed, and who took whose work?',
-  },
-  { id: 'log', label: 'Log', question: 'What exactly is in the event log, in order?' },
+  { id: 'summary', label: 'Summary', needsRequest: true },
+  { id: 'request', label: 'Request', needsRequest: true, byWidth: true },
+  { id: 'queue', label: 'Queue' },
+  { id: 'timeline', label: 'Timeline', byWidth: true },
+  { id: 'knowledge', label: 'Knowledge', clockless: true },
+  { id: 'changes', label: 'Changes', clockless: true },
+  { id: 'log', label: 'Log', clockless: true },
 ];
+const viewOf = (id) => VIEWS.find((v) => v.id === id);
 
 const state = {
   swarm: new URLSearchParams(location.search).get('swarm'),
@@ -30,6 +30,12 @@ const state = {
   diff: null,
   focus: null,
   log: null,
+  request: null,
+  rev: null,
+  sec: null,
+  pending: null,
+  reqMode: 'spec',
+  closed: new Set(),
 };
 // #endregion STATE
 
@@ -161,9 +167,6 @@ const api = (p, params = {}) => {
   return s ? `${p}?${s}` : p;
 };
 
-// These views draw nothing from the clock, so a resend with no new event changes nothing in them.
-const CLOCKLESS = new Set(['knowledge', 'changes', 'log']);
-
 function connect() {
   if (stream) return;
   stream = new EventSource(api('/api/stream'));
@@ -173,7 +176,7 @@ function connect() {
     state.model = next;
     $('live').classList.add('on');
     if (moved && state.log) loadLog();
-    if (moved || !CLOCKLESS.has(state.view)) render();
+    if (moved || !viewOf(state.view).clockless) render();
   });
   stream.addEventListener('failure', (e) => toast(`The swarm log could not be read: ${JSON.parse(e.data)}`));
   stream.addEventListener('missing', async (e) => {
@@ -208,6 +211,7 @@ function show(on) {
 async function refresh() {
   const btn = $('refreshBtn');
   btn.classList.add('loading');
+  reqFailed = null;
   try {
     const r = await fetch(api('/api/swarm'));
     if (!r.ok) throw new Error((await r.json()).error);
@@ -254,6 +258,37 @@ async function loadLog() {
   }
 }
 
+// The texts change only with a new request revision, so they are fetched once per revision. A fetch
+// that failed is tried again on the next revision or a refresh, not on every frame.
+let reqBusy = null;
+let reqFailed = null;
+async function loadRequest() {
+  const s = state.model?.swarm;
+  if (!s?.listId) return;
+  const key = `${s.listId}:${s.revision}`;
+  if (state.request?.key === key || reqBusy === key || reqFailed === key) return;
+  reqBusy = key;
+  try {
+    const r = await fetch(api('/api/request'));
+    const body = await r.json();
+    if (!r.ok) throw new Error(body.error);
+    if (reqBusy !== key) return;
+    const texts = new Map(body.revisions.map((x) => [x.revision, x.text]));
+    state.request = { key, texts, doc: splitSpec(texts.get(1) ?? '') };
+    if (viewOf(state.view).needsRequest) render();
+    if (state.pending && state.view === 'request') {
+      const id = state.pending;
+      state.pending = null;
+      reveal('request', id);
+    }
+  } catch (err) {
+    if (reqBusy === key) reqFailed = key;
+    toast(`The request did not load: ${err.message}`);
+  } finally {
+    if (reqBusy === key) reqBusy = null;
+  }
+}
+
 async function loadSwarms() {
   try {
     const r = await (await fetch('/api/swarms')).json();
@@ -276,7 +311,10 @@ function setSwarmParam(id) {
 
 function pickSwarm(id) {
   if (!id || id === state.swarm) return;
-  Object.assign(state, { swarm: id, model: null, diff: null, scope: null, focus: null });
+  Object.assign(state, { swarm: id, model: null, diff: null, scope: null, focus: null, request: null, rev: null, sec: null, pending: null });
+  state.closed.clear();
+  reqBusy = null;
+  reqFailed = null;
   resetLog();
   setSwarmParam(id);
   disconnect();
@@ -413,14 +451,33 @@ function hl(text) {
 
 const focused = (id) => (state.focus === id ? ' focused' : '');
 
+// A stream frame can redraw the view while the flash runs, so render() puts it back.
+let flashing = null;
+
 function reveal(view, id) {
   setView(view, id);
   const el = document.getElementById(id);
   if (!el) return;
+  flashing = { id, until: Date.now() + 3200 };
   el.scrollIntoView({ block: 'center', behavior: 'smooth' });
   el.classList.remove('flash');
   void el.offsetWidth;
   el.classList.add('flash');
+}
+
+function showRev(n) {
+  state.rev = n;
+  state.sec = null;
+  reveal('request', `rev-${n}`);
+}
+
+// A section exists only once the request text is in, so a jump before that waits for it.
+function showSec(id) {
+  state.sec = id;
+  state.closed.delete(id);
+  if (state.request) return reveal('request', id);
+  state.pending = id;
+  setView('request');
 }
 
 const HEALTH = {
@@ -534,11 +591,26 @@ function setView(id, focus = null) {
   state.view = id;
   state.focus = focus;
   store('view', id);
-  const u = new URL(location.href);
-  u.searchParams.set('view', id);
-  history.replaceState(null, '', u);
+  history.replaceState(null, '', viewUrl(id, id === 'request' ? { rev: state.rev, sec: state.sec } : {}) + location.hash);
   render();
 }
+
+// The page's query without its view keys, read again only when the address changes.
+let baseQuery = { from: null, rest: '' };
+
+function viewUrl(view, { rev, sec } = {}) {
+  if (baseQuery.from !== location.search) {
+    const q = new URLSearchParams(location.search);
+    for (const k of ['view', 'rev', 'sec']) q.delete(k);
+    baseQuery = { from: location.search, rest: String(q) };
+  }
+  const own = [`view=${encodeURIComponent(view)}`];
+  if (rev != null) own.push(`rev=${encodeURIComponent(rev)}`);
+  if (sec != null) own.push(`sec=${encodeURIComponent(sec)}`);
+  return `?${[baseQuery.rest, ...own].filter(Boolean).join('&')}`;
+}
+
+const reqHref = (params) => esc(viewUrl('request', params));
 
 function render() {
   renderTopbar();
@@ -554,11 +626,12 @@ function render() {
     main.innerHTML = `${tabs}<p class="loading">No swarm yet. Start one with /swarm in a Claude Code session; it shows up here.${state.root ? ` Swarms are read from <code>${esc(state.root)}</code>.` : ''}</p>`;
     return;
   }
-  const v = VIEWS.find((x) => x.id === state.view);
   const scroll = main.scrollTop;
-  main.innerHTML = `${tabs}<p class="question">${esc(v.question)}</p><div class="view">${RENDER[state.view]()}</div>`;
+  main.innerHTML = `${tabs}<div class="view">${RENDER[state.view]()}</div>`;
   main.scrollTop = scroll;
+  if (flashing && Date.now() < flashing.until) document.getElementById(flashing.id)?.classList.add('flash');
   if (state.view === 'log' && !state.log) loadLog();
+  if (viewOf(state.view).needsRequest) loadRequest();
 }
 
 function deliveryLine(d) {
@@ -613,7 +686,7 @@ function summaryView() {
       <span>started ${clock(s.startedAt)}</span>
       <span>${s.endedAt ? `ran ${dur(s.endedAt - s.startedAt)}` : `running for ${dur(s.ref - s.startedAt)}`}</span>
       <span>${plural(s.events, 'event')}</span>
-      ${s.revision > 1 ? `<span>request revision ${s.revision}</span>` : ''}
+      ${specLink()}
     </div>
     ${s.outcome ? `<p class="outcome"><span class="chip ${s.outcome.outcome === 'complete' ? 'ok' : 'warn'}">${esc(s.outcome.outcome)}</span> ${hl(s.outcome.summary)}</p>` : ''}
     ${deliveryLine(s.delivery)}
@@ -622,13 +695,7 @@ function summaryView() {
     </div>
     <div class="sub">${p.done} of ${p.total} tasks done${p.closed ? ` (${p.closed} closed)` : ''} · ${p.claimed} claimed · ${p.open} open</div>
   </div>
-  ${
-    state.model.requests.length
-      ? `<div class="card"><div class="section-title"><span>Request changes</span><span>${state.model.requests.length}</span></div>${state.model.requests
-          .map((r) => `<div class="note"><div><div class="text">${hl(r.text)}</div><div class="sub">revision ${r.revision} · ${clock(r.t)}</div></div></div>`)
-          .join('')}</div>`
-      : ''
-  }
+  ${requestCard()}
   <div class="grid cols-2">
     <div class="card">
       <div class="section-title"><span>Workers</span><span>${workers.length}</span></div>
@@ -671,6 +738,315 @@ function summaryView() {
   </div>`;
 }
 
+const CANON = ['Goal', 'Constraints', 'Decisions', 'Acceptance checks'];
+const wordCount = (s) => s.split(/\s+/).filter(Boolean).length;
+const inlineCode = (s) => esc(s).replace(/`([^`]+)`/g, '<code>$1</code>');
+const revName = (n) => (n === 1 ? 'Spec' : `Revision ${n}`);
+const revShort = (n) => (n === 1 ? 'spec' : `rev ${n}`);
+const revStatus = (n) => (n === state.model.swarm.revision ? 'current' : n === 1 ? null : 'superseded');
+const superseded = (outcome, rev) => outcome === 'complete' && rev < state.model.swarm.revision;
+const taskRef = (id) => `<a class="ref" href="#" data-task="${id}">#${id}</a>`;
+const secChip = (x, words = false) =>
+  `<button class="filter" data-sec="${x.id}">${esc(x.name)}${words ? `<span class="n">${x.words}</span>` : ''}</button>`;
+
+function selRev() {
+  const { revisions, swarm } = state.model;
+  return revisions.some((r) => r.revision === state.rev) ? state.rev : swarm.revision;
+}
+
+function tlWidth() {
+  const css = getComputedStyle(main);
+  const room = main.clientWidth - 2 * Number.parseFloat(css.paddingLeft);
+  return Math.min(Number.parseFloat(css.getPropertyValue('--content-max')), room) - 26;
+}
+
+// Headings inside a code fence are text, not sections.
+function splitSpec(text) {
+  const parts = [];
+  let cur = { name: null, body: [] };
+  let title = null;
+  let fence = null;
+  for (const l of text.replace(/\r\n?/g, '\n').split('\n')) {
+    const f = /^\s*(```|~~~)/.exec(l);
+    if (f) fence = fence == null ? f[1] : fence === f[1] ? null : fence;
+    else if (fence == null && title == null && !parts.length && cur.body.every((b) => !b.trim()) && l.startsWith('# ')) {
+      title = l.slice(2).trim();
+      continue;
+    } else if (fence == null && l.startsWith('## ')) {
+      parts.push(cur);
+      cur = { name: l.slice(3).trim(), body: [] };
+      continue;
+    }
+    cur.body.push(l);
+  }
+  parts.push(cur);
+  const ids = new Set();
+  const sections = [];
+  for (const p of parts) {
+    const body = p.body.join('\n').trim();
+    if (!p.name && !body) continue;
+    const base = p.name ? `sec-${p.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'part'}` : 'sec-intro';
+    let id = base;
+    for (let i = 2; ids.has(id); i++) id = `${base}-${i}`;
+    ids.add(id);
+    sections.push({ id, name: p.name, body, words: wordCount(body) });
+  }
+  return { title, words: wordCount(text), sections };
+}
+
+// Request texts come from the log, which any session on the machine can write, so they are sanitized.
+const mdCache = new Map();
+if (window.DOMPurify)
+  DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+    if (node.tagName !== 'A' || !node.hasAttribute('href')) return;
+    node.setAttribute('target', '_blank');
+    node.setAttribute('rel', 'noopener noreferrer');
+  });
+
+function md(text) {
+  if (!text) return '';
+  let html = mdCache.get(text);
+  if (html == null) {
+    html =
+      window.marked && window.DOMPurify
+        ? DOMPurify.sanitize(marked.parse(text), { FORBID_TAGS: ['img', 'style', 'form', 'input', 'button'] })
+        : `<p>${esc(text)}</p>`;
+    mdCache.set(text, html);
+  }
+  return html;
+}
+
+function gist(text) {
+  const line = (text ?? '').split('\n').map((l) => l.trim()).find((l) => l && !/^(#|```|~~~|---)/.test(l)) ?? '';
+  return line.replace(/^([-*+]|\d+\.)\s+/, '').replace(/\*\*|__/g, '').split(/(?<=[.!?])\s/)[0];
+}
+
+function specLink() {
+  const { revisions, spec, swarm: s } = state.model;
+  if (!revisions.length) return '';
+  const last = revisions.at(-1);
+  const title = `Open the request: ${spec ? `spec ${clock(spec.t)}, ` : ''}revision ${s.revision} current${last.revision > 1 ? ` since ${clock(last.t)}` : ''}`;
+  const label = revisions.length > 1 ? `spec · ${revisions.length} revisions` : 'spec · rev 1';
+  return `<a class="ref" href="${reqHref({ rev: s.revision })}" data-rev="${s.revision}" title="${esc(title)}">${label}</a>`;
+}
+
+function requestCard() {
+  const { revisions, spec, swarm: s } = state.model;
+  if (!revisions.length) return '';
+  const last = revisions.at(-1);
+  const req = state.request;
+  const goal = req?.doc.sections.find((x) => x.name?.toLowerCase() === 'goal');
+  const row = (key, value, label, text, t, title) =>
+    `<a class="req-row" href="${reqHref({ [key]: value })}" data-${key}="${esc(value)}" title="${esc(title)}"><span class="rv">${label}</span><span class="txt">${inlineCode(gist(text))}</span><span class="sub">${clock(t)}</span></a>`;
+  const rows = [];
+  if (spec)
+    rows.push(
+      goal
+        ? row('sec', goal.id, 'goal', goal.body, spec.t, 'Open the Goal section')
+        : row('rev', 1, 'spec', req?.doc.title ?? req?.texts.get(1), spec.t, 'Open the spec'),
+    );
+  if (last.revision > 1)
+    rows.push(row('rev', last.revision, revShort(last.revision), req?.texts.get(last.revision), last.t, `Open revision ${last.revision}`));
+  return `<div class="card"><div class="section-title"><span>Request</span><a class="ref" href="${reqHref({ rev: s.revision })}" data-rev="${s.revision}">rev ${s.revision}</a></div>${rows.join('')}</div>`;
+}
+
+function revCounts(r) {
+  return (
+    [
+      [r.tasks.length, r.revision === 1 ? 'task' : 'new task'],
+      [r.retitles.length, 'retitle'],
+      [r.publications.length, 'publication'],
+      [r.outcomes.length, 'outcome'],
+      [r.refused.length, 'refused', 'refused'],
+    ]
+      .filter(([n]) => n)
+      .map(([n, one, many]) => plural(n, one, many))
+      .join(' · ') || '—'
+  );
+}
+
+function requestView() {
+  if (!state.model.revisions.length) return '<p class="empty">No request in the log.</p>';
+  const byRev = Map.groupBy(state.model.tasks, (t) => t.revision);
+  return `<div class="stack">
+    ${reqHead(byRev)}
+    ${reqTimeline()}
+    <div class="grid cols-2 req-grid">${specCard()}<div class="stack">${revisionsCard()}${reqTasks(byRev)}</div></div>
+  </div>`;
+}
+
+function reqHead(byRev) {
+  const { swarm: s, revisions, tasks, spec } = state.model;
+  const doc = state.request?.doc;
+  const sel = selRev();
+  const rail = revisions
+    .map((r) => {
+      const cur = r.revision === s.revision;
+      const kind = [r.revision === 1 ? 'spec' : null, revStatus(r.revision)].filter(Boolean).join(' · ');
+      return `<button class="rail-step${r.revision === sel ? ' on' : ''}${cur ? ' current' : ''}" role="tab" aria-selected="${r.revision === sel}" data-rev="${r.revision}" title="seq ${r.seq} · ${esc(r.who)}">
+        <span class="r-kind">${kind}</span>
+        <span class="r-top"><span>${revName(r.revision)}</span><span class="r-t">${clock(r.t)}</span></span>
+        <span class="r-sum">${revCounts(r)}</span>
+      </button>`;
+    })
+    .join('');
+  const facts = [
+    spec ? `spec ${clock(spec.t)} by ${esc(spec.who)}` : '',
+    doc ? `${plural(doc.words, 'word')} · ${plural(doc.sections.filter((x) => x.name).length, 'section')}` : '',
+    `revision ${s.revision} is current`,
+    `${plural(revisions.length - 1, 'change')} since the spec`,
+    `${plural(byRev.get(1)?.length ?? 0, 'task')} seeded · ${tasks.length} now`,
+  ];
+  return `<div class="card">
+    <h1 class="goal">${esc(s.goal ?? 'No goal recorded')}</h1>
+    <div class="facts">${facts.filter(Boolean).map((f) => `<span>${f}</span>`).join('')}</div>
+    <div class="rail" role="tablist" aria-label="Request revisions">${rail}</div>
+  </div>`;
+}
+
+function reqTimeline() {
+  return `<div class="card"><div class="section-title"><span>Revisions over time</span></div>${laneChart(true)}</div>`;
+}
+
+function specCard() {
+  const req = state.request;
+  if (!req) return '<div class="card"><p class="empty">Reading the request…</p></div>';
+  const { doc, texts } = req;
+  if (!doc.sections.length) return '<div class="card"><p class="empty">No spec in the log.</p></div>';
+  const { spec, revisions, swarm: s } = state.model;
+  const named = doc.sections.filter((x) => x.name);
+  const has = new Set(named.map((x) => x.name.toLowerCase()));
+  const nav = [
+    ...named.map((x) => secChip(x, true)),
+    ...CANON.filter((c) => !has.has(c.toLowerCase())).map((c) => `<span class="filter absent" title="The spec has no ${c} section">${c}</span>`),
+  ].join('');
+  const sel = selRev();
+  const body = doc.sections
+    .map((x) =>
+      x.name
+        ? `<details class="sec" id="${x.id}" data-part="${x.id}"${state.closed.has(x.id) ? '' : ' open'}><summary><h2>${esc(x.name)}</h2><span class="sub">${plural(x.words, 'word')}</span></summary><div class="md">${md(x.body)}</div></details>`
+        : `<div class="md intro" id="${x.id}">${md(x.body)}</div>`,
+    )
+    .join('');
+  const inline =
+    state.reqMode === 'all'
+      ? revisions
+          .filter((r) => r.revision > 1 && r.revision <= sel)
+          .map(
+            (r) => `<div class="note inline-rev${r.revision === s.revision ? ' current' : ''}">
+              <div class="note-head"><a class="ref" href="${reqHref({ rev: r.revision })}" data-rev="${r.revision}">${revName(r.revision)}</a>${r.revision === s.revision ? '<span class="chip ok">current</span>' : ''}<span class="sub">${clock(r.t)} · ${esc(r.who)}</span></div>
+              <div class="md">${md(texts.get(r.revision))}</div>
+            </div>`,
+          )
+          .join('')
+      : '';
+  const modes =
+    revisions.length > 1
+      ? `<span class="seg" role="group" aria-label="What to show"><button data-mode="spec" class="filter${state.reqMode === 'spec' ? ' on' : ''}">Spec only</button><button data-mode="all" class="filter${state.reqMode === 'all' ? ' on' : ''}" title="The spec plus each revision up to revision ${sel}, as a worker holds them">Spec + revisions ≤ ${sel}</button></span>`
+      : '';
+  const docTip = spec ? `Request revision 1 · seq ${spec.seq} · ${clock(spec.t)} · ${spec.who}` : '';
+  return `<div class="card spec-card">
+    ${nav ? `<div class="sec-nav">${nav}</div>` : ''}
+    <div class="toolbar">
+      <div class="doc-title" title="${esc(docTip)}">${inlineCode(doc.title ?? 'Spec')}</div>
+      <span class="grow"></span>
+      ${modes}
+      ${named.length ? '<span class="seg"><button class="filter" data-fold="open">Expand</button><button class="filter" data-fold="close">Collapse</button></span>' : ''}
+    </div>
+    ${body}${inline}
+  </div>`;
+}
+
+function revisionsCard() {
+  const { revisions, tasks } = state.model;
+  const sel = selRev();
+  const req = state.request;
+  const subject = new Map(tasks.map((t) => [t.id, t.subject]));
+  const notes = revisions
+    .slice()
+    .reverse()
+    .map((r) => {
+      const n = r.revision;
+      const status = revStatus(n);
+      const chip = status ? `<span class="chip${status === 'current' ? ' ok' : ''}">${status}</span>` : '';
+      let body = '';
+      if (!req) body = '<p class="empty">Reading the request…</p>';
+      else if (n === 1) body = `<div class="filters">${req.doc.sections.filter((x) => x.name).map((x) => secChip(x)).join('')}</div>`;
+      else body = `<div class="md">${md(req.texts.get(n))}</div>`;
+      return `<div class="note rev-note${status === 'current' ? ' current' : ''}${n === sel ? ' sel' : ''}" id="rev-${n}">
+        <div class="note-head"><a class="ref" href="${reqHref({ rev: n })}" data-rev="${n}">${revName(n)}</a>${chip}<span class="sub">${clock(r.t)} · seq ${r.seq} · ${esc(r.who)}</span></div>
+        ${body}${impact(r, subject)}
+      </div>`;
+    })
+    .join('');
+  return `<div class="card"><div class="section-title"><span>Request revisions</span><span>${revisions.length}</span></div>${notes}</div>`;
+}
+
+function impact(r, subject) {
+  const { workers, swarm: s } = state.model;
+  const n = r.revision;
+  const rows = [];
+  if (r.tasks.length) rows.push(['ok', n === 1 ? 'seeded' : 'new task', r.tasks.map((id) => `${taskRef(id)} ${esc(subject.get(id) ?? '')}`).join(' · ')]);
+  for (const x of r.retitles)
+    rows.push(['warn', 'retitled', `${taskRef(x.taskId)} <span title="${esc(`was: ${x.from}`)}">${esc(x.to)}</span> <span class="muted">${esc(x.who)} ${clock(x.t)}</span>`]);
+  if (r.woken.length) rows.push(['info', 'woken', r.woken.map((w) => `${who(w.who)} ${clock(w.t)}`).join(' · ')]);
+  if (n > 1) {
+    const first = new Map(r.first.map((f) => [f.who, f.t]));
+    const acks = workers.map((w) => {
+      if (first.has(w.name)) return `${who(w.name)} ${clock(first.get(w.name))}`;
+      if (w.acked != null && w.acked >= n) return `${who(w.name)} <span class="muted">acked</span>`;
+      return `${who(w.name)} <span class="muted">${w.health === 'stopped' ? 'stopped' : 'not yet'}</span>`;
+    });
+    rows.push(['', 'acked', acks.join(' · '), 'The first event each worker wrote under this revision; "acked" when the store has its acknowledgment and no event yet']);
+  }
+  if (r.publications.length)
+    rows.push([
+      'info',
+      'publish',
+      r.publications.map((p) => `${who(p.who)} <a class="ref" href="#" data-pub="${p.id}" title="${esc(p.summary)}">publication ${p.id}</a>`).join(' · '),
+    ]);
+  for (const o of r.outcomes) {
+    const stale = superseded(o.outcome, n)
+      ? ` <span class="chip warn" title="${esc(`Declared under revision ${n}; revision ${s.revision} came later`)}">superseded</span>`
+      : '';
+    rows.push(['info', 'outcome', `${who(o.who)} <span title="${esc(o.summary ?? '')}">${esc(o.outcome)}</span> ${clock(o.t)}${stale}`]);
+  }
+  for (const x of r.refused)
+    rows.push([
+      'bad',
+      'refused',
+      `${who(x.who)} ${esc(x.outcome ?? '?')} <span class="muted">declared under revision ${x.expected ?? '?'}</span> ${clock(x.t)}`,
+      'The store refused this declaration: it did not acknowledge the current revision',
+    ]);
+  if (!rows.length) return '';
+  return `<ul class="impact">${rows
+    .map(([k, label, html, title]) => `<li><span class="chip ${k}"${title ? ` title="${esc(title)}"` : ''}>${label}</span><span>${html}</span></li>`)
+    .join('')}</ul>`;
+}
+
+const TASK_CHIP = { done: 'ok', claimed: 'info', open: '' };
+
+const metaRow = (meta) => `<div class="meta">${meta.map((m) => `<span>${m}</span>`).join('')}</div>`;
+
+function reqTask(t) {
+  const meta = [taskRef(t.id), `<span class="chip ${t.closed ? '' : TASK_CHIP[t.state]}">${t.closed ? 'closed' : t.state}</span>`];
+  if (t.owner) meta.push(who(t.owner));
+  for (const x of t.retitles) meta.push(`<span class="chip warn" title="${esc(`was: ${x.from}`)}">retitled in rev ${x.revision}</span>`);
+  return `<div class="task${t.closed ? ' closed' : ''}"><div class="t">${hl(t.subject)}</div>${metaRow(meta)}</div>`;
+}
+
+function reqTasks(byRev) {
+  const { tasks } = state.model;
+  const groups = [...byRev.keys()]
+    .sort((a, b) => a - b)
+    .map((n) => {
+      const list = byRev.get(n);
+      return `<div class="section-title req-group"><a class="ref" href="${reqHref({ rev: n })}" data-rev="${n}">${revName(n)}</a><span>${list.length}</span></div>${list.map(reqTask).join('')}`;
+    })
+    .join('');
+  return `<div class="card"><div class="section-title"><span>Tasks by revision</span><span>${tasks.length}</span></div>${groups || '<p class="empty">None.</p>'}</div>`;
+}
+
 function queueView() {
   const { tasks, swarm: s } = state.model;
   const col = (st, title) => {
@@ -695,7 +1071,7 @@ function taskCard(t, s) {
   return `<div class="task${t.closed ? ' closed' : ''}${focused(`task-${t.id}`)}" id="task-${t.id}">
     <div class="t">${hl(t.subject)}</div>
     ${t.detail ? `<div class="detail">${hl(t.detail)}</div>` : ''}
-    <div class="meta">${meta.map((m) => `<span>${m}</span>`).join('')}</div>
+    ${metaRow(meta)}
     ${t.summary ? `<div class="summary">${hl(t.summary)}</div>` : ''}
     ${t.state !== 'done' && t.handoff ? `<div class="summary"><span class="muted">handoff:</span> ${hl(t.handoff)}</div>` : ''}
     ${races.length ? `<div class="races">${races.join('')}</div>` : ''}
@@ -703,41 +1079,42 @@ function taskCard(t, s) {
 }
 
 function timelineView() {
-  const { swarm: s, workers, timeline, tasks } = state.model;
-  const css = getComputedStyle(main);
-  const room = main.clientWidth - 2 * Number.parseFloat(css.paddingLeft);
-  const width = Math.min(Number.parseFloat(css.getPropertyValue('--content-max')), room) - 26;
+  return `<div class="card">${laneChart(false)}</div>`;
+}
+
+function laneChart(revs) {
+  const { swarm: s, workers, timeline, tasks, revisions } = state.model;
+  const width = tlWidth();
   const narrow = width < 560;
   const W = Math.max(300, width);
-  const left = narrow ? 8 : 96;
+  const left = narrow ? 8 : Math.max(96, 16 + 7 * Math.max(0, ...workers.map((w) => w.name.length)));
   const right = 12;
   const laneH = narrow ? 44 : 40;
-  const top = 22;
+  const top = revs ? 40 : 22;
   const labelH = narrow ? 14 : 0;
   const t0 = s.startedAt;
   const t1 = Math.max(s.ref, t0 + 60000);
-  const x = (t) => left + ((t - t0) / (t1 - t0)) * (W - left - right);
+  const x = (t) => left + ((Math.max(t, t0) - t0) / (t1 - t0)) * (W - left - right);
+  const H = top + workers.length * (laneH + labelH) + 6;
+  const under = [];
   const parts = [];
   const tick = niceTick(t1 - t0, narrow ? 4 : 8);
-  parts.push('<g class="axis">');
+  under.push('<g class="axis">');
   for (let t = Math.ceil(t0 / tick) * tick; t <= t1; t += tick) {
     const anchor = x(t) < left + 30 ? 'start' : x(t) > W - right - 30 ? 'end' : 'middle';
-    parts.push(
-      `<line x1="${x(t)}" x2="${x(t)}" y1="${top - 6}" y2="${top + workers.length * (laneH + labelH)}"></line><text x="${x(t)}" y="${top - 9}" text-anchor="${anchor}">${clock(t)}</text>`,
+    under.push(
+      `<line x1="${x(t)}" x2="${x(t)}" y1="${top - 6}" y2="${H - 6}"></line><text x="${x(t)}" y="${top - 9}" text-anchor="${anchor}">${clock(t)}</text>`,
     );
   }
-  parts.push('</g>');
+  under.push('</g>');
   workers.forEach((w, i) => {
     const y = top + i * (laneH + labelH) + labelH;
     const mid = y + laneH / 2;
     const color = wc(w.name);
-    if (narrow)
-      parts.push(`<text x="${left}" y="${y - 3}" style="fill:${color};font-weight:500">${esc(w.name)}</text>`);
-    else
-      parts.push(
-        `<text x="${left - 8}" y="${mid + 4}" text-anchor="end" style="fill:${color};font-weight:500">${esc(w.name)}</text>`,
-      );
-    parts.push(
+    under.push(
+      narrow
+        ? `<text x="${left}" y="${y - 3}" style="fill:${color};font-weight:500">${esc(w.name)}</text>`
+        : `<text x="${left - 8}" y="${mid + 4}" text-anchor="end" style="fill:${color};font-weight:500">${esc(w.name)}</text>`,
       `<rect class="lane-bg" x="${left}" y="${y + 4}" width="${W - left - right}" height="${laneH - 8}" rx="4"></rect>`,
     );
     for (const g of w.gaps)
@@ -778,14 +1155,32 @@ function timelineView() {
     }
     for (const m of timeline[w.name] ?? []) parts.push(marker(m, x(m.t), y, laneH));
   });
-  const H = top + workers.length * (laneH + labelH) + 6;
+  if (revs) {
+    const sel = selRev();
+    revisions.forEach((r, i) => {
+      const from = x(r.t);
+      const to = x(revisions[i + 1]?.t ?? t1);
+      const on = r.revision === sel && revisions.length > 1;
+      const cls = on ? ' on' : i % 2 ? ' alt' : '';
+      const name = revShort(r.revision);
+      const tip = esc(`${revName(r.revision)}${revStatus(r.revision) === 'current' ? ' (current)' : ''}\n${clock(r.t)}–${clock(revisions[i + 1]?.t ?? t1)} · ${r.who}`);
+      const end = from > W - right - 60;
+      under.push(
+        `<rect class="band${cls}" data-rev="${r.revision}" data-tip="${tip}" x="${from}" y="${top - 4}" width="${Math.max(0, to - from)}" height="${H - top}"></rect>`,
+        `<line class="rev-line" x1="${from}" x2="${from}" y1="4" y2="${H - 2}"></line>`,
+        `<text class="rev-label${on ? ' on' : ''}" data-rev="${r.revision}" data-tip="${tip}" x="${end ? from - 4 : from + 4}" y="13" text-anchor="${end ? 'end' : 'start'}">${name}</text>`,
+      );
+    });
+  }
   const swatch = (css) => `<i style="${css}"></i>`;
-  return `<div class="card"><div class="tl-wrap"><svg class="tl" viewBox="0 0 ${W} ${H}" height="${H}">
+  return `<div class="tl-wrap"><svg class="tl" viewBox="0 0 ${W} ${H}" height="${H}">
     <defs>
       <pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" style="stroke:var(--hatch);stroke-width:2"></line></pattern>
       <pattern id="hatchBad" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" style="stroke:var(--hatch-bad);stroke-width:2"></line></pattern>
-    </defs>${parts.join('')}</svg></div>
+    </defs>${under.join('')}${parts.join('')}</svg></div>
     <div class="legend">
+      ${revs ? `<span>${swatch('border-left:2px dotted var(--accent)')}revision start</span>` : ''}
+      ${revs && revisions.length > 1 ? `<span>${swatch('background:color-mix(in srgb, var(--accent) 10%, transparent);border:1px solid color-mix(in srgb, var(--accent) 40%, transparent);border-radius:2px')}selected revision</span>` : ''}
       <span>${swatch('background:color-mix(in srgb, var(--w1) 38%, var(--bg-surface));border:1px solid var(--w1);border-radius:2px')}claimed → done</span>
       <span>${swatch('background:var(--success);border-radius:50%')}finding</span>
       <span>${swatch('background:var(--accent);border-radius:2px')}publish</span>
@@ -794,12 +1189,13 @@ function timelineView() {
       <span><b style="color:var(--error)">×</b> lost claim</span>
       <span>${swatch('border-left:2px dashed var(--text-tertiary)')}status</span>
       <span>${swatch('border-left:2px solid var(--success)')}outcome</span>
+      <span>${swatch('border-left:2px dashed var(--warning)')}superseded</span>
+      <span>${swatch('border:1.5px dashed var(--error);border-radius:50%')}refused</span>
       <span><b style="color:var(--error)">■</b> stopped</span>
       <span><b style="color:var(--team)">↑</b> woken <b style="color:var(--warning)">↑</b> stall</span>
       <span>${swatch('background:repeating-linear-gradient(45deg,var(--hatch) 0 2px,transparent 2px 5px)')}no board event ≥ 8 min</span>
       <span>${swatch('background:repeating-linear-gradient(45deg,var(--hatch-bad) 0 2px,transparent 2px 5px)')}quiet ≥ 10 min</span>
-    </div>
-  </div>`;
+    </div>`;
 }
 
 function marker(m, cx, y, laneH) {
@@ -823,11 +1219,20 @@ function marker(m, cx, y, laneH) {
     const color = m.reason === 'no_producer' ? 'var(--warning)' : 'var(--team)';
     return `<text data-tip="${esc(tip)}" x="${cx}" y="${y + laneH - 3}" text-anchor="middle" style="fill:${color};font-weight:600;font-size:12px">↑</text>`;
   }
-  if (m.type === 'outcome')
-    return `<line data-tip="${esc(`outcome ${m.outcome} ${at}\n${m.summary}`)}" x1="${cx}" x2="${cx}" y1="${y + 4}" y2="${y + laneH - 4}" style="stroke:var(--success);stroke-width:2"></line>`;
+  const vline = (tip, style) =>
+    `<line data-tip="${esc(tip)}" x1="${cx}" x2="${cx}" y1="${y + 4}" y2="${y + laneH - 4}" style="${style}"></line>`;
+  if (m.type === 'outcome') {
+    const old = superseded(m.outcome, m.rev);
+    const tip = `outcome ${m.outcome} ${at}${old ? `, under revision ${m.rev}; superseded by revision ${state.model.swarm.revision}` : ''}\n${m.summary}`;
+    return vline(tip, old ? 'stroke:var(--warning);stroke-width:2;stroke-dasharray:3 2' : 'stroke:var(--success);stroke-width:2');
+  }
+  if (m.type === 'refused') {
+    const tip = `outcome ${m.outcome ?? '?'} refused ${at}\ndeclared under revision ${m.expected ?? '?'}, current was ${m.rev}`;
+    return `<circle data-tip="${esc(tip)}" cx="${cx}" cy="${y + laneH / 2}" r="4.5" style="fill:none;stroke:var(--error);stroke-width:1.5;stroke-dasharray:2 2"></circle>`;
+  }
   if (m.type === 'status') {
     const tip = `${m.state}${m.dependency ? ` for ${m.dependency}` : ''}${m.summary ? `: ${m.summary}` : ''} ${at}`;
-    return `<line data-tip="${esc(tip)}" x1="${cx}" x2="${cx}" y1="${y + 4}" y2="${y + laneH - 4}" style="stroke:var(--text-tertiary);stroke-width:2;stroke-dasharray:2 2"></line>`;
+    return vline(tip, 'stroke:var(--text-tertiary);stroke-width:2;stroke-dasharray:2 2');
   }
   return '';
 }
@@ -910,7 +1315,7 @@ function changesView() {
         `<tr><td><code>${esc(f.path)}</code>${f.versions > 1 ? ` <span class="chip warn">${f.versions} versions</span>` : ''}</td>${names
           .map((n) => {
             const h = f.held[n];
-            if (!h) return '<td class="held muted">base?</td>';
+            if (!h) return '<td class="held muted" title="no publication or apply of this path by this worker in the log">base?</td>';
             const label = h.own ? 'own' : `from ${esc(h.author)}`;
             return `<td class="held${h.current ? '' : ' stale'}" title="${h.current ? 'latest publication' : 'a newer publication exists'}">${label} #${h.pub}${h.current ? '' : ' ⚠'}</td>`;
           })
@@ -938,8 +1343,7 @@ function changesView() {
   return `<div class="grid cols-2">
     <div class="stack">
       <div class="card"><div class="section-title"><span>Who applied whose work</span></div><div class="scroll"><table class="data-table"><thead><tr><th>author ↓ applier →</th>${head}</tr></thead><tbody>${flow}</tbody></table></div></div>
-      <div class="card"><div class="section-title"><span>Files per worker, as logged</span></div><div class="scroll"><table class="data-table"><thead><tr><th>path</th>${head}</tr></thead><tbody>${grid}</tbody></table></div>
-      <p class="sub" style="margin-top:8px">"base?" means the log has no publication or apply of that path by this worker. ⚠ means a newer publication exists. The log does not record a merge by hand.</p></div>
+      <div class="card"><div class="section-title"><span>Files per worker, as logged</span></div><div class="scroll"><table class="data-table"><thead><tr><th>path</th>${head}</tr></thead><tbody>${grid}</tbody></table></div></div>
     </div>
     <div class="card"><div class="section-title"><span>Publications</span><span>${publications.length}</span></div>${pubs || '<p class="empty">None.</p>'}</div>
   </div>`;
@@ -964,6 +1368,7 @@ function logView() {
 
 const RENDER = {
   summary: summaryView,
+  request: requestView,
   queue: queueView,
   timeline: timelineView,
   knowledge: knowledgeView,
@@ -974,7 +1379,8 @@ const RENDER = {
 
 // #region MODAL
 const SHORTCUTS = [
-  [['1', '…', '6'], 'Switch the view'],
+  [['1', '…', String(VIEWS.length)], 'Switch the view'],
+  [['[', ']'], 'Step the request revisions'],
   [['s'], 'List the swarm runs'],
   [['r'], 'Refresh'],
   [['t'], 'Toggle light and dark'],
@@ -1019,15 +1425,39 @@ new ResizeObserver(() => {
   if (main.clientWidth === mainWidth) return;
   mainWidth = main.clientWidth;
   clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(() => state.view === 'timeline' && render(), 120);
+  resizeTimer = setTimeout(() => viewOf(state.view).byWidth && render(), 120);
 }).observe(main);
+
+document.addEventListener(
+  'toggle',
+  (e) => {
+    const part = e.target.dataset?.part;
+    if (!part) return;
+    if (e.target.open) state.closed.delete(part);
+    else state.closed.add(part);
+  },
+  true,
+);
 
 document.addEventListener('click', (e) => {
   if (!e.target.closest('#themePickerBtn')) toggleThemeMenu(false);
-  const el = e.target.closest('[data-view],[data-scope],[data-diff],[data-task],[data-pub],[data-act],[data-color-theme-id],#themePickerBtn');
+  const el = e.target.closest(
+    '[data-view],[data-scope],[data-diff],[data-task],[data-pub],[data-act],[data-rev],[data-sec],[data-mode],[data-fold],[data-color-theme-id],#themePickerBtn',
+  );
   if (!el) return;
-  if (el.classList.contains('ref')) e.preventDefault();
-  if (el.dataset.task) {
+  if (el.classList.contains('ref') || el.classList.contains('req-row')) e.preventDefault();
+  if (el.dataset.rev) {
+    showRev(Number(el.dataset.rev));
+  } else if (el.dataset.sec) {
+    showSec(el.dataset.sec);
+  } else if (el.dataset.mode) {
+    state.reqMode = el.dataset.mode;
+    render();
+  } else if (el.dataset.fold) {
+    if (el.dataset.fold === 'open') state.closed.clear();
+    else for (const x of state.request?.doc.sections ?? []) if (x.name) state.closed.add(x.id);
+    render();
+  } else if (el.dataset.task) {
     reveal('queue', `task-${el.dataset.task}`);
   } else if (el.dataset.pub) {
     reveal('changes', `pub-${el.dataset.pub}`);
@@ -1083,6 +1513,13 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
     return act(keys[e.key]);
   }
+  if ((e.key === '[' || e.key === ']') && state.view === 'request' && state.model?.revisions.length) {
+    e.preventDefault();
+    const list = state.model.revisions.map((r) => r.revision);
+    const next = list[list.indexOf(selRev()) + (e.key === ']' ? 1 : -1)];
+    if (next != null) showRev(next);
+    return;
+  }
   const n = Number(e.key);
   if (n >= 1 && n <= VIEWS.length) {
     e.preventDefault();
@@ -1092,8 +1529,11 @@ document.addEventListener('keydown', (e) => {
 // #endregion EVENTS
 
 // #region INIT
-const fromUrl = new URLSearchParams(location.search).get('view');
-state.view = [fromUrl, stored('view')].find((v) => VIEWS.some((x) => x.id === v)) ?? 'summary';
+const params = new URLSearchParams(location.search);
+state.view = [params.get('view'), stored('view')].find((v) => VIEWS.some((x) => x.id === v)) ?? 'summary';
+state.rev = Number(params.get('rev')) || null;
+state.sec = params.get('sec');
+if (state.view === 'request') state.pending = state.sec ?? (state.rev ? `rev-${state.rev}` : null);
 render();
 showIfSeen();
 if (shown) loadSwarms();

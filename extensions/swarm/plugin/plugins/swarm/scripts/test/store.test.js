@@ -470,7 +470,7 @@ describe('swarm store', { skip: !hasSqlite && 'node:sqlite needs Node 22.5 or la
     const id = publish(w, a, 'p', ['main.txt', 'logo.png'], { cwd: wa, base });
     const all = main('export', { dir: w.dir });
     assert.equal(all.events.at(-1).kind, 'publication');
-    assert.deepEqual(all.workers, [{ worker: 'worker-a', state: 'working', running: true }]);
+    assert.deepEqual(all.workers, [{ worker: 'worker-a', state: 'working', running: true, acked: 1 }]);
     assert.deepEqual(main('export', { dir: w.dir, since: all.sequence }).events, []);
     const diff = main('diff', { dir: w.dir, publication_id: id, path: 'main.txt' });
     assert.equal(diff.ok, true, diff.error);
@@ -510,6 +510,21 @@ describe('swarm store', { skip: !hasSqlite && 'node:sqlite needs Node 22.5 or la
     assert.equal(done(t, 'status', a).request_updates, undefined);
     assert.equal(done(t, 'status', b).request_updates.length, 1, 'a worker that never acted sees every change');
     assert.equal(events(t).find((e) => e.kind === 'outcome').revision, 2);
+  });
+
+  it('logs a stale declaration as outcome_refused, which acknowledges no revision', () => {
+    const t = team(world());
+    done(t, 'status', a, { idempotency_key: 'start', summary: 'reading' });
+    done(t, 'request', parent, { idempotency_key: 'r2', text: 'Also support dark mode' });
+    assert.match(run(t, 'complete', a, { idempotency_key: 'old', outcome: 'complete', expected_revision: 1, summary: 'Done' }).error, /stale/);
+    const refused = events(t).filter((e) => e.kind === 'outcome_refused');
+    assert.deepEqual(refused.map((e) => [e.actor, e.revision, e.payload]), [[a.id, 2, { worker: 'worker-a', outcome: 'complete', expected_revision: 1, revision: 2 }]]);
+    assert.equal(run(t, 'complete', a, { idempotency_key: 'bad', outcome: 'nope', summary: 'x' }).ok, false);
+    assert.deepEqual(events(t).at(-1).payload, { worker: 'worker-a', outcome: null, expected_revision: null, revision: 2 });
+    const worker = (name) => main('export', { dir: t.dir }).workers.find((w) => w.worker === name);
+    assert.equal(worker('worker-a').acked, 1, 'the refusal sent no request update');
+    assert.deepEqual(done(t, 'status', a, { idempotency_key: 'next', summary: 'reading' }).request_updates, [{ revision: 2, text: 'Also support dark mode' }]);
+    assert.equal(worker('worker-a').acked, 2);
   });
 
   it('a complete result must be on the board: each change in the workspace matches a publication', () => {

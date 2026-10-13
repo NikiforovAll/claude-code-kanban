@@ -8,7 +8,8 @@ It lives at `<base directory>/../../viewer` (this skill's base directory). It ne
 
 - Each swarm is a folder under `<CLAUDE_CONFIG_DIR>/.cck/swarm/`. The folder name is the swarm id, the `listId` the start script prints.
 - `?swarm=<listId>` selects a swarm. With no id, the viewer opens the newest running swarm, else the newest one.
-- `?view=<id>` selects a tab: `summary`, `queue`, `timeline`, `knowledge`, `changes` or `log`.
+- `?view=<id>` selects a tab: `summary`, `request`, `queue`, `timeline`, `knowledge`, `changes` or `log`.
+- On the `request` tab, `&rev=<n>` opens request revision n (1 is the spec), and `&sec=sec-<section>` opens a spec section, such as `sec=sec-goal`.
 - A picker in the top bar lists every swarm in the config dir.
 
 ## Run it

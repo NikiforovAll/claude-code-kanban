@@ -7,10 +7,12 @@ const QUIET_MS = 10 * 60_000;
 const GAP_MS = 8 * 60_000;
 const OUTCOME_STATE = { waiting: 'waiting', blocked: 'blocked' };
 
-// `running` maps a worker name to whether its turn runs now (parseExport), or is null when unknown.
-function buildModel(events, registry = {}, now = Date.now(), running = null) {
+// `running` maps a worker name to whether its turn runs now, and `acked` to the last request
+// revision it acknowledged (parseExport); either is null when unknown.
+function buildModel(events, registry = {}, now = Date.now(), { running = null, acked = null } = {}) {
   const names = nameMap(events, registry);
   const label = (id) => names.get(id) ?? id;
+  const isParent = (id) => id === registry.parent || ['parent', 'supervisor'].includes(names.get(id));
 
   const tasks = new Map();
   const findings = [];
@@ -26,12 +28,23 @@ function buildModel(events, registry = {}, now = Date.now(), running = null) {
     timeline[name] ??= [];
     return timeline[name];
   };
+  // What happened under each request revision, by the revision each event was written under.
+  const effects = new Map();
+  const seen = new Set();
+  const fx = (rev) => {
+    if (!effects.has(rev)) effects.set(rev, { tasks: [], retitles: [], woken: [], publications: [], outcomes: [], refused: [], first: [] });
+    return effects.get(rev);
+  };
 
   for (const e of events) {
     const { t } = e;
     const who = label(e.actor);
-    const mark = (type, extra = {}, name = who) => lane(name).push({ type, t, seq: e.seq, ...extra });
+    const mark = (type, extra = {}, name = who) => lane(name).push({ type, t, seq: e.seq, rev: e.revision, ...extra });
     const task = tasks.get(e.taskId);
+    if (e.kind !== 'woken' && !isParent(e.actor) && !seen.has(`${e.revision}:${e.actor}`)) {
+      seen.add(`${e.revision}:${e.actor}`);
+      fx(e.revision).first.push({ who, t });
+    }
     switch (e.kind) {
       case 'task':
         tasks.set(e.taskId, {
@@ -40,9 +53,12 @@ function buildModel(events, registry = {}, now = Date.now(), running = null) {
           detail: e.description,
           createdBy: who,
           createdAt: t,
+          revision: e.revision,
+          retitles: [],
           state: 'open',
           races: [],
         });
+        fx(e.revision).tasks.push(e.taskId);
         break;
       case 'claim':
         if (task) Object.assign(task, { state: 'claimed', owner: who, claimedAt: t });
@@ -50,7 +66,12 @@ function buildModel(events, registry = {}, now = Date.now(), running = null) {
         break;
       case 'update':
       case 'split':
-        if (task && e.title) task.subject = e.title;
+        if (task && e.title && e.title !== task.subject) {
+          const retitle = { taskId: task.id, from: task.subject, to: e.title, who, t, revision: e.revision };
+          task.retitles.push(retitle);
+          fx(e.revision).retitles.push(retitle);
+          task.subject = e.title;
+        }
         break;
       case 'release':
         if (task) Object.assign(task, { state: 'open', owner: null, claimedAt: null, handoff: e.handoff });
@@ -74,6 +95,7 @@ function buildModel(events, registry = {}, now = Date.now(), running = null) {
         break;
       case 'publish':
         publications.set(e.publicationId, { id: e.publicationId, author: who, t, summary: e.summary, files: e.files });
+        fx(e.revision).publications.push({ id: e.publicationId, who, t, summary: e.summary });
         mark('publish', { id: e.publicationId, summary: e.summary });
         break;
       case 'status':
@@ -93,15 +115,22 @@ function buildModel(events, registry = {}, now = Date.now(), running = null) {
         break;
       case 'outcome':
         statuses[who] = { state: OUTCOME_STATE[e.outcome] ?? 'working', outcome: e.outcome, summary: e.summary, dependency: e.dependency, t };
+        fx(e.revision).outcomes.push({ who, t, outcome: e.outcome, summary: e.summary });
         mark('outcome', { outcome: e.outcome, summary: e.summary });
+        break;
+      case 'refused':
+        fx(e.revision).refused.push({ who, t, outcome: e.outcome, expected: e.expected });
+        mark('refused', { outcome: e.outcome, expected: e.expected });
         break;
       case 'woken':
         statuses[who] = { state: 'working', summary: statuses[who]?.summary ?? '', dependency: null, woken: e.reason, wokeFor: e.dependency, t };
+        if (e.reason === 'request') fx(e.revision).woken.push({ who, t });
         mark('woken', { reason: e.reason, from: e.from, dependency: e.dependency });
         break;
       case 'request':
-        // Revision 1 is the swarm's spec, written by start.mjs; only later revisions change it.
-        if (e.revision > 1) requests.push({ revision: e.revision, text: e.text, who, t });
+        // Revision 1 is the swarm's spec, written by start.mjs; later revisions change it. The texts
+        // are served by /api/request, so the model that every stream frame carries holds none.
+        requests.push({ revision: e.revision, seq: e.seq, who, t });
         break;
       case 'end':
         end = { outcome: e.outcome, summary: e.summary, who, t };
@@ -115,7 +144,6 @@ function buildModel(events, registry = {}, now = Date.now(), running = null) {
   const ref = ended ? Math.max(last, registry.endedAt ? ms(registry.endedAt) : 0) : now;
   const start = registry.startedAt ? Math.min(ms(registry.startedAt), first) : first;
 
-  const isParent = (id) => id === registry.parent || ['parent', 'supervisor'].includes(names.get(id));
   const actorIds = [
     ...new Set([...(registry.workers ?? []).map((w) => w.sessionId).filter(Boolean), ...events.map((e) => e.actor)]),
   ].filter((id) => !isParent(id));
@@ -154,6 +182,7 @@ function buildModel(events, registry = {}, now = Date.now(), running = null) {
       name,
       health,
       running: turn,
+      acked: acked?.get(name) ?? null,
       lastT,
       silence,
       holding: holding ? { id: holding.id, subject: holding.subject, since: holding.claimedAt } : null,
@@ -164,6 +193,7 @@ function buildModel(events, registry = {}, now = Date.now(), running = null) {
 
   const pubList = [...publications.values()];
   const done = taskList.filter((x) => x.state === 'done').length;
+  const revisions = requests.map((r) => ({ ...r, ...fx(r.revision) }));
 
   return {
     swarm: {
@@ -176,7 +206,7 @@ function buildModel(events, registry = {}, now = Date.now(), running = null) {
       ref,
       events: events.length,
       seq: events.length ? events.at(-1).seq : 0,
-      revision: requests.at(-1)?.revision ?? 1,
+      revision: Math.max(1, ...requests.map((r) => r.revision)),
       outcome: end,
       delivery: registry.delivery ?? null,
     },
@@ -190,7 +220,8 @@ function buildModel(events, registry = {}, now = Date.now(), running = null) {
     },
     workers,
     tasks: taskList,
-    requests,
+    spec: requests.find((r) => r.revision === 1) ?? null,
+    revisions,
     races,
     releases,
     findings,

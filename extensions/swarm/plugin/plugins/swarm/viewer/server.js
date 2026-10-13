@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
-const { parseExport, nameMap, logRow } = require('./lib/events');
+const { parseExport, nameMap, logRow, requestTexts } = require('./lib/events');
 const { buildModel } = require('./lib/model');
 const { configDir, swarmRoot, listSwarms, describe, readRegistry, readDelivery, ID_RE } = require('./lib/swarms');
 const { recordFile, liveRecord, claimRecord, removeRecord } = require('./lib/record');
@@ -95,7 +95,7 @@ const stats = { exports: 0, exportMs: 0, lastExportMs: 0, polls: 0 };
 const watched = new Map();
 
 function entry(dir) {
-  if (!watched.has(dir)) watched.set(dir, { dir, key: null, store: null, sequence: 0, events: [], log: [], running: null, model: null, clients: new Set(), timer: null, lastSent: 0, loading: null });
+  if (!watched.has(dir)) watched.set(dir, { dir, key: null, store: null, sequence: 0, events: [], log: [], workerState: {}, model: null, clients: new Set(), timer: null, lastSent: 0, loading: null });
   return watched.get(dir);
 }
 
@@ -156,7 +156,8 @@ async function refresh(w) {
   w.events.push(...next.events);
   const names = nameMap(w.events, registry);
   w.log.push(...next.raw.map((e) => logRow(e, names)));
-  Object.assign(w, { key, sequence: next.sequence, running: next.running, model: buildModel(w.events, registry, Date.now(), next.running) });
+  const workerState = { running: next.running, acked: next.acked };
+  Object.assign(w, { key, sequence: next.sequence, workerState, model: buildModel(w.events, registry, Date.now(), workerState) });
   return w;
 }
 
@@ -170,7 +171,7 @@ async function push(w) {
   const changed = w.key !== before;
   const stale = w.model.swarm.state === 'running' && Date.now() - w.lastSent >= RUNNING_RESEND_MS;
   if (!changed && !stale) return;
-  if (!changed) w.model = buildModel(w.events, registryOf(w.dir), Date.now(), w.running);
+  if (!changed) w.model = buildModel(w.events, registryOf(w.dir), Date.now(), w.workerState);
   w.lastSent = Date.now();
   const data = frame('swarm', w.model);
   for (const res of w.clients) res.write(data);
@@ -215,6 +216,14 @@ app.get('/api/log', async (req, res) => {
   if (!dir) return res.json([]);
   const since = Number(req.query.get('since')) || 0;
   res.json((await load(dir)).log.filter((r) => r.seq > since));
+});
+
+// The spec and each later revision in full. The page reads it again only when the revision changes,
+// so the long spec text stays out of the stream frames.
+app.get('/api/request', async (req, res) => {
+  const { dir, missing } = resolveSwarm(req.query.get('swarm'));
+  if (missing) return res.status(404).json(NOT_FOUND);
+  res.json({ revisions: dir ? requestTexts((await load(dir)).events) : [] });
 });
 
 app.get('/api/diff', async (req, res) => {
