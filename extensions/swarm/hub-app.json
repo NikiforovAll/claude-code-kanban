@@ -14,19 +14,27 @@
     "screenshots": [
       {
         "url": "https://nikiforovall.blog/claude-code-hub/shots/extensions/swarm-timeline.webp",
-        "alt": "The Swarm timeline: three workers' claimed tasks over one hour, with findings, publications, applies, lost claims, a released task and a stopped worker"
+        "alt": "The Swarm timeline: three workers' claimed tasks over one hour, with findings, publications, applies, lost claims, a released task and a stopped worker, and the event list under it",
+        "title": "Timeline",
+        "caption": "Each worker's claims, findings and publications over time, and every event under it."
       },
       {
         "url": "https://nikiforovall.blog/claude-code-hub/shots/extensions/swarm-board.webp",
-        "alt": "Swarm in the hub: the supervisor and two workers grouped in the Kanban sidebar, the task cards with the owner of each, and the Swarm timeline in a pane beside the board"
+        "alt": "Swarm in the hub: the supervisor and two workers grouped in the Kanban sidebar, the task cards with the owner of each, and the Swarm timeline in a pane beside the board",
+        "title": "On the board",
+        "caption": "The supervisor and its workers sit in one group in the Kanban sidebar, and each card names the worker that claimed it."
       },
       {
         "url": "https://nikiforovall.blog/claude-code-hub/shots/extensions/swarm-summary.webp",
-        "alt": "The Swarm summary: the goal, the outcome and delivered files, a change request, the three workers and the items that need a look"
+        "alt": "The Swarm summary: the goal, the wall time, the outcome and delivered files, the request and its revision, the three workers and the items that need a look",
+        "title": "Summary",
+        "caption": "The goal, the outcome and the delivered files, the workers, and the items that need a look from you."
       },
       {
         "url": "https://nikiforovall.blog/claude-code-hub/shots/extensions/swarm-changes.webp",
-        "alt": "The Swarm changes view: who applied whose work, the files each worker touched, and the publications"
+        "alt": "The Swarm changes view: who applied whose work, the files each worker touched, and the publications",
+        "title": "Changes",
+        "caption": "Who applied whose work, the files each worker touched, and what each one published."
       }
     ],
     "author": "NikiforovAll",
