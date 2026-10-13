@@ -9,6 +9,8 @@ disable-model-invocation: true
 
 The argument is the goal, plus `--n <workers>` (2 to 4, default 2). With no goal, ask the user for one and stop.
 
+Check the goal's fit against `<base directory>/references/guidance.md`. On a poor fit, tell the user why and what the swarm costs, and ask with `AskUserQuestion` whether to start it anyway or work on the goal in this session.
+
 Each worker gets its own git worktree of the current repo.
 
 1. Write the spec to a markdown file in your scratchpad directory. The workers are fresh sessions, so write a spec that stands alone, from what the user said here:
