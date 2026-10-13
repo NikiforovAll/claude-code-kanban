@@ -8,8 +8,9 @@ const GAP_MS = 8 * 60_000;
 const OUTCOME_STATE = { waiting: 'waiting', blocked: 'blocked' };
 
 // `running` maps a worker name to whether its turn runs now, and `acked` to the last request
-// revision it acknowledged (parseExport); either is null when unknown.
-function buildModel(events, registry = {}, now = Date.now(), { running = null, acked = null } = {}) {
+// revision it acknowledged (parseExport), and `compacted` to how many times its session was
+// compacted (lib/compactions.js); each is null when unknown.
+function buildModel(events, registry = {}, now = Date.now(), { running = null, acked = null, compacted = null } = {}) {
   const names = nameMap(events, registry);
   const label = (id) => names.get(id) ?? id;
   const isParent = (id) => id === registry.parent || ['parent', 'supervisor'].includes(names.get(id));
@@ -183,6 +184,7 @@ function buildModel(events, registry = {}, now = Date.now(), { running = null, a
       health,
       running: turn,
       acked: acked?.get(name) ?? null,
+      compacted: compacted?.get(name) ?? null,
       lastT,
       silence,
       holding: holding ? { id: holding.id, subject: holding.subject, since: holding.claimedAt } : null,

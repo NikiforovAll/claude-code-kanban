@@ -10,6 +10,7 @@ const { parseExport, nameMap, logRow, requestTexts } = require('./lib/events');
 const { buildModel } = require('./lib/model');
 const { configDir, swarmRoot, listSwarms, describe, readRegistry, readDelivery, ID_RE } = require('./lib/swarms');
 const { recordFile, liveRecord, claimRecord, removeRecord } = require('./lib/record');
+const { compactionCounter } = require('./lib/compactions');
 
 // The defaultPort of extensions/swarm/hub-app.json. Claude's plugin cache holds only the plugin folder, so the viewer
 // cannot read the manifest from there.
@@ -26,6 +27,7 @@ const PINNED = arg('swarm') ? path.resolve(arg('swarm')) : null;
 const STORE = path.resolve(arg('store') ?? path.join(__dirname, '..', 'scripts', 'store.mjs'));
 const PUBLIC = path.join(__dirname, 'public');
 const CONFIG = path.resolve(configDir());
+const compactions = compactionCounter(CONFIG);
 // The hub's app and a viewer pinned to one folder are not the config dir's shared viewer.
 const SHARED = !PINNED && process.env.CLAUDE_HUB !== '1';
 const IDLE_MS = Number(arg('idle-exit') ?? 0) * 60_000;
@@ -156,10 +158,12 @@ async function refresh(w) {
   w.events.push(...next.events);
   const names = nameMap(w.events, registry);
   w.log.push(...next.raw.map((e) => logRow(e, names)));
-  const workerState = { running: next.running, acked: next.acked };
-  Object.assign(w, { key, sequence: next.sequence, workerState, model: buildModel(w.events, registry, Date.now(), workerState) });
+  Object.assign(w, { key, sequence: next.sequence, workerState: { running: next.running, acked: next.acked } });
+  w.model = modelOf(w, registry);
   return w;
 }
+
+const modelOf = (w, registry) => buildModel(w.events, registry, Date.now(), { ...w.workerState, compacted: compactions(registry.workers) });
 
 const frame = (event, data) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 
@@ -171,7 +175,7 @@ async function push(w) {
   const changed = w.key !== before;
   const stale = w.model.swarm.state === 'running' && Date.now() - w.lastSent >= RUNNING_RESEND_MS;
   if (!changed && !stale) return;
-  if (!changed) w.model = buildModel(w.events, registryOf(w.dir), Date.now(), w.workerState);
+  if (!changed) w.model = modelOf(w, registryOf(w.dir));
   w.lastSent = Date.now();
   const data = frame('swarm', w.model);
   for (const res of w.clients) res.write(data);

@@ -706,7 +706,7 @@ function summaryView() {
           (w) => `<div class="worker-row">
           ${who(w.name)}
           <span>${healthChip(w.health)}${w.health === 'stopped' || s.endedAt ? '' : turnChip(w.running)}</span>
-          <span class="sub">${w.lastT ? `seen ${dur(w.silence)} ago` : ''}</span>
+          <span class="sub">${[w.lastT ? `seen ${dur(w.silence)} ago` : '', w.compacted != null ? `<span title="How many times Claude Code compacted this worker's session">compacted ${w.compacted}×</span>` : ''].filter(Boolean).join(' · ')}</span>
           <div class="doing">${w.holding ? `#${w.holding.id} ${esc(w.holding.subject)} <span class="muted">· ${dur(s.ref - w.holding.since)}</span>` : (hl(w.status?.summary) || '—')}</div>
         </div>`,
         )
