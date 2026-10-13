@@ -32,7 +32,9 @@ jobs:
       - name: Contract tests
         run: npm test
 
+      # The swarm store needs node:sqlite without a flag (Node 22.13+).
       - name: Swarm tests
+        if: matrix.node-version >= 22
         run: npm run test:swarm
 
       - name: Startup smoke test
