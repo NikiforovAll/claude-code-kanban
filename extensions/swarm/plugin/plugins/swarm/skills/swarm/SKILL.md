@@ -17,7 +17,7 @@ Each worker gets its own git worktree of the current repo.
    - **Goal**: what the result is and who uses it.
    - **Constraints**: what the result must and must not do, and what it must leave alone.
    - **Decisions**: choices already made with the user (stack, approach, names), each with its reason when it matters, and what the new behavior means where it meets existing behavior, such as defaults.
-   - **Acceptance checks**: how a worker shows the result is done, as commands or observable behavior.
+   - **Acceptance checks**: how a worker shows the result is done, as commands or observable behavior. Include checks that cross the seams between tasks and with existing code: the new behavior combined with each existing kind it touches, not only on its own.
    - **Code map**, when the request changes existing code: the files and the existing pattern the change follows, such as how a similar feature passes through the layers.
    - **Blast radius**, the same: every entry point and code path the change must reach, so no path is missed.
 
@@ -67,7 +67,7 @@ Run the board commands with `node "<base directory>/../../scripts/supervisor.mjs
 
 A complete result holds the workers' changes until you send a request or end the swarm; a message leaves it in place.
 
-1. Check the result in the candidate worker's worktree, `<project>/.claude/worktrees/<worker>`. Run each check with a path flag or in a subshell (`npm --prefix <worktree> test`, `(cd <worktree> && …)`), so your shell stays in the project: `end` removes the worktrees and refuses while your shell is in one. Also read the worker's summary and the result's own output for a failure it reports, such as a check that fails or a plan marked not feasible: one that the spec does not explain falls short too. Done when each acceptance check of the spec has a result. When one falls short, send a request that names it and wait for the next notice.
+1. Check the result in the candidate worker's worktree, `<project>/.claude/worktrees/<worker>`. Run each check with a path flag or in a subshell (`npm --prefix <worktree> test`, `(cd <worktree> && …)`), so your shell stays in the project: `end` removes the worktrees and refuses while your shell is in one. Also read the worker's summary and the result's own output for a failure it reports, such as a check that fails or a plan marked not feasible: one that the spec does not explain falls short too. Each worker tested its own part, so run the checks that cross the seams yourself, against the assembled result. Done when each acceptance check of the spec has a result. When one falls short, send a request that names it and wait for the next notice.
 2. Review each open task that the notice lists, a claimed one too, as its work can be missing from the result. Close a task the result makes moot with `task_close` and a reason (`task_release` a claimed one first). Send a request for a task that names missing work. Done when no task is open: `end` as `complete` refuses until then.
 3. End the swarm as `complete` and report the output to the user as it is:
    - **Delivered**: the changed files are in the project. The Git index and HEAD are as they were, so the user reviews and commits them. When the output says to run setup or a focused check (a file merged with the user's edits, or a changed dependency manifest), run it before you call the result ready.

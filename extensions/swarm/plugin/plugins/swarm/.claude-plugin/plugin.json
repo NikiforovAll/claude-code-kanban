@@ -1,5 +1,5 @@
 {
   "name": "swarm",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Swarm, a DeLM implementation: run several Claude Code sessions on one goal, coordinating through a shared task queue and log of findings, shown on the claude-code-kanban board. Needs claude-code-kanban: its board runs the workers and its CLI on PATH (npm install -g claude-code-kanban)"
 }
