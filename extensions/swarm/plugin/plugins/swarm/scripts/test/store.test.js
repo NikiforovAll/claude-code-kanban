@@ -556,7 +556,30 @@ describe('swarm store', { skip: !hasSqlite && 'node:sqlite needs Node 22.5 or la
     assert.match(complete(a, 'c3', wa).error, /not on the board: main\.txt$/);
     assert.equal(ok(w, 'complete', a, { idempotency_key: 'p', outcome: 'partial', expected_revision: 1, summary: 'More to do', cwd: wa, ...ctx }).outcome, 'partial', 'only complete is checked');
     fs.writeFileSync(path.join(wb, 'main.txt'), 'fixed');
+    fs.writeFileSync(path.join(wb, 'new.txt'), 'new');
+    fs.rmSync(path.join(wb, 'remove.txt'));
     assert.equal(complete(b, 'c4', wb).result.outcome, 'complete', "a peer's publication puts an applied file on the board");
+  });
+
+  it("a complete result holds the newest version of each path a peer published", () => {
+    const w = world();
+    const { base, wa, wb } = workspaces(w, { 'core.txt': 'core', 'dto.txt': 'dto', 'gone.txt': 'gone' });
+    const ctx = { base };
+    const complete = (actor, key, cwd) => run(w, 'complete', actor, { idempotency_key: key, outcome: 'complete', expected_revision: 1, summary: 'Done', cwd, ...ctx });
+    fs.writeFileSync(path.join(wa, 'core.txt'), 'core v1');
+    publish(w, a, 'a1', ['core.txt'], { cwd: wa, ...ctx });
+    fs.writeFileSync(path.join(wb, 'dto.txt'), 'dto v1');
+    fs.rmSync(path.join(wb, 'gone.txt'));
+    const p2 = publish(w, b, 'b1', ['dto.txt', 'gone.txt'], { cwd: wb, ...ctx });
+    assert.equal(complete(a, 'c1', wa).error, `apply your peers' work before you declare it complete; publications ${p2} are not in your workspace: dto.txt, gone.txt`);
+    fs.writeFileSync(path.join(wa, 'dto.txt'), 'dto v1');
+    fs.rmSync(path.join(wa, 'gone.txt'));
+    fs.writeFileSync(path.join(wb, 'core.txt'), 'core v2');
+    const p3 = publish(w, b, 'b2', ['core.txt'], { cwd: wb, ...ctx });
+    assert.match(complete(a, 'c2', wa).error, new RegExp(`publications ${p3} are not in your workspace: core\\.txt$`), "a peer's newer version of my file counts");
+    fs.writeFileSync(path.join(wa, 'core.txt'), 'core v3');
+    publish(w, a, 'a2', ['core.txt'], { cwd: wa, ...ctx });
+    assert.equal(complete(a, 'c3', wa).result.outcome, 'complete', 'my newer publication of the path is the board version');
   });
 
   it('the spec is request revision 1, written once and never delivered as an update', () => {

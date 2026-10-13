@@ -84,7 +84,7 @@ describe('buildModel on the fixture swarm, built through the real store', () => 
   it('lists findings, publications and applies', () => {
     assert.equal(m.findings.length, 7);
     assert.equal(m.publications.length, 8);
-    assert.equal(m.applies.length, 5);
+    assert.equal(m.applies.length, 8);
   });
 
   it('shows who holds which version of a file', () => {

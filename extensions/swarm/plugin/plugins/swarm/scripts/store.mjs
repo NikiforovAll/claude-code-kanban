@@ -878,6 +878,11 @@ class Store {
       const published = this.db.prepare("SELECT 1 FROM publication_files WHERE path = ? AND json_extract(result, '$.sha256') IS ? LIMIT 1")
       const missing = changes.filter((c) => !published.get(c.path, c.sha256)).map((c) => c.path)
       if (missing.length) throw new BoardError(`publish your result before you declare it complete; not on the board: ${missing.slice(0, 20).join(', ')}${missing.length > 20 ? ` and ${missing.length - 20} more` : ''}`)
+      const lacking = this.peerWorkMissing(actor, changes)
+      if (lacking.length) {
+        const ids = [...new Set(lacking.map((l) => l.id))].join(', ')
+        throw new BoardError(`apply your peers' work before you declare it complete; publications ${ids} are not in your workspace: ${lacking.slice(0, 20).map((l) => l.path).join(', ')}${lacking.length > 20 ? ` and ${lacking.length - 20} more` : ''}`)
+      }
     }
     const summary = text(args, 'summary', { max: 4096, required: true })
     const dependency = outcome === 'waiting' ? this.checkWait(actor, args.dependency === undefined ? null : text(args, 'dependency', DEPENDENCY)) : null
@@ -885,6 +890,18 @@ class Store {
     const artifacts = selection(args.artifacts, true)
     if (artifacts && artifacts.length > ARTIFACT_LIMIT) throw new BoardError(`artifacts lists at most ${ARTIFACT_LIMIT} paths`)
     return this.declare(actor, outcome, summary, dependency, { ...(checks && { checks }), ...(artifacts && { artifacts }) })
+  }
+
+  // DeLM's agent submits a solution that covers every requirement. In run swarm-requiredif-conditional-r
+  // the candidate lacked a peer's finished parts, and while a candidate stands no worker can apply them.
+  // The newest publication of each path is the board's version; one by a peer must be in the workspace.
+  peerWorkMissing(actor, changes) {
+    const have = new Map(changes.map((c) => [c.path, c.sha256]))
+    return this.db
+      .prepare(`SELECT pf.path, pf.publication_id AS id, json_extract(pf.result, '$.sha256') AS sha256 FROM publication_files pf JOIN publications p ON p.id = pf.publication_id
+        WHERE p.actor != ? AND pf.publication_id = (SELECT MAX(publication_id) FROM publication_files WHERE path = pf.path) ORDER BY pf.publication_id, pf.path`)
+      .all(actor.id)
+      .filter((f) => !have.has(f.path) || have.get(f.path) !== f.sha256)
   }
 
   declare(actor, outcome, summary, dependency, extra = {}) {

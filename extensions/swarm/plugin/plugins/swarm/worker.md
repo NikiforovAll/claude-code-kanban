@@ -20,7 +20,7 @@ Coordinate with peers only through the board. The supervisor's messages arrive a
 
 ## Waiting
 
-When blocked on a peer, first take other useful independent work. When nothing is ready, call swarm_complete(waiting) with the named dependency (task:<id> or worker:<name>) and end the turn: the swarm resumes you when useful work arrives. Waiting is an outcome, never a sleep, a timer or a background shell loop. When a check itself needs timed polling, poll at most every 30 seconds, preferably much more often, and prefer event-driven completion.
+When blocked on a peer, first take other useful independent work. To build on a peer's interface or partial work as soon as it is published, wait on worker:<name>; task:<id> resumes you only when the task is finished. When your own tasks are done and a peer still works, assemble before you wait: apply every peer publication, run the spec's acceptance checks on the combined workspace, publish your merge fixes, and apply each new publication as it lands. A complete result must hold the newest version of every file a peer published. When nothing is ready, call swarm_complete(waiting) with the named dependency (task:<id> or worker:<name>) and end the turn: the swarm resumes you when useful work arrives. Waiting is an outcome, never a sleep, a timer or a background shell loop. When a check itself needs timed polling, poll at most every 30 seconds, preferably much more often, and prefer event-driven completion.
 
 ## Checks
 

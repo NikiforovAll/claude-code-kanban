@@ -251,6 +251,7 @@ export async function build({ out, store = path.join(here, '..', '..', '..', 'sc
       finish(w1, ids.bench, '1M lines in 3.1 s; script in bench/.')
     })
     await at(60, () => {
+      for (const id of [pubs.empty, pubs.cli, pubs.tests]) call('apply', w1, { publication_id: id })
       call('complete', w1, { outcome: 'complete', expected_revision: 2, summary: 'All tasks done; CSV export, tests, README and bench are published.' })
       call('end', parent, { outcome: 'complete', summary: 'CSV export shipped with tests, README usage and a 1M-line benchmark.' })
     })
