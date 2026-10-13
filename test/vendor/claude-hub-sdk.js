@@ -1,4 +1,4 @@
-// claude-hub-sdk 1.4.0 (sha256 7d559a8888ce). Copied by npm run sdk:sync in claude-code-hub. Do not edit.
+// claude-hub-sdk 1.5.0 (sha256 1505d3d5f8ba). Copied by npm run sdk:sync in claude-code-hub. Do not edit.
 // Claude Code Hub SDK: the one rule that names a key press, shared by the hub page, client.js and
 // stub.js. The hub serves it to its page as /sdk/keys.js; mount() and sdk:sync put it in front of
 // client.js and stub.js, so an app still loads one file.
@@ -44,6 +44,8 @@ if (typeof module === 'object' && module.exports) module.exports = ClaudeHubKeys
 ((root) => {
   'use strict';
 
+  // Holds {origin, vars}: the hub origin that sent the cached vars. Every config dir's app shares the
+  // hub's proxy port, so a page framed by something other than the hub would otherwise paint the hub's last theme.
   const VARS_KEY = 'claude-hub:vars';
   const WELCOME_WAIT_MS = 2000;
 
@@ -91,24 +93,33 @@ if (typeof module === 'object' && module.exports) module.exports = ClaudeHubKeys
       return true;
     }
 
-    function adoptVars(vars) {
+    function adoptVars(vars, from) {
       if (!setVars(vars) && vars) return;
       try {
-        if (vars) win.localStorage.setItem(VARS_KEY, JSON.stringify(vars));
+        if (vars) win.localStorage.setItem(VARS_KEY, JSON.stringify({ origin: from, vars }));
         else win.localStorage.removeItem(VARS_KEY);
       } catch (_) {}
     }
 
-    function readVars() {
+    function readCache() {
       try {
-        const v = JSON.parse(win.localStorage.getItem(VARS_KEY));
-        return isVars(v) ? v : null;
+        const c = JSON.parse(win.localStorage.getItem(VARS_KEY));
+        return c && isVars(c.vars) ? c : null;
       } catch (_) {
         return null;
       }
     }
 
-    if (framed) setVars(readVars());
+    // The hub is the top window, also for a page framed inside another app's page, such as a cck
+    // pane. Firefox does not list the ancestors, so there any origin passes.
+    const ancestors = win.location?.ancestorOrigins;
+    const topOrigin = ancestors?.length ? ancestors[ancestors.length - 1] : undefined;
+    const hubOnTop = (o) => topOrigin === undefined || topOrigin === o;
+
+    if (framed) {
+      const cache = readCache();
+      if (cache && hubOnTop(cache.origin)) setVars(cache.vars);
+    }
 
     function connect({ standalone = {} } = {}) {
       if (hub) return hub;
@@ -138,8 +149,9 @@ if (typeof module === 'object' && module.exports) module.exports = ClaudeHubKeys
         return typeof fn === 'function' ? fn : null;
       };
 
+      // The top window, not the parent: a page nested inside another app's page talks to the hub itself.
       function post(msg) {
-        if (origin) win.parent.postMessage(msg, origin);
+        if (origin) win.top.postMessage(msg, origin);
       }
 
       function setStatus(next) {
@@ -169,7 +181,7 @@ if (typeof module === 'object' && module.exports) module.exports = ClaudeHubKeys
 
       function themeIn(p) {
         if (!p || typeof p !== 'object') return;
-        if (isVars(p.vars)) adoptVars(p.vars);
+        if (isVars(p.vars)) adoptVars(p.vars, origin);
         else if (!waiting()) adoptVars(null);
         lastTheme = p;
         applyMode(p);
@@ -212,7 +224,7 @@ if (typeof module === 'object' && module.exports) module.exports = ClaudeHubKeys
       }
 
       function onMessage(e) {
-        if (!origin || e.source !== win.parent || e.origin !== origin) return;
+        if (!origin || e.source !== win.top || e.origin !== origin) return;
         const m = e.data;
         if (!m || typeof m.type !== 'string') return;
         switch (m.type) {
@@ -287,7 +299,10 @@ if (typeof module === 'object' && module.exports) module.exports = ClaudeHubKeys
         .catch(() => ({}))
         .then((cfg) => {
           try {
-            if (framed && cfg?.enabled === true) origin = new URL(cfg.url).origin;
+            if (framed && cfg?.enabled === true) {
+              const hubOrigin = new URL(cfg.url).origin;
+              if (hubOnTop(hubOrigin)) origin = hubOrigin;
+            }
           } catch (_) {}
           if (!origin) {
             setVars(null);
