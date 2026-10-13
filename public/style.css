@@ -8446,7 +8446,8 @@ select.form-input option:checked {
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
 }
 
-#review-pop textarea {
+#review-pop textarea,
+.review-card-edit {
   width: 100%;
   box-sizing: border-box;
   margin: 0 0 6px;
@@ -8575,7 +8576,8 @@ select.form-input option:checked {
 }
 
 .review-panel button.review-discard,
-.review-panel button.review-remove {
+.review-panel button.review-remove,
+.review-panel button.review-edit {
   padding: 3px 4px;
   color: var(--text-muted);
   background: none;
@@ -8590,7 +8592,7 @@ select.form-input option:checked {
 
 .review-card {
   position: relative;
-  padding: 8px 24px 10px 0;
+  padding: 8px 44px 10px 0;
   cursor: pointer;
 }
 
@@ -8617,11 +8619,25 @@ select.form-input option:checked {
   word-break: break-word;
 }
 
-.review-panel button.review-remove {
+.review-panel button.review-remove,
+.review-panel button.review-edit {
   position: absolute;
   top: 4px;
   right: 4px;
   padding: 0 6px;
+}
+
+.review-panel button.review-edit {
+  right: 24px;
+}
+
+.review-edit svg {
+  width: 11px;
+  height: 11px;
+}
+
+.review-card-edit {
+  border-color: var(--accent);
 }
 /* #endregion */
 

@@ -8160,6 +8160,9 @@ function startReview(opts) {
   document.addEventListener('scroll', closeReviewOffer, { capture: true, signal });
   panelEl.addEventListener('click', onReviewPanelClick, { signal });
   panelEl.addEventListener('mouseover', onReviewPanelHover, { signal });
+  panelEl.addEventListener('dblclick', onReviewPanelDblClick, { signal });
+  panelEl.addEventListener('keydown', onReviewPanelKey, { signal });
+  panelEl.addEventListener('input', onReviewPanelInput, { signal });
   panelEl.addEventListener('mouseleave', () => setReviewHot(null), { signal });
   renderReviewPanel();
 }
@@ -8594,20 +8597,30 @@ function openReviewEditor(picked) {
   el.innerHTML = `<textarea rows="3" placeholder="Comment (Ctrl+Enter to add)"></textarea>
     <div class="review-pop-actions"><button type="button" data-act="cancel">Cancel</button><button type="button" data-act="add" class="primary">Add</button></div>`;
   const ta = el.querySelector('textarea');
-  const add = () => {
-    const comment = ta.value.trim();
-    if (!comment) return ta.focus();
-    addReviewComment(picked, comment);
-  };
-  ta.addEventListener('keydown', (e) => {
-    e.stopPropagation();
-    if (e.key === 'Escape') closeReviewPop();
-    else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) add();
-  });
+  const add = (comment) => addReviewComment(picked, comment);
+  ta.addEventListener('keydown', (e) => onReviewEditorKey(e, add, closeReviewPop));
   el.querySelector('[data-act="cancel"]').addEventListener('click', closeReviewPop);
-  el.querySelector('[data-act="add"]').addEventListener('click', add);
+  el.querySelector('[data-act="add"]').addEventListener('click', () => {
+    const comment = reviewEditorText(ta);
+    if (comment) add(comment);
+  });
   placeReviewPop(el, picked.rect);
   ta.focus();
+}
+
+function reviewEditorText(ta) {
+  const text = ta.value.trim();
+  if (!text) ta.focus();
+  return text;
+}
+
+function onReviewEditorKey(e, save, cancel) {
+  e.stopPropagation();
+  if (e.key === 'Escape') cancel();
+  else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+    const text = reviewEditorText(e.target);
+    if (text) save(text);
+  }
 }
 
 function addReviewComment(picked, comment) {
@@ -8661,6 +8674,7 @@ function removeReviewComment(c) {
   items.splice(i, 1);
   unmarkReviewItem(c);
   if (activeReview.hot === c) setReviewHot(null);
+  if (activeReview.editing?.c === c) activeReview.editing = null;
   if (!items.length) reviewDrafts.delete(activeReview.key);
   renderReviewPanel();
 }
@@ -8668,6 +8682,7 @@ function removeReviewComment(c) {
 function clearReviewDrafts(key = activeReview?.key) {
   for (const c of reviewDrafts.get(key) || []) unmarkReviewItem(c);
   reviewDrafts.delete(key);
+  if (activeReview) activeReview.editing = null;
   setReviewHot(null);
   renderReviewPanel();
 }
@@ -8676,16 +8691,52 @@ function onReviewPanelClick(e) {
   const act = e.target.closest('[data-act]')?.dataset.act;
   if (act === 'send') return sendReview();
   if (act === 'discard') return clearReviewDrafts();
-  const card = e.target.closest('.review-card');
-  const c = card && reviewItems()[Number(card.dataset.i)];
-  if (!c) return;
+  const c = reviewCardItem(e.target);
+  if (!c || e.target.closest('.review-card-edit')) return;
   if (e.target.closest('.review-remove')) removeReviewComment(c);
+  else if (e.target.closest('.review-edit')) startReviewEdit(c);
   else revealReviewItem(c);
 }
 
+function reviewCardItem(el) {
+  const card = el.closest('.review-card');
+  return (card && reviewItems()[Number(card.dataset.i)]) || null;
+}
+
+function onReviewPanelDblClick(e) {
+  const c = reviewCardItem(e.target);
+  if (c && e.target.closest('.review-card-comment')) startReviewEdit(c);
+}
+
+// `draft` keeps the typed text when the panel renders again during the edit.
+function startReviewEdit(c) {
+  activeReview.editing = { c, draft: c.comment };
+  renderReviewPanel();
+  const ta = activeReview.panelEl.querySelector('.review-card-edit');
+  ta.focus();
+  ta.setSelectionRange(ta.value.length, ta.value.length);
+}
+
+function endReviewEdit() {
+  activeReview.editing = null;
+  renderReviewPanel();
+}
+
+function saveReviewEdit(comment) {
+  activeReview.editing.c.comment = comment;
+  endReviewEdit();
+}
+
+function onReviewPanelKey(e) {
+  if (e.target.matches('.review-card-edit')) onReviewEditorKey(e, saveReviewEdit, endReviewEdit);
+}
+
+function onReviewPanelInput(e) {
+  if (e.target.matches('.review-card-edit')) activeReview.editing.draft = e.target.value;
+}
+
 function onReviewPanelHover(e) {
-  const card = e.target.closest('.review-card');
-  setReviewHot((card && reviewItems()[Number(card.dataset.i)]) || null);
+  setReviewHot(reviewCardItem(e.target));
 }
 
 let reviewSendClaimed = false;
@@ -8712,10 +8763,15 @@ function renderReviewPanel() {
     </div>
     <ol class="review-panel-list">${items
       .map((c, i) => {
+        const body =
+          c === activeReview.editing?.c
+            ? `<textarea class="review-card-edit" rows="3" aria-label="Edit comment" placeholder="Ctrl+Enter to save, Esc to cancel">${escapeHtml(activeReview.editing.draft)}</textarea>`
+            : `<div class="review-card-comment" title="Double-click to edit">${escapeHtml(c.comment)}</div>`;
         return `<li class="review-card${c === activeReview.hot ? ' hot' : ''}" data-i="${i}" title="Show in the document">
+        <button type="button" class="review-edit" title="Edit" aria-label="Edit">${DETAIL_EDIT_SVG}</button>
         <button type="button" class="review-remove" title="Remove" aria-label="Remove">×</button>
         <div class="review-card-quote">${escapeHtml(c.quote.slice(0, 300))}</div>
-        <div class="review-card-comment">${escapeHtml(c.comment)}</div></li>`;
+        ${body}</li>`;
       })
       .join('')}</ol>`;
 }
