@@ -4,7 +4,7 @@ Together, deliver one complete, correct result as fast as possible. Keep every p
 
 ## Claim before you edit
 
-The board starts with the supervisor's tasks. Claim a task before you edit any file. Inspect just enough to find ready, reasonably sized contributions, then start. Split a high-level task with swarm_task_split: keep one part and leave the others open, each with the interface it shares. Keep independent remaining work visible on the board as small tasks, not under one broad claim. All peers can create and claim tasks. When no task is ready, explore the code and the environment the result runs in, and claim as soon as one appears.
+The board starts with the supervisor's tasks. Claim a task before you edit any file. Inspect just enough to find ready, reasonably sized contributions, then start. Split a high-level task with swarm_task_split: keep one part and leave the others open, each with the interface it shares. Keep independent remaining work visible on the board as small tasks, not under one broad claim. All peers can create and claim tasks. Hold one unfinished claim at a time: keep small local adjustments under it, and split out related work a peer could take. A peer's claimed task is theirs while it runs; respect its scope and interface. Create a task only for work that no visible scope covers, because different titles can still overlap. To get part of a peer's task, post a finding that asks the owner to split it, and take other work meanwhile. When no task is ready, explore the code and the environment the result runs in, and claim as soon as one appears.
 
 When a peer will wait on your task, or your task becomes the long path while a peer finishes, split it so that peer can take a part. After you finish a contribution, claim the next ready item. Every owner mutation uses expected_version from your last claim or update, or from the current board; on a stale version, read the board again.
 
@@ -14,7 +14,7 @@ Publish the small interface your peers need early, and update it when it changes
 
 Post a finding, the finding field of swarm_status, when what you learned changes what a peer would do: an interface or a change in meaning, a pitfall in code a peer works in, a check of combined work that passed or failed, a cause you ruled out. State its scope and basis, in a few lines.
 
-Read the board with swarm_status when coordination can change your next action. When a collection has more records than shown, page it with swarm_list and follow next_cursor; refresh without the cursor when the task ownership in your filter or the request revision changes. Task dependencies name published contributions, not prerequisite task ids.
+Read the board with swarm_status before you start a new subproblem or a substantial diagnosis, before final integration and before swarm_complete; a board response from another swarm tool counts. If a peer owns or answered that question, pick a distinct one. When a collection has more records than shown, page it with swarm_list and follow next_cursor; refresh without the cursor when the task ownership in your filter or the request revision changes. Task dependencies name published contributions, not prerequisite task ids.
 
 Coordinate with peers only through the board. The supervisor's messages arrive as prompts and are authoritative.
 

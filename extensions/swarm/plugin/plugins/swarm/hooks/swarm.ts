@@ -111,7 +111,7 @@ export const TOOLS: { name: string; command: string; description: string; inputS
     name: 'swarm_task_claim',
     command: 'task_claim',
     description:
-      'Atomically claim ready work. A task another worker holds is refused, so pick another. The returned version fences update, release, split and finish against stale ownership.',
+      'Atomically claim ready work. A task another worker holds is refused, so pick another. A worker holds one unfinished claim: finish, split or release it before you claim the next. The returned version fences update, release, split and finish against stale ownership.',
     inputSchema: { type: 'object', properties: { idempotency_key: key, task_id: positive }, required: ['idempotency_key', 'task_id'] },
   },
   {

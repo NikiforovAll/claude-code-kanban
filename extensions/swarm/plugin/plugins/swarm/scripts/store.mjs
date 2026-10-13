@@ -738,6 +738,8 @@ class Store {
       err.event = { kind: 'claim_lost', payload: { task_id: id, owner: t.owner, state: t.state } }
       throw err
     }
+    const held = this.db.prepare("SELECT id FROM tasks WHERE owner = ? AND state = 'claimed' LIMIT 1").get(actor.id)
+    if (held) throw new BoardError(`you already hold task ${held.id}; finish, split or release it before you claim another`)
     if (t.kind === 'integration') {
       const other = this.db
         .prepare("SELECT id FROM tasks WHERE state = 'claimed' AND json_extract(body, '$.kind') = 'integration' LIMIT 1")

@@ -234,13 +234,24 @@ describe('swarm store', { skip: !hasSqlite && 'node:sqlite needs Node 22.5 or la
     claim(w, b, 'claim3', second);
   });
 
-  it('lets a worker hold several claims', () => {
+  it('one unfinished claim per worker', () => {
     const w = world();
     const one = create(w, a, 'one');
     const two = create(w, a, 'two');
-    claim(w, a, 'c1', one);
-    claim(w, a, 'c2', two);
-    assert.deepEqual(tasks(w).map((t) => [t.state, t.owner]), [['claimed', 'worker-a'], ['claimed', 'worker-a']]);
+    const version = claim(w, a, 'c1', one);
+    assert.match(run(w, 'task_claim', a, { idempotency_key: 'c2', task_id: two }).error, new RegExp(`you already hold task ${one}`));
+    assert.equal(claim(w, a, 'again', one), version);
+    ok(w, 'task_finish', a, { idempotency_key: 'f1', task_id: one, expected_version: version, summary: 'ok' });
+    claim(w, a, 'c3', two);
+    assert.deepEqual(tasks(w).map((t) => [t.state, t.owner]), [['done', 'worker-a'], ['claimed', 'worker-a']]);
+  });
+
+  it('a task the supervisor assigns joins a claim the worker already holds', () => {
+    const t = team(world());
+    const one = create(t, a, 'one');
+    claim(t, a, 'c1', one);
+    const assigned = ok(t, 'task_create', parent, { idempotency_key: 'assign', title: 'Assigned', description: 'Do it', kind: 'implementation', assignee: 'worker-a' });
+    assert.deepEqual([assigned.state, assigned.owner], ['claimed', 'worker-a']);
   });
 
   it('discovery_reaches_old_tasks_without_changing_claims_or_including_later_creations', () => {
@@ -592,8 +603,7 @@ describe('swarm store', { skip: !hasSqlite && 'node:sqlite needs Node 22.5 or la
     for (const [i, dependency] of ['worker:worker-a', 'worker:worker-c', 'task:99999', 'storage publication', `task:${mine}`, undefined].entries()) {
       assert.equal(run(t,'complete', a, { idempotency_key: `bad-${i}`, ...wait, dependency }).ok, false, String(dependency));
     }
-    const fin = create(t, b, 'fin');
-    const v = claim(t, b, 'claim-fin', fin);
+    const { task_id: fin, version: v } = ok(t, 'task_create', parent, { idempotency_key: 'fin', title: 'Task fin', description: 'Do it', kind: 'implementation', assignee: 'worker-b' });
     ok(t, 'task_finish', b, { idempotency_key: 'fin-done', task_id: fin, expected_version: v, summary: 'ok' });
     assert.match(run(t,'complete', a, { idempotency_key: 'late', ...wait, dependency: `task:${fin}` }).error, /already finished/);
     assert.equal(worker(done(t, 'complete', a, { idempotency_key: 'peer', ...wait, dependency: 'worker:worker-b' }), 'worker-a').dependency, 'worker:worker-b');
@@ -781,9 +791,8 @@ describe('swarm store', { skip: !hasSqlite && 'node:sqlite needs Node 22.5 or la
   it('a stopped worker releases its claims with a handoff (release_worker_claims)', () => {
     const t = team(world());
     const one = create(t, a, 'one');
-    const two = create(t, a, 'two');
     claim(t, a, 'c1', one);
-    claim(t, a, 'c2', two);
+    const two = ok(t, 'task_create', parent, { idempotency_key: 'two', title: 'Task two', description: 'Do it', kind: 'implementation', assignee: 'worker-a' }).task_id;
     assert.match(run(t,'worker_stop', a, { idempotency_key: 's', worker: 'worker-b', reason: 'x' }).error, /stops only itself/);
     const stopped = done(t, 'worker_stop', parent, { idempotency_key: 'stop', worker: 'worker-a', reason: 'session exited' });
     assert.deepEqual(stopped.result, { worker: 'worker-a', state: 'stopped', released: [one, two] });
