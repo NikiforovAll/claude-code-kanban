@@ -8570,6 +8570,8 @@ function reviewBridge(textBefore, headingBefore, rangeAt, comboOf, fieldSelector
       marks.delete(e.data.id);
     } else if (type === 'reveal' && range) {
       range.startContainer.parentElement?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    } else if (type === 'scrollTo') {
+      requestAnimationFrame(() => scrollTo(e.data.x, e.data.y));
     }
   });
 }
@@ -8583,6 +8585,23 @@ const REVIEW_BRIDGE_TAG = `<script>(${reviewBridge})(${reviewTextBefore}, ${revi
 // not drive the board.
 const bridgedFrames = new WeakSet();
 const paneFrameScroll = new WeakMap();
+const hiddenPaneFrames = new WeakSet();
+
+// Chrome resets a frame's scroll to 0 while the frame is display:none and does not give it back.
+function restorePaneFrameScroll(view, shown) {
+  const frame = view.querySelector(':scope > iframe[srcdoc]');
+  if (!frame) return;
+  if (!shown) {
+    hiddenPaneFrames.add(frame);
+  } else if (hiddenPaneFrames.delete(frame)) {
+    const s = paneFrameScroll.get(frame);
+    if (s) postPaneScroll(frame, s);
+  }
+}
+
+function postPaneScroll(frame, { x, y }) {
+  frame.contentWindow?.postMessage({ type: `${REVIEW_MSG}scrollTo`, x: Number(x) || 0, y: Number(y) || 0 }, '*');
+}
 
 function bridgedFrameEls() {
   return [...document.querySelectorAll('iframe[srcdoc]')].filter((f) => bridgedFrames.has(f));
@@ -9100,7 +9119,7 @@ function renderHtmlPreview(bodyEl, content) {
   bodyEl.innerHTML = '';
   // After the document's end the parser still adds the script to <body>, and it runs after
   // the page's own scripts.
-  bodyEl.appendChild(createPreviewFrame('preview-html-frame', content + REVIEW_BRIDGE_TAG));
+  bodyEl.appendChild(createPreviewFrame('preview-html-frame themed-frame', themedSrcdoc(content)));
 }
 
 function isAbsolutePath(p) {
@@ -13409,7 +13428,8 @@ function syncPanes() {
   const boardSide = split ? splitSideOf(split, 'board') : null;
   sessionView.classList.toggle('pane-mode', split ? !boardSide : !!pane);
   sessionView.classList.toggle('split-mode', !!split);
-  if (!layout || wantsTerminal()) closePanePop();
+  const term = wantsTerminal();
+  if (!layout || term) closePanePop();
   // key → side ('' unsplit). The focused side mounts last, so the frame limit evicts it last.
   const sides = new Map();
   if (split) {
@@ -13427,14 +13447,15 @@ function syncPanes() {
     el.classList.toggle('on', side !== undefined);
     markPaneSide(el, side, el.dataset.key === focusKey);
     if (paneLineWanted.size && side !== undefined) applyPaneLine(el);
+    restorePaneFrameScroll(el, side !== undefined && !term);
   }
   const boardWasSplit = boardInSplit();
   markPaneSide(paneBoard, boardSide, !!boardSide && !pane);
   if (boardWasSplit !== !!boardSide) applyAgentFooterCollapsed();
-  placeSessionLog(wantsTerminal() ? null : boardSide);
+  placeSessionLog(term ? null : boardSide);
   // Off screen, a framed page keeps focus and takes keys the user aims at the board.
   const focused = document.activeElement;
-  if (paneViews.contains(focused) && (wantsTerminal() || !focused.closest('.pane-view.on'))) focused.blur();
+  if (paneViews.contains(focused) && (term || !focused.closest('.pane-view.on'))) focused.blur();
   syncPaneReview();
   if (!layout) return;
   for (const b of document.querySelectorAll('.pane-tool')) b.disabled = !pane;
@@ -13611,19 +13632,16 @@ async function loadPaneView(sid, pane, view, scroll) {
   }
   const data = await getJson('/api/preview', null, { query: { path: pane.target } });
   if (data?.kind === 'html') {
-    // The frame's origin is opaque, so the page restores its own scroll on load.
-    const restore = scroll
-      ? `<script>addEventListener('load',()=>requestAnimationFrame(()=>scrollTo(${Number(scroll.x) || 0},${Number(scroll.y) || 0})))</script>`
-      : '';
     // A show card's own zoom follows the text zoom (showBridge), so its frame is not .modal-zoomable.
     const [cls, doc] = pane.show
       ? ['pane-frame show-pane-frame', showSrcdoc(data.content, scroll?.y)]
-      : ['pane-frame modal-zoomable', data.content + REVIEW_BRIDGE_TAG + restore];
+      : ['pane-frame modal-zoomable themed-frame', themedSrcdoc(data.content)];
     const frame = createPreviewFrame(cls, doc);
     frame.title = pane.title;
     // Focus given before the document loads stays on the frame element, out of the document's keys.
     frame.addEventListener('load', () => {
       if (document.activeElement === frame) frame.contentWindow?.focus();
+      if (scroll && !pane.show) postPaneScroll(frame, scroll);
     });
     view.appendChild(frame);
     attachPaneReview(view, sid, fileReviewOpts(data.path, data.kind, frame, frame));
@@ -13842,8 +13860,13 @@ function syncPaneReview() {
 
 function unmountPane(sid, paneId) {
   const key = `${sid}/${paneId}`;
-  paneFrames.get(key)?.remove();
+  const view = paneFrames.get(key);
+  const hadFocus = view?.contains(document.activeElement);
+  view?.remove();
   paneFrames.delete(key);
+  // Chrome leaves the window without focus when a focused frame is removed, so no key reaches
+  // the board until a click. Only when it had focus: under the hub, cck may be off screen.
+  if (hadFocus) window.focus();
 }
 
 function selectPane(id) {
@@ -13906,6 +13929,7 @@ function closeFocusedPane() {
   const id = focusedPaneId();
   if (!id || id === 'board') return false;
   closePane(id);
+  focusActivePane();
   return true;
 }
 
@@ -16352,21 +16376,48 @@ function showTokens() {
   return out;
 }
 
-// A whole document gets the tokens and base styles first in its head, so its own styles win.
-function showSrcdoc(content, restoreY) {
-  const tokens = Object.entries(showTokens())
+function showTokenCss() {
+  return Object.entries(showTokens())
     .map(([k, v]) => `${k}:${v}`)
     .join(';');
-  const head = `<meta http-equiv="Content-Security-Policy" content="${SHOW_CSP}"><style>:root{${tokens}}${SHOW_FRAME_BASE}</style>`;
+}
+
+function withHeadFirst(content, head) {
+  const at = /<head[^>]*>/i.exec(content) || /<html[^>]*>/i.exec(content) || /<!doctype[^>]*>/i.exec(content);
+  const inject = at?.[0].toLowerCase().startsWith('<head') ? head : `<head>${head}</head>`;
+  const cut = at ? at.index + at[0].length : 0;
+  return content.slice(0, cut) + inject + content.slice(cut);
+}
+
+// A whole document gets the tokens and base styles first in its head, so its own styles win.
+function showSrcdoc(content, restoreY) {
+  const head = `<meta http-equiv="Content-Security-Policy" content="${SHOW_CSP}"><style>:root{${showTokenCss()}}${SHOW_FRAME_BASE}</style>`;
   const bridge = `<script>(${showBridge})(${Math.max(0, Math.round(restoreY) || 0)}, ${modalZoom});</script>${REVIEW_BRIDGE_TAG}`;
   if (!/^\s*(<!doctype|<html)/i.test(content)) {
     return `<!doctype html><html><head><meta charset="utf-8">${head}</head><body>${content}${bridge}</body></html>`;
   }
-  const at = /<head[^>]*>/i.exec(content) || /<html[^>]*>/i.exec(content);
-  const inject = at?.[0].toLowerCase().startsWith('<head') ? head : `<head>${head}</head>`;
-  const cut = at ? at.index + at[0].length : 0;
-  return content.slice(0, cut) + inject + content.slice(cut) + bridge;
+  return withHeadFirst(content, head) + bridge;
 }
+
+// An HTML file preview gets only the tokens, first in its head: its own :root rules win, and
+// a page that declares its defaults in :where(:root) follows the board theme.
+function themedSrcdoc(content) {
+  const head = `<style id="cck-tokens">:root{${showTokenCss()}}</style>`;
+  return withHeadFirst(content, head) + THEME_BRIDGE_TAG + REVIEW_BRIDGE_TAG;
+}
+
+// Runs inside the preview as source text, so it must not close over anything outside its own body.
+// It rewrites the injected rule, not inline styles, so the page's own :root still wins after a switch.
+function themeBridge(prefix) {
+  addEventListener('message', (e) => {
+    if (e.source !== parent || e.data?.type !== `${prefix}tokens`) return;
+    const rule = document.getElementById('cck-tokens')?.sheet?.cssRules[0];
+    if (!rule) return;
+    for (const [k, v] of Object.entries(e.data.tokens)) rule.style.setProperty(k, v);
+  });
+}
+
+const THEME_BRIDGE_TAG = `<script>(${themeBridge})(${JSON.stringify(SHOW_MSG)});</script>`;
 
 // Runs inside the card as source text, so it must not close over anything outside its own body.
 // Keys and links go through reviewBridge, which the card loads next to this.
@@ -16432,15 +16483,26 @@ window.addEventListener('message', (e) => {
 });
 
 // The same body attributes the terminal theme watches; a markdown card follows the board's CSS.
+// The body's style also changes on every drag, so a push with the same tokens is dropped.
+let sentTokens = '';
 new MutationObserver(() => {
-  postToShowFrames(() => ({ type: `${SHOW_MSG}tokens`, tokens: showTokens() }));
+  postToShowFrames(() => {
+    const tokens = showTokens();
+    const key = JSON.stringify(tokens);
+    if (key === sentTokens) return null;
+    sentTokens = key;
+    return { type: `${SHOW_MSG}tokens`, tokens };
+  });
 }).observe(document.body, { attributes: true, attributeFilter: ['class', 'data-color-theme', 'style'] });
 
 // Builds the message only when a frame is there, because showTokens forces a style recalc.
 function postToShowFrames(makeMsg) {
-  const frames = [showState.frame, ...document.querySelectorAll('.show-pane-frame')].filter((f) => f?.contentWindow);
+  const frames = [showState.frame, ...document.querySelectorAll('.show-pane-frame, .themed-frame')].filter(
+    (f) => f?.contentWindow,
+  );
   if (!frames.length) return;
   const msg = makeMsg();
+  if (!msg) return;
   for (const f of frames) f.contentWindow.postMessage(msg, '*');
 }
 

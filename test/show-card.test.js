@@ -60,7 +60,8 @@ describe('showSrcdoc', () => {
     SHOW_CSP: csp,
     SHOW_FRAME_BASE: 'body{base}',
     REVIEW_BRIDGE_TAG: '<script>review</script>',
-    showTokens: () => ({ '--color-bg': '#111' }),
+    showTokenCss: () => '--color-bg:#111',
+    withHeadFirst: appFunction('withHeadFirst'),
     showBridge: function showBridge() {},
     modalZoom: 1.2,
   });
@@ -94,6 +95,58 @@ describe('showSrcdoc', () => {
     for (const d of ["default-src 'none'", "connect-src 'none'", "form-action 'none'", "frame-src 'none'", 'img-src data:']) {
       assert.ok(csp.includes(d), d);
     }
+  });
+});
+
+describe('themedSrcdoc', () => {
+  const themed = appFunction('themedSrcdoc', {
+    showTokenCss: () => '--color-bg:#111',
+    withHeadFirst: appFunction('withHeadFirst'),
+    THEME_BRIDGE_TAG: '<script>theme</script>',
+    REVIEW_BRIDGE_TAG: '<script>review</script>',
+  });
+  const style = '<style id="cck-tokens">:root{--color-bg:#111}</style>';
+
+  it('puts only the tokens first in the head, before the page styles', () => {
+    const doc = themed('<!doctype html><html><head><meta charset="utf-8"><style>:root{--color-bg:#fff}</style></head><body>b</body></html>');
+    assert.ok(doc.startsWith(`<!doctype html><html><head>${style}<meta charset="utf-8">`));
+    assert.ok(!doc.includes('Content-Security-Policy'));
+    assert.ok(doc.endsWith('<script>theme</script><script>review</script>'));
+  });
+
+  it('keeps the doctype first when the document has no html or head tag', () => {
+    assert.ok(themed('<!doctype html><body>b</body>').startsWith(`<!doctype html><head>${style}</head><body>b`));
+  });
+
+  it('does not wrap a fragment, so its rendering mode stays', () => {
+    assert.ok(themed('<p>x</p>').startsWith(`<head>${style}</head><p>x</p>`));
+  });
+});
+
+describe('themeBridge', () => {
+  it('rewrites the injected rule from a parent message only', () => {
+    let onMessage;
+    const props = {};
+    const rule = { style: { setProperty: (k, v) => (props[k] = v) } };
+    const parent = {};
+    const bridge = appFunction('themeBridge', {
+      parent,
+      addEventListener: (_t, fn) => {
+        onMessage = fn;
+      },
+      Object,
+      document: { getElementById: (id) => (id === 'cck-tokens' ? { sheet: { cssRules: [rule] } } : null) },
+    });
+    bridge('cck-show:');
+    onMessage({ source: {}, data: { type: 'cck-show:tokens', tokens: { '--color-bg': '#000' } } });
+    assert.deepEqual(props, {});
+    onMessage({ source: parent, data: { type: 'cck-show:tokens', tokens: { '--color-bg': '#000', '--color-text': '#fff' } } });
+    assert.deepEqual(props, { '--color-bg': '#000', '--color-text': '#fff' });
+  });
+
+  it('runs as source text in the preview, so it closes over nothing', () => {
+    const src = appFunction('themeBridge').toString();
+    for (const name of ['showState', 'SHOW_MSG', 'showTokens']) assert.doesNotMatch(src, new RegExp(`\\b${name}\\b`), name);
   });
 });
 
