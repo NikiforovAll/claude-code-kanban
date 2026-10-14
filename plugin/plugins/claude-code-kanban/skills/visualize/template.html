@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Page Title</title>
+<style>
+/* Defaults in :where() have zero specificity, so a host that sets the same tokens on :root wins. */
+:where(:root) {
+  color-scheme: light dark;
+  --color-bg: #f7f5f2; --color-bg-subtle: #ece9e4;
+  --color-text: #16130f; --color-text-muted: #5f5a53; --color-border: #d6d1c9;
+  --color-accent: #c4581c;
+  --color-info: #2563eb; --color-success: #1a8a5a; --color-warning: #b07d0a; --color-danger: #c0392b;
+  --color-series-1: #2a78d6; --color-series-2: #c4511c; --color-series-3: #008a72; --color-series-4: #ad6f00;
+  --color-series-5: #c4467a; --color-series-6: #008300; --color-series-7: #4a3aa7; --color-series-8: #d03a3a;
+  --color-ramp-1: #5598e7; --color-ramp-2: #2a78d6; --color-ramp-3: #1c5cab; --color-ramp-4: #104281; --color-ramp-5: #0a2b57;
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  --font-serif: "Playfair Display", Georgia, "Times New Roman", serif;
+}
+@media (prefers-color-scheme: dark) {
+  :where(:root) {
+    --color-bg: #16181c; --color-bg-subtle: #101114;
+    --color-text: #f0f1f3; --color-text-muted: #9a9da5; --color-border: #363840;
+    --color-accent: #e86f33;
+    --color-info: #60a5fa; --color-success: #3ecf8e; --color-warning: #f0b429; --color-danger: #ef5350;
+    --color-series-1: #3987e5; --color-series-2: #d95926; --color-series-3: #199e70; --color-series-4: #c98500;
+    --color-series-5: #d55181; --color-series-6: #2a9a2a; --color-series-7: #9085e9; --color-series-8: #e66767;
+    --color-ramp-1: #256abf; --color-ramp-2: #3987e5; --color-ramp-3: #6da7ec; --color-ramp-4: #9ec5f4; --color-ramp-5: #cde2fb;
+  }
+}
+:root { --surface: color-mix(in srgb, var(--color-text) 4%, var(--color-bg)); }
+:where(.dot, .tag) { --tone: var(--color-text-muted); }
+:where(.callout) { --tone: var(--color-accent); }
+[data-tone="accent"] { --tone: var(--color-accent); }
+[data-tone="info"] { --tone: var(--color-info); }
+[data-tone="success"] { --tone: var(--color-success); }
+[data-tone="warning"] { --tone: var(--color-warning); }
+[data-tone="danger"] { --tone: var(--color-danger); }
+[data-tone="muted"] { --tone: var(--color-text-muted); }
+
+*, *::before, *::after { box-sizing: border-box; }
+body { margin: 0; background: var(--color-bg); color: var(--color-text); font: 16px/1.65 var(--font-sans); -webkit-text-size-adjust: 100%; }
+main { max-width: 980px; margin: 0 auto; padding: 64px 16px 96px; counter-reset: section; }
+p, li { max-width: 68ch; }
+p { margin: 0 0 14px; }
+ul, ol { margin: 0 0 16px; padding-left: 22px; }
+li { margin: 4px 0; }
+a { color: var(--color-accent); text-underline-offset: 3px; }
+b, strong { font-weight: 600; }
+code { font: .85em var(--font-mono); background: var(--surface); border: 1px solid var(--color-border); border-radius: 5px; padding: 1px 5px; }
+pre { font: 13px/1.6 var(--font-mono); background: var(--color-bg-subtle); border: 1px solid var(--color-border); border-radius: 10px; padding: 12px 14px; margin: 0 0 16px; overflow-x: auto; }
+pre code { font-size: inherit; background: none; border: 0; padding: 0; }
+.muted { color: var(--color-text-muted); }
+
+.kicker { font: 500 12px/1.4 var(--font-mono); letter-spacing: .12em; text-transform: uppercase; color: var(--color-accent); margin: 0 0 18px; }
+h1 { font: 400 48px/1.08 var(--font-serif); letter-spacing: -.01em; margin: 0 0 16px; }
+.sub { font-size: 17px; color: var(--color-text-muted); max-width: 46em; margin: 0 0 28px; }
+.lead { font-size: 21px; line-height: 1.5; max-width: 40em; margin: 0 0 32px; }
+.lead b { color: var(--color-accent); }
+
+.lineup { display: grid; grid-template-columns: repeat(auto-fit, minmax(108px, 1fr)); gap: 8px; margin: 0 0 40px; }
+.lineup > div { border: 1px solid var(--color-border); border-radius: 12px; padding: 12px 12px 10px; background: var(--surface); }
+.lineup b { display: block; font: 400 28px/1 var(--font-serif); color: var(--color-text-muted); }
+.lineup span { display: block; font-size: 13px; font-weight: 600; line-height: 1.3; margin-top: 8px; }
+.lineup small { display: block; font: 11px/1.35 var(--font-mono); color: var(--color-text-muted); margin-top: 4px; }
+.lineup > [data-tone] { border-color: var(--tone); background: color-mix(in srgb, var(--tone) 12%, var(--color-bg)); box-shadow: 0 10px 32px -14px var(--tone); }
+.lineup > [data-tone] b { color: var(--tone); }
+
+section { counter-increment: section; margin-top: 88px; }
+.eyebrow { max-width: none; display: flex; align-items: center; gap: 12px; font: 500 12px/1.4 var(--font-mono); letter-spacing: .12em; text-transform: uppercase; color: var(--color-text-muted); margin: 0 0 14px; }
+.eyebrow::before { content: counter(section, decimal-leading-zero); color: var(--color-accent); }
+.eyebrow::after { content: ""; flex: 1; height: 1px; background: var(--color-border); }
+h2 { font: 400 32px/1.2 var(--font-serif); letter-spacing: -.005em; max-width: 30em; margin: 0 0 22px; }
+h3 { font-size: 17px; line-height: 1.4; font-weight: 600; margin: 36px 0 10px; }
+
+.callout { border: 1px solid var(--color-border); border-radius: 12px; background: var(--surface); box-shadow: inset 3px 0 0 var(--tone); padding: 16px 20px; margin: 0 0 20px; }
+.callout p { max-width: none; }
+.callout > :last-child { margin-bottom: 0; }
+
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 0 0 16px; }
+.kpi { border: 1px solid var(--color-border); border-radius: 12px; background: var(--surface); padding: 14px 16px; }
+.kpi > span { display: block; font: 500 11px/1.4 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--color-text-muted); }
+.kpi > b { display: block; font: 400 40px/1.1 var(--font-serif); font-variant-numeric: lining-nums tabular-nums; margin: 8px 0 4px; color: var(--tone, var(--color-text)); }
+.kpi > small { display: block; font-size: 13px; color: var(--color-text-muted); }
+
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; margin: 0 0 16px; }
+.card { border: 1px solid var(--color-border); border-radius: 14px; padding: 20px 22px; background: var(--surface); }
+.card[data-tone] { border-color: var(--tone); background: color-mix(in srgb, var(--tone) 7%, var(--color-bg)); box-shadow: 0 16px 40px -24px var(--tone); }
+.card h3 { font-size: 14px; margin: 0 0 10px; color: var(--color-text-muted); }
+.card .verdict { font: 400 20px/1.35 var(--font-serif); color: var(--color-text); margin: 0 0 12px; }
+.card > p:not(.verdict), .card ul { font-size: 13px; line-height: 1.55; color: var(--color-text-muted); }
+.card > p:not(.verdict) { margin: 0 0 12px; }
+.card pre { font-size: 12px; padding: 8px 10px; margin: 0 0 12px; white-space: pre-wrap; }
+.card ul { margin: 0; padding-left: 18px; }
+.card li { margin: 3px 0; }
+li.pro::marker { content: "+  "; color: var(--color-success); font-weight: 700; }
+li.con::marker { content: "−  "; color: var(--color-danger); font-weight: 700; }
+
+.tag { display: inline-block; font: 500 10.5px/18px var(--font-mono); letter-spacing: .06em; text-transform: uppercase; padding: 0 7px; border-radius: 9px; margin-left: 8px; vertical-align: 1px; color: var(--tone); background: color-mix(in srgb, var(--tone) 15%, transparent); }
+.dot { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; margin-right: 8px; vertical-align: 1px; font: 600 11px var(--font-mono); color: var(--color-bg); background: var(--tone); }
+
+.table { overflow-x: auto; margin: 0 0 20px; border: 1px solid var(--color-border); border-radius: 14px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { padding: 10px 14px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--color-border); }
+tbody tr:last-child > td { border-bottom: 0; }
+th { font: 500 11px/1.4 var(--font-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--color-text-muted); background: var(--color-bg-subtle); }
+td:first-child { white-space: nowrap; font-weight: 500; }
+td.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.c { text-align: center; white-space: nowrap; }
+td.yes { --tone: var(--color-success); } td.no { --tone: var(--color-danger); } td.part { --tone: var(--color-warning); }
+td.yes, td.no, td.part { color: var(--tone); font-weight: 600; background: color-mix(in srgb, var(--tone) 13%, transparent); }
+td.yes::before { content: "● "; } td.part::before { content: "◐ "; } td.no::before { content: "○ "; }
+tr[data-tone] > td:first-child { box-shadow: inset 3px 0 0 var(--tone); background: color-mix(in srgb, var(--tone) 10%, transparent); }
+
+figure { margin: 0 0 20px; padding: 24px; border: 1px solid var(--color-border); border-radius: 14px; background: var(--color-bg-subtle) radial-gradient(color-mix(in srgb, var(--color-text) 9%, transparent) 1px, transparent 1.5px) 0 0 / 18px 18px; }
+figure svg { display: block; width: 100%; height: auto; }
+figcaption { font-size: 13px; color: var(--color-text-muted); margin-top: 14px; }
+@media (max-width: 600px) { figure.wide { overflow-x: auto; } figure.wide svg { min-width: 680px; } }
+
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font: 12px var(--font-mono); color: var(--color-text-muted); margin: 0 0 14px; }
+.legend i { display: inline-block; width: 14px; height: 10px; border-radius: 2px; margin-right: 6px; background: var(--tone, var(--color-text-muted)); }
+
+ul.points { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 8px 36px; }
+ul.points > li { max-width: none; margin: 0; padding: 14px 0 0; border-top: 1px solid var(--color-border); color: var(--color-text-muted); font-size: 15px; }
+ul.points > li > b:first-child { display: block; font: 400 19px/1.35 var(--font-serif); color: var(--color-text); margin-bottom: 6px; }
+
+ol.steps { list-style: none; counter-reset: step; padding: 0; }
+ol.steps > li { counter-increment: step; position: relative; padding: 2px 0 20px 48px; }
+ol.steps > li::before { content: counter(step); position: absolute; left: 0; top: 0; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font: 600 13px var(--font-mono); color: var(--color-bg); background: var(--color-accent); }
+ol.steps > li:not(:last-child)::after { content: ""; position: absolute; left: 15px; top: 36px; bottom: 4px; width: 1px; background: var(--color-border); }
+
+.sources { margin-top: 88px; padding-top: 16px; border-top: 1px solid var(--color-border); font: 12px/1.7 var(--font-mono); color: var(--color-text-muted); }
+.sources p { max-width: none; }
+.sources code { font-size: inherit; background: none; border: 0; padding: 0; }
+
+@media (max-width: 600px) {
+  main { padding-top: 36px; }
+  h1 { font-size: 34px; }
+  .lead { font-size: 18px; }
+  h2 { font-size: 25px; }
+  section { margin-top: 64px; }
+  figure { padding: 14px; }
+}
+@media print { main { max-width: none; padding: 0; } figure, .card, .kpi, tr { break-inside: avoid; } .card, .lineup > div { box-shadow: none; } }
+</style>
+</head>
+<body>
+<main>
+<p class="kicker">Ticket or context · kind of page</p>
+<h1>Page Title</h1>
+<p class="sub">The question this page answers.</p>
+<p class="lead">The answer in one or two sentences, with <b>the pick</b> named, so a reader who stops here has it.</p>
+
+<div class="lineup">
+  <div data-tone="accent"><b>1</b><span>Option A</span><small>the pick</small></div>
+  <div><b>2</b><span>Option B</span><small>too static</small></div>
+  <div><b>3</b><span>Option C</span><small>separate project</small></div>
+</div>
+
+<div class="kpis">
+  <div class="kpi"><span>Errors in 7 days</span><b>133.5K</b><small>26% of minutes [1]</small></div>
+  <div class="kpi" data-tone="danger"><span>Peak after release</span><b>30,000</b><small>RU per minute, estimate</small></div>
+</div>
+
+<section>
+  <p class="eyebrow">Overview</p>
+  <h2>Each heading is a claim that can be true or false</h2>
+  <figure class="wide">
+    <svg viewBox="0 0 900 200" role="img" aria-labelledby="f1-t"><title id="f1-t">What the diagram shows</title></svg>
+    <figcaption>One sentence: what to notice.</figcaption>
+  </figure>
+</section>
+
+<section>
+  <p class="eyebrow">Options</p>
+  <h2>Cards lead with the verdict</h2>
+  <div class="cards">
+    <div class="card" data-tone="accent">
+      <h3><span class="dot" data-tone="accent">1</span>Option A<span class="tag" data-tone="accent">pick</span></h3>
+      <p class="verdict">The verdict, in one line.</p>
+      <p>What it is, in one sentence.</p>
+      <pre>on 429: wait, then retry</pre>
+      <ul><li class="pro">A strong point.</li><li class="con">A weak point.</li></ul>
+    </div>
+  </div>
+</section>
+
+<section>
+  <p class="eyebrow">Compare</p>
+  <h2>A table holds the matrix</h2>
+  <div class="table"><table>
+    <thead><tr><th>Option</th><th>Global</th><th>Lines</th></tr></thead>
+    <tbody>
+      <tr data-tone="accent"><td><span class="dot" data-tone="accent">1</span>Option A</td><td class="c yes">yes</td><td class="num">1,229</td></tr>
+      <tr><td><span class="dot">2</span>Option B</td><td class="c no">no</td><td class="num">300</td></tr>
+    </tbody>
+  </table></div>
+  <ul class="points">
+    <li><b>A point leads with its claim.</b> One or two sentences of support.</li>
+    <li><b>Points sit side by side.</b> They wrap to one column on a phone.</li>
+  </ul>
+</section>
+
+<section>
+  <p class="eyebrow">Next</p>
+  <h2>Steps say what to do next</h2>
+  <ol class="steps"><li>First action.</li><li>Second action.</li></ol>
+</section>
+
+<div class="sources"><p>Sources: [1] <code>path/to/file.md</code> · [2] <a href="https://example.com">Title</a>. Estimates are marked as estimates.</p></div>
+</main>
+</body>
+</html>
