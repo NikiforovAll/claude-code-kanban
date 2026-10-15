@@ -70,6 +70,7 @@ const { pickFolder } = require('./lib/folder-dialog');
 const { loadSessionCache, saveSessionCache } = require('./lib/session-cache');
 const { countTaskDir } = require('./lib/task-counts');
 const { readTaskDir } = require('./lib/task-dir');
+const { foldAgentLines } = require('./lib/agent-log');
 const { projectMatcher, normalizeProjectPath, sessionProjectKey } = require('./public/project-match');
 const { getParentVerdict, setParentVerdict } = require('./lib/parent-cache');
 
@@ -275,13 +276,7 @@ const RETENTION_FIRST_RUN_MS = 5 * 60 * 1000;
 // #region AGENT_ACTIVITY
 
 function readAgentJsonl(filePath) {
-  const raw = readFileSync(filePath, 'utf8');
-  const merged = {};
-  for (const line of raw.split(/\r?\n/)) {
-    if (!line.trim()) continue;
-    try { Object.assign(merged, JSON.parse(line)); } catch (_) { /* skip malformed */ }
-  }
-  return merged;
+  return foldAgentLines(readFileSync(filePath, 'utf8'));
 }
 
 // Agent-activity record files in a session dir, excluding the `_`-prefixed sidecars

@@ -1,4 +1,4 @@
-import type { EngineInterface, Register, ToolCallArgs } from 'claude-code'
+import type { AgentSpawnInput, EngineInterface, Register, ToolCallArgs } from 'claude-code'
 import { cckRoot } from './context'
 
 // Mods cannot delete files. The server reads any status but "waiting" as no ask.
@@ -148,21 +148,24 @@ async function markStopped($: EngineInterface) {
   await $.fs.write(`${await sessionDir($)}/_stop.json`, '')
 }
 
-// The name map lets TeammateIdle, which names the teammate, find its agent id.
-async function agentStarted($: EngineInterface, agentId: string, type: string, model: string, name?: string) {
+// The name map lets TeammateIdle, which names the teammate, find its agent id. The prompt is on
+// the start line because a resume runs a new prompt, and the server's own lookup finds the first.
+async function agentStarted($: EngineInterface, e: AgentSpawnInput, agentId: string, model: string) {
   const dir = await sessionDir($)
   const ts = new Date().toISOString()
   await Promise.all([
     appendLine($, `${dir}/${agentId}.jsonl`, {
       agentId,
-      type,
+      type: e.subagentType,
       model,
       event: 'start',
       status: 'active',
+      ...(e.prompt && { prompt: e.prompt }),
+      ...(e.description && { description: e.description }),
       startedAt: ts,
       updatedAt: ts,
     }),
-    $.fs.write(`${dir}/_name-${name ?? type}.id`, agentId),
+    $.fs.write(`${dir}/_name-${e.name ?? e.subagentType}.id`, agentId),
   ])
 }
 
@@ -249,7 +252,7 @@ export const register: Register = on => {
   })
   on('agent.spawn', async ($, e, next) => {
     const result = await next(e)
-    if (result.agentId) await agentStarted($, result.agentId, e.subagentType, result.model, e.name)
+    if (result.agentId) await agentStarted($, e, result.agentId, result.model)
     return result
   })
   // An interrupted turn fires no Stop hook, so it does not mark the session unread either.

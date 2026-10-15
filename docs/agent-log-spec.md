@@ -55,6 +55,8 @@ Each line is one event. The server folds them in order, last key wins:
 
 The folded agent also gets `lastMessage`, from the transcript when the stop line has none.
 
+The start line carries the spawn's `prompt` and `description`. A `SendMessage` to a stopped subagent spawns it again under the same id, and the mod appends another start line whose `prompt` is the message. A start line begins a new run: the fold (`foldAgentLines` in `lib/agent-log.js`) drops every line before it, so the answer, stop time and `*Unavailable` flags of the run before do not show.
+
 ## Team member lifecycle
 
 Team members differ from regular subagents — they persist across multiple interactions.
@@ -196,7 +198,7 @@ Team member prompts are wrapped in `<teammate-message teammate_id="..." summary=
 - A stop line may be missing for some agents. Mitigated by stale timeout.
 - No stop line is written for terminated teammates. Mitigated by server-side JSONL `teammate_terminated` detection.
 - Shutdown handshake spawns transient agent instances that never get a stop line. Mitigated by temporal dedup filter.
-- The start line carries only the agent type, not the prompt. Prompt is extracted from the parent session's JSONL transcript (progress map) or the subagent's own transcript.
+- A start line written by a plugin before 3.7.6 has no prompt. The server then takes it from the parent session's transcript (progress map) or the subagent's own transcript, which give the first prompt, also for a resumed run.
 - `TeammateIdle` may provide no `agent_id` — resolved via name→ID mapping files written on `agent.spawn`.
 - Internal agents (e.g. AskUserQuestion) get no file: `agent.spawn` does not fire for them, and the stop line is written only when the file exists.
 - Team member prompts contain `<teammate-message>` XML wrapper that must be stripped for display.

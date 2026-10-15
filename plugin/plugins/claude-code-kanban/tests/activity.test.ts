@@ -272,6 +272,31 @@ test('a subagent stop with an empty answer leaves lastMessage out', async ($, on
   expect('lastMessage' in stop).toBe(false)
 })
 
+test('a resumed subagent appends a start line with the new task', async ($, on) => {
+  const files: Record<string, string> = {}
+  engine(on, files)
+
+  await $.agent.spawn(spawn('general-purpose'))
+  await $.turn.complete(turn({ agentId: 'a1', answer: 'first answer' }))
+  await $.agent.spawn({ ...spawn('general-purpose'), prompt: 'second task', description: '' })
+
+  const all = lines(files[`${SESSION}/a1.jsonl`])
+  expect(all.map((l) => l.event)).toEqual(['start', 'stop', 'start'])
+  expect(all[2]).toMatchObject({ status: 'active', prompt: 'second task' })
+  expect('description' in all[2]).toBe(false)
+})
+
+test('a first spawn records its prompt and description', async ($, on) => {
+  const files: Record<string, string> = {}
+  engine(on, files)
+
+  await $.agent.spawn(spawn('general-purpose'))
+
+  const [start] = lines(files[`${SESSION}/a1.jsonl`])
+  expect(start).toMatchObject({ prompt: 'p', description: 'd' })
+  expect('lastMessage' in start).toBe(false)
+})
+
 test('a finished loop that was never spawned writes nothing', async ($, on) => {
   const { writes } = engine(on, {})
 
