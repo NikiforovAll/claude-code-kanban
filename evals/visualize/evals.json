@@ -1,0 +1,68 @@
+{
+  "skill_name": "visualize",
+  "evals": [
+    {
+      "id": 1,
+      "name": "morning-drink-pick",
+      "prompt": "/visualize Tea, coffee or an energy drink for a morning routine: compare them on caffeine, cost, crash and taste, and pick one.",
+      "expected_output": "A lead that names the pick, a lineup or matrix of the three options, the pick in the accent. A control only on a value the reader brings (servings, half-life); estimated prices stay static.",
+      "files": [],
+      "exhibit": "either",
+      "pick": true
+    },
+    {
+      "id": 2,
+      "name": "letter-journey-overview",
+      "prompt": "/visualize How a letter gets from a mailbox to someone's door, step by step.",
+      "expected_output": "No options: a flow diagram as the main exhibit, the main path in the accent, claim headings. A stepper is allowed for states one after another.",
+      "files": [],
+      "exhibit": "either",
+      "svg": true
+    },
+    {
+      "id": 3,
+      "name": "car-value-trend",
+      "prompt": "/visualize How a typical family car loses value over its first 10 years (invent plausible numbers, mark them as invented), and when the drop slows down.",
+      "expected_output": "Static: every input is invented, so no control. A trend chart of 10 years in series colors, the point where the drop slows as the main path, numbers marked as invented.",
+      "files": [],
+      "exhibit": "static",
+      "svg": true,
+      "invented": true
+    },
+    {
+      "id": 4,
+      "name": "retention-doc",
+      "prompt": "/visualize {cck}/docs/retention.md",
+      "expected_output": "How each cck store is bounded: every section and number of the doc placed or reported as left out, file names as sources. A control only on a setting the doc names (cleanupPeriodDays).",
+      "files": ["{cck}/docs/retention.md"],
+      "exhibit": "either",
+      "facts": ["1,?000\\b", "\\b500\\b", "\\b200\\b", "2 days", "30 min", "\\b50\\b", "2,?000\\b", "8 ?MB", "5 min", "cleanupPeriodDays", "one.hour|1.hour|1 h\\b"]
+    },
+    {
+      "id": 6,
+      "name": "slow-port-detection",
+      "prompt": "/visualize How the hub decides that an app's port is slow: {hub}/lib/port-health.js and the 'Slow ports' part of {hub}/CLAUDE.md. When is a port flagged, why does a busy app not count, and how long from the first slow probe to the badge?",
+      "expected_output": "Static exhibits for the rules (strike, busy app, 5 min window), plus a slider, toggle or stepper over the probe pattern; every number of port-health.js on the page.",
+      "files": ["{hub}/lib/port-health.js", "{hub}/CLAUDE.md"],
+      "exhibit": "interactive",
+      "facts": ["300 ?ms|0\\.3 ?s", "100 ?ms", "\\b3\\b|three", "5 ?min", "30 ?s", "4\\.5 ?s"]
+    },
+    {
+      "id": 7,
+      "name": "savings-growth",
+      "prompt": "/visualize How much a monthly saving of 200 grows over 30 years at different yearly interest rates, compounded monthly, and why starting 10 years earlier matters more than a higher rate.",
+      "expected_output": "A slider on the rate (or years, start age) that computes the chart again; the numbers in the text match the exhibit at its defaults; nothing runs while the reader does nothing.",
+      "files": [],
+      "exhibit": "interactive"
+    },
+    {
+      "id": 8,
+      "name": "token-bucket",
+      "prompt": "/visualize How a token bucket absorbs bursts: a bucket of 10 tokens, refilled at 2 a second, against requests that arrive in bursts of 15 every 5 seconds. Which requests get rejected, and what bucket size would let every burst through?",
+      "expected_output": "Controls for bucket size and refill rate. The default rejects 5 requests of each burst. No bucket size is enough at 2 a second: 5 s refills only 10 tokens, so a bucket of 15 passes the first burst and then rejects 5 each time; every burst passes only with a refill of at least 3 a second and a bucket of at least 15.",
+      "files": [],
+      "exhibit": "interactive",
+      "facts": ["\\b15\\b", "\\b10\\b", "\\b5\\b", "\\b3\\b|three"]
+    }
+  ]
+}

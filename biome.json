@@ -37,6 +37,7 @@
       "cli.js",
       "install.js",
       "lib/**/*.js",
+      "evals/*/*.cjs",
       "!!**/.claude/worktrees"
     ]
   },

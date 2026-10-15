@@ -1,5 +1,6 @@
 node_modules/
 .DS_Store
 *.log
+evals/*/runs/
 # TODO: the DeepSWE eval (deepswe.mjs) is not ready to commit; remove this line when it is.
 extensions/swarm/plugin/plugins/swarm/e2e/
