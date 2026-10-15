@@ -266,16 +266,21 @@ describe('showCardKey', () => {
   });
 });
 
+const toggleShowFocus = () => {};
+const toggleTerminalFocus = () => {};
+const toggleMessagePanel = () => {};
+const toggleLastMessage = () => {};
+const shortcut = appFunction('terminalShortcut', {
+  toggleShowFocus,
+  toggleTerminalFocus,
+  toggleMessagePanel,
+  toggleLastMessage,
+  hubModDown: appFunction('hubModDown'),
+  zoomDelta: () => undefined,
+  matchKey: () => false,
+});
+
 describe('Ctrl+Alt+` focuses the show card', () => {
-  const toggleShowFocus = () => {};
-  const toggleTerminalFocus = () => {};
-  const shortcut = appFunction('terminalShortcut', {
-    toggleShowFocus,
-    toggleTerminalFocus,
-    hubModDown: appFunction('hubModDown'),
-    zoomDelta: () => undefined,
-    matchKey: () => false,
-  });
   const tick = (mods) => press('`', { code: 'Backquote', getModifierState: () => false, ...mods });
 
   it('maps Ctrl+Alt+` to the card and leaves Alt+` on the terminal toggle', () => {
@@ -285,6 +290,21 @@ describe('Ctrl+Alt+` focuses the show card', () => {
 
   it('leaves AltGr+` to the terminal', () => {
     assert.equal(shortcut(tick({ ctrlKey: true, altKey: true, getModifierState: (m) => m === 'AltGraph' })), null);
+  });
+});
+
+describe('Ctrl+Shift+L and Ctrl+Shift+M from the terminal', () => {
+  const key = (code, mods) => press(code.at(-1), { code, getModifierState: () => false, ...mods });
+
+  it('maps them to the session log and the last message', () => {
+    assert.equal(shortcut(key('KeyL', { ctrlKey: true, shiftKey: true })), toggleMessagePanel);
+    assert.equal(shortcut(key('KeyM', { ctrlKey: true, shiftKey: true })), toggleLastMessage);
+  });
+
+  it('leaves Shift+L, Shift+M and Ctrl+L to the terminal', () => {
+    assert.equal(shortcut(key('KeyL', { shiftKey: true })), null);
+    assert.equal(shortcut(key('KeyM', { shiftKey: true })), null);
+    assert.equal(shortcut(key('KeyL', { ctrlKey: true })), null);
   });
 });
 

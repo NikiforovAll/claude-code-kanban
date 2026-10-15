@@ -6433,8 +6433,8 @@ const SHORTCUT_TABS = [
           { keys: ['>'], label: 'Toggle sticky' },
           { keys: ['Shift', 'F10'], combo: true, label: 'Session menu: move to group, fork (or Menu key)' },
           { keys: ['Ctrl', 'D'], combo: true, label: 'Dismiss session (pinned: to Pinned group)' },
-          { keys: ['Shift', 'L'], combo: true, label: 'Toggle session log' },
-          { keys: ['Shift', 'M'], combo: true, label: 'Open last message' },
+          { keys: ['Ctrl', 'Shift', 'L'], combo: true, label: 'Toggle session log' },
+          { keys: ['Ctrl', 'Shift', 'M'], combo: true, label: 'Open last message' },
           { keys: ['↑', '↓'], label: 'Previous / next message in detail' },
           { keys: ['Ctrl', 'Enter'], combo: true, label: 'Allow / approve the waiting prompt; send review comments' },
         ],
@@ -7548,6 +7548,18 @@ function shiftOnly(e, code) {
   return e.code === code && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey;
 }
 
+function toggleLastMessage() {
+  if (document.getElementById('msg-detail-modal').classList.contains('visible')) {
+    closeMsgDetailModal();
+  } else if (isWaitingFresh()) {
+    msgDetailFollowLatest = true;
+    showWaitingDetail();
+  } else if (currentMessages.length) {
+    msgDetailFollowLatest = true;
+    showMsgDetail(currentMessages.length - 1);
+  }
+}
+
 function dismissSessionFromList(sid) {
   const prevIdx = selectedSessionIdx;
   if (!setSessionDismissed(sid, true)) return;
@@ -7843,16 +7855,7 @@ document.addEventListener('keydown', (e) => {
   }
   if (shiftOnly(e, 'KeyM')) {
     e.preventDefault();
-    const msgDetailModal = document.getElementById('msg-detail-modal');
-    if (msgDetailModal.classList.contains('visible')) {
-      closeMsgDetailModal();
-    } else if (isWaitingFresh()) {
-      msgDetailFollowLatest = true;
-      showWaitingDetail();
-    } else if (currentMessages.length) {
-      msgDetailFollowLatest = true;
-      showMsgDetail(currentMessages.length - 1);
-    }
+    toggleLastMessage();
     return;
   }
   if (shiftOnly(e, 'KeyS')) {
@@ -14780,6 +14783,8 @@ function terminalShortcut(e, probe = false) {
   // Ctrl+Shift+Z is redo in a text field, so only the terminal's own textarea gives it up.
   if (ctrlShift && e.code === 'KeyZ') return inPageField(e) ? null : toggleZenMode;
   if (ctrlShift && e.code === 'KeyK') return kanbotAvailable() ? () => toggleKanbot() : null;
+  if (ctrlShift && e.code === 'KeyL') return toggleMessagePanel;
+  if (ctrlShift && e.code === 'KeyM') return toggleLastMessage;
   if (ctrlShift && e.code === 'KeyD') return dismissContextSession;
   if (ctrlAlt && (e.code === 'KeyN' || e.code === 'KeyR') && terminalAvailable()) {
     return () => openNewSession(null, e.code === 'KeyR');
