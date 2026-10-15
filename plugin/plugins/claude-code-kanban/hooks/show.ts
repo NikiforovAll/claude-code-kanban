@@ -4,7 +4,7 @@ import { cckRoot } from './context'
 export const TOOL = 'mcp__claude-code-kanban__show'
 export const SKILL_LINE = /^\s*-\s*claude-code-kanban:show(?=:|\s*$)/
 
-type ShowInput = { title: string; key?: string; kind?: 'markdown' | 'html'; file?: string }
+type ShowInput = { title: string; key?: string; kind?: 'markdown' | 'html'; file?: string; base?: string }
 type Shown = { title: string; key?: string | null; index: number; count: number; path?: string | null }
 
 export function boardPort(cckUrl: string) {
@@ -67,8 +67,8 @@ async function post($: EngineInterface, input: ShowInput) {
   if (!t) return { deny: 'The overlay needs a Claude Code session started in the cck terminal.' }
   const token = await terminalToken($, t.url)
   if (!token) return { deny: `No terminal token for the cck server at ${t.url}. It must run with the terminal enabled.` }
-  const { title, key, kind, file } = input
-  const body = JSON.stringify({ sessionId: await $.session.id(), title, key, kind, file })
+  const { title, key, kind, file, base } = input
+  const body = JSON.stringify({ sessionId: await $.session.id(), title, key, kind, file, base })
   let res: Awaited<ReturnType<EngineInterface['http']['fetch']>>
   try {
     res = await $.http.fetch(`${t.url}/api/terminals/${encodeURIComponent(t.terminalId)}/show`, {
@@ -103,6 +103,11 @@ export const register: Register = on => {
             },
             file: { type: 'string', description: 'Absolute path of an existing markdown, HTML, image or text file' },
             key: { type: 'string', description: 'Card name: the same key replaces the card in place and keeps its file' },
+            base: {
+              type: 'string',
+              description:
+                "Absolute path of the folder that the card's path:line links resolve against, usually the repo root. Always pass it with a call stack. Without it, links resolve against the session cwd, which is wrong for a worktree or another repo",
+            },
           },
           required: ['title'],
         },

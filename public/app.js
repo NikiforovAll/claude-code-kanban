@@ -16114,16 +16114,20 @@ function forgetEndedTerminals() {
   if (!runningTerminals.has(showState.lookup)) showState.lookup = null;
 }
 
-function setShowView(tid, view) {
+// `post` is the id of the card on screen; a view without one keeps the saved id, so an empty list
+// while a terminal's posts load does not forget it.
+function setShowView(tid, view, post) {
   const set = SHOW_VIEW_FLAGS.filter((f) => view[f]);
   const old = showViews[tid];
-  if (old && SHOW_VIEW_FLAGS.every((f) => !!old[f] === set.includes(f))) return;
+  const shown = post ?? old?.post;
+  if (old && old.post === shown && SHOW_VIEW_FLAGS.every((f) => !!old[f] === set.includes(f))) return;
   showViews[tid] = Object.fromEntries(set.map((f) => [f, true]));
+  if (shown) showViews[tid].post = shown;
   store.writeJson(SHOW_VIEW_KEY, showViews);
 }
 
 function saveShowView() {
-  if (showState.terminalId) setShowView(showState.terminalId, showState);
+  if (showState.terminalId) setShowView(showState.terminalId, showState, showState.posts[showState.idx]?.id);
 }
 
 function resetShowPosts() {
@@ -16146,18 +16150,18 @@ function syncShowCard() {
   for (const f of SHOW_VIEW_FLAGS) showState[f] = !!view[f];
   resetShowPosts();
   renderShow();
-  if (tid) loadShowPosts(tid, { newest: true }).then((ok) => ok && renderShow());
+  if (tid) loadShowPosts(tid, { shownId: view.post }).then((ok) => ok && renderShow());
 }
 
-async function loadShowPosts(tid, { newest = false } = {}) {
+// Opens `shownId` (by default the card on screen) when the list still holds it, else the newest.
+async function loadShowPosts(tid, { shownId = showState.posts[showState.idx]?.id } = {}) {
   const seq = ++showState.listSeq;
   const data = await getJson(apiPath`/api/terminals/${tid}/show`, null, { cache: 'no-store' });
   if (seq !== showState.listSeq || tid !== showState.terminalId) return false;
-  const shownId = showState.posts[showState.idx]?.id;
   showState.sessionId = data?.sessionId ?? null;
   showState.posts = Array.isArray(data?.posts) ? data.posts : [];
   const at = showState.posts.findIndex((p) => p.id === shownId);
-  showState.idx = newest || at < 0 ? Math.max(0, showState.posts.length - 1) : at;
+  showState.idx = at < 0 ? Math.max(0, showState.posts.length - 1) : at;
   return true;
 }
 
@@ -16230,10 +16234,11 @@ function showTicksHtml() {
 }
 
 function renderShow({ flash = false } = {}) {
+  const n = showState.posts.length;
+  if (n) showState.idx = Math.min(Math.max(0, showState.idx), n - 1);
   saveShowView();
   const card = showCardEl();
   const chip = document.getElementById('show-reopen');
-  const n = showState.posts.length;
   const open = n > 0 && !showState.closed;
   chip.hidden = !n || open;
   chip.querySelector('.show-reopen-n').textContent = `show · ${n}`;
@@ -16247,7 +16252,6 @@ function renderShow({ flash = false } = {}) {
     card.replaceChildren();
     return;
   }
-  showState.idx = Math.min(Math.max(0, showState.idx), n - 1);
   const p = showState.posts[showState.idx];
   showState.marked.delete(p.id);
   card.classList.toggle('expanded', showState.expanded && !showState.collapsed);
@@ -17279,8 +17283,9 @@ function onCallstackLoc(e) {
   e.preventDefault();
   e.stopPropagation();
   if (e.shiftKey) window.getSelection().collapseToEnd();
-  const sid = el.closest('#show-card') ? showState.sessionId : currentSessionId;
-  const base = (sid && getSessionBaseDir(sid)) || undefined;
+  const onCard = !!el.closest('#show-card');
+  const sid = onCard ? showState.sessionId : currentSessionId;
+  const base = (onCard && showState.posts[showState.idx]?.base) || (sid && getSessionBaseDir(sid)) || undefined;
   if (e.shiftKey || !sid || el.closest('.modal-overlay')) openPreviewAtLine(loc, base);
   else openPaneAtLine(sid, loc, base);
 }

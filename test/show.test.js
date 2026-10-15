@@ -194,12 +194,24 @@ describe('show routes', () => {
       { sessionId: A, title: 't', kind: 'svg' },
       { sessionId: A, title: 't', key: 7 },
       { sessionId: A, title: 't', file: 'relative.md' },
+      { sessionId: A, title: 't', base: 'relative/repo' },
+      { sessionId: A, title: 't', base: path.join(root, 'no-such-repo') },
     ];
     for (const body of bad) {
       const r = await api.call('POST', showUrl(), body);
       assert.equal(r.status, 400, JSON.stringify(body));
       assert.equal(typeof r.body.error, 'string');
     }
+  });
+
+  it('keeps the base of a post in the list, so its links resolve against it', async () => {
+    const r = await api.call('POST', showUrl(), { sessionId: A, title: 'Stack', key: 'stack', base: root });
+    assert.equal(r.status, 200);
+    const list = await api.call('GET', showUrl());
+    assert.equal(list.body.posts.find((p) => p.id === r.body.id).base, root);
+    await api.call('POST', showUrl(), { sessionId: A, title: 'Stack', key: 'stack' });
+    const again = await api.call('GET', showUrl());
+    assert.equal(again.body.posts.find((p) => p.id === r.body.id).base, null);
   });
 
   it('refuses inline content and names the claim form', async () => {

@@ -35,11 +35,13 @@ board     GET the list and the post, render the card
 
 `kind` is `markdown` (default) or `html`, and sets the extension of the post's file. `key` names a card: a post with a key that exists replaces that card in place, keeps its id and file, and the board marks it updated. A claim with a new `kind` under the same key renames the file to the new extension.
 
+`base` is an absolute path to an existing folder, kept on the post's index entry. A call stack's `path:line` links on the card resolve against it, else against the session's cwd. A worktree or a second repo needs it, because the session's cwd is a different checkout. A post without `base` under the same key drops the old one.
+
 ## Storage
 
 Each session's posts are in `<session scratchpad>/.cck/show/`:
 
-- `index.json`: `{sessionId, posts: [{id, title, key, kind, file, updatedAt}]}`
+- `index.json`: `{sessionId, posts: [{id, title, key, kind, file, base, updatedAt}]}`
 - `<post id>.md` or `<post id>.html`: the file of a claim post
 
 The scratchpad is under the OS temp dir, so the folder goes with it and cck does not sweep it (`docs/retention.md`). `terminals.json` keeps the map of terminal id to its current session as `showSessions`, so the card comes back after a board restart. The map drops terminals that no longer exist. A session resumed from the board in a new terminal gets a new terminal id; a terminal with no entry takes the session it was started with when that session has posts (`startedSession`, from the host's terminal list), so its card comes back too. The board drops a PTY's terminal id when the PTY leaves the running list (`forgetEndedTerminals`), because a session resumed after its terminal ended runs under the same PTY id with a new terminal id.

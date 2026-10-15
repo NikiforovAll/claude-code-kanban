@@ -38,6 +38,67 @@ describe('showFitSize', () => {
   });
 });
 
+describe('the card on screen per terminal', () => {
+  const SHOW_VIEW_FLAGS = appConst('SHOW_VIEW_FLAGS');
+
+  function viewStore(saved = {}) {
+    const writes = [];
+    const showViews = structuredClone(saved);
+    const set = appFunction('setShowView', { SHOW_VIEW_FLAGS, SHOW_VIEW_KEY: 'k', showViews, store: { writeJson: (_k, v) => writes.push(structuredClone(v)) } });
+    return { set, showViews, writes };
+  }
+
+  it('saves the shown post with the flags', () => {
+    const v = viewStore();
+    v.set('t1', { collapsed: true }, 'p2');
+    assert.deepEqual({ ...v.showViews.t1 }, { collapsed: true, post: 'p2' });
+  });
+
+  it('keeps the saved post when the view has none, and writes nothing for no change', () => {
+    const v = viewStore({ t1: { collapsed: true, post: 'p2' } });
+    v.set('t1', { collapsed: true });
+    assert.equal(v.writes.length, 0);
+    v.set('t1', { closed: true });
+    assert.deepEqual({ ...v.showViews.t1 }, { closed: true, post: 'p2' });
+  });
+
+  it('writes when only the post changes', () => {
+    const v = viewStore({ t1: { collapsed: true, post: 'p2' } });
+    v.set('t1', { collapsed: true }, 'p3');
+    assert.deepEqual(v.writes, [{ t1: { collapsed: true, post: 'p3' } }]);
+  });
+
+  function loader(posts, state) {
+    const showState = { listSeq: 0, terminalId: 't1', posts: [], idx: 0, ...state };
+    const load = appFunction('loadShowPosts', {
+      showState,
+      apiPath: (s, ...v) => s.reduce((a, p, i) => a + p + (v[i] ?? ''), ''),
+      getJson: async () => ({ sessionId: 's1', posts }),
+    });
+    return { load, showState };
+  }
+
+  const posts = [{ id: 'p1' }, { id: 'p2' }, { id: 'p3' }];
+
+  it('opens the saved post when the list still holds it', async () => {
+    const l = loader(posts);
+    assert.equal(await l.load('t1', { shownId: 'p2' }), true);
+    assert.equal(l.showState.idx, 1);
+  });
+
+  it('opens the newest post when the saved one is gone', async () => {
+    const l = loader(posts);
+    await l.load('t1', { shownId: 'p9' });
+    assert.equal(l.showState.idx, 2);
+  });
+
+  it('keeps the card on screen on a reload of the same terminal', async () => {
+    const l = loader(posts, { posts: [{ id: 'p1' }], idx: 0 });
+    await l.load('t1');
+    assert.equal(l.showState.idx, 0);
+  });
+});
+
 describe('showClampSize', () => {
   const clamp = appFunction('showClampSize', {
     SHOW_INSET,

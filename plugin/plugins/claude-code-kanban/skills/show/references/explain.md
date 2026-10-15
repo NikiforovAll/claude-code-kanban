@@ -38,7 +38,9 @@ The board draws the tree lines, links, focus and folds from this notation:
 - The fence tag is `callstack`.
 - Caller on top. Indent each callee 2 spaces under its caller; the board turns the spaces into tree lines. Several roots are fine.
 - One frame per line: the function or method name as one identifier, spelled as in the code.
-- The note goes after 2 or more spaces: a `path:line` relative to the project root, which the board links, or a few words. Line the notes up in one column.
+- The note goes after 2 or more spaces: a `path:line` relative to the card's `base`, which the board links, or a few words. Line the notes up in one column.
+- Post every card with a call stack with `base`: the absolute path of the repo root that holds the files. Without it, links resolve against the session cwd, which is a different checkout when you work in a worktree or another repo.
+- Write the full relative path on each linked frame. A bare file name (`place.ts:40`) or a bare line (`:40`) never resolves.
 - A `*` after the name, with one space, marks the frame to look at. One per stack.
 - `+` or `-` in the first column marks a frame the change adds or removes. In a stack with any `+` or `-`, every other line starts with one space.
 

@@ -102,6 +102,13 @@ test('posts the body with the terminal token and answers with the position', asy
   ])
 })
 
+test('sends the base for the card links', async ($, on) => {
+  const board = engine(on, GATE, { status: 200, body: { id: 'p1', title: 'Stack', key: 'stack', index: 1, count: 1, path: 'C:/s/p1.md' } })
+  await $.session.start({ cwd: 'C:/proj', surface: 'terminal', isInteractive: true })
+  await $.tool.call(call({ title: 'Stack', key: 'stack', base: 'C:/proj-worktree' }))
+  expect(board.requests[0]?.body).toEqual({ sessionId: 'sid-1', title: 'Stack', key: 'stack', base: 'C:/proj-worktree' })
+})
+
 test('a claim sends no file and answers with the file to write', async ($, on) => {
   const path = 'C:/s/.cck/show/p1.md'
   const board = engine(on, GATE, { status: 200, body: { id: 'p1', title: 'Plan', key: 'plan', index: 1, count: 1, path } })
