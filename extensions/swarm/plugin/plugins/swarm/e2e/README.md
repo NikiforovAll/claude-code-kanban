@@ -26,3 +26,21 @@ Run them from a Claude Code session in cck's terminal, so the CLI reaches the bo
 3. **Stop.** `setup`, then `supervise --stop`. The toy swarm finishes in about 2 minutes, too fast to type `/swarm-stop` reliably, so the supervisor ends it as stopped at the first claim. Expect `stopped`, a recovery bundle, and no leftover worktrees.
 
 After each run, keep its report and note what broke.
+
+# DeepSWE eval
+
+`deepswe.mjs` runs a swarm, or a single session to compare against, on a DeepSWE v1.1 dynamodb-toolbox task (default `dynamodb-toolbox-conditional-attribute-requirements`; `dynamodb-toolbox-lazy-recursive-schemas` has the same base commit and is harder), and grades the result with the task's hidden tests, without Docker. It fetches the [DeepSWE](https://github.com/datacurve-ai/deep-swe) dataset (Apache-2.0) at a pinned commit, sparse to the tasks in use, and builds the task's repo the way its Dockerfile does: dynamodb-toolbox at the base commit with no later history. The task text is the dataset's `instruction.md` with its commit line replaced by how to run the repo's checks.
+
+Like the toy run, it runs on the real board, loads this checkout's plugin with `--plugin-dir` in the supervisor and the workers, and runs every session with `--permission-mode auto`. Each run records the plugin version and commit, and whether the plugin had uncommitted changes, so a result names the code it measured.
+
+Everything goes to `SWARM_DEEPSWE_ROOT`, else `kanban-swarm-deepswe` in the temp dir: `deep-swe/` (the dataset), `source/` (the base repo with `node_modules`, which the grader reuses) and `runs/<label>/` (one run's `repo/`, `setup.json` with its task id, `task.md`, `prompt.md`, `run.json`, `model.patch`, `grade/`, `grade.json`, `report.json` and `report.md`).
+
+| Command | Does |
+|---|---|
+| `node deepswe.mjs setup <label> [--task <id>]` | A fresh repo for the run at `runs/<label>/repo`, and its `task.md`. The first setup clones the dataset and the upstream repo. The source holds one base commit, so every task must share it |
+| `node deepswe.mjs supervise <label> [--arm swarm\|single] [--n 2] [--model sonnet] [--review] [--report-to <peer>]` | Dispatches the session. The swarm arm runs `/swarm:swarm` and starts without the user's review of the spec and tasks, unless `--review`; the single arm works alone. cck sends no report: with `--report-to`, the session sends that peer one line with `SendMessage` when it is done |
+| `node deepswe.mjs grade <label>` | Grades the repo's working tree, untracked files included, against the base: `grade.json` with the reward and the f2p and p2p counts |
+| `node deepswe.mjs report <label>` | Grades, then adds the swarm's outcome, start-to-end time, spec size, findings, publications, applies, lost claims, peer waits, and the tokens of every session |
+| `node deepswe.mjs list` | Every run's report in one table |
+
+Run book: `setup run5`, `supervise run5`, wait for the supervisor to end the swarm, then `report run5` and `list`. Run each arm 2 to 3 times before you compare them: one run has no measure of spread. With `--review`, the swarm's time includes the wait for your review.

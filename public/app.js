@@ -16021,7 +16021,7 @@ const showState = {
   path: null,
 };
 let showSize = store.readJson(SHOW_SIZE_KEY);
-// Terminal id → { closed?, collapsed?, expanded? }; no entry when no flag is set. Ids gone from the terminal list are pruned.
+// Terminal id → { closed?, collapsed?, expanded? }; a terminal with no entry yet starts collapsed. Ids gone from the terminal list are pruned.
 const showViews = store.readJson(SHOW_VIEW_KEY, {});
 // Older boards stored the string 'collapsed' or 'expanded'.
 for (const [tid, v] of Object.entries(showViews)) if (typeof v === 'string') showViews[tid] = { [v]: true };
@@ -16116,10 +16116,9 @@ function forgetEndedTerminals() {
 
 function setShowView(tid, view) {
   const set = SHOW_VIEW_FLAGS.filter((f) => view[f]);
-  const old = showViews[tid] || {};
-  if (SHOW_VIEW_FLAGS.every((f) => !!old[f] === set.includes(f))) return;
-  if (set.length) showViews[tid] = Object.fromEntries(set.map((f) => [f, true]));
-  else delete showViews[tid];
+  const old = showViews[tid];
+  if (old && SHOW_VIEW_FLAGS.every((f) => !!old[f] === set.includes(f))) return;
+  showViews[tid] = Object.fromEntries(set.map((f) => [f, true]));
   store.writeJson(SHOW_VIEW_KEY, showViews);
 }
 
@@ -16142,7 +16141,7 @@ function syncShowCard() {
   }
   const tid = pty ? (terminalIds.get(pty) ?? null) : null;
   if (tid === showState.terminalId) return;
-  const view = (tid && showViews[tid]) || {};
+  const view = (tid && showViews[tid]) || { collapsed: true };
   Object.assign(showState, { terminalId: tid, sessionId: null, idx: 0 });
   for (const f of SHOW_VIEW_FLAGS) showState[f] = !!view[f];
   resetShowPosts();
