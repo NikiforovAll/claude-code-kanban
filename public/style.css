@@ -2734,6 +2734,7 @@ code.ct .ct-loc {
   color: var(--accent-text);
   text-decoration: underline dotted;
   text-underline-offset: 3px;
+  cursor: pointer;
 }
 
 code.ct .ct-focus {
