@@ -1058,8 +1058,12 @@ body.booting .boot-splash {
   position: absolute;
   inset: -1px;
   border-left: 3px solid var(--accent);
-  border-radius: inherit;
   pointer-events: none;
+}
+
+.session-item.unread::before,
+.session-item.permission-pending::before {
+  border-radius: inherit;
 }
 
 .session-item.permission-pending::before,
@@ -9014,7 +9018,6 @@ select.form-input option:checked {
   align-items: baseline;
   gap: 8px;
   padding: 6px 8px;
-  border-radius: 4px;
   cursor: pointer;
   font-size: 12px;
 }
