@@ -86,6 +86,41 @@ describe('createWorktreeStore', () => {
     assert.equal(s.resolve(SIDE), null);
   });
 
+  it('walks up from a subfolder of a worktree beside its repo', () => {
+    const sub = path.join(SIDE, 'plugin', 'skills');
+    const { s, writes, flush } = store({ files: { [SIDE]: `gitdir: ${REPO}/.git/worktrees/feature` } });
+    assert.deepEqual(s.resolve(sub), { repo: REPO, name: 'feature' });
+    flush();
+    assert.deepEqual(Object.keys(writes[0].worktrees), [sub]);
+  });
+
+  it('walks up from a subfolder of a claude worktree once the checkout is gone', () => {
+    const { s } = store({ files: { [REPO]: fsError('EISDIR') } });
+    assert.deepEqual(s.resolve(path.join(CLAUDE_WT, 'plugin', 'skills')), { repo: REPO, name: 'squid' });
+  });
+
+  it('answers a subfolder from a saved worktree once the checkout is gone', () => {
+    const saved = { version: 1, worktrees: { [SIDE]: { repo: REPO, name: 'feature', at: 1 } } };
+    const { s } = store({ saved });
+    assert.deepEqual(s.resolve(path.join(SIDE, 'src')), { repo: REPO, name: 'feature' });
+  });
+
+  it('stops at the first .git on the way up', () => {
+    const inRepo = path.join(REPO, 'src');
+    const inSub = path.join(SIDE, 'vendor', 'lib');
+    const { s, reads } = store({
+      files: { [REPO]: fsError('EISDIR'), [path.join(SIDE, 'vendor')]: 'gitdir: ../.git/modules/vendor' },
+    });
+    assert.equal(s.resolve(inRepo), null);
+    assert.equal(s.resolve(inSub), null);
+    assert.deepEqual(reads, [inRepo, REPO, inSub, path.join(SIDE, 'vendor')]);
+  });
+
+  it('finds nothing in a folder outside any repo', () => {
+    const { s } = store();
+    assert.equal(s.resolve(path.join(SIDE, 'src')), null);
+  });
+
   it('answers a saved worktree without reading the disk', () => {
     const saved = { version: 1, worktrees: { [SIDE]: { repo: REPO, name: 'feature', at: 1 } } };
     const { s, reads } = store({ saved });

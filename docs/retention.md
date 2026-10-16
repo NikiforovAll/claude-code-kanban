@@ -43,7 +43,9 @@ A group the sweep empties is removed when no child group is left, and so is a pa
 `lib/worktrees.js` maps a project path to `{repo, name, at}` when the path is a linked worktree. The board folds a worktree into its repo in `/api/projects` and in the project filter. Claude Code deletes worktrees but keeps their transcripts, so the mapping must outlive the checkout:
 
 - A hit comes from the `.git` pointer file and is saved at once. A saved hit is answered without reading the disk.
-- When the `.git` file is gone, a path under `<repo>/.claude/worktrees/<name>` (where `claude -w` puts it) still resolves. This covers worktrees deleted before the board saw them.
+- A path in a subfolder of a worktree resolves too: the lookup walks up from the path the way git finds its repo, and stops at the first `.git`. A directory `.git` (an ordinary checkout) or a submodule pointer is a miss.
+- On the way up, a saved ancestor answers for its subfolders, so a subfolder of a gone worktree in any layout resolves when the board saw a session at that ancestor.
+- When the `.git` file is gone, a path under `<repo>/.claude/worktrees/<name>` (where `claude -w` puts it) still resolves, subfolders included. This covers worktrees deleted before the board saw them.
 - A miss stays in memory only.
 
 The sweep drops an entry when, after the one-hour grace period, no project dir under `projects/` with that path's encoded name holds a transcript. Claude Code deletes transcripts after `cleanupPeriodDays`, so this rule also applies that limit. When the scan finds no transcripts, nothing is dropped.
