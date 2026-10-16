@@ -8622,22 +8622,21 @@ const ZOOM_CLAIMS = ['ctrlKey', 'metaKey'].flatMap((mod) =>
   ),
 );
 
-// The sidebar and tab keys, so they work while a previewed page has focus. Matched by key where
-// the board matches by key, so they follow the keyboard layout. A page that handles one first
-// keeps it, and text fields keep every key.
+// The board keys a pane gets before the board's inPane return, so they work while a previewed page
+// has focus; a new key there needs a row here. Matched by key where the board matches by key, so
+// they follow the keyboard layout, and by code where it matches by code. A page that handles one
+// first keeps it, and text fields keep every key.
 const PANE_CLAIMS = [
-  ...['\\', '[', ']'].map((key) => ({ key, code: '' })),
-  ...['|', '{', '}'].map((key) => ({ shiftKey: true, key, code: '' })),
+  ...['\\', '[', ']', 'ContextMenu', 'Escape'].map((key) => ({ key, code: '' })),
+  ...['|', '{', '}', 'F10'].map((key) => ({ shiftKey: true, key, code: '' })),
   ...['BracketLeft', 'BracketRight', 'KeyW'].map((code) => ({ altKey: true, key: 'Unidentified', code })),
-  { shiftKey: true, key: 'F10', code: '' },
-  { key: 'ContextMenu', code: '' },
+  ...['KeyL', 'KeyM', 'KeyP', 'KeyS', 'KeyZ'].map((code) => ({ shiftKey: true, key: 'Unidentified', code })),
 ];
 
-// Ctrl+D, Alt+Enter and Esc act on the show card (showCardKey); other pages keep them. Alt+W is in PANE_CLAIMS.
+// Ctrl+D and Alt+Enter act on the show card (showCardKey); other pages keep them. Alt+W and Esc are in PANE_CLAIMS.
 const SHOW_CLAIMS = [
   ...['ctrlKey', 'metaKey'].map((mod) => ({ [mod]: true, key: 'd', code: '' })),
   { altKey: true, key: 'Enter', code: '' },
-  { key: 'Escape', code: '' },
 ];
 
 // Claimed only while comments wait, so a previewed page keeps Ctrl+Enter otherwise.

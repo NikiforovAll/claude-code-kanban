@@ -310,7 +310,7 @@ describe('Ctrl+Shift+L and Ctrl+Shift+M from the terminal', () => {
 
 describe('SHOW_CLAIMS', () => {
   it('claims Alt+Enter and Esc from the card frame, not Ctrl+Enter', () => {
-    const claims = appConst('SHOW_CLAIMS');
+    const claims = [...appConst('PANE_CLAIMS'), ...appConst('SHOW_CLAIMS')];
     assert.ok(claims.some((c) => c.altKey && c.key === 'Enter' && !c.ctrlKey));
     assert.ok(claims.some((c) => c.key === 'Escape' && !c.altKey && !c.ctrlKey));
     assert.ok(!claims.some((c) => c.ctrlKey && c.key === 'Enter'));
