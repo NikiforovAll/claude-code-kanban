@@ -8629,6 +8629,8 @@ const PANE_CLAIMS = [
   ...['\\', '[', ']'].map((key) => ({ key, code: '' })),
   ...['|', '{', '}'].map((key) => ({ shiftKey: true, key, code: '' })),
   ...['BracketLeft', 'BracketRight', 'KeyW'].map((code) => ({ altKey: true, key: 'Unidentified', code })),
+  { shiftKey: true, key: 'F10', code: '' },
+  { key: 'ContextMenu', code: '' },
 ];
 
 // Ctrl+D, Alt+Enter and Esc act on the show card (showCardKey); other pages keep them. Alt+W is in PANE_CLAIMS.
