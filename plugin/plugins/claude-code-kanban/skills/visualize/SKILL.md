@@ -17,7 +17,7 @@ The page is a document to read: its text and static exhibits are in the HTML, an
    1. `.kicker`, then `<title>` and `<h1>`: a name of 2 to 5 words. `.sub`: the question, in one line.
    2. `.lead`: the answer in 1 or 2 sentences, the pick in `<b>`.
    3. Sections. Each `<h2>` is a claim that can be false ("A breaker alone trips again on release", not "Breaker"), with one exhibit and at most 2 short paragraphs under it.
-   4. Close with what to do next and `.sources`.
+   4. Close with what to do next and `.sources`, one `li` per source. Each `[n]` in the text is an `a.cite` to its row.
 3. **Invent each exhibit.** Ask what form makes this claim obvious at a glance, then build that, the template's blocks or something new: a slope chart, an annotated timeline, small multiples, a cutaway, a ranked strip, a map. The Blocks table is a palette of ready parts, not a menu to choose from. Before you draw an SVG, read the matching guide in the `show` skill — [chart](../show/references/chart.md), [diagram](../show/references/diagram.md) and its type file, [mockup](../show/references/mockup.md) — for patterns: shapes, arrows and labels. Their sizes and directions are for cards; on a page, the Principles below set them. Label masks fill with `--color-bg-subtle`, the figure's background. When the source or the request has a value the reader would want to change, or states one after another, the exhibit can be interactive: a slider or toggle that computes the figure again, a stepper through states, or a model that runs over time. Use the simplest one that proves the claim, and follow [Interactive exhibits](#interactive-exhibits). Never add a control on an input you made up: a claim that rests on fixed facts gets a static exhibit.
 4. **Check.** Render the page in light and in dark, and look at each render, not the source. Done when no text is clipped, no arrow crosses a label, `scrollWidth` equals `clientWidth`, and, when the topic comes from a source such as a file or a conversation, every section and number of it is named where it landed on the page or reported to the user as left out. For an interactive exhibit, also: no console errors, and the numbers the text states are the ones the exhibit shows at its default settings.
 5. **Show.** When `$CCK_URL` is set, the session runs in the cck board: run `claude-code-kanban pane add <page> --title '<h1>'` and tell the user the page waits in that tab. Else give the user the page path.
@@ -62,6 +62,7 @@ Ready parts in the template's CSS; its body has one of each.
 | Callout | `div.callout` | A warning |
 | Steps | `ol.steps` | What to do next |
 | Tag, dot, legend | `span.tag`, `span.dot`, `.legend > span > i` | Labels and keys |
-| Sources | `div.sources` | Where each claim comes from |
+| Sources | `.sources > ol > li#src-n > code + span`, then `p` | Where each claim comes from: one source per `li`, numbered in order (CSS prints `[n]`), the path or `a` link, and in `span` what it backs; a closing line, such as how estimates are marked, goes in the `p` |
+| Citation | `a.cite[href="#src-n"]` holding `[n]` | An in-text marker that jumps to its source row |
 
 `data-tone` takes `accent`, `info`, `success`, `warning`, `danger` or `muted` on any block, legend keys included.
