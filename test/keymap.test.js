@@ -11,10 +11,11 @@ const MAC_KEYS = /^const MAC_KEYS = .*;$/m.exec(src)[0];
 
 // The hub's labels, as hub.keyLabel gives them after welcome. Empty: the hub has not answered.
 let hubLabels = {};
+let hubForward = [];
 // The page's own helpers, with the platform passed in the way the page's IS_MAC default does.
 const page = vm.runInNewContext(
   `${MAC_KEYS}\n${fn('hubModDown')}\n${fn('helpKeys')}\n${fn('buildHelpShortcuts')}\n${tabs}\n({ hubModDown, helpKeys, buildHelpShortcuts, SHORTCUT_TABS })`,
-  { IS_MAC: false, escapeHtml: String, hub: { keyLabel: (a) => hubLabels[[a].flat().join()] ?? null } },
+  { IS_MAC: false, escapeHtml: String, hub: { keyLabel: (a) => hubLabels[[a].flat().join()] ?? null, forwardCombos: () => hubForward } },
 );
 const { hubModDown, SHORTCUT_TABS } = page;
 // Arrays from the vm context have another prototype, so copy them for deepEqual.
@@ -63,6 +64,15 @@ describe('help dialog keys', () => {
     assert.deepEqual(helpKeys(row('Jump to memory'), MAC), ['⌃', 'M']);
     assert.deepEqual(helpKeys(row('Show / hide terminal'), MAC), ['⌃', '`']);
     assert.deepEqual(helpKeys(row('End terminal'), MAC), ['⌥', '⇧', '`']);
+  });
+
+  it('the tab number keys are Ctrl+Alt, and hidden when the hub binds them', () => {
+    const tab = row('Go to tab N (the board is 1)');
+    assert.deepEqual(helpKeys(tab, WIN), ['Ctrl', 'Alt', '1…9']);
+    assert.deepEqual(helpKeys(tab, MAC), ['⌃', '⌥', '1…9']);
+    hubForward = ['ctrl+alt+1'];
+    assert.deepEqual(helpKeys(tab, MAC), []);
+    hubForward = [];
   });
 
   it('every hub row is flagged, and none of the others', () => {

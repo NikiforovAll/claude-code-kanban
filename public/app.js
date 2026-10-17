@@ -6391,6 +6391,7 @@ const SHORTCUT_TABS = [
         title: 'Tabs',
         rows: [
           { keys: ['[', ']'], label: 'Previous / next tab (a split counts as one)' },
+          { keys: ['Ctrl', 'Alt', '1…9'], combo: true, yields: 'ctrl+alt+1', label: 'Go to tab N (the board is 1)' },
           { keys: ['Alt', '[ / ]'], combo: true, label: 'Change the tab in the focused side of a split' },
           { keys: ['|'], label: 'Split with the tab before it / unsplit (or drag a tab onto a side)' },
           { keys: ['{', '}'], label: 'Focus left / right side of a split' },
@@ -6542,6 +6543,8 @@ function termKbd() {
 function helpKeys(row, mac = IS_MAC, keyLabel = hub.keyLabel) {
   const live = row.action && keyLabel(row.action);
   if (live) return live;
+  // `yields`: the row's key gives way when the hub binds that combo.
+  if (row.yields && hub.forwardCombos().includes(row.yields)) return [];
   if (!mac) return row.keys;
   if (row.hubMod) return ['⌃', '⌥', ...row.keys.filter((k) => k !== 'Ctrl' && k !== 'Alt')];
   return row.keys.map((k) => MAC_KEYS[k] || k);
@@ -7825,6 +7828,12 @@ document.addEventListener('keydown', (e) => {
     }
     return;
   }
+  // The hub binds Ctrl+Alt+digit on macOS for its app keys.
+  if (hubModDown(e) && /^Digit[1-9]$/.test(e.code) && !hub.forwards(e) && selectPaneByNumber(Number(e.code.slice(5)))) {
+    e.preventDefault();
+    focusActivePane();
+    return;
+  }
   if (altOnly && e.code === 'KeyW' && closeFocusedPane()) {
     e.preventDefault();
     return;
@@ -8631,6 +8640,7 @@ const PANE_CLAIMS = [
   ...['|', '{', '}', 'F10'].map((key) => ({ shiftKey: true, key, code: '' })),
   ...['BracketLeft', 'BracketRight', 'KeyW'].map((code) => ({ altKey: true, key: 'Unidentified', code })),
   ...['KeyL', 'KeyM', 'KeyP', 'KeyS', 'KeyZ'].map((code) => ({ shiftKey: true, key: 'Unidentified', code })),
+  ...'123456789'.split('').map((n) => ({ ctrlKey: true, altKey: true, key: 'Unidentified', code: `Digit${n}` })),
 ];
 
 // Ctrl+D and Alt+Enter act on the show card (showCardKey); other pages keep them. Alt+W and Esc are in PANE_CLAIMS.
@@ -13901,14 +13911,25 @@ function cyclePane(step) {
   return true;
 }
 
+function selectStripItem({ ids, pair }) {
+  selectPane(pair ? pair[pair.f || 'l'] : ids[0]);
+}
+
+function selectPaneByNumber(n) {
+  const sid = paneSessionId();
+  if (!sid || wantsTerminal()) return false;
+  const item = paneStripItems(sid)[n - 1];
+  if (item) selectStripItem(item);
+  return true;
+}
+
 function cyclePaneStrip(step) {
   const sid = paneSessionId();
   if (!sid || wantsTerminal()) return false;
   const active = getActivePaneId(sid);
   const items = paneStripItems(sid);
   const i = items.findIndex((it) => it.ids.includes(active));
-  const { ids, pair } = items[(i + step + items.length) % items.length];
-  selectPane(pair ? pair[pair.f || 'l'] : ids[0]);
+  selectStripItem(items[(i + step + items.length) % items.length]);
   return true;
 }
 

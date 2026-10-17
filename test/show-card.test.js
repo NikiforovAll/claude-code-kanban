@@ -317,6 +317,16 @@ describe('SHOW_CLAIMS', () => {
   });
 });
 
+describe('PANE_CLAIMS', () => {
+  it('claims Ctrl+Alt+1 to 9 by code, so an HTML pane hands the tab keys back', () => {
+    const digits = appConst('PANE_CLAIMS').filter((c) => c.ctrlKey && c.altKey && /^Digit/.test(c.code));
+    assert.deepEqual(
+      [...digits.map((c) => c.code)],
+      [1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => `Digit${n}`),
+    );
+  });
+});
+
 // The gates of the dataviz skill's validate_palette.js, run against every cck theme's surface.
 describe('show chart palette', () => {
   const palette = appConst('SHOW_PALETTE');
