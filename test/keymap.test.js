@@ -67,7 +67,7 @@ describe('help dialog keys', () => {
   });
 
   it('the tab number keys are Ctrl+Alt, and hidden when the hub binds them', () => {
-    const tab = row('Go to tab N (the board is 1)');
+    const tab = row('Go to tab or group N (the board is 1)');
     assert.deepEqual(helpKeys(tab, WIN), ['Ctrl', 'Alt', '1…9']);
     assert.deepEqual(helpKeys(tab, MAC), ['⌃', '⌥', '1…9']);
     hubForward = ['ctrl+alt+1'];

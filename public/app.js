@@ -6391,7 +6391,12 @@ const SHORTCUT_TABS = [
         title: 'Tabs',
         rows: [
           { keys: ['[', ']'], label: 'Previous / next tab (a split counts as one)' },
-          { keys: ['Ctrl', 'Alt', '1…9'], combo: true, yields: 'ctrl+alt+1', label: 'Go to tab N (the board is 1)' },
+          {
+            keys: ['Ctrl', 'Alt', '1…9'],
+            combo: true,
+            yields: 'ctrl+alt+1',
+            label: 'Go to tab or group N (the board is 1)',
+          },
           { keys: ['Alt', '[ / ]'], combo: true, label: 'Change the tab in the focused side of a split' },
           { keys: ['|'], label: 'Split with the tab before it / unsplit (or drag a tab onto a side)' },
           { keys: ['{', '}'], label: 'Focus left / right side of a split' },
@@ -13247,6 +13252,7 @@ function setActivePaneId(sid, id) {
   if (getActivePaneId(sid) === id) return;
   paneActive = savePaneState(PANE_ACTIVE_KEY, paneActive, sid, id === 'board' ? null : id);
   notePairFocus(sid, id);
+  noteGroupFocus(sid, id);
 }
 
 // {[sessionId]: [{l, r, f}]}; sides are pane ids or 'board', `f` the side focused
@@ -13307,17 +13313,74 @@ function neighborPair(sid, id, pairs) {
   return i > 0 ? { l: free[i - 1], r: id } : { l: id, r: free[1] };
 }
 
-// The strip in order, as {ids, pair}: a lone tab, or a pair at the place of its first tab.
-function paneStripItems(sid) {
+// {[sessionId]: [{id, name, color, ids, closed, last}]}; `ids` are pane ids, `last` the one shown
+// last. Like pairs, groups live in this browser tab only. A group shows at the place of its first
+// tab, so grouping leaves the server's order alone; a drag saves the order on screen.
+const PANE_GROUPS_KEY = 'pane-groups';
+const PANE_GROUP_COLORS = ['blue', 'purple', 'teal', 'orange', 'yellow', 'pink', 'green', 'red'];
+let paneGroups = loadPaneState(PANE_GROUPS_KEY);
+
+// Tabs that are gone, or in an earlier group, drop out, and so do groups left empty.
+function getPaneGroups(sid) {
+  if (!paneGroups[sid]) return [];
+  const live = new Set(paneLayout(sid).panes.map((p) => p.id));
+  const taken = new Set();
+  const groups = [];
+  for (const g of paneGroups[sid]) {
+    const ids = g.ids.filter((id) => live.has(id) && !taken.has(id));
+    for (const id of ids) taken.add(id);
+    const color = PANE_GROUP_COLORS.includes(g.color) ? g.color : PANE_GROUP_COLORS[0];
+    if (ids.length) groups.push({ id: g.id, name: g.name || '', color, ids, closed: !!g.closed, last: g.last });
+  }
+  return groups;
+}
+
+function setPaneGroups(sid, groups) {
+  paneGroups = savePaneState(PANE_GROUPS_KEY, paneGroups, sid, groups.length ? groups : null);
+}
+
+// A pair is in the group of either side, and the board is in none.
+function groupOfTabs(groups, ids) {
+  return ids.includes('board') ? null : groups.find((g) => ids.some((t) => g.ids.includes(t))) || null;
+}
+
+function noteGroupFocus(sid, id) {
+  const pair = pairOf(sid, id);
+  const group = groupOfTabs(getPaneGroups(sid), pair ? [pair.l, pair.r] : [id]);
+  if (group && (group.closed || group.last !== id)) updatePaneGroup(sid, group.id, { closed: false, last: id });
+}
+
+// The strip as the number keys count it, {group, items}: a group is one stop, open or collapsed.
+// An item is {ids, pair, group}: a lone tab, or a pair at the place of its first tab. A group's
+// items follow its first one.
+function paneStripStops(sid) {
   const pairs = getPanePairs(sid);
-  const items = [];
+  const groups = getPaneGroups(sid);
+  const stops = [];
+  const groupStops = new Map();
+  const seen = new Set();
   for (const id of paneTabIds(sid)) {
     const pair = pairs.find((p) => splitSideOf(p, id)) || null;
-    if (!pair) items.push({ ids: [id], pair });
-    else if (!items.some((it) => it.pair === pair)) items.push({ ids: [pair.l, pair.r], pair });
+    if (pair && seen.has(pair)) continue;
+    if (pair) seen.add(pair);
+    const ids = pair ? [pair.l, pair.r] : [id];
+    const group = groupOfTabs(groups, ids);
+    const item = { ids, pair, group };
+    const stop = group && groupStops.get(group);
+    if (stop) stop.items.push(item);
+    else {
+      stops.push({ group, items: [item] });
+      if (group) groupStops.set(group, stops.at(-1));
+    }
   }
-  return items;
+  return stops;
 }
+
+const paneStripItems = (sid) => paneStripStops(sid).flatMap((s) => s.items);
+
+// The items a click or a key can reach: a collapsed group hides its tabs.
+const isOpenItem = (it) => !it.group?.closed;
+const openStripItems = (sid) => paneStripItems(sid).filter(isOpenItem);
 
 function unpairPanes(sid, pair, keep) {
   setPanePairs(sid, withoutTabs(getPanePairs(sid), pair.l));
@@ -13512,7 +13575,7 @@ function paneMenuLabel(pane, label) {
 
 function renderPaneTabs(sid, layout, split) {
   // A rebuild mid-drag removes the dragged tab, and then no dragend fires. Mid-rename it drops the input.
-  if (paneDragId || paneRenameId) return;
+  if (paneDragId || stripRename) return;
   const active = getActivePaneId(sid);
   const state = (id) => (active === id ? ' on' : split && splitSideOf(split, id) ? ' shown' : '');
   const tab = (id, cls, inner, tip) =>
@@ -13541,9 +13604,17 @@ function renderPaneTabs(sid, layout, split) {
     pair
       ? `<div class="pane-pair${pair === split ? ' on' : ''}">${ids.map(tabHtml).join('<span class="pane-pair-sep"></span>')}</div>`
       : tabHtml(ids[0]);
-  const [pinned, ...rest] = paneStripItems(sid).map(itemHtml);
-  const pin = pinned + (rest.length ? '<span class="pane-sep"></span>' : '');
-  const html = rest.join('');
+  const groupHtml = (g, items) => {
+    const n = items.flatMap((it) => it.ids).length;
+    const tip = g.closed ? `Expand group (${n} tabs)` : 'Collapse group';
+    const label =
+      (g.name ? `<span>${escapeHtml(g.name)}</span>` : '') +
+      (g.closed ? `<span class="pane-group-count">${n}</span>` : '');
+    return `<div class="pane-group${g.closed ? ' closed' : ''}" style="${paneGroupStyle(g.color)}"><button class="pane-group-chip" data-group="${escapeHtml(g.id)}" title="${escapeHtml(tip)}">${label}</button>${g.closed ? '' : items.map(itemHtml).join('')}</div>`;
+  };
+  const [first, ...rest] = paneStripStops(sid);
+  const pin = itemHtml(first.items[0]) + (rest.length ? '<span class="pane-sep"></span>' : '');
+  const html = rest.map(({ group, items }) => (group ? groupHtml(group, items) : itemHtml(items[0]))).join('');
   // syncPanes runs on every task refresh and search keystroke; skip the rebuild and the reflows.
   if (pin + html === paneTabsHtml) return;
   paneTabsHtml = pin + html;
@@ -13918,8 +13989,8 @@ function selectStripItem({ ids, pair }) {
 function selectPaneByNumber(n) {
   const sid = paneSessionId();
   if (!sid || wantsTerminal()) return false;
-  const item = paneStripItems(sid)[n - 1];
-  if (item) selectStripItem(item);
+  const stop = paneStripStops(sid)[n - 1];
+  if (stop) selectStripItem(stop.items.find((it) => it.ids.includes(stop.group?.last)) || stop.items[0]);
   return true;
 }
 
@@ -13927,10 +13998,72 @@ function cyclePaneStrip(step) {
   const sid = paneSessionId();
   if (!sid || wantsTerminal()) return false;
   const active = getActivePaneId(sid);
-  const items = paneStripItems(sid);
+  const items = openStripItems(sid);
   const i = items.findIndex((it) => it.ids.includes(active));
   selectStripItem(items[(i + step + items.length) % items.length]);
   return true;
+}
+
+function updatePaneGroup(sid, groupId, change) {
+  const groups = getPaneGroups(sid);
+  const group = groups.find((g) => g.id === groupId);
+  if (!group) return;
+  Object.assign(group, change);
+  setPaneGroups(sid, groups);
+}
+
+// `to` is a group id, 'new', or null to take the tab out of its group. A split moves as one.
+function groupPaneTab(id, to) {
+  const sid = paneSessionId();
+  const item = sid && paneStripItems(sid).find((it) => it.ids.includes(id));
+  if (!item || item.ids.includes('board')) return;
+  const groups = getPaneGroups(sid);
+  for (const g of groups) g.ids = g.ids.filter((t) => !item.ids.includes(t));
+  let target = groups.find((g) => g.id === to);
+  if (to === 'new') {
+    const used = new Set(groups.filter((g) => g.ids.length).map((g) => g.color));
+    const color =
+      PANE_GROUP_COLORS.find((c) => !used.has(c)) || PANE_GROUP_COLORS[groups.length % PANE_GROUP_COLORS.length];
+    target = { id: `g${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, name: '', color, ids: [] };
+    groups.push(target);
+  }
+  if (target) Object.assign(target, { ids: [...target.ids, ...item.ids], closed: false });
+  setPaneGroups(sid, groups);
+  syncPanes();
+  if (to === 'new') beginPaneGroupRename(target.id);
+}
+
+// A collapsed group cannot hold the tab on screen, so collapsing it moves to the next open item.
+function togglePaneGroup(groupId) {
+  const sid = paneSessionId();
+  const group = sid && getPaneGroups(sid).find((g) => g.id === groupId);
+  if (!group) return;
+  const closing = !group.closed;
+  updatePaneGroup(sid, groupId, { closed: closing });
+  const items = paneStripItems(sid);
+  const i = items.findIndex((it) => it.ids.includes(getActivePaneId(sid)));
+  if (!closing || items[i]?.group?.id !== groupId) {
+    syncPanes();
+    return;
+  }
+  selectStripItem(items.slice(i).find(isOpenItem) || items.slice(0, i).findLast(isOpenItem));
+}
+
+function ungroupPanes(groupId) {
+  const sid = paneSessionId();
+  if (!sid) return;
+  setPaneGroups(
+    sid,
+    getPaneGroups(sid).filter((g) => g.id !== groupId),
+  );
+  syncPanes();
+}
+
+function colorPaneGroup(groupId, color) {
+  const sid = paneSessionId();
+  if (!sid) return;
+  updatePaneGroup(sid, groupId, { color });
+  syncPanes();
 }
 
 function isMenuKey(e) {
@@ -14078,44 +14211,105 @@ async function deleteBoardTasks(onlyCompleted) {
   await refreshCurrentView();
 }
 
-let paneRenameId = null;
+// The save function of the tab or group name being edited.
+let stripRename = null;
+
+function beginStripRename(el, { className, value, label, maxLength, save }) {
+  stripRename = save;
+  const input = document.createElement('input');
+  input.className = `strip-rename ${className}`;
+  input.value = value;
+  if (maxLength) input.maxLength = maxLength;
+  input.setAttribute('aria-label', label);
+  el.replaceWith(input);
+  input.focus();
+  input.select();
+}
+
+async function endStripRename(input, save) {
+  const onSave = stripRename;
+  if (!onSave) return;
+  stripRename = null;
+  paneTabsHtml = '';
+  if (save) await onSave(input.value.trim());
+  syncPanes();
+}
 
 function beginPaneRename(id) {
   const pane = paneById(id);
   const tab = paneStrip.querySelector(`.pane-tab[data-pane="${CSS.escape(id)}"]`);
   const title = tab?.querySelector('.pane-title');
   if (!pane || !title) return;
-  paneRenameId = id;
   tab.draggable = false;
-  const input = document.createElement('input');
-  input.className = 'pane-title-input';
-  input.value = pane.title;
-  input.setAttribute('aria-label', 'Pane title');
-  title.replaceWith(input);
-  input.focus();
-  input.select();
+  beginStripRename(title, {
+    className: 'pane-title-input',
+    value: pane.title,
+    label: 'Pane title',
+    save: async (text) => {
+      const sid = paneSessionId();
+      if (!sid || !paneById(id) || text === paneById(id).title) return;
+      const res = await paneRequest('PATCH', apiPath`/api/panes/${sid}/${id}`, { title: text });
+      if (res.error) showToast(res.error, 'error');
+      else applyPaneLayout(sid, res.layout);
+    },
+  });
 }
 
-async function endPaneRename(input, save) {
-  const id = paneRenameId;
-  if (!id) return;
-  paneRenameId = null;
-  paneTabsHtml = '';
+const PANE_GROUP_NAME_MAX = 40;
+
+function beginPaneGroupRename(groupId) {
   const sid = paneSessionId();
-  const pane = paneById(id);
-  const title = input.value.trim();
-  if (save && sid && pane && title !== pane.title) {
-    const res = await paneRequest('PATCH', apiPath`/api/panes/${sid}/${id}`, {
-      title,
-    });
-    if (res.error) showToast(res.error, 'error');
-    else applyPaneLayout(sid, res.layout);
-  }
-  syncPanes();
+  const group = sid && getPaneGroups(sid).find((g) => g.id === groupId);
+  const chip = paneStrip.querySelector(`[data-group="${CSS.escape(groupId)}"]`);
+  if (!group || !chip) return;
+  beginStripRename(chip, {
+    className: 'pane-group-input',
+    value: group.name,
+    label: 'Group name',
+    maxLength: PANE_GROUP_NAME_MAX,
+    save: (name) => updatePaneGroup(sid, groupId, { name: name.slice(0, PANE_GROUP_NAME_MAX) }),
+  });
 }
 
-const paneMenuItem = (act, label) =>
-  `<button class="pane-menu-item" role="menuitem" data-pane-act="${escapeHtml(act)}">${label}</button>`;
+const paneMenuItem = (act, label, arg) =>
+  `<button class="pane-menu-item" role="menuitem" data-pane-act="${escapeHtml(act)}"${arg == null ? '' : ` data-arg="${escapeHtml(arg)}"`}>${label}</button>`;
+const paneGroupStyle = (color) => escapeHtml(`--g: var(--owner-${color})`);
+const paneGroupDot = (g) => `<span class="pane-menu-dot" style="${paneGroupStyle(g.color)}"></span>`;
+
+function paneGroupMenuItems(id) {
+  const sid = paneSessionId();
+  const item = paneStripItems(sid).find((it) => it.ids.includes(id));
+  if (!item || item.ids.includes('board')) return '';
+  const others = getPaneGroups(sid).filter((g) => g.id !== item.group?.id);
+  return (
+    paneMenuItem('group', 'Add to new group', 'new') +
+    others
+      .map((g) => paneMenuItem('group', `Add to ${paneGroupDot(g)}${escapeHtml(g.name || 'unnamed group')}`, g.id))
+      .join('') +
+    (item.group ? paneMenuItem('group', 'Remove from group', '') : '')
+  );
+}
+
+function openPaneGroupMenu(x, y, groupId) {
+  const sid = paneSessionId();
+  const group = sid && getPaneGroups(sid).find((g) => g.id === groupId);
+  if (!group) return;
+  const swatches = PANE_GROUP_COLORS.map(
+    (c) =>
+      `<button class="pane-menu-item pane-menu-swatch${c === group.color ? ' on' : ''}" role="menuitemradio" aria-checked="${escapeHtml(String(c === group.color))}" aria-label="${escapeHtml(c)}" title="${escapeHtml(c)}" data-pane-act="groupColor" data-arg="${escapeHtml(c)}" style="${paneGroupStyle(c)}"></button>`,
+  ).join('');
+  showPaneMenu(
+    x,
+    y,
+    group.id,
+    'Group actions',
+    `<div class="pane-menu-label">${escapeHtml(group.name || 'Unnamed group')}</div>` +
+      paneMenuItem('groupRename', 'Rename') +
+      paneMenuItem('groupToggle', group.closed ? 'Expand' : 'Collapse') +
+      `<div class="pane-menu-swatches">${swatches}</div>` +
+      paneMenuItem('ungroup', 'Ungroup'),
+  );
+}
 
 function openPaneMenu(x, y, id) {
   if (id === 'board') {
@@ -14148,6 +14342,7 @@ function openPaneMenu(x, y, id) {
         : paneMenuItem('link', paneIsLinked(pane) ? 'Remove from linked documents' : 'Add to linked documents')) +
       paneMenuItem('rename', 'Rename') +
       paneMenuItem('reload', 'Reload') +
+      paneGroupMenuItems(pane.id) +
       paneMenuItem('close', 'Close pane'),
   );
   return true;
@@ -14190,6 +14385,11 @@ const PANE_MENU_ACTIONS = {
   rename: beginPaneRename,
   reload: reloadPane,
   close: closePane,
+  group: (id, to) => groupPaneTab(id, to || null),
+  groupRename: beginPaneGroupRename,
+  groupToggle: togglePaneGroup,
+  groupColor: colorPaneGroup,
+  ungroup: ungroupPanes,
   deleteCompleted: () => deleteBoardTasks(true),
   deleteAll: () => deleteBoardTasks(false),
 };
@@ -14379,18 +14579,23 @@ function closePanePop() {
 }
 
 paneStrip.addEventListener('keydown', (e) => {
-  const input = e.target.closest?.('.pane-title-input');
+  const input = e.target.closest?.('.strip-rename');
   if (input && (e.key === 'Enter' || e.key === 'Escape')) {
     e.preventDefault();
-    endPaneRename(input, e.key === 'Enter');
+    endStripRename(input, e.key === 'Enter');
   }
 });
 paneStrip.addEventListener('focusout', (e) => {
-  const input = e.target.closest?.('.pane-title-input');
-  if (input) endPaneRename(input, true);
+  const input = e.target.closest?.('.strip-rename');
+  if (input) endStripRename(input, true);
 });
 paneStrip.addEventListener('click', (e) => {
-  if (e.target.closest('.pane-title-input')) return;
+  if (e.target.closest('.strip-rename')) return;
+  const chip = e.target.closest('[data-group]');
+  if (chip) {
+    togglePaneGroup(chip.dataset.group);
+    return;
+  }
   const close = e.target.closest('[data-close]');
   if (close) {
     closePane(close.dataset.close);
@@ -14406,16 +14611,19 @@ paneStrip.addEventListener('auxclick', (e) => {
   if (e.button === 1 && tab && tab.dataset.pane !== 'board') closePane(tab.dataset.pane);
 });
 paneStrip.addEventListener('contextmenu', (e) => {
+  const chip = e.target.closest('[data-group]');
   const tab = e.target.closest('.pane-tab');
-  if (!tab) return;
+  if (!chip && !tab) return;
   e.preventDefault();
-  openPaneMenu(e.clientX, e.clientY, tab.dataset.pane);
+  if (chip) openPaneGroupMenu(e.clientX, e.clientY, chip.dataset.group);
+  else openPaneMenu(e.clientX, e.clientY, tab.dataset.pane);
 });
 document.addEventListener('click', (e) => {
   const menu = document.getElementById('pane-menu');
   if (!menu) return;
-  const act = e.target.closest('.pane-menu-item')?.dataset.paneAct;
-  if (act) PANE_MENU_ACTIONS[act](menu.dataset.pane);
+  const item = e.target.closest('.pane-menu-item');
+  const act = item?.dataset.paneAct;
+  if (act) PANE_MENU_ACTIONS[act](menu.dataset.pane, item.dataset.arg);
   if (act) closePaneMenu();
   else if (!menu.contains(e.target)) closePaneMenu(true);
 });
@@ -14491,15 +14699,18 @@ paneStrip.addEventListener('dragstart', (e) => {
 });
 
 // A split shows as one strip item, so a drop moves the dragged tab's whole item; the first item
-// holds the board and stays put. Elsewhere on the strip, a split tab's drop ends its split.
+// holds the board and stays put. A moved item joins the group it lands in, and a drop on a
+// group's chip adds it to that group. Elsewhere on the strip, a split tab's drop ends its split.
 function paneDropAction(e) {
   const sid = paneSessionId();
   const tab = e.target.closest?.('.pane-tab');
+  const chip = e.target.closest?.('[data-group]');
   if (!sid || !paneDragId) return null;
-  if (tab) {
+  if (chip || tab) {
     const [fixed, ...movable] = paneStripItems(sid);
     const itemOf = (id) => movable.find((it) => it.ids.includes(id));
     const from = itemOf(paneDragId);
+    if (chip) return from ? { kind: 'group', sid, el: chip, group: chip.dataset.group } : null;
     const to = itemOf(tab.dataset.pane);
     if (from && to && from !== to) {
       const el = to.pair ? tab.closest('.pane-pair') : tab;
@@ -14513,9 +14724,11 @@ function paneDropAction(e) {
 
 function markPaneDrop(action) {
   paneStrip.classList.toggle('drop-hot', action?.kind === 'unpair');
-  for (const el of paneStrip.querySelectorAll('.pane-tab, .pane-pair')) {
-    el.classList.toggle('drop-before', el === action?.el && !action.after);
-    el.classList.toggle('drop-after', el === action?.el && action.after);
+  for (const el of paneStrip.querySelectorAll('.pane-tab, .pane-pair, .pane-group-chip')) {
+    const on = el === action?.el;
+    el.classList.toggle('drop-in', on && action.kind === 'group');
+    el.classList.toggle('drop-before', on && action.kind === 'move' && !action.after);
+    el.classList.toggle('drop-after', on && action.kind === 'move' && action.after);
   }
 }
 
@@ -14542,11 +14755,15 @@ paneStrip.addEventListener('drop', (e) => {
   if (!action) return;
   e.preventDefault();
   const { sid, pair } = action;
+  const id = paneDragId;
   const shown = pair && !!splitSideOf(pair, getActivePaneId(sid));
-  const keep = shown ? pair[otherSide(splitSideOf(pair, paneDragId))] : null;
+  const keep = shown ? pair[otherSide(splitSideOf(pair, id))] : null;
   endPaneDrag();
-  if (action.kind === 'move') movePaneItem(action);
-  else unpairPanes(sid, pair, keep);
+  if (action.kind === 'group') groupPaneTab(id, action.group);
+  else if (action.kind === 'move') {
+    if (action.from.group?.id !== action.to.group?.id) groupPaneTab(id, action.to.group?.id ?? null);
+    movePaneItem(action);
+  } else unpairPanes(sid, pair, keep);
 });
 paneDrop.addEventListener('dragover', (e) => {
   if (!paneDragId) return;

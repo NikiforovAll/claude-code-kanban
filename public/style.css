@@ -4489,6 +4489,75 @@ body.show-resizing iframe {
   background: var(--border);
 }
 
+.pane-group {
+  position: relative;
+  display: flex;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* Over the tabs, so a tab's own background does not hide it. */
+.pane-group:not(.closed)::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 1px;
+  z-index: 1;
+  height: 2px;
+  background: var(--g);
+  pointer-events: none;
+}
+
+.pane-group-chip,
+.pane-group-input {
+  flex: none;
+  align-self: center;
+  height: 18px;
+  margin: 0 2px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
+.pane-group-chip {
+  min-width: 14px;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: var(--g);
+  color: var(--bg-deep);
+  cursor: pointer;
+}
+
+.pane-group-chip:hover {
+  filter: brightness(1.12);
+}
+
+.pane-group-count {
+  font-weight: 400;
+  opacity: 0.75;
+}
+
+.pane-group-count:not(:first-child) {
+  margin-left: 6px;
+}
+
+.pane-group-chip.drop-in {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.pane-group-input {
+  width: 110px;
+  color: var(--text-primary);
+  background: var(--bg-deep);
+  box-shadow: inset 0 0 0 1px var(--g);
+  outline: none;
+}
+
 .pane-strip.drop-hot {
   background: var(--accent-dim);
 }
@@ -10440,5 +10509,33 @@ pre.mermaid[data-mermaid-error]::before {
   flex: none;
   color: var(--text-primary);
   font-weight: 600;
+}
+.pane-menu-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--g);
+}
+.pane-menu-swatches {
+  display: flex;
+  gap: 4px;
+  padding: 4px 8px;
+}
+.pane-menu-item.pane-menu-swatch {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--g);
+}
+.pane-menu-item.pane-menu-swatch:hover,
+.pane-menu-item.pane-menu-swatch:focus-visible,
+.pane-menu-swatch.on {
+  background: var(--g);
+  box-shadow:
+    0 0 0 2px var(--bg-elevated),
+    0 0 0 3px var(--text-primary);
 }
 /* #endregion */

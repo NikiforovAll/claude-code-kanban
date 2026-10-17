@@ -20,7 +20,7 @@ Claude adds panes with `pane add <url|file>`. The board does not switch to the n
 
 ## Work with tabs
 
-- Press <kbd>[</kbd> or <kbd>]</kbd> to go to the previous or next tab.
+- Press <kbd>[</kbd> or <kbd>]</kbd> to go to the previous or next tab, or <kbd>Ctrl+Alt+1</kbd> to <kbd>Ctrl+Alt+9</kbd> to go to tab 1 to 9. The board is tab 1, and a [tab group](#tab-groups) counts as one tab.
 - Drag a tab onto another tab to move it. A line on that tab shows the side it lands on. The new order is stored with the panes, so every browser shows it.
 - To close a pane, click × on its tab, middle-click the tab, or press <kbd>Alt+W</kbd>.
 - Right-click a tab, or press <kbd>Shift+F10</kbd> or the <kbd>Menu</kbd> key for the tab that has focus, to copy its URL or path, open it in a new browser tab, rename it, reload it or close it. To rename, type the new title and press <kbd>Enter</kbd>, or press <kbd>Esc</kbd> to cancel. An empty title gives the pane its default title back. A file opens in the Preview dialog instead of a browser tab. The buttons at the right of the strip reload or open the pane on screen.
@@ -55,6 +55,20 @@ Show two tabs side by side, for example the board next to a report Claude is wri
 You can keep several splits. Click a tab outside a split to show it alone. The split comes back when you go to one of its tabs. Splits last until you close the browser tab, and the divider position is the same for all of them.
 
 With the board in a split, the session log opens inside the board's side, and the agent log starts collapsed. A narrow board side packs its three columns tighter. Below about 476 px, it scrolls sideways.
+
+## Tab groups
+
+Put related tabs under a colored label, and collapse the group to make room in the strip.
+
+- Right-click a tab and click **Add to new group**, then type a name and press <kbd>Enter</kbd>. To add a tab to a group, right-click it and pick the group, or drag the tab onto the group's label.
+- Click the label to collapse or expand the group. A collapsed group shows its name and its tab count.
+- Right-click the label to rename the group, change its color or ungroup its tabs.
+- Drag a tab next to a tab in a group to add it there, or next to a tab outside a group to take it out.
+- <kbd>Ctrl+Alt+1</kbd> to <kbd>Ctrl+Alt+9</kbd> count a group as one tab, open or collapsed. The key shows the group's last used tab and expands the group.
+- <kbd>[</kbd> and <kbd>]</kbd> go through the tabs of an open group and skip a collapsed one. Collapsing the group of the tab on screen shows the next tab.
+- A split is in the group of its tabs.
+
+Like splits, groups last until you close the browser tab.
 
 ## Comment on a file pane
 
