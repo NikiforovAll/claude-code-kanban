@@ -1,0 +1,68 @@
+<!-- Markup of each ready part; the CSS is in template.html. Copy a part only when the content has its shape. -->
+
+<!-- Kicker and sub -->
+<p class="kicker">Ticket or context · kind of page</p>
+<p class="sub">The question this page answers.</p>
+
+<!-- Lineup: a page that compares options; data-tone="accent" on the pick -->
+<div class="lineup">
+  <div data-tone="accent"><b>1</b><span>Option A</span><small>the pick</small></div>
+  <div><b>2</b><span>Option B</span><small>too static</small></div>
+</div>
+
+<!-- Stat tiles: a few headline numbers -->
+<div class="kpis">
+  <div class="kpi"><span>Errors in 7 days</span><b>133.5K</b><small>26% of minutes <a class="cite" href="#src-1">[1]</a></small></div>
+  <div class="kpi" data-tone="danger"><span>Peak after release</span><b>30,000</b><small>RU per minute, estimate</small></div>
+</div>
+
+<!-- Section with a label -->
+<section>
+  <p class="eyebrow">Overview</p>
+  <h2>A heading is a claim that can be false</h2>
+</section>
+
+<!-- Cards: trade-offs of options -->
+<div class="cards">
+  <div class="card" data-tone="accent">
+    <h3><span class="dot" data-tone="accent">1</span>Option A<span class="tag" data-tone="accent">pick</span></h3>
+    <p class="verdict">The verdict, in one line.</p>
+    <p>What it is. <a class="cite" href="#src-2">[2]</a></p>
+    <pre>on 429: wait, then retry</pre>
+    <ul><li class="pro">A strong point.</li><li class="con">A weak point.</li></ul>
+  </div>
+</div>
+
+<!-- Table and heatmap cells -->
+<div class="table"><table>
+  <thead><tr><th>Option</th><th>Global</th><th>Lines</th></tr></thead>
+  <tbody>
+    <tr data-tone="accent"><td><span class="dot" data-tone="accent">1</span>Option A</td><td class="c yes">yes</td><td class="num">1,229</td></tr>
+    <tr><td><span class="dot">2</span>Option B</td><td class="c part">partial</td><td class="num">640</td></tr>
+    <tr><td><span class="dot">3</span>Option C</td><td class="c no">no</td><td class="num">300</td></tr>
+  </tbody>
+</table></div>
+
+<!-- Points: findings, each led by its claim -->
+<ul class="points">
+  <li><b>A point leads with its claim.</b> The support.</li>
+  <li><b>Points sit side by side.</b> They wrap to one column on a phone.</li>
+</ul>
+
+<!-- Callout -->
+<div class="callout" data-tone="warning"><p>A warning.</p></div>
+
+<!-- Steps: what to do next -->
+<ol class="steps"><li>First action.</li><li>Second action.</li></ol>
+
+<!-- Legend -->
+<div class="legend"><span><i data-tone="accent"></i>Pick</span><span><i></i>Other</span></div>
+
+<!-- Sources with a closing line -->
+<div class="sources">
+  <ol>
+    <li id="src-1"><code>logs/errors-7d.csv</code><span>error count and share of minutes</span></li>
+    <li id="src-2"><a href="https://example.com">Title of the page</a><span>the retry on 429</span></li>
+  </ol>
+  <p>Estimates are marked as estimates.</p>
+</div>

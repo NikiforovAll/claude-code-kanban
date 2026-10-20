@@ -11,7 +11,7 @@ if (!iteration) {
 const root = path.join(RUNS, `iteration-${iteration}`);
 const skill = path.join(root, 'skill');
 fs.mkdirSync(skill, { recursive: true });
-for (const f of ['SKILL.md', 'template.html']) fs.copyFileSync(path.join(SKILL, f), path.join(skill, f));
+for (const f of fs.readdirSync(SKILL)) fs.copyFileSync(path.join(SKILL, f), path.join(skill, f));
 
 const runs = [];
 for (const e of loadEvals().filter((x) => !ids.length || ids.includes(String(x.id)))) {
@@ -30,7 +30,7 @@ for (const e of loadEvals().filter((x) => !ids.length || ids.includes(String(x.i
     eval: `${e.id}-${e.name}`,
     run: slash(run),
     prompt: [
-      `Use the skill at ${slash(skill)}/SKILL.md. Read it first and follow it as if the user typed the request below. Its template.html is in the same folder. The \`show\` guides it links to are in ${slash(path.join(SKILL, '../show/references'))}/.`,
+      `Use the skill at ${slash(skill)}/SKILL.md. Read it first and follow it as if the user typed the request below. Its template.html and blocks.html are in the same folder. The \`show\` guides it links to are in ${slash(path.join(SKILL, '../show/references'))}/.`,
       '',
       `Request: ${fill(e.prompt)}`,
       '',

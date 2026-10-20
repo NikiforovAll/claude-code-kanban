@@ -16,8 +16,9 @@ def find_viewer():
 
 VIEWER = find_viewer()
 
-# The review is about the look of each page, so the viewer shows the prompt, the screenshots and the feedback box only.
-HIDE = "<style>#grades-section,#prev-outputs-section,#view-tabs,#panel-benchmark{display:none!important}</style>"
+# The review is about the look of each page, so the viewer shows the prompt, the screenshots, the previous
+# iteration's screenshots (with --previous-workspace) and the feedback box only.
+HIDE = "<style>#grades-section,#view-tabs,#panel-benchmark{display:none!important}</style>"
 
 # generate_review.py embeds run data with json.dumps inside a <script>; a page that contains
 # </script> ends that script early. Escaping "</" keeps the JSON valid and the script intact.

@@ -158,75 +158,21 @@ a.cite:hover { text-decoration: underline; }
 </head>
 <body>
 <main>
-<p class="kicker">Ticket or context · kind of page</p>
 <h1>Page Title</h1>
-<p class="sub">The question this page answers.</p>
-<p class="lead">The answer in one or two sentences, with <b>the pick</b> named, so a reader who stops here has it.</p>
-
-<div class="lineup">
-  <div data-tone="accent"><b>1</b><span>Option A</span><small>the pick</small></div>
-  <div><b>2</b><span>Option B</span><small>too static</small></div>
-  <div><b>3</b><span>Option C</span><small>separate project</small></div>
-</div>
-
-<div class="kpis">
-  <div class="kpi"><span>Errors in 7 days</span><b>133.5K</b><small>26% of minutes <a class="cite" href="#src-1">[1]</a></small></div>
-  <div class="kpi" data-tone="danger"><span>Peak after release</span><b>30,000</b><small>RU per minute, estimate</small></div>
-</div>
+<p class="lead">The answer, with <b>the main finding</b> named.</p>
 
 <section>
-  <p class="eyebrow">Overview</p>
-  <h2>Each heading is a claim that can be true or false</h2>
+  <h2>A heading is a claim that can be false</h2>
   <figure class="wide">
-    <svg viewBox="0 0 900 200" role="img" aria-labelledby="f1-t"><title id="f1-t">What the diagram shows</title></svg>
-    <figcaption>One sentence: what to notice.</figcaption>
+    <svg viewBox="0 0 900 200" role="img" aria-labelledby="f1-t"><title id="f1-t">What the figure shows</title></svg>
+    <figcaption>What to notice.</figcaption>
   </figure>
-</section>
-
-<section>
-  <p class="eyebrow">Options</p>
-  <h2>Cards lead with the verdict</h2>
-  <div class="cards">
-    <div class="card" data-tone="accent">
-      <h3><span class="dot" data-tone="accent">1</span>Option A<span class="tag" data-tone="accent">pick</span></h3>
-      <p class="verdict">The verdict, in one line.</p>
-      <p>What it is, in one sentence. <a class="cite" href="#src-2">[2]</a></p>
-      <pre>on 429: wait, then retry</pre>
-      <ul><li class="pro">A strong point.</li><li class="con">A weak point.</li></ul>
-    </div>
-  </div>
-</section>
-
-<section>
-  <p class="eyebrow">Compare</p>
-  <h2>A table holds the matrix</h2>
-  <div class="table"><table>
-    <thead><tr><th>Option</th><th>Global</th><th>Lines</th></tr></thead>
-    <tbody>
-      <tr data-tone="accent"><td><span class="dot" data-tone="accent">1</span>Option A</td><td class="c yes">yes</td><td class="num">1,229</td></tr>
-      <tr><td><span class="dot">2</span>Option B</td><td class="c part">partial</td><td class="num">640</td></tr>
-      <tr><td><span class="dot">3</span>Option C</td><td class="c no">no</td><td class="num">300</td></tr>
-    </tbody>
-  </table></div>
-  <ul class="points">
-    <li><b>A point leads with its claim.</b> One or two sentences of support.</li>
-    <li><b>Points sit side by side.</b> They wrap to one column on a phone.</li>
-  </ul>
-</section>
-
-<section>
-  <p class="eyebrow">Next</p>
-  <h2>Steps say what to do next</h2>
-  <ol class="steps"><li>First action.</li><li>Second action.</li></ol>
 </section>
 
 <div class="sources">
   <ol>
-    <li id="src-1"><code>logs/errors-7d.csv</code><span>error count and share of minutes</span></li>
-    <li id="src-2"><code>services/api/src/middleware/rate-limit/retry-after-handler.ts:42</code><span>the retry on 429</span></li>
-    <li id="src-3"><a href="https://example.com">Title of the page</a><span>line counts in the table</span></li>
+    <li id="src-1"><code>path/to/file.ts:42</code><span>what it backs</span></li>
   </ol>
-  <p>Estimates are marked as estimates.</p>
 </div>
 </main>
 </body>
