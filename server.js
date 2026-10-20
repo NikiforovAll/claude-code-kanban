@@ -3801,7 +3801,7 @@ async function confirmKind(absPath, kind) {
 }
 
 // Whole files are pushed into a modal, so anything huge freezes the tab regardless of kind.
-const PREVIEW_MAX_BYTES = 8 * 1024 * 1024;
+const PREVIEW_MAX_BYTES = 16 * 1024 * 1024;
 // Source in a modal is for reading, not for scrolling a generated bundle.
 const PREVIEW_TEXT_MAX_BYTES = 2 * 1024 * 1024;
 
