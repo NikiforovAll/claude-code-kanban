@@ -7623,6 +7623,10 @@ body.light .msg-assistant .msg-text {
   overflow-y: auto;
 }
 
+.modal.msg-detail-dialog:focus {
+  outline: none;
+}
+
 /* Before .modal.fullscreen on purpose: at equal specificity the later
    fullscreen rule must win, same as for every other per-modal size. */
 .modal.msg-detail-dialog {

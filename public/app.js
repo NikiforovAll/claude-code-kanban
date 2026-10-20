@@ -7565,23 +7565,19 @@ function shiftOnly(e, code) {
   return e.code === code && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey;
 }
 
-// The terminal frame keeps focus when the modal opens from it, so the modal's arrow keys would go to xterm.
+// xterm runs in another process, so blur() in the board leaves it focused and the modal's arrow keys go
+// to it. Focusing a board element takes the focus.
 function toggleLastMessage() {
   if (document.getElementById('msg-detail-modal').classList.contains('visible')) {
     closeMsgDetailModal();
     return;
   }
-  const fromTerminal = terminalPaneFocused();
-  if (isWaitingFresh()) {
-    msgDetailFollowLatest = true;
-    showWaitingDetail();
-  } else if (currentMessages.length) {
-    msgDetailFollowLatest = true;
-    showMsgDetail(currentMessages.length - 1);
-  } else return;
-  if (!fromTerminal) return;
-  msgDetailFromTerminal = true;
-  document.activeElement.blur();
+  if (!isWaitingFresh() && !currentMessages.length) return;
+  msgDetailFromTerminal = terminalPaneFocused();
+  msgDetailFollowLatest = true;
+  if (isWaitingFresh()) showWaitingDetail();
+  else showMsgDetail(currentMessages.length - 1);
+  if (msgDetailFromTerminal) document.querySelector('#msg-detail-modal .msg-detail-dialog').focus();
 }
 
 function dismissSessionFromList(sid) {
