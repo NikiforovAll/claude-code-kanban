@@ -2604,9 +2604,18 @@ function replyLocateHint(timestamp, sid) {
   return `If that reply is not in your context, it is in ${transcript}, the assistant entry with timestamp ${timestamp}.`;
 }
 
+let msgDetailFromTerminal = false;
+
 function closeMsgDetailModal() {
   unmountMsgReview();
   hideModalOverlay('msg-detail-modal');
+  // A task later, so a modal opened right after this one (View Agent) keeps the focus.
+  if (msgDetailFromTerminal) {
+    setTimeout(() => {
+      if (!isAnyModalOpen() && wantsTerminal()) focusTerminalPane();
+    });
+  }
+  msgDetailFromTerminal = false;
   msgDetailFollowLatest = false;
   waitingDetailAutoOpened = false;
   // Drop the message highlight on close, mirroring task-card behavior.
@@ -7556,16 +7565,23 @@ function shiftOnly(e, code) {
   return e.code === code && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey;
 }
 
+// The terminal frame keeps focus when the modal opens from it, so the modal's arrow keys would go to xterm.
 function toggleLastMessage() {
   if (document.getElementById('msg-detail-modal').classList.contains('visible')) {
     closeMsgDetailModal();
-  } else if (isWaitingFresh()) {
+    return;
+  }
+  const fromTerminal = terminalPaneFocused();
+  if (isWaitingFresh()) {
     msgDetailFollowLatest = true;
     showWaitingDetail();
   } else if (currentMessages.length) {
     msgDetailFollowLatest = true;
     showMsgDetail(currentMessages.length - 1);
-  }
+  } else return;
+  if (!fromTerminal) return;
+  msgDetailFromTerminal = true;
+  document.activeElement.blur();
 }
 
 function dismissSessionFromList(sid) {
