@@ -3918,7 +3918,7 @@ function renderSessions() {
   const renderSessionCard = (session) => {
     if (session.placeholder) return renderPlaceholderCard(session, childDepth.get(session.id));
     const total = session.taskCount;
-    const percent = total > 0 ? Math.round((session.completed / total) * 100) : 0;
+    const pct = (n) => Math.round((n / total) * 100);
     const isActive = session.id === currentSessionId && viewMode === 'session';
     const isLive = isSessionLive(session);
     const sessionName = sessionDisplayName(session);
@@ -3951,7 +3951,7 @@ function renderSessions() {
     const sid = escAttrJs(session.id);
     const progressHtml =
       total > 0
-        ? `<div class="session-progress" title="${escapeHtml(session.completed)} of ${total} tasks done"><div class="progress-bar"><div class="progress-fill" style="width: ${percent}%"></div></div><span class="progress-text">${session.completed}/${total}</span></div>`
+        ? `<div class="session-progress" title="${escapeHtml(`${session.pending} pending, ${session.inProgress} in progress, ${session.completed} completed`)}"><div class="progress-bar"><div class="progress-fill done" style="width: ${pct(session.completed)}%"></div>${session.inProgress > 0 ? `<div class="progress-fill wip" style="width: ${pct(session.inProgress)}%"></div>` : ''}</div><span class="progress-text">${session.completed + session.inProgress}/${total}</span></div>`
         : '';
     const metricsHtml = progressHtml + (showCtx ? renderContextBar(session) : '');
     return `

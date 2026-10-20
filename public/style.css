@@ -1204,7 +1204,6 @@ body.booting .boot-splash {
 
 /* The live-workflow bar takes the muted fill too: its card already carries a pulsing
    accent dot, and a second accent bar under it shouts. */
-.session-item:not(.active) .progress-fill,
 .wf-live-bar .progress-fill {
   background: color-mix(in srgb, var(--text-tertiary) 55%, transparent);
 }
@@ -1214,6 +1213,14 @@ body.booting .boot-splash {
   font-weight: 500;
   color: var(--text-tertiary);
   font-variant-numeric: tabular-nums;
+}
+
+.session-progress .progress-bar {
+  display: flex;
+}
+
+.progress-fill.done {
+  background: var(--success);
 }
 
 .context-bar-labels {
