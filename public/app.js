@@ -10178,6 +10178,12 @@ function setupEventSource() {
         handleSessionOpenEvent(data);
       }
 
+      // Alone, the page would open a tab without a user gesture, which the browser blocks; the
+      // CLI prints the link instead.
+      if (data.type === 'session:cost' && hub.inHub) {
+        openCost(data.id, data.agent);
+      }
+
       if (data.type === 'session:pin') {
         handleSessionPinEvent(data);
       }
@@ -12968,7 +12974,9 @@ function openFolderInEditor(folder, file) {
   postAndToast('/api/open-folder', body, 'folder');
 }
 
-function openCost(sessionId) {
+function openCost(sessionId, agentId) {
+  if (sessionId && agentId && hub.can('agent.cost'))
+    return hub.invoke('agent.cost', { session: sessionId, agent: agentId });
   hub.invoke('session.cost', sessionId ? { session: sessionId } : {});
 }
 

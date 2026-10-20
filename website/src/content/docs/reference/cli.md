@@ -282,6 +282,14 @@ claude-code-kanban session agents <id> [--json]
 
 Lists the subagents of the session with the columns `AGENT`, `STATUS`, `AGE`, `TYPE` and `DESCRIPTION`, and prints `Waiting for the user.` when the session waits for an answer. It needs the cck hooks in the config dir (`--install`). `--json` prints `{agents, waitingForUser}`.
 
+### session cost
+
+```bash
+claude-code-kanban session cost <id> [--agent <agent id>]
+```
+
+Sends the session, or one of its subagents (`agent-…`), to the board. Under the hub, the board opens it in the Cost tab. It also prints the Cost view URL when cck knows the cost server. It returns 1 when no board page under the hub is open and there is no URL.
+
 ## group list
 
 ```bash

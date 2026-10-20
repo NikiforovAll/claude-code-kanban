@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { kanbotOn, kanbotModel, createKanbot, KANBOT_AGENT, KANBOT_PLUGIN_DIR } = require('../lib/kanbot');
+const { kanbotOn, kanbotModel, createKanbot, findCostCli, readCostServer, KANBOT_AGENT, KANBOT_PLUGIN_DIR } = require('../lib/kanbot');
 const { encodeProjectDirName } = require('../lib/claude-dir');
 
 const A = '11111111-1111-4111-8111-111111111111';
@@ -55,7 +55,43 @@ describe('kanbot', () => {
     const help = fs.readFileSync(args[args.indexOf('--append-system-prompt-file') + 1], 'utf8');
     assert.match(help, /Usage: claude-code-kanban <command>/);
     assert.match(help, /This board runs at http:\/\/127\.0\.0\.1:4000/);
+    assert.doesNotMatch(help, /# Costs/);
     assert.ok(fs.existsSync(path.join(KANBOT_PLUGIN_DIR, 'agents', 'kanbot.md')));
+  });
+
+  it('names the cost CLI in the help prompt when there is one', () => {
+    const spec = createKanbot({ cckDir: cck, projectsDir: projects }).startSpec({ costCli: 'node "/x/server.js"' });
+    const help = fs.readFileSync(spec.extraArgs[spec.extraArgs.indexOf('--append-system-prompt-file') + 1], 'utf8');
+    assert.match(help, /`node "\/x\/server\.js" help`/);
+    assert.match(help, /claude-code-kanban session cost <id>/);
+  });
+
+  describe('findCostCli', () => {
+    const noBin = () => null;
+    const serverFile = (rec) => {
+      fs.mkdirSync(path.join(root, '.cost'), { recursive: true });
+      fs.writeFileSync(path.join(root, '.cost', 'server.json'), JSON.stringify(rec));
+    };
+
+    it('takes the script of the live cost server from its server.json', () => {
+      assert.equal(readCostServer(root), null);
+      serverFile({ pid: process.pid, port: 4321, script: 'C:\\hub\\cost\\server.js' });
+      assert.deepEqual(readCostServer(root), { url: 'http://localhost:4321', script: 'C:\\hub\\cost\\server.js' });
+      assert.equal(findCostCli({ claudeDir: root, which: noBin }), 'node "C:/hub/cost/server.js"');
+      serverFile({ pid: 2 ** 31 - 2, port: 4321, script: 'C:\\hub\\cost\\server.js' });
+      assert.equal(readCostServer(root), null);
+    });
+
+    it('takes the bin on PATH only when its package has the CLI', () => {
+      const prefix = path.join(root, 'npm');
+      const bin = path.join(prefix, 'claude-code-cost.cmd');
+      fs.mkdirSync(path.join(prefix, 'node_modules', 'claude-code-cost', 'lib'), { recursive: true });
+      fs.writeFileSync(bin, '');
+      assert.equal(findCostCli({ claudeDir: root, which: () => bin }), null);
+      fs.writeFileSync(path.join(prefix, 'node_modules', 'claude-code-cost', 'lib', 'cli.js'), '');
+      assert.equal(findCostCli({ claudeDir: root, which: () => bin }), 'claude-code-cost');
+      assert.equal(findCostCli({ claudeDir: root, which: noBin }), null);
+    });
   });
 
   it('resumes the newest transcript, the one after a /clear', () => {

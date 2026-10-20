@@ -48,7 +48,8 @@ const { buildDecision, decisionFileName, isDecisionFile, approvalsFrom, boardRef
 const { getClaudeDir, getArgValue, storageNamespace, isDefaultClaudeDir } = require('./lib/claude-dir');
 const { readTerminalConfig } = require('./lib/terminal');
 const { createTerminalClient } = require('./lib/terminal-client');
-const { kanbotOn, kanbotModel, createKanbot } = require('./lib/kanbot');
+const { kanbotOn, kanbotModel, createKanbot, findCostCli, readCostServer } = require('./lib/kanbot');
+const { AGENT_ID_RE } = require('./cli');
 const { createShowStore, mountShowRoutes, showBodyParser, SHOW_PATH } = require('./lib/show');
 const { readLiveSessions, isPidAlive, noteReplacedSessions } = require('./lib/live-sessions');
 const { createProcStats } = require('./lib/proc-stats');
@@ -3526,6 +3527,7 @@ async function ensureKanbot() {
   const started = await terminal.startNew(kanbot.startSpec({
     model: kanbotModelSetting(),
     boardUrl: `http://127.0.0.1:${boardPort}`,
+    costCli: findCostCli({ claudeDir: CLAUDE_DIR, which: whichSync }),
   }));
   if (started.error) return started;
   kanbot.ptyId = started.id;
@@ -3987,6 +3989,19 @@ app.post('/api/session/open', async (req, res) => {
     console.error('Error in /api/session/open:', error);
     res.status(500).json({ error: error.message || 'Failed' });
   }
+});
+
+app.post('/api/session/cost', (req, res) => {
+  const { id, agent } = req.body || {};
+  if (!id || typeof id !== 'string') return res.status(400).json({ error: 'id is required' });
+  if (agent !== undefined && (typeof agent !== 'string' || !AGENT_ID_RE.test(agent))) {
+    return res.status(400).json({ error: 'agent must be an agent-… id' });
+  }
+  broadcast({ type: 'session:cost', id, ...(agent && { agent }) });
+  const query = new URLSearchParams({ view: 'detail', session: id, ...(agent && { agent }) });
+  const costUrl = COST_URL || readCostServer(CLAUDE_DIR)?.url;
+  // A page opens the Cost tab only under the hub.
+  res.json({ delivered: process.env.CLAUDE_HUB ? clients.size : 0, url: costUrl ? `${new URL(`?${query}`, costUrl)}` : null });
 });
 
 // #region SESSION_PINS
