@@ -369,7 +369,7 @@ async function fetchSessions(includeTasks = true, focusId = currentSessionId) {
       schedulePublishSession();
     }
     // A list too short to scroll gives no scroll event, so fill it until it can scroll.
-    if (sessionsHasMore) setTimeout(loadMoreIfNearEnd);
+    if (sessionsHasMore) setTimeout(() => loadMoreIfNearEnd());
 
     if (includeTasks && searchQuery) await loadSearchTasks();
   } catch (error) {
@@ -418,11 +418,11 @@ function resetSessionPage() {
 }
 
 const LOAD_MORE_MARGIN_PX = 240;
-function loadMoreIfNearEnd() {
-  const { scrollTop, clientHeight, scrollHeight } = sessionsList;
-  if (clientHeight > 0 && scrollTop + clientHeight >= scrollHeight - LOAD_MORE_MARGIN_PX) loadMoreSessions();
+function loadMoreIfNearEnd(el = sessionsList, load = loadMoreSessions) {
+  const { scrollTop, clientHeight, scrollHeight } = el;
+  if (clientHeight > 0 && scrollTop + clientHeight >= scrollHeight - LOAD_MORE_MARGIN_PX) load();
 }
-sessionsList.addEventListener('scroll', loadMoreIfNearEnd, { passive: true });
+sessionsList.addEventListener('scroll', () => loadMoreIfNearEnd(), { passive: true });
 
 // Sessions by id, in the order given, ignoring every sidebar filter — that is what `include` means.
 async function fetchSessionsByIds(ids) {
@@ -12273,6 +12273,52 @@ let spFromTerminal = false;
 let spRenderedQuery = null;
 // Per-open cache: spSource is frozen while the picker is up, so a fetched log stays valid.
 const spPeekCache = new Map();
+// 'board' offers the sidebar's sessions plus a short tail of the newest others; 'all' offers
+// every session, newest first, paged like the sidebar's All filter. Each open starts on 'board'.
+let spScope = 'board';
+let spRecent = { rows: [], limit: 0, hasMore: true, loading: false };
+let spRowEls = [];
+const SP_RECENT_PAGE = 50;
+const SP_RECENT_TAIL = 5;
+
+// The first load asks for the board's count plus the tail, so the tail is there even when
+// the newest sessions are all on the board.
+async function spLoadRecent() {
+  const state = spRecent;
+  if (state.loading || !state.hasMore) return;
+  state.loading = true;
+  state.limit = state.limit ? state.limit + SP_RECENT_PAGE : spSource.length + SP_RECENT_TAIL;
+  try {
+    const res = await api('/api/sessions', { query: { limit: state.limit, pins: 'off' } });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const rows = await res.json();
+    if (state !== spRecent) return;
+    state.rows = rows;
+    state.hasMore = res.headers.get('X-Has-More') === 'true';
+  } catch (error) {
+    console.error('Failed to load recent sessions:', error);
+    state.hasMore = false;
+  } finally {
+    state.loading = false;
+  }
+  if (!isSessionPickerOpen()) return;
+  renderSessionPicker();
+  spLoadMoreNearEnd();
+}
+
+function spSetScope(scope) {
+  spScope = scope;
+  for (const el of document.querySelectorAll('#session-picker-scope [data-scope]')) {
+    el.setAttribute('aria-checked', String(el.dataset.scope === scope));
+  }
+  renderSessionPicker();
+  spLoadMoreNearEnd();
+}
+
+// Also run after each load: a page too short to scroll gives no scroll event.
+function spLoadMoreNearEnd() {
+  if (spScope === 'all') loadMoreIfNearEnd(document.getElementById('session-picker-list'), spLoadRecent);
+}
 
 const spSearch = sessionSearch(() => {
   if (document.getElementById('session-picker-modal').classList.contains('visible')) renderSessionPicker();
@@ -12285,9 +12331,11 @@ function openSessionPicker() {
   spSource = getFilteredSessions().sort((a, b) => Date.parse(b.modifiedAt) - Date.parse(a.modifiedAt));
   spPeekCache.clear();
   spRenderedQuery = null;
+  spRecent = { rows: [], limit: 0, hasMore: true, loading: false };
   document.getElementById('session-picker-modal').classList.add('visible');
-  renderSessionPicker();
+  spSetScope('board');
   input.focus();
+  spLoadRecent();
 }
 
 // refocus: false when a session is being opened, which moves the terminal focus itself.
@@ -12403,29 +12451,39 @@ function spPinHtml(session) {
 function renderSessionPicker() {
   const list = document.getElementById('session-picker-list');
   const query = document.getElementById('session-picker-input').value.trim();
-  // Search rows that arrive for the same query append below, so the cursor stays on its row.
-  const selectedId = query === spRenderedQuery ? spRows[spIdx]?.id : null;
-  spRenderedQuery = query;
-  const local = spSource.filter((s) => spMatches(s, query));
+  // Rows that arrive for the same query and scope append below, so the cursor stays on its row.
+  const renderKey = `${spScope}\n${query}`;
+  const selectedId = renderKey === spRenderedQuery ? spRows[spIdx]?.id : null;
+  spRenderedQuery = renderKey;
+  const all = spScope === 'all';
+  const board = new Set(spSource.map((s) => s.id));
+  const local = (all ? spRecent.rows : spSource).filter((s) => spMatches(s, query));
   const found = spSearch.rows(query, local);
-  spRows = [...local, ...found.rows];
+  const tail = !all && !query ? spRecent.rows.filter((s) => !board.has(s.id)).slice(0, SP_RECENT_TAIL) : [];
+  const extra = [...found.rows, ...tail];
+  spRows = [...local, ...extra];
   if (!spRows.length) {
     spIdx = -1;
-    const empty = found.pending
-      ? 'Searching all sessions…'
-      : spSource.length || query.length >= SESSION_SEARCH_MIN
-        ? 'No session matches'
-        : 'No sessions in the current sidebar filter';
+    spRowEls = [];
+    const empty =
+      found.pending || (all && spRecent.loading)
+        ? 'Searching all sessions…'
+        : all || spSource.length || query.length >= SESSION_SEARCH_MIN
+          ? 'No session matches'
+          : 'No sessions in the current sidebar filter';
     list.innerHTML = `<div class="sp-empty">${empty}</div>`;
     return;
   }
 
-  // Rows past the sidebar list come from the server search and show their full project path.
+  // Rows not on the board show their full project path; in the board scope they also sit below
+  // the board's rows, under a label.
+  const section = !all && extra.length ? '<div class="sp-section">Not on board</div>' : '';
   list.innerHTML = spRows
     .map((s, i) => {
-      const outside = i >= local.length;
+      const outside = !board.has(s.id);
+      const below = !all && i >= local.length;
       const project = s.project ? (outside ? s.project : pathBasename(s.project)) : '';
-      return `<button class="sp-row${s.id === currentSessionId ? ' current' : ''}${outside ? ' outside' : ''} ${sessionBarClass(s)}" data-idx="${i}" title="${escapeHtml(s.project ? `${s.id}\n${s.project}` : s.id)}">
+      return `${below && i === local.length ? section : ''}<button class="sp-row${s.id === currentSessionId ? ' current' : ''}${below ? ' outside' : ''} ${sessionBarClass(s)}" data-idx="${i}" title="${escapeHtml(s.project ? `${s.id}\n${s.project}` : s.id)}">
         ${spDotHtml(s)}
         <span class="sp-name">${escapeHtml(sessionDisplayName(s))}</span>
         <span class="sp-project">${escapeHtml(project)}</span>
@@ -12436,18 +12494,21 @@ function renderSessionPicker() {
       </button>`;
     })
     .join('');
+  // The section label sits between rows, so row index and child index differ.
+  spRowEls = list.querySelectorAll('.sp-row');
+  spIdx = -1;
   const keep = spRows.findIndex((s) => s.id === selectedId);
   spSelect(Math.max(0, keep));
 }
 
 function spSelect(idx) {
-  const list = document.getElementById('session-picker-list');
-  list.children[spIdx]?.classList.remove('selected');
+  spRowEls[spIdx]?.classList.remove('selected');
   spIdx = Math.min(Math.max(idx, 0), spRows.length - 1);
-  const row = list.children[spIdx];
+  const row = spRowEls[spIdx];
   row?.classList.add('selected');
   row?.scrollIntoView({ block: 'nearest' });
   spSchedulePeek();
+  if (spScope === 'all' && spIdx >= spRows.length - 5) spLoadRecent();
 }
 
 async function spOpen(idx) {
@@ -12468,13 +12529,21 @@ function initSessionPicker() {
     else if (matchKey(e, 'ArrowUp') || (e.ctrlKey && !e.shiftKey && e.key === 'p')) spSelect(spIdx - 1);
     else if (e.key === 'Enter') spOpen(spIdx);
     else if (e.ctrlKey && e.code === 'Space') spSetPeeking(!spIsPeeking());
+    else if (e.key === 'Tab' && !e.ctrlKey && !e.altKey && !e.metaKey) spSetScope(spScope === 'all' ? 'board' : 'all');
     else return;
     e.preventDefault();
     e.stopPropagation();
   });
-  document.getElementById('session-picker-list').addEventListener('click', (e) => {
+  const list = document.getElementById('session-picker-list');
+  list.addEventListener('click', (e) => {
     const row = e.target.closest('.sp-row');
     if (row) spOpen(Number(row.dataset.idx));
+  });
+  list.addEventListener('scroll', spLoadMoreNearEnd, { passive: true });
+  document.getElementById('session-picker-scope').addEventListener('click', (e) => {
+    const scope = e.target.closest('[data-scope]')?.dataset.scope;
+    if (scope) spSetScope(scope);
+    input.focus();
   });
   // Vimium eats Escape inside a text input and only blurs it, so the page never sees the key.
   // A blur that no click in the picker caused, while the window keeps focus, is that Escape.

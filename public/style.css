@@ -8746,6 +8746,54 @@ select.form-input option:checked {
   overflow: hidden;
 }
 
+.sp-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sp-head .sp-input {
+  flex: 1;
+}
+
+.sp-scope {
+  flex: none;
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.sp-scope button {
+  padding: 4px 10px;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.sp-scope button:hover {
+  color: var(--text-secondary);
+}
+
+.sp-scope button[aria-checked='true'] {
+  background: var(--bg-deep);
+  color: var(--text-primary);
+}
+
+.sp-section {
+  margin-top: 8px;
+  padding: 2px 8px;
+  color: var(--text-muted);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .sp-input {
   padding: 10px 12px;
   background: var(--bg-deep);
@@ -8907,6 +8955,10 @@ select.form-input option:checked {
 
 .sp-row:not(.outside) + .sp-row.outside {
   margin-top: 8px;
+}
+
+.sp-section + .sp-row.outside {
+  margin-top: 0;
 }
 
 .sp-row.current .sp-name {

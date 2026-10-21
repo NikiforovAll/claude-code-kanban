@@ -885,12 +885,18 @@
 
   <div id="session-picker-modal" class="modal-overlay top-aligned" onclick="closeSessionPicker()">
     <div class="modal session-picker" onclick="event.stopPropagation()">
-      <input type="text" id="session-picker-input" class="form-input sp-input" placeholder="Jump to session..." autocomplete="off" data-bwignore data-1p-ignore data-lpignore="true" spellcheck="false">
+      <div class="sp-head">
+        <input type="text" id="session-picker-input" class="form-input sp-input" placeholder="Jump to session..." autocomplete="off" data-bwignore data-1p-ignore data-lpignore="true" spellcheck="false">
+        <div id="session-picker-scope" class="sp-scope" role="radiogroup" aria-label="Sessions" title="Tab switches scope">
+          <button type="button" role="radio" tabindex="-1" data-scope="board">Board</button>
+          <button type="button" role="radio" tabindex="-1" data-scope="all">All</button>
+        </div>
+      </div>
       <div class="sp-body">
         <div id="session-picker-list" class="sp-list"></div>
         <div id="session-picker-peek" class="sp-peek"></div>
       </div>
-      <div class="sp-hint"><kbd>&uarr;</kbd><kbd>&darr;</kbd> move &middot; <kbd>Enter</kbd> open &middot; <kbd>Ctrl</kbd><kbd>Space</kbd> peek &middot; <kbd>Esc</kbd> close</div>
+      <div class="sp-hint"><kbd>&uarr;</kbd><kbd>&darr;</kbd> move &middot; <kbd>Enter</kbd> open &middot; <kbd>Tab</kbd> board / all &middot; <kbd>Ctrl</kbd><kbd>Space</kbd> peek &middot; <kbd>Esc</kbd> close</div>
     </div>
   </div>
 
