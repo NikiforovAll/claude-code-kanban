@@ -11,6 +11,7 @@ let reply;
 const calls = [];
 const page = vm.runInNewContext(`${fn('apiPath')}\n${fn('api')}\n${fn('getJson')}\n({ apiPath, api, getJson })`, {
   URLSearchParams,
+  Blob,
   fetch: async (url, init) => {
     calls.push({ url, init });
     return reply();
@@ -45,6 +46,13 @@ describe('api', () => {
     assert.equal(last().init.method, 'POST');
     assert.equal(last().init.body, '{"a":1}');
     assert.deepEqual({ ...last().init.headers }, { 'Content-Type': 'application/json', 'X-Terminal-Token': 't' });
+  });
+
+  it('sends a Blob body as-is, with no JSON content type', async () => {
+    const file = new Blob(['x'], { type: 'image/png' });
+    await api('/api/x', { method: 'POST', body: file, headers: { 'X-Terminal-Token': 't' } });
+    assert.equal(last().init.body, file);
+    assert.deepEqual({ ...last().init.headers }, { 'X-Terminal-Token': 't' });
   });
 
   it('sends no body and no content type without a body', async () => {

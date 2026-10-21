@@ -83,10 +83,11 @@ Press <kbd>Ctrl+Alt+N</kbd>, click the **+ New** pill at the top of the sidebar,
 - **Folder.** Type to filter the projects you have used before, or click **Browse…** to pick a folder in the system dialog. Only a known project folder or a folder you picked in the dialog is accepted.
 - **Name.** Optional. Letters, digits, spaces, `.`, `_` and `-`, up to 80 characters. It must start with a letter or digit.
 - **Prompt.** Optional. Claude Code gets it as the first message. If your browser supports speech input, a microphone button lets you dictate it.
+- **Images.** Paste or drop PNG, JPEG, GIF or WebP images (up to 10 MB each) into the prompt. Each one shows as a thumbnail: click it to see it full size, click **×** to remove it, or press <kbd>Backspace</kbd> in an empty prompt to remove the last one. On start, the board saves the images to `<config dir>/.cck/attachments/<session id>/` and adds their paths to the prompt, and Claude Code reads them from there.
 - **New worktree.** Starts Claude Code in a new git worktree at `.claude/worktrees/<name>`. The name is optional: letters, digits, `.`, `_` and `-`, up to 64 characters. With no name, Claude Code picks one.
 - **Model.** Default, Fable, Opus, Sonnet or Haiku.
 
-The button reads **Start in &lt;folder&gt;**. Press <kbd>Enter</kbd> to start, or <kbd>Ctrl+Enter</kbd> while you type in the prompt. <kbd>Esc</kbd> closes the folder list, then the dialog.
+The button reads **Start in &lt;folder&gt;**. Press <kbd>Enter</kbd> to start, or <kbd>Ctrl+Enter</kbd> while you type in the prompt. <kbd>Esc</kbd> closes the image preview or the folder list, then the dialog.
 
 Until Claude Code writes its first message, the sidebar shows a placeholder card with the text "waiting for your first message". It turns into a normal session card after the first message.
 

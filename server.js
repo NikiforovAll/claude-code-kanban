@@ -115,6 +115,7 @@ const SESSIONS_DIR = path.join(CLAUDE_DIR, 'sessions');
 const CCK_DIR = path.join(CLAUDE_DIR, '.cck');
 const AGENT_ACTIVITY_DIR = path.join(CCK_DIR, 'agent-activity');
 const CONTEXT_STATUS_DIR = path.join(CCK_DIR, 'context-status');
+const ATTACHMENTS_DIR = path.join(CCK_DIR, 'attachments');
 const PINS_FILE = path.join(CCK_DIR, 'pins.json');
 const USER_GROUPS_FILE = path.join(CCK_DIR, 'groups.json');
 const DISPATCHED_FILE = path.join(CCK_DIR, 'dispatched.json');
@@ -3386,6 +3387,30 @@ app.post('/api/terminal/start', terminalRoute(async (req, res) => {
   res.status(201).json({ session: started.id, cwd: started.cwd });
 }));
 
+// The New session dialog's images. The prompt names the saved path, and claude reads the file.
+// The token check runs before the body parser, so a rejected upload is never buffered.
+const ATTACHMENT_TYPES = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp' };
+app.post('/api/terminal/attachments/:session', (req, res, next) => {
+  const reason = terminal.unavailableReason();
+  if (reason) return res.status(403).json({ error: reason });
+  if (!terminal.authorized(req.get('x-terminal-token'))) return res.status(401).json({ error: 'invalid terminal token' });
+  if (!isUUID(req.params.session)) return res.status(400).json({ error: 'invalid session id' });
+  res.locals.ext = ATTACHMENT_TYPES[req.get('content-type')];
+  if (!res.locals.ext) return res.status(415).json({ error: 'use a PNG, JPEG, GIF or WebP image' });
+  next();
+}, express.raw({ type: () => true, limit: '10mb' }), async (req, res) => {
+  if (!req.body?.length) return res.status(400).json({ error: 'empty image' });
+  const dir = path.join(ATTACHMENTS_DIR, req.params.session);
+  const file = path.join(dir, `${Date.now()}-${crypto.randomBytes(3).toString('hex')}.${res.locals.ext}`);
+  try {
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(file, req.body);
+    res.status(201).json({ path: file });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // The hub's eviction check reads this to keep a pool with live PTYs alive.
 app.get('/api/terminals', terminalRoute(async (_req, res) => {
   res.setHeader('Cache-Control', 'no-store');
@@ -4783,7 +4808,7 @@ async function cleanupAgentActivity() {
   } catch { /* agent-activity dir may not exist */ }
 }
 
-// Dispatch markers, pane layouts, reviews, context status and worktrees: see docs/retention.md.
+// Dispatch markers, pane layouts, reviews, attachments, context status and worktrees: see docs/retention.md.
 async function runRetention() {
   try {
     const scan = await scanTranscripts(PROJECTS_DIR);
@@ -4792,12 +4817,13 @@ async function runRetention() {
     const layouts = panes.prune(opts);
     if (layouts) queuePaneFileWatch();
     const reviews = await pruneSessionDirs(REVIEW_DIR, opts);
+    const attachments = await pruneSessionDirs(ATTACHMENTS_DIR, opts);
     const contexts = await pruneContextStatus(CONTEXT_STATUS_DIR, opts);
     const wts = worktrees.prune(scan?.dirs);
     const taskMaps = await pruneTaskMaps(TASK_MAPS_DIR, opts);
     const grouped = expireGroupMembers(scan?.ids);
-    if (markers || layouts || reviews || contexts || wts || taskMaps || grouped.members) {
-      console.log(`[retention] removed ${markers} dispatch markers, ${layouts} pane layouts, ${reviews} reviews, ${contexts} context status files, ${wts} worktrees, ${taskMaps} task-list mappings, ${grouped.members} group members, ${grouped.groups} groups`);
+    if (markers || layouts || reviews || attachments || contexts || wts || taskMaps || grouped.members) {
+      console.log(`[retention] removed ${markers} dispatch markers, ${layouts} pane layouts, ${reviews} reviews, ${attachments} attachments, ${contexts} context status files, ${wts} worktrees, ${taskMaps} task-list mappings, ${grouped.members} group members, ${grouped.groups} groups`);
     }
   } catch (e) {
     console.warn('[retention] failed:', e.message);

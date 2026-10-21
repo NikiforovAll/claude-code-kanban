@@ -309,12 +309,13 @@ function apiPath(strings, ...values) {
 
 function api(path, { method, body, query, headers, cache } = {}) {
   const qs = query ? new URLSearchParams(Object.entries(query).filter(([, v]) => v != null)).toString() : '';
-  const json = body != null;
+  // A Blob goes as-is, and fetch takes its Content-Type from the Blob's type.
+  const json = body != null && !(body instanceof Blob);
   return fetch(qs ? `${path}?${qs}` : path, {
     method,
     cache,
     headers: json ? { 'Content-Type': 'application/json', ...headers } : headers,
-    body: json ? JSON.stringify(body) : undefined,
+    body: json ? JSON.stringify(body) : (body ?? undefined),
   });
 }
 
@@ -17025,7 +17026,10 @@ const newSpecs = new Map();
 // Sessions another session started (`dispatch start`), shown where they will stay until
 // their transcript appears. Kept apart from newSpecs: their prompt is already sent.
 const dispatchSpecs = new Map();
-const ns = { projects: [], picked: [], matches: [], idx: -1, folder: '', busy: false, resume: false };
+const ns = { projects: [], picked: [], matches: [], idx: -1, folder: '', busy: false, resume: false, images: [] };
+// Must match ATTACHMENT_TYPES and the upload limit in server.js.
+const NS_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+const NS_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
 const NEW_SESSION_STAY_KEY = 'new-session-stay';
 const NEW_SESSION_EDIT_KEY = 'new-session-edit';
 
@@ -17229,6 +17233,7 @@ function openNewSession(folder, resume = false) {
   document.getElementById('ns-wt').checked = false;
   document.getElementById('ns-model').value = '';
   document.getElementById('ns-effort').value = '';
+  clearNewSessionImages();
   document.getElementById('ns-stay').checked = store.getItem(NEW_SESSION_STAY_KEY) === 'true';
   document.getElementById('ns-edit').checked = store.getItem(NEW_SESSION_EDIT_KEY) === 'true';
   setNewSessionError('');
@@ -17252,7 +17257,75 @@ function openNewSession(folder, resume = false) {
 function closeNewSession() {
   hideModalOverlay('new-session-modal');
   closeFolderList();
+  closeImagePreview();
+  clearNewSessionImages();
   promptVoice.rec?.abort();
+}
+
+function addNewSessionImages(files) {
+  for (const file of files) {
+    if (!NS_IMAGE_TYPES.includes(file.type)) {
+      setNewSessionError(`${file.name || 'File'}: use a PNG, JPEG, GIF or WebP image.`);
+      continue;
+    }
+    if (file.size > NS_IMAGE_MAX_BYTES) {
+      setNewSessionError(`${file.name || 'Image'}: larger than ${NS_IMAGE_MAX_BYTES / 1024 / 1024} MB.`);
+      continue;
+    }
+    ns.images.push({ file, url: URL.createObjectURL(file) });
+  }
+  renderNewSessionImages();
+}
+
+function removeNewSessionImage(i) {
+  const [img] = ns.images.splice(i, 1);
+  if (img) URL.revokeObjectURL(img.url);
+  renderNewSessionImages();
+}
+
+function clearNewSessionImages() {
+  for (const img of ns.images) URL.revokeObjectURL(img.url);
+  ns.images = [];
+  renderNewSessionImages();
+}
+
+function renderNewSessionImages() {
+  const strip = document.getElementById('ns-images');
+  strip.hidden = !ns.images.length;
+  strip.innerHTML = ns.images
+    .map(
+      (img, i) =>
+        `<button type="button" class="ns-thumb" data-preview="${i}" title="${escapeHtml(img.file.name || 'Pasted image')}"><img src="${escapeHtml(img.url)}" alt=""><span class="ns-thumb-remove" data-remove="${i}" title="Remove" aria-label="Remove image">×</span></button>`,
+    )
+    .join('');
+}
+
+function openImagePreview(i) {
+  const img = ns.images[i];
+  if (!img) return;
+  const box = document.getElementById('ns-lightbox');
+  box.querySelector('img').src = img.url;
+  box.hidden = false;
+}
+
+function closeImagePreview() {
+  const box = document.getElementById('ns-lightbox');
+  if (box.hidden) return false;
+  box.hidden = true;
+  box.querySelector('img').removeAttribute('src');
+  return true;
+}
+
+async function uploadNewSessionImage(sessionId, file) {
+  const r = await newSessionPost(`/api/terminal/attachments/${encodeURIComponent(sessionId)}`, file, 'Upload failed');
+  if (r.error) throw new Error(r.error);
+  return r.path;
+}
+
+async function withImagePaths(id, prompt) {
+  const paths = await Promise.all(ns.images.map((img) => uploadNewSessionImage(id, img.file)));
+  const list = `Attached images:\n${paths.map((p) => `- ${p}`).join('\n')}`;
+  return prompt ? `${prompt}\n\n${list}` : list;
 }
 
 function knownFolders() {
@@ -17414,10 +17487,17 @@ function fieldAfterFolder() {
   return ns.resume ? 'ns-start' : 'ns-name';
 }
 
-function startNewSession() {
+async function startNewSession() {
   const v = newSessionValues();
   if (!v.cwd || newSessionProblem(v) || ns.busy) return;
   const id = crypto.randomUUID();
+  if (!ns.resume && ns.images.length) {
+    setNewSessionBusy(true);
+    const prompt = await withImagePaths(id, v.prompt).catch((e) => e);
+    setNewSessionBusy(false);
+    if (prompt instanceof Error) return setNewSessionError(prompt.message);
+    v.prompt = prompt;
+  }
   newSpecs.set(id, { ...(ns.resume ? { cwd: v.cwd } : v), mode: ns.resume ? 'pick' : 'new', startedAt: Date.now() });
   setTerminalMode(id, true);
   if (v.stay) return startNewSessionInBackground(id, v);
@@ -17556,11 +17636,35 @@ function initNewSession() {
     mic.addEventListener('mousedown', (e) => e.preventDefault());
     mic.addEventListener('click', togglePromptVoice);
   }
+  const prompt = document.getElementById('ns-prompt');
+  const promptField = prompt.closest('.ns-prompt-field');
+  prompt.addEventListener('paste', (e) => {
+    const files = [...(e.clipboardData?.files || [])].filter((f) => f.type.startsWith('image/'));
+    if (!files.length) return;
+    e.preventDefault();
+    addNewSessionImages(files);
+  });
+  promptField.addEventListener('dragover', (e) => {
+    if (e.dataTransfer?.types.includes('Files')) e.preventDefault();
+  });
+  promptField.addEventListener('drop', (e) => {
+    if (!e.dataTransfer?.files.length) return;
+    e.preventDefault();
+    addNewSessionImages(e.dataTransfer.files);
+  });
+  document.getElementById('ns-images').addEventListener('click', (e) => {
+    const remove = e.target.closest('[data-remove]');
+    if (remove) return removeNewSessionImage(Number(remove.dataset.remove));
+    const thumb = e.target.closest('[data-preview]');
+    if (thumb) openImagePreview(Number(thumb.dataset.preview));
+  });
+  document.getElementById('ns-lightbox').addEventListener('click', closeImagePreview);
   // Bound on the dialog: the global handler returns early on INPUT and TEXTAREA targets.
   modal.addEventListener('keydown', (e) => {
     const inFolder = e.target === input;
     if (e.key === 'Escape') {
-      if (folderListOpen()) closeFolderList();
+      if (closeImagePreview()) prompt.focus();
+      else if (folderListOpen()) closeFolderList();
       else closeNewSession();
     } else if (inFolder && matchKey(e, 'ArrowDown')) {
       if (!folderListOpen()) renderFolderList();
@@ -17569,6 +17673,8 @@ function initNewSession() {
       moveFolderHighlight(-1);
     } else if (inFolder && e.key === 'Enter' && folderListOpen() && ns.idx >= 0 && ns.matches[ns.idx] !== ns.folder) {
       pickFolderOption(ns.idx);
+    } else if (e.target === prompt && e.key === 'Backspace' && !prompt.value && ns.images.length) {
+      removeNewSessionImage(ns.images.length - 1);
     } else if (e.key === 'Enter' && (e.target.tagName !== 'TEXTAREA' || e.ctrlKey || e.metaKey)) {
       if (e.target.tagName === 'BUTTON') return;
       startNewSession();
