@@ -39,7 +39,25 @@ describe('transcriptActivityMs', () => {
     const p = freshParsers();
     seed();
     activity(p);
-    fs.appendFileSync(file, '{"type":"assistant"}\n');
+    fs.appendFileSync(file, '{"type":"assistant","timestamp":"2026-01-01T00:00:00Z"}\n');
+    assert.equal(activity(p), fs.statSync(file).mtimeMs);
+  });
+
+  it('keeps the last activity when only bookkeeping lines are appended', () => {
+    const p = freshParsers();
+    seed();
+    const first = activity(p);
+    fs.appendFileSync(file, '{"type":"last-prompt","sessionId":"s"}\n{"type":"cost-state","sessionId":"s"}\n');
+    assert.equal(activity(p), first);
+    fs.appendFileSync(file, '{"type":"user","timestamp":"2026-01-01T00:00:00Z"}\n');
+    assert.equal(activity(p), fs.statSync(file).mtimeMs);
+  });
+
+  it('moves when an append ends mid-line', () => {
+    const p = freshParsers();
+    seed();
+    activity(p);
+    fs.appendFileSync(file, '{"type":"cost-state"');
     assert.equal(activity(p), fs.statSync(file).mtimeMs);
   });
 

@@ -8,7 +8,7 @@ Change a signal, a window, the filter or a drawn state, and update this doc in t
 
 The server builds these fields on every session object (`buildSessionObject` and the agent pass in `/api/sessions`, `server.js`).
 
-"Written" below means the transcript's size or inode changed (`transcriptActivityMs`). A new mtime alone is not a write, because other processes set it without writing (#50).
+"Written" below means the transcript's size or inode changed (`transcriptActivityMs`). A new mtime alone is not a write, because other processes set it without writing (#50). An append of only lines with no `timestamp` is not a write either: Claude Code adds such a block (`cost-state`, `last-prompt`, …) when the session exits, so closing a terminal does not wake its card.
 
 | Field | True when | Window |
 |---|---|---|
