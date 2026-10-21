@@ -364,7 +364,7 @@ describe('board pins', () => {
     await page.ctx.syncSessionPins();
     vm.runInNewContext(
       [
-        "const PINNED_MESSAGES_PREFIX = 'pm-', PAD_EMOJI_PREFIX = 'pe-', PREVIEW_STORAGE_PREFIX = 'pp-', PAD_LINKED_PREFIX = 'pl-';",
+        "const PINNED_MESSAGES_PREFIX = 'pm-', PAD_EMOJI_PREFIX = 'pe-', PREVIEW_STORAGE_PREFIX = 'pp-', PAD_LINKED_PREFIX = 'pl-', DROPPED_ARTIFACTS_PREFIX = 'ad-';",
         fn('_findOrphanedKeys'),
         fn('cleanupOrphanedStorage'),
       ].join('\n'),

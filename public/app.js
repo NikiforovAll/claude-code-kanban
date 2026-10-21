@@ -7503,7 +7503,13 @@ function _findOrphanedKeys(known) {
   const orphaned = [];
   for (const id of pinnedSessionIds) if (!known.has(id)) orphaned.push(`__pinned__${id}`);
   for (const id of stickySessionIds) if (!known.has(id)) orphaned.push(`__sticky__${id}`);
-  const sessionKeyPrefixes = [PINNED_MESSAGES_PREFIX, PAD_EMOJI_PREFIX, PREVIEW_STORAGE_PREFIX, PAD_LINKED_PREFIX];
+  const sessionKeyPrefixes = [
+    PINNED_MESSAGES_PREFIX,
+    PAD_EMOJI_PREFIX,
+    PREVIEW_STORAGE_PREFIX,
+    PAD_LINKED_PREFIX,
+    DROPPED_ARTIFACTS_PREFIX,
+  ];
   for (const key of store.keys()) {
     const pad = _parsePadKey(key);
     if (pad?.kind === 'group') {
@@ -9675,8 +9681,34 @@ function artifactLabel(a) {
   return a.path ? pathBasename(a.path).replace(/\.html?$/i, '') : 'Artifact';
 }
 
+// The list comes from the transcript on every read, so a dropped artifact is kept out by URL.
+const DROPPED_ARTIFACTS_PREFIX = 'artifacts-dropped-';
+
+function droppedArtifacts(sessionId) {
+  return new Set(readStoredList(DROPPED_ARTIFACTS_PREFIX + sessionId));
+}
+
+function setArtifactDropped(sessionId, url, dropped) {
+  const urls = droppedArtifacts(sessionId);
+  if (dropped) urls.add(url);
+  else urls.delete(url);
+  if (urls.size) store.writeJson(DROPPED_ARTIFACTS_PREFIX + sessionId, [...urls]);
+  else store.removeItem(DROPPED_ARTIFACTS_PREFIX + sessionId);
+  artifactsSection.repaint(sessionId);
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+function dropArtifact(sessionId, url) {
+  setArtifactDropped(sessionId, url, true);
+  showToast('Artifact dropped from the list', 'info', {
+    label: 'Undo',
+    onClick: () => setArtifactDropped(sessionId, url, false),
+  });
+}
+
 function artifactsInnerHtml(sessionId) {
-  const list = artifactsSection.get(sessionId);
+  const dropped = droppedArtifacts(sessionId);
+  const list = artifactsSection.get(sessionId).filter((a) => !dropped.has(a.url));
   if (!list.length) return '';
   const items = list
     .map(
@@ -9684,6 +9716,7 @@ function artifactsInnerHtml(sessionId) {
         <a class="artifact-link" href="${escapeHtml(a.url)}" target="_blank" rel="noopener" title="${escapeHtml(a.url)}">${escapeHtml(artifactLabel(a))}</a>
         <span class="row-actions artifact-actions">
           <button type="button" onclick="copyWithFeedback('${escAttrJs(a.url)}', this)" title="Copy link" aria-label="Copy artifact link">${ICON_COPY}</button>
+          <button type="button" class="artifact-remove" onclick="dropArtifact('${escAttrJs(sessionId)}','${escAttrJs(a.url)}')" title="Drop from the list" aria-label="Drop ${escapeHtml(artifactLabel(a))} from the list">&times;</button>
         </span>
       </li>`,
     )

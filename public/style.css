@@ -7030,13 +7030,15 @@ body.show-resizing iframe {
 }
 
 /* The × is a glyph, not an svg, so .row-actions button svg does not size it. */
-.linked-doc-remove {
+.linked-doc-remove,
+.artifact-remove {
   font-family: var(--mono);
   font-size: 15px;
   line-height: 1;
 }
 
-.linked-doc-actions .linked-doc-remove:hover {
+.linked-doc-actions .linked-doc-remove:hover,
+.artifact-actions .artifact-remove:hover {
   background: var(--bg-elevated);
   border-color: var(--border);
   color: var(--text-primary);
