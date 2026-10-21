@@ -8134,6 +8134,13 @@ body.light .msg-assistant .msg-text {
   padding: 8px 16px;
   white-space: nowrap;
 }
+
+/* The modal focuses a button itself, and after a mouse click Chrome does not match
+   :focus-visible for that, so Enter would act on a button with no ring. */
+.confirm-buttons .btn:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 /* #endregion */
 
 /* Reference card, not reading material: it stays out of the modal zoom, uses the app's
