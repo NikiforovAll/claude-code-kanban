@@ -77,7 +77,8 @@ let sessions = [];
 let currentSessionId = null;
 // Kept in the store because a config-dir switch in the hub reloads this page.
 const SWAP_KEY = 'swap-sessions';
-let [lastSessionId, previousSessionId] = readSwapPair();
+const SWAP_HISTORY_MAX = 20;
+let swapHistory = readStoredList(SWAP_KEY).filter(Boolean);
 let currentTasks = [];
 let viewMode = 'session';
 let sessionFilter = FILTER_DEFAULTS.session;
@@ -783,7 +784,7 @@ async function fetchTasks(sessionId) {
     revealedStorageSessionId = null;
   }
   if (currentSessionId && currentSessionId !== sessionId) deferredPinPlacement.delete(currentSessionId);
-  if (lastSessionId !== sessionId) setSwapPair(sessionId, lastSessionId);
+  pushSwapHistory(sessionId);
   const switched = sessionId !== currentSessionId;
   currentSessionId = sessionId;
   markOpenSessionRead();
@@ -7592,9 +7593,8 @@ function dismissSessionFromList(sid) {
     return;
   }
   // Ctrl+Alt+S would reveal the dismissed session, and revealing restores it.
-  const forget = (x) => (x === sid ? null : x);
-  const fallback = currentSessionId === sid && lastSessionId === sid ? previousSessionId : null;
-  setSwapPair(forget(lastSessionId), forget(previousSessionId));
+  const fallback = currentSessionId === sid && swapHistory[0] === sid ? swapHistory[1] : null;
+  forgetSwapHistory(sid);
   const targetIdx = newItems.length > 0 ? Math.max(0, prevIdx - 1) : -1;
   // If the dismissed session is currently open, navigate to the previous one
   if (currentSessionId === sid || selectedSessionId === sid) {
@@ -15132,20 +15132,22 @@ function terminalShortcut(e, probe = false) {
   return null;
 }
 
-function readSwapPair() {
-  const pair = readStoredList(SWAP_KEY);
-  return pair.length === 2 ? pair : [null, null];
+function setSwapHistory(ids) {
+  swapHistory = [...new Set(ids.filter(Boolean))].slice(0, SWAP_HISTORY_MAX);
+  store.writeJson(SWAP_KEY, swapHistory);
 }
 
-function setSwapPair(last, previous) {
-  lastSessionId = last;
-  previousSessionId = previous;
-  store.writeJson(SWAP_KEY, [last, previous]);
+function pushSwapHistory(id) {
+  if (swapHistory[0] !== id) setSwapHistory([id, ...swapHistory]);
+}
+
+function forgetSwapHistory(id) {
+  if (swapHistory.includes(id)) setSwapHistory(swapHistory.filter((x) => x !== id));
 }
 
 async function swapToPreviousSession() {
-  const target = currentSessionId === lastSessionId ? previousSessionId : lastSessionId;
-  if (!target || target === currentSessionId) return;
+  const target = swapHistory.find((id) => id !== currentSessionId);
+  if (!target) return;
   if (terminalPaneFocused() || isShowCardFocused()) termState.focusNext = true;
   await revealSession(target);
 }
@@ -15806,8 +15808,7 @@ function terminalOpenMode(sessionId) {
 // replays the same screen, and the placeholder gives way to the real card.
 function adoptPickedSession(oldId, id) {
   const focused = terminalPaneFocused();
-  const adopt = (x) => (x === oldId ? id : x);
-  setSwapPair(adopt(lastSessionId), adopt(previousSessionId));
+  setSwapHistory(swapHistory.map((x) => (x === oldId ? id : x)));
   setTerminalMode(id, true);
   forgetPlaceholder(oldId);
   if (currentSessionId !== oldId || viewMode !== 'session') return renderSessions();
@@ -17131,8 +17132,7 @@ function forgetPlaceholder(id) {
   // Before the socket's close handler runs, or it would reconnect and start the session again.
   if (termState.sessionId === id) detachTerminal();
   sessions = sessions.filter((s) => s.id !== id);
-  const forget = (x) => (x === id ? null : x);
-  setSwapPair(forget(lastSessionId), forget(previousSessionId));
+  forgetSwapHistory(id);
   return true;
 }
 

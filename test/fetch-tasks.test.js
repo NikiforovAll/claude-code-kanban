@@ -38,7 +38,7 @@ function makePage() {
     },
     apiPath: (strings, ...values) => strings.reduce((a, s, i) => a + s + (i < values.length ? values[i] : ''), ''),
   };
-  for (const f of 'openTerminal terminalOpenMode wantsTerminalFor exitAgentLogMode closeScratchpad closeDetailPanel setSwapPair markOpenSessionRead autoRevealLog loadPins resetMessageScrollState resetAgentState updateUrl fetchAgents renderSessions renderMessages'.split(' '))
+  for (const f of 'openTerminal terminalOpenMode wantsTerminalFor exitAgentLogMode closeScratchpad closeDetailPanel pushSwapHistory markOpenSessionRead autoRevealLog loadPins resetMessageScrollState resetAgentState updateUrl fetchAgents renderSessions renderMessages'.split(' '))
     ctx[f] = () => {};
   ctx.renderSession = () => ctx.rendered.push(ctx.currentTasks.length);
   ctx.log = [];
@@ -59,7 +59,7 @@ function makePage() {
   vm.runInNewContext(
     [
       'var viewMode = "none", currentSessionId = null, currentTasks = [], agentLogMode = false;',
-      'var revealedPlanSessionId = null, revealedStorageSessionId = null, lastSessionId = null;',
+      'var revealedPlanSessionId = null, revealedStorageSessionId = null;',
       'var currentPins, ownerFilter = "", sessionJustSelected = false;',
       'var messagePanelOpen = true, currentMessages = [], logLoading = null;',
       ...['lastCurrentTasksHash', 'taskFetchSeq', 'switchSeq', 'taskRetry'].map(decl),
