@@ -270,11 +270,14 @@ const toggleShowFocus = () => {};
 const toggleTerminalFocus = () => {};
 const toggleMessagePanel = () => {};
 const toggleLastMessage = () => {};
+const stickied = [];
 const shortcut = appFunction('terminalShortcut', {
   toggleShowFocus,
   toggleTerminalFocus,
   toggleMessagePanel,
   toggleLastMessage,
+  toggleSessionSticky: (id) => stickied.push(id),
+  currentSessionId: 's1',
   hubModDown: appFunction('hubModDown'),
   zoomDelta: () => undefined,
   matchKey: () => false,
@@ -305,6 +308,20 @@ describe('Ctrl+Shift+L and Ctrl+Shift+M from the terminal', () => {
     assert.equal(shortcut(key('KeyL', { shiftKey: true })), null);
     assert.equal(shortcut(key('KeyM', { shiftKey: true })), null);
     assert.equal(shortcut(key('KeyL', { ctrlKey: true })), null);
+  });
+});
+
+describe('Ctrl+Shift+. from the terminal', () => {
+  const key = (mods) => press('>', { code: 'Period', getModifierState: () => false, ...mods });
+
+  it('toggles sticky on the open session', () => {
+    shortcut(key({ ctrlKey: true, shiftKey: true }))();
+    assert.deepEqual(stickied, ['s1']);
+  });
+
+  it('leaves Shift+. and Ctrl+. to the terminal', () => {
+    assert.equal(shortcut(key({ shiftKey: true })), null);
+    assert.equal(shortcut(key({ ctrlKey: true })), null);
   });
 });
 

@@ -6446,6 +6446,7 @@ const SHORTCUT_TABS = [
           { keys: ['I'], label: 'Session info' },
           { keys: ['.'], label: 'Pin / unpin' },
           { keys: ['>'], label: 'Toggle sticky' },
+          { keys: ['Ctrl', 'Shift', '.'], combo: true, label: 'Toggle sticky (from the terminal)' },
           { keys: ['Shift', 'F10'], combo: true, label: 'Session menu: move to group, fork (or Menu key)' },
           { keys: ['Ctrl', 'D'], combo: true, label: 'Dismiss session (pinned: to Pinned group)' },
           { keys: ['Ctrl', 'Shift', 'L'], combo: true, label: 'Toggle session log' },
@@ -15114,6 +15115,7 @@ function terminalShortcut(e, probe = false) {
   if (ctrlShift && e.code === 'KeyL') return toggleMessagePanel;
   if (ctrlShift && e.code === 'KeyM') return toggleLastMessage;
   if (ctrlShift && e.code === 'KeyD') return dismissContextSession;
+  if (ctrlShift && e.code === 'Period') return currentSessionId ? () => toggleSessionSticky(currentSessionId) : null;
   if (ctrlAlt && (e.code === 'KeyN' || e.code === 'KeyR') && terminalAvailable()) {
     return () => openNewSession(null, e.code === 'KeyR');
   }
@@ -15434,6 +15436,7 @@ const TERMINAL_PROBE_KEYS = [
   ['Backquote', '`', '~'],
   ['Equal', '=', '+'],
   ['Minus', '-', '_'],
+  ['Period', '.', '>'],
   ['NumpadAdd', '+', '+'],
   ['NumpadSubtract', '-', '-'],
   ['Numpad0', '0', '0'],
