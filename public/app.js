@@ -9179,7 +9179,7 @@ function bindPreviewRelativeLinks(bodyEl, baseOf = () => currentPreviewPath) {
     if (isUrlRef(href)) return;
     const cleanHref = href.replace(/#.*$/, '');
     e.preventDefault();
-    openPreviewByPath(cleanHref, isAbsolutePath(href) ? undefined : baseOf(a), openFileInEditor);
+    openPreviewByPath(cleanHref, baseOf(a), openFileInEditor);
   });
   bodyEl.dataset.relLinkBound = '1';
 }
@@ -11088,9 +11088,14 @@ function toRelativeIfUnder(filePath, baseDir) {
   return fp.slice(bd.length + 1);
 }
 
+// DOMPurify's default list plus `file:` and drive paths (`C:/x` reads as a scheme), so a link to a
+// local file survives and opens in the preview.
+const MARKDOWN_URI =
+  /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|matrix|file):|[a-z]:[\\/]|[^a-z]|[a-z+.-]+(?:[^a-z+.\-:]|$))/i;
+
 function renderMarkdown(text) {
   if (typeof DOMPurify !== 'undefined' && typeof marked !== 'undefined') {
-    return DOMPurify.sanitize(marked.parse(text));
+    return DOMPurify.sanitize(marked.parse(text), { ALLOWED_URI_REGEXP: MARKDOWN_URI });
   }
   return `<pre style="white-space:pre-wrap;margin:0;">${escapeHtml(text)}</pre>`;
 }
@@ -15410,6 +15415,12 @@ function terminalInitOptions(themeOptions) {
   };
 }
 
+function openTerminalLink(href) {
+  if (typeof href === 'string' && isLocalHref(href)) return openLocalHref(href);
+  const url = linkUrl(href);
+  if (url) hub.openExternal(url);
+}
+
 function onTerminalFrameMessage(t, m) {
   const socket = termState.socket;
   const current = socket && m.socketId === socket.id;
@@ -15429,6 +15440,7 @@ function onTerminalFrameMessage(t, m) {
       reconnectTerminal();
     }
   } else if (t === 'key') replayKey(m, document.getElementById('terminal-key-proxy'));
+  else if (t === 'link') openTerminalLink(m.href);
   // Chrome does not always fire focusin on the iframe element when its content takes focus.
   else if (t === 'focused') terminalHadFocus = terminalPaneFocused();
   else if (t === 'opening') {
@@ -18125,13 +18137,6 @@ function publishSession() {
   );
 }
 
-// The help modal stops click propagation, so the document handler below never sees this link.
-// The service worker can pair a cached page that lacks the link with this script.
-document.getElementById('help-docs')?.addEventListener('click', (e) => {
-  e.preventDefault();
-  hub.openExternal(e.currentTarget.href);
-});
-
 function webUrl(href) {
   let url;
   try {
@@ -18142,17 +18147,38 @@ function webUrl(href) {
   return url.protocol === 'http:' || url.protocol === 'https:' ? url : null;
 }
 
-document.addEventListener('click', (e) => {
-  const a = e.target.closest?.('a[href]');
-  if (!a) return;
-  const href = a.getAttribute('href');
-  if (!href) return;
-  const url = webUrl(href);
-  if (!url || url.origin === window.location.origin) return;
-  e.preventDefault();
-  e.stopPropagation();
-  hub.openExternal(url.href);
-});
+function isLocalHref(href) {
+  return /^file:/i.test(href) || (isAbsolutePath(href) && !href.startsWith('//'));
+}
+
+function openLocalHref(href) {
+  openPreviewByPath(href.replace(/#.*$/, ''), undefined, openFileInEditor);
+}
+
+// Capture, because the modals stop a click's propagation, and stopped here so a link in a message
+// preview does not also open the row. Under the hub the SDK has already opened a web link
+// outside (defaultPrevented), and leaves a link to a hub app alone.
+document.addEventListener(
+  'click',
+  (e) => {
+    if (e.button !== 0) return;
+    const href = e.target.closest?.('a[href]')?.getAttribute('href');
+    if (!href) return;
+    const url = webUrl(href);
+    const external = url && url.origin !== window.location.origin;
+    if (e.defaultPrevented) {
+      if (external) e.stopPropagation();
+      return;
+    }
+    const local = isLocalHref(href);
+    if (!local && (!external || hub.inHub)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (local) openLocalHref(href);
+    else hub.openExternal(url.href);
+  },
+  true,
+);
 
 (function initHubTheme() {
   const getTheme = () => (document.body.classList.contains('light') ? 'light' : 'dark');

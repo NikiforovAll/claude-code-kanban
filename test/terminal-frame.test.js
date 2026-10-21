@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const { readFileSync } = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const { createTerminalFrame, claimSig, isClaimed, parentOriginOf, tailOf } = require('../public/terminal-frame.js');
+const { createTerminalFrame, claimSig, isClaimed, parentOriginOf, tailOf, pathsIn } = require('../public/terminal-frame.js');
 
 const BOARD = 'http://localhost:3541';
 const app = readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
@@ -124,6 +124,7 @@ describe('createTerminalFrame', () => {
     const terms = [];
     const focus = { frame: false, element: null };
     const microtasks = [];
+    const webLinks = [];
     class Terminal {
       constructor(options) {
         this.options = { ...options };
@@ -137,9 +138,13 @@ describe('createTerminalFrame', () => {
           registerCsiHandler: (id, fn) => this.csiHandlers.push({ id, fn }),
         };
         this.textarea = { addEventListener() {} };
+        this.buffer = { active: { getLine() {}, getNullCell: () => ({}) } };
         terms.push(this);
       }
       loadAddon() {}
+      registerLinkProvider(provider) {
+        this.linkProvider = provider;
+      }
       open() {}
       attachCustomKeyEventHandler(fn) {
         this.keyFilter = fn;
@@ -174,6 +179,13 @@ describe('createTerminalFrame', () => {
       Terminal,
       FitAddon: { FitAddon: class {} },
       Unicode11Addon: { Unicode11Addon: class {} },
+      WebLinksAddon: {
+        WebLinksAddon: class {
+          constructor(handler) {
+            webLinks.push(handler);
+          }
+        },
+      },
       WebglAddon: {
         WebglAddon: class {
           onContextLoss() {}
@@ -192,7 +204,7 @@ describe('createTerminalFrame', () => {
     const send = (data, from = {}) =>
       listeners.message({ source: from.source ?? parent, origin: from.origin ?? BOARD, data });
     const flush = () => microtasks.splice(0).forEach((fn) => fn());
-    return { posted, terms, send, docListeners, win, focus, flush };
+    return { posted, terms, send, docListeners, win, focus, flush, webLinks };
   }
 
   const init = { type: 'cck-term:init', fontFamily: 'mono', fontSize: 13, scrollback: 1000, themeOptions: { theme: {} } };
@@ -211,6 +223,65 @@ describe('createTerminalFrame', () => {
         ['cck-term:term', BOARD],
       ],
     );
+  });
+
+  it('hands OSC 8 and plain-text links to the board, with no confirm', () => {
+    const w = stubWindow();
+    w.send(init);
+    const { linkHandler } = w.terms[0].options;
+    assert.equal(linkHandler.allowNonHttpProtocols, true);
+    linkHandler.activate({}, 'file:///C:/x.md');
+    w.webLinks[0]({}, 'https://git.example.com/mr/1');
+    assert.deepEqual(
+      w.posted.slice(-2).map((p) => p.message),
+      [
+        { type: 'cck-term:link', href: 'file:///C:/x.md' },
+        { type: 'cck-term:link', href: 'https://git.example.com/mr/1' },
+      ],
+    );
+  });
+
+  it('links absolute paths on a line, in cells, without the line number', () => {
+    const w = stubWindow();
+    w.send(init);
+    const term = w.terms[0];
+    const cells = [...'界 see C:/a/b.js:12, then /'].flatMap((c) =>
+      c === '界' ? [{ getChars: () => c, getWidth: () => 2 }, { getChars: () => '', getWidth: () => 0 }] : [{ getChars: () => c, getWidth: () => 1 }],
+    );
+    const line = { getCell: (x) => cells[x], translateToString: () => cells.map((c) => c.getChars()).join('') };
+    term.buffer.active.getLine = (i) => (i === 4 ? line : undefined);
+    let links;
+    term.linkProvider.provideLinks(5, (l) => {
+      links = l;
+    });
+    assert.deepEqual(
+      links.map((l) => [l.text, l.range]),
+      [['C:/a/b.js:12', { start: { x: 8, y: 5 }, end: { x: 19, y: 5 } }]],
+    );
+    links[0].activate();
+    assert.deepEqual(w.posted.at(-1).message, { type: 'cck-term:link', href: 'C:/a/b.js' });
+    term.linkProvider.provideLinks(1, (l) => {
+      links = l;
+    });
+    assert.equal(links, undefined);
+  });
+
+  it('finds paths but not URLs or bare slashes', () => {
+    const paths = (s) => pathsIn(s).map((p) => p.path);
+    assert.deepEqual(paths('open C:\\Users\\me\\notes.md.'), ['C:\\Users\\me\\notes.md']);
+    assert.deepEqual(paths('(see /home/me/src/app.js:3:7)'), ['/home/me/src/app.js']);
+    assert.deepEqual(paths('https://example.com/a/b and a/b/c and 1/2 and /api'), []);
+    assert.deepEqual(paths('as "C:\\Program Files\\x.txt" and \'/home/my docs/a b.md:4\''), [
+      'C:\\Program Files\\x.txt',
+      '/home/my docs/a b.md',
+    ]);
+    assert.deepEqual(pathsIn('x "C:/a b"')[0].index, 3);
+    assert.deepEqual(paths('at \\\\nas01\\share\\notes.md and "\\\\nas01\\my share\\a.md"'), [
+      '\\\\nas01\\share\\notes.md',
+      '\\\\nas01\\my share\\a.md',
+    ]);
+    assert.deepEqual(paths('regex \\\\d and \\\\'), []);
+    assert.deepEqual(paths('C:/Program Files/x and "say C:/a b"'), ['C:/Program', 'C:/a']);
   });
 
   it('hands a claimed key to the board and keeps the rest', () => {

@@ -48,6 +48,39 @@
     return lines.join('\n');
   }
 
+  const PATH_ROOT = String.raw`(?:[A-Za-z]:[\\/]|\/(?=[\w.@+-]+\/)|\\\\(?=[\w.$-]+\\))`;
+  // A quoted path may hold spaces; a bare one ends at the first.
+  const PATH_RE = new RegExp(
+    [
+      String.raw`"(${PATH_ROOT}[^"<>|*?]*[^\s"<>|*?])"`,
+      String.raw`'(${PATH_ROOT}[^'<>|*?]*[^\s'<>|*?])'`,
+      String.raw`(?<![\w/\\:.~-])${PATH_ROOT}[^\s"'<>|*?${'`'}]*[^\s"'<>|*?${'`'}.,;:!)\]}]`,
+    ].join('|'),
+    'g',
+  );
+
+  function pathsIn(text) {
+    return Array.from(text.matchAll(PATH_RE), (m) => {
+      const quoted = m[1] ?? m[2];
+      const found = quoted ?? m[0];
+      return { index: m.index + (quoted ? 1 : 0), text: found, path: found.replace(/(?::\d+){1,2}$/, '') };
+    });
+  }
+
+  // Cell x of each character, because a wide character spans two cells and translateToString counts it once.
+  function lineCells(line, cols, reuse) {
+    let text = '';
+    const xs = [];
+    for (let x = 0; x < cols; x++) {
+      const cell = line.getCell(x, reuse);
+      if (!cell || cell.getWidth() === 0) continue;
+      const chars = cell.getChars() || ' ';
+      for (let i = 0; i < chars.length; i++) xs.push(x);
+      text += chars;
+    }
+    return { text, xs };
+  }
+
   function oscColor(hex) {
     const m = /^#([0-9a-f]{6})$/i.exec(hex || '');
     if (!m) return null;
@@ -147,6 +180,8 @@
         scrollback: o.scrollback,
         cursorBlink: true,
         allowProposedApi: true,
+        // xterm's default asks with confirm() and opens a window, which the installed hub window blocks.
+        linkHandler: { activate: (_e, uri) => up('link', { href: uri }), allowNonHttpProtocols: true },
         ...o.themeOptions,
       });
       state.term = term;
@@ -154,6 +189,22 @@
       term.loadAddon(state.fit);
       term.loadAddon(new win.Unicode11Addon.Unicode11Addon());
       term.unicode.activeVersion = '11';
+      // Link providers scan a line only when the pointer moves onto it, never on output.
+      term.loadAddon(new win.WebLinksAddon.WebLinksAddon((_e, uri) => up('link', { href: uri })));
+      const cellReuse = term.buffer.active.getNullCell();
+      term.registerLinkProvider({
+        provideLinks(y, done) {
+          const line = term.buffer.active.getLine(y - 1);
+          if (!line || !/[\\/]/.test(line.translateToString(true))) return done(undefined);
+          const { text, xs } = lineCells(line, term.cols, cellReuse);
+          const links = pathsIn(text).map((p) => ({
+            text: p.text,
+            range: { start: { x: xs[p.index] + 1, y }, end: { x: xs[p.index + p.text.length - 1] + 1, y } },
+            activate: () => up('link', { href: p.path }),
+          }));
+          done(links.length ? links : undefined);
+        },
+      });
       term.open(host);
       try {
         const gl = new win.WebglAddon.WebglAddon();
@@ -346,7 +397,7 @@
   }
 
   if (typeof module === 'object' && module.exports) {
-    module.exports = { createTerminalFrame, claimSig, isClaimed, handsBack, parentOriginOf, tailOf };
+    module.exports = { createTerminalFrame, claimSig, isClaimed, handsBack, parentOriginOf, tailOf, pathsIn };
   } else {
     createTerminalFrame(root);
   }

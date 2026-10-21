@@ -3468,6 +3468,7 @@ const XTERM_FILES = {
   'addon-fit.js': '@xterm/addon-fit/lib/addon-fit.js',
   'addon-webgl.js': '@xterm/addon-webgl/lib/addon-webgl.js',
   'addon-unicode11.js': '@xterm/addon-unicode11/lib/addon-unicode11.js',
+  'addon-web-links.js': '@xterm/addon-web-links/lib/addon-web-links.js',
 };
 app.get('/vendor/xterm/:file', (req, res) => {
   const rel = Object.hasOwn(XTERM_FILES, req.params.file) ? XTERM_FILES[req.params.file] : null;
