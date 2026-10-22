@@ -150,14 +150,19 @@ async function markStopped($: EngineInterface) {
 
 // The name map lets TeammateIdle, which names the teammate, find its agent id. The prompt is on
 // the start line because a resume runs a new prompt, and the server's own lookup finds the first.
-async function agentStarted($: EngineInterface, e: AgentSpawnInput, agentId: string, model: string) {
+async function agentStarted(
+  $: EngineInterface,
+  e: Partial<Pick<AgentSpawnInput, 'subagentType' | 'prompt' | 'description' | 'name'>>,
+  agentId: string,
+  model?: string,
+) {
   const dir = await sessionDir($)
   const ts = new Date().toISOString()
   await Promise.all([
     appendLine($, `${dir}/${agentId}.jsonl`, {
       agentId,
       type: e.subagentType,
-      model,
+      ...(model && { model }),
       event: 'start',
       status: 'active',
       ...(e.prompt && { prompt: e.prompt }),
@@ -167,6 +172,27 @@ async function agentStarted($: EngineInterface, e: AgentSpawnInput, agentId: str
     }),
     $.fs.write(`${dir}/_name-${e.name ?? e.subagentType}.id`, agentId),
   ])
+}
+
+// A forked skill fires no agent.spawn, but $.agent.list() names it; internal loops (compaction,
+// memory) and workflow agents it does not. A spawned agent's turn.start runs inside its spawn's
+// next(), and a second start line would reset the server's fold, so turn.start leaves the agents
+// of a spawn in flight to the spawn; turn.complete catches a fork that started in that window.
+const tracked = new Map<string, Promise<void>>()
+let spawning = 0
+
+function trackAgent($: EngineInterface, agentId: string, prompt?: string) {
+  const found = tracked.get(agentId) ?? startUnspawned($, agentId, prompt).catch(() => {})
+  tracked.set(agentId, found)
+  return found
+}
+
+async function startUnspawned($: EngineInterface, agentId: string, prompt?: string) {
+  if (await $.fs.exists(`${await sessionDir($)}/${agentId}.jsonl`)) return
+  const agent = (await $.agent.list()).find(a => a.id === agentId)
+  if (!agent) return
+  const { type: subagentType, description, name } = agent
+  await agentStarted($, { subagentType, description, name, prompt }, agentId)
 }
 
 // turn.complete also ends loops agent.spawn never started (internal agents): those have no file.
@@ -251,13 +277,26 @@ export const register: Register = on => {
     return next(e)
   })
   on('agent.spawn', async ($, e, next) => {
-    const result = await next(e)
-    if (result.agentId) await agentStarted($, e, result.agentId, result.model)
-    return result
+    spawning++
+    try {
+      const result = await next(e)
+      if (result.agentId) await agentStarted($, e, result.agentId, result.model)
+      return result
+    } finally {
+      spawning--
+    }
+  })
+  on('turn.start', async ($, e, next) => {
+    if (e.agentId && !spawning) await trackAgent($, e.agentId, e.text || undefined)
+    return next(e)
   })
   // An interrupted turn fires no Stop hook, so it does not mark the session unread either.
   on('turn.complete', async ($, e, next) => {
-    if (e.agentId) await agentStopped($, e.agentId, e.answer)
+    if (e.agentId) {
+      await trackAgent($, e.agentId)
+      tracked.delete(e.agentId)
+      await agentStopped($, e.agentId, e.answer)
+    }
     else if (!e.isAborted) await markStopped($)
     return next(e)
   })

@@ -1,4 +1,4 @@
-import type { On, ToolCallArgs, ToolCheckDecision } from 'claude-code'
+import type { AgentInfo, On, ToolCallArgs, ToolCheckDecision } from 'claude-code'
 import { type Engine, expect, type MockClock, mock, test } from 'claude-code/testing'
 import { BOARD_ALLOWED, CLEARED } from '../hooks/activity'
 
@@ -7,11 +7,20 @@ const SESSION = `${ROOT}/sid-1`
 const MARKER = `${SESSION}/_waiting.json`
 const CONFIG = 'C:/cfg/.cck/config.json'
 
-type EngineOptions = { decision?: ToolCheckDecision; rule?: string; env?: Record<string, string> }
+type EngineOptions = {
+  decision?: ToolCheckDecision
+  rule?: string
+  env?: Record<string, string>
+  agents?: AgentInfo[]
+}
 
 // A test hook cannot raise tool.check, so the test raises it (askFor), and the engine's tool.call
 // holds the first call until the test answers the terminal prompt.
-function engine(on: On, files: Record<string, string>, { decision = 'allow', rule, env = {} }: EngineOptions = {}) {
+function engine(
+  on: On,
+  files: Record<string, string>,
+  { decision = 'allow', rule, env = {}, agents = [] }: EngineOptions = {},
+) {
   const writes: { path: string; text: string }[] = []
   const runs: unknown[] = []
   const status: (string | undefined)[] = []
@@ -50,6 +59,9 @@ function engine(on: On, files: Record<string, string>, { decision = 'allow', rul
   })
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
   on('agent.spawn', () => ({ model: 'haiku', agentId: 'a1' }))
+  on('agent.list', () => ({ value: agents }))
+  on('fs.exists', (_$, e) => ({ value: norm(e.path) in files }))
+  on('turn.start', (_$, e) => ({ turnId: e.turnId }))
   on('turn.complete', (_$, e) => ({ text: e.answer }))
   on('classic.*', () => ({}))
   return { writes, runs, status, answer }
@@ -303,6 +315,64 @@ test('a finished loop that was never spawned writes nothing', async ($, on) => {
   await $.turn.complete(turn({ agentId: 'internal' }))
 
   expect(writes).toEqual([])
+})
+
+const forked: AgentInfo = {
+  id: 'f1',
+  type: 'general-purpose',
+  description: '/code-review high',
+  status: 'running',
+  name: 'code-review',
+}
+
+test('a forked skill is recorded at its turn start and stopped at its end', async ($, on) => {
+  const files: Record<string, string> = {}
+  engine(on, files, { agents: [forked] })
+
+  await $.turn.start({ text: 'review the MR', turnId: 't', agentId: 'f1' })
+  await $.turn.complete(turn({ agentId: 'f1', answer: 'review done' }))
+
+  const all = lines(files[`${SESSION}/f1.jsonl`])
+  expect(all.map(l => l.event)).toEqual(['start', 'stop'])
+  expect(all[0]).toMatchObject({
+    agentId: 'f1',
+    type: 'general-purpose',
+    description: '/code-review high',
+    prompt: 'review the MR',
+  })
+  expect('model' in all[0]).toBe(false)
+  expect(all[1]).toMatchObject({ status: 'stopped', lastMessage: 'review done' })
+  expect(files[`${SESSION}/_name-code-review.id`]).toBe('f1')
+})
+
+test('a forked skill whose start no hook heard is recorded at its end', async ($, on) => {
+  const files: Record<string, string> = {}
+  engine(on, files, { agents: [{ ...forked, id: 'f2' }] })
+
+  await $.turn.complete(turn({ agentId: 'f2' }))
+
+  expect(lines(files[`${SESSION}/f2.jsonl`]).map(l => l.event)).toEqual(['start', 'stop'])
+})
+
+test('a spawned subagent turn start adds no second start line', async ($, on) => {
+  const files: Record<string, string> = {}
+  engine(on, files, { agents: [{ ...forked, id: 'a1' }] })
+
+  await $.agent.spawn(spawn('general-purpose'))
+  await $.turn.start({ text: 'p', turnId: 't', agentId: 'a1' })
+
+  expect(lines(files[`${SESSION}/a1.jsonl`]).map(l => l.event)).toEqual(['start'])
+})
+
+test('a turn start inside its spawn leaves the start line to the spawn', async ($, on) => {
+  const files: Record<string, string> = {}
+  engine(on, files, { agents: [{ ...forked, id: 'a1' }] })
+
+  await Promise.all([$.agent.spawn(spawn('general-purpose')), $.turn.start({ text: 'p', turnId: 't', agentId: 'a1' })])
+
+  const all = lines(files[`${SESSION}/a1.jsonl`])
+  expect(all.map(l => l.event)).toEqual(['start'])
+  expect(all[0]).toMatchObject({ model: 'haiku' })
 })
 
 test('a named spawn maps the name, and TeammateIdle finds the agent by it', async ($, on) => {
