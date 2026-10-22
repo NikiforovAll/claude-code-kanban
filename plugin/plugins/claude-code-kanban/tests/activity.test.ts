@@ -14,8 +14,8 @@ type EngineOptions = {
   agents?: AgentInfo[]
 }
 
-// A test hook cannot raise tool.check, so the test raises it (askFor), and the engine's tool.call
-// holds the first call until the test answers the terminal prompt.
+// The engine raises tool.check inside the call, and its ask waits in classic.PermissionRequest
+// until the test answers the terminal prompt.
 function engine(
   on: On,
   files: Record<string, string>,
@@ -47,13 +47,8 @@ function engine(
     return { value: undefined }
   })
   on('tool.check', () => ({ decision, rule }))
-  let held = decision === 'ask'
   on('tool.call', async (_$, e) => {
     const { tool, tool_use_id, agentId, ...input } = e
-    if (held) {
-      held = false
-      await terminal
-    }
     runs.push(input)
     return { result: { stdout: 'ok' } }
   })
@@ -63,15 +58,16 @@ function engine(
   on('fs.exists', (_$, e) => ({ value: norm(e.path) in files }))
   on('turn.start', (_$, e) => ({ turnId: e.turnId }))
   on('turn.complete', (_$, e) => ({ text: e.answer }))
+  on('classic.PermissionRequest', async () => {
+    await terminal
+    return { decision: { behavior: 'allow' as const } }
+  })
   on('classic.*', () => ({}))
   return { writes, runs, status, answer }
 }
 
 async function askFor($: Engine, clock: MockClock, args: { tool: string } & Record<string, unknown>) {
-  const { tool, ...input } = args
   const call = $.tool.call(args as ToolCallArgs)
-  await clock.settle()
-  await $.tool.check({ tool, input })
   await clock.settle()
   return { call }
 }
