@@ -23,8 +23,25 @@ board     GET the list and the post, render the card
 ```
 
 - The mod reads the token on every post, because a restarted board writes a new one.
-- Outside cck's terminal the mod registers no tool and drops the skill from the skill listing, so the model never sees either.
+- Outside cck's terminal an interactive session gets `show` too, as a board pane (below).
 - POST and the two DELETE routes need the terminal token and a live terminal with that id. The GET routes need neither, because the board reads them.
+
+## Outside the terminal
+
+A session without `CCK_URL` and `CCK_TERMINAL_ID` has no overlay, so `show` adds the card as a pane of the session on the board instead, the same pane `claude-code-kanban pane add` makes:
+
+```
+mod       session.start registers show with title and file required
+model     show {title, file}
+mod       POST /api/panes/<session id> {target: file, title, show: true}, board from <config dir>/.cck/server.json
+board     the pane opens in the background; the pane file watch refreshes it on each save
+```
+
+- The model writes the card to a file in its scratchpad first, as the `visualize` skill does with its pages: the mod has no claim path to hand out. A call without `file` sends nothing and asks for one.
+- `show: true` renders the pane with the card's theme, like the header's pane button (Card, below). The same file again answers that its tab exists.
+- `key`, `kind` and `base` are not in this tool's schema: the file's extension sets the kind, and the pane is the file.
+- No `server.json`: the tool answers that the board is not running. A board error reaches the model with its text.
+- The skill list keeps the `show` skill everywhere. The mod does not filter it: a managed `prepend` plugin can pass `prompt.attachment` over user plugins, so a filter there would not hold.
 
 ## Posts
 
@@ -75,3 +92,4 @@ Any HTML preview (the card, a pane, the preview modal) can send the user's answe
 - Watches: one `fs.watch` per session that has posts and a terminal, unref'd.
 - Board: one list GET and one post GET per event for the terminal on screen.
 - Per action: nothing until a click; then one file write and one doorbell line.
+- Per post outside the terminal: one `server.json` read and one pane POST; the board's existing pane file watch does the refresh.

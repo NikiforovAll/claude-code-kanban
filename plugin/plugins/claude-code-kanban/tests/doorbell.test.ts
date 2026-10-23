@@ -23,6 +23,7 @@ function engine(on: On, replies: (() => Reply)[], submit?: () => Promise<unknown
   on('env.get', (_$, e) => ({ value: { CLAUDE_CONFIG_DIR: 'C:/cfg' }[e.name] }))
   on('session.id', () => ({ value: sessionId }))
   on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('tool.register', (_$, e) => ({ value: { tool: `mcp__claude-code-kanban__${e.name}` } }))
   on('http.fetch', async (_$, e) => {
     urls.push(e.url)
     const reply = replies.shift()
