@@ -46,6 +46,7 @@ Every exhibit, ready or new, keeps these:
 - Colors come from the tokens on every draw, in canvas too, so a theme change needs no extra code.
 - Nothing runs while the reader does nothing, except a running model that is on screen.
 - Numbers from a model are marked as model numbers.
+- When the reader's choice should come back to the session, such as quiz answers or a pick, wrap the inputs in `<form data-cck-submit="<name>">`, or put `data-cck-action="<name>"` on one button. It works in a board pane: the session gets the fields as its next prompt. The board sends only on a real click. Give `type="button"` to buttons that must not send, and call `preventDefault` on the submit so the page also works outside cck.
 - The script goes at the end of `<body>`; its CSS goes in the second `<style>`.
 
 ## Blocks
