@@ -1,4 +1,4 @@
-// claude-hub-sdk 1.7.0 (sha256 904e53d87ec4). Copied by npm run sdk:sync in claude-code-hub. Do not edit.
+// claude-hub-sdk 1.8.0 (sha256 9a67dd2aa534). Copied by npm run sdk:sync in claude-code-hub. Do not edit.
 // Claude Code Hub SDK: the one rule that names a key press, shared by the hub page, client.js and
 // stub.js. The hub serves it to its page as /sdk/keys.js; mount() and sdk:sync put it in front of
 // client.js and stub.js, so an app still loads one file.
@@ -33,7 +33,21 @@ var ClaudeHubKeys = (() => {
     return combo.split('+').map((k) => mods[k] ?? named[k] ?? (k.length === 1 ? k.toUpperCase() : k));
   }
 
-  return { comboOf, keyParts };
+  // A host claim (protocol §5.2) names a press by its physical code, or by its character when the layout
+  // moves the key: {ctrlKey?, altKey?, shiftKey?, metaKey?, code, key: 'Unidentified'} or {…, key, code: ''}.
+  // A press matches a claim when one of its two signatures is the claim's first. AltGr types a
+  // character, so its press matches by character only. cck's frames use the same format.
+  function keySigs(e) {
+    const mods = [e.ctrlKey && 'ctrl', e.altKey && 'alt', e.shiftKey && 'shift', e.metaKey && 'meta']
+      .filter(Boolean)
+      .join('+');
+    return [
+      e.code && !e.getModifierState?.('AltGraph') && `${mods}|c:${e.code}`,
+      typeof e.key === 'string' && e.key !== 'Unidentified' && `${mods}|k:${e.key.toLowerCase()}`,
+    ].filter(Boolean);
+  }
+
+  return { comboOf, keyParts, keySigs };
 })();
 
 if (typeof module === 'object' && module.exports) module.exports = ClaudeHubKeys;
@@ -69,9 +83,10 @@ if (typeof module === 'object' && module.exports) module.exports = ClaudeHubKeys
         bindTheme: () => off,
         handle() {},
         publish() {},
-        invoke(action, params = {}) {
+        invoke(action, params = {}, opts = {}) {
           const target = standaloneFn(action)?.(params);
           if (!target) return Promise.resolve({ ok: false, reason: 'unhandled' });
+          if (opts.open === 'pane') return Promise.resolve({ ok: true, handledBy: 'standalone', url: target });
           win.open(target, '_blank', 'noopener');
           return Promise.resolve({ ok: true, handledBy: 'standalone' });
         },

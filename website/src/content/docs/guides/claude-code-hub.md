@@ -46,15 +46,17 @@ Claude Code Kanban keeps <kbd>Ctrl+Alt+N</kbd> (new session), <kbd>Ctrl+Alt+R</k
 
 ## Jump to other apps
 
-These keys work only under the hub. They use the session that is selected or under the cursor.
+These keys work only under the hub. They use the session that is selected or under the cursor, and open the app in a [pane](/claude-code-kanban/guides/panes/) of that session, which the board brings into view. The app in the pane follows the hub theme and takes the hub keys, like its tab. While the app has focus, board keys with <kbd>Ctrl</kbd> or <kbd>Alt</kbd> still work, such as <kbd>Alt+W</kbd> to close the pane. Marketplace opens the Installed list with the session project's customizations selected.
 
-| Key | Goes to |
+| Key | Opens |
 | --- | --- |
 | <kbd>M</kbd> | Marketplace, scoped to the project of the session |
 | <kbd>$</kbd> | Cost, on the detail view of the session |
 | <kbd>Ctrl+M</kbd> | Memory, scoped to the project of the session |
 
-The [session info](/claude-code-kanban/guides/session-details/) modal (<kbd>I</kbd>) also has **Open in Cost**, **Open in Marketplace** and **Open in Memory** buttons. The Marketplace and Memory buttons show only when the session has a project. Standalone, the buttons show only when you set `--cost-url`, `--marketplace-url` or `--memory-url`.
+The [session info](/claude-code-kanban/guides/session-details/) modal (<kbd>I</kbd>) also has **Open in Cost**, **Open in Marketplace** and **Open in Memory** buttons, which open a pane the same way. Shift-click a button to switch to the app's hub tab instead. The same view opened again goes to the pane it already has. The Marketplace and Memory buttons show only when the session has a project. Standalone, the buttons show only when you set `--cost-url`, `--marketplace-url` or `--memory-url`.
+
+`claude-code-kanban session cost` still switches to the Cost tab.
 
 ## Theme and project sync
 

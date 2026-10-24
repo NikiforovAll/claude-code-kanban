@@ -1,4 +1,4 @@
-// claude-hub-sdk 1.7.0 (sha256 904e53d87ec4). Copied by npm run sdk:sync in claude-code-hub. Do not edit.
+// claude-hub-sdk 1.8.0 (sha256 9a67dd2aa534). Copied by npm run sdk:sync in claude-code-hub. Do not edit.
 // Claude Code Hub SDK: the one rule that names a key press, shared by the hub page, client.js and
 // stub.js. The hub serves it to its page as /sdk/keys.js; mount() and sdk:sync put it in front of
 // client.js and stub.js, so an app still loads one file.
@@ -33,7 +33,21 @@ var ClaudeHubKeys = (() => {
     return combo.split('+').map((k) => mods[k] ?? named[k] ?? (k.length === 1 ? k.toUpperCase() : k));
   }
 
-  return { comboOf, keyParts };
+  // A host claim (protocol §5.2) names a press by its physical code, or by its character when the layout
+  // moves the key: {ctrlKey?, altKey?, shiftKey?, metaKey?, code, key: 'Unidentified'} or {…, key, code: ''}.
+  // A press matches a claim when one of its two signatures is the claim's first. AltGr types a
+  // character, so its press matches by character only. cck's frames use the same format.
+  function keySigs(e) {
+    const mods = [e.ctrlKey && 'ctrl', e.altKey && 'alt', e.shiftKey && 'shift', e.metaKey && 'meta']
+      .filter(Boolean)
+      .join('+');
+    return [
+      e.code && !e.getModifierState?.('AltGraph') && `${mods}|c:${e.code}`,
+      typeof e.key === 'string' && e.key !== 'Unidentified' && `${mods}|k:${e.key.toLowerCase()}`,
+    ].filter(Boolean);
+  }
+
+  return { comboOf, keyParts, keySigs };
 })();
 
 if (typeof module === 'object' && module.exports) module.exports = ClaudeHubKeys;
@@ -48,9 +62,12 @@ if (typeof module === 'object' && module.exports) module.exports = ClaudeHubKeys
   // hub's proxy port, so a page framed by something other than the hub would otherwise paint the hub's last theme.
   const VARS_KEY = 'claude-hub:vars';
   const WELCOME_WAIT_MS = 2000;
+  // A press in one of these types text, so the host never gets it.
+  const FIELDS =
+    'input:not([type=checkbox], [type=radio], [type=button], [type=submit], [type=reset], [type=range], [type=color], [type=file], [type=image]), textarea, select, [contenteditable]';
 
   // keys.js comes first in the served file. Required as a module, client.js loads it itself.
-  const { comboOf, keyParts } = typeof ClaudeHubKeys === 'object' ? ClaudeHubKeys : require('./keys');
+  const { comboOf, keyParts, keySigs } = typeof ClaudeHubKeys === 'object' ? ClaudeHubKeys : require('./keys');
 
   function isVars(v) {
     return (
@@ -274,28 +291,50 @@ if (typeof module === 'object' && module.exports) module.exports = ClaudeHubKeys
         return !!forward && forward.has(comboOf(e));
       }
 
-      function onKeydown(e) {
-        if (!forwards(e)) return;
-        e.preventDefault();
-        post({
-          type: 'hub:keydown',
-          key: e.key,
-          code: e.code,
-          ctrl: e.ctrlKey,
-          alt: e.altKey,
-          shift: e.shiftKey,
-          meta: e.metaKey,
-        });
+      // Protocol §5.2. The app page that frames this one, such as a cck pane, claims the presses it acts on.
+      let hostKeys = null;
+      let hostOrigin = null;
+
+      function onHostMessage(e) {
+        const m = e.data;
+        if (!framed || e.source !== win.parent || win.parent === win.top) return;
+        if (m?.type !== 'hub:hostKeys' || !Array.isArray(m.keys)) return;
+        if (!hostKeys) win.parent.postMessage({ type: 'hub:hostReady' }, e.origin);
+        hostOrigin = e.origin;
+        hostKeys = new Set(m.keys.map((k) => keySigs(k)[0]));
       }
 
-      function run(action, params, resolve) {
+      const keyMessage = (type, e) => ({
+        type,
+        key: e.key,
+        code: e.code,
+        ctrl: e.ctrlKey,
+        alt: e.altKey,
+        shift: e.shiftKey,
+        meta: e.metaKey,
+      });
+
+      function onKeydown(e) {
+        if (forwards(e)) {
+          e.preventDefault();
+          return post(keyMessage('hub:keydown', e));
+        }
+        if (!hostKeys || e.defaultPrevented || !keySigs(e).some((s) => hostKeys.has(s))) return;
+        if (e.target?.closest?.(FIELDS)) return;
+        e.preventDefault();
+        win.parent.postMessage(keyMessage('hub:hostKey', e), hostOrigin);
+      }
+
+      function run(action, params, opts, resolve) {
+        const pane = opts?.open === 'pane';
         if (status === 'live') {
           const id = String(++nextId);
           pending.set(id, resolve);
-          return post({ type: 'hub:invoke', id, action, params });
+          return post({ type: 'hub:invoke', id, action, params, ...(pane && { open: 'pane' }) });
         }
         const target = standaloneFn(action)?.(params);
         if (!target) return resolve({ ok: false, reason: 'unhandled' });
+        if (pane) return resolve({ ok: true, handledBy: 'standalone', url: target });
         win.open(target, '_blank', 'noopener');
         resolve({ ok: true, handledBy: 'standalone' });
       }
@@ -337,6 +376,7 @@ if (typeof module === 'object' && module.exports) module.exports = ClaudeHubKeys
       }
 
       win.addEventListener('message', onMessage);
+      win.addEventListener('message', onHostMessage);
       doc.addEventListener('keydown', onKeydown);
       win.addEventListener('click', onLinkClick, true);
       win.addEventListener('auxclick', onLinkClick, true);
@@ -448,10 +488,10 @@ if (typeof module === 'object' && module.exports) module.exports = ClaudeHubKeys
           if (status === 'live') post({ type: 'hub:publish', topic, payload });
           else if (waiting()) outbox.set(topic, payload);
         },
-        invoke(action, params = {}) {
+        invoke(action, params = {}, opts = {}) {
           return new Promise((resolve) => {
-            if (waiting()) queued.push(() => run(action, params, resolve));
-            else run(action, params, resolve);
+            if (waiting()) queued.push(() => run(action, params, opts, resolve));
+            else run(action, params, opts, resolve);
           });
         },
         can(action) {

@@ -5058,7 +5058,7 @@ body.show-resizing iframe {
   color: var(--accent);
 }
 
-.pane-view.frame-focus .pane-keys {
+.pane-view.frame-focus:not(.keys-bridged) .pane-keys {
   display: flex;
 }
 

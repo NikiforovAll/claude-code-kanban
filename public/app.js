@@ -3433,24 +3433,34 @@ function agentIdentHtml(a) {
 
 // The count names every running agent; the rows stop at ZEN_AGENTS_MAX, and the Agents Log
 // below the board lists the rest.
-function zenAgentsHtml(agents) {
-  const active = agents.filter((a) => a.status === 'active');
+function zenAgentsHtml(active) {
   if (!active.length) return '';
-  const now = Date.now();
   const rows = active.slice(0, ZEN_AGENTS_MAX).map((a) => {
     const task = truncateAtWord(agentTaskText(a), 200);
     return `<button type="button" class="zen-agent" title="${escapeHtml(task)}" onclick="showAgentModal('${escAttrJs(a.agentId)}')">
       <span class="agent-dot active"></span>
       <span class="zen-agent-text"><span class="zen-agent-task">${escapeHtml(task)}</span><span class="agent-ident-row">${agentIdentHtml(a)}</span></span>
-      <span class="zen-agent-time">${formatDuration(agentElapsed(a, now))}</span>
+      <span class="zen-agent-time"></span>
     </button>`;
   });
   return `<div class="panel-section-header"><span>Agents</span><span class="panel-section-count">${active.length}</span></div>${rows.join('')}`;
 }
 
+// The 1 s duration tick calls this. Rewriting the rows each time would drop the focus of a row,
+// so the rows are rewritten only when they change and the times are set in place.
 function renderZenAgents(agents) {
   const el = zenMode && sessionsList.querySelector('.zen-agents');
-  if (el) el.innerHTML = zenAgentsHtml(agents);
+  if (!el) return;
+  const active = agents.filter((a) => a.status === 'active');
+  const html = zenAgentsHtml(active);
+  if (html !== el.dataset.shape) {
+    el.dataset.shape = html;
+    el.innerHTML = html;
+  }
+  const now = Date.now();
+  el.querySelectorAll('.zen-agent-time').forEach((t, i) => {
+    t.textContent = formatDuration(agentElapsed(active[i], now));
+  });
 }
 
 // Filter shutdown ghosts: for same-type agents, keep if they overlapped (parallel)
@@ -4111,11 +4121,13 @@ function renderSessions() {
         ${renderZenBookmarksHtml(zenSession.id)}
       </div>
       ${zenSession.hasWorkflow ? renderWorkflowLiveHtml(zenSession.id) : ''}
-      <div class="zen-agents">${zenAgentsHtml(visibleAgents())}</div>`;
+      <div class="zen-agents"></div>`;
+    renderZenAgents(visibleAgents());
     bindLinkedDocsHandlers(sessionsList.querySelector('.linked-docs-section'), zenSession.id);
     artifactsSection.load(zenSession.id);
     scratchFilesSection.load(zenSession.id);
     if (zenSession.hasWorkflow) pollWorkflowLive(zenSession.id);
+    restoreSessionCursor();
     return;
   }
 
@@ -4364,7 +4376,10 @@ function renderSessions() {
     const tail = sectioned ? sectionHtml(SECTION_SESSIONS, 'Sessions', true, restHtml, sgRest.length === 0) : restHtml;
     sessionsList.innerHTML = html + sgSectionHtml(true) + tail + outsideHtml;
   }
+  restoreSessionCursor();
+}
 
+function restoreSessionCursor() {
   const navItems = getNavigableItems();
   const allSessions = getSessionItems();
   const activeIdx = allSessions.findIndex((el) => el.classList.contains('active'));
@@ -7949,6 +7964,21 @@ document.addEventListener('keydown', (e) => {
     toggleZenMode();
     return;
   }
+  if (e.key === '$' && plainShift) {
+    e.preventDefault();
+    openCost(contextSessionId());
+    return;
+  }
+  if (matchKey(e, 'KeyM')) {
+    e.preventDefault();
+    openMarketplace(contextSessionId());
+    return;
+  }
+  if (ClaudeHub.comboOf(e) === 'ctrl+m') {
+    e.preventDefault();
+    openMemory(contextSessionId());
+    return;
+  }
   if (e.key === '.' || e.key === '>') {
     const sid = sessionsList.querySelector('.kb-selected')?.dataset.sessionId || currentSessionId;
     if (sid) {
@@ -8087,23 +8117,6 @@ document.addEventListener('keydown', (e) => {
     const cursorKey = _scratchpadKeyOf(focusZone === 'sidebar' ? sessionsList.querySelector('.kb-selected') : null);
     if (cursorKey) showScratchpad(cursorKey);
     else toggleScratchpad();
-    return;
-  }
-  if (e.key === '$' && !e.ctrlKey && !e.altKey && !e.metaKey) {
-    e.preventDefault();
-    openCost(contextSid);
-    return;
-  }
-  if (matchKey(e, 'KeyM')) {
-    e.preventDefault();
-    const mSession = contextSid ? sessions.find((s) => s.id === contextSid) : null;
-    openMarketplace(mSession?.project);
-    return;
-  }
-  if (ClaudeHub.comboOf(e) === 'ctrl+m') {
-    e.preventDefault();
-    const mSession = contextSid ? sessions.find((s) => s.id === contextSid) : null;
-    openMemory(mSession?.project);
     return;
   }
   if (ClaudeHub.comboOf(e) === 'ctrl+d') {
@@ -8709,7 +8722,9 @@ const ZOOM_CLAIMS = ['ctrlKey', 'metaKey'].flatMap((mod) =>
 // first keeps it, and text fields keep every key.
 const PANE_CLAIMS = [
   ...['\\', '[', ']', 'ContextMenu', 'Escape'].map((key) => ({ key, code: '' })),
-  ...['|', '{', '}', 'F10'].map((key) => ({ shiftKey: true, key, code: '' })),
+  ...['|', '{', '}', 'F10', '$'].map((key) => ({ shiftKey: true, key, code: '' })),
+  { key: 'Unidentified', code: 'KeyM' },
+  { ctrlKey: true, key: 'm', code: '' },
   ...['BracketLeft', 'BracketRight', 'KeyW'].map((code) => ({ altKey: true, key: 'Unidentified', code })),
   ...['KeyL', 'KeyM', 'KeyP', 'KeyS', 'KeyZ'].map((code) => ({ shiftKey: true, key: 'Unidentified', code })),
   ...'123456789'.split('').map((n) => ({ ctrlKey: true, altKey: true, key: 'Unidentified', code: `Digit${n}` })),
@@ -9197,7 +9212,7 @@ function createPreviewFrame(className, srcdoc, sandbox = 'allow-scripts allow-po
   frame.setAttribute('referrerpolicy', 'no-referrer');
   frame.srcdoc = srcdoc;
   bridgedFrames.add(frame);
-  frame.addEventListener('load', () => sendBridgeClaimsAll([frame], keyClaims()));
+  frame.addEventListener('load', () => sendBridgeClaimsAll([frame], bridgeClaims(keyClaims())));
   return frame;
 }
 
@@ -10275,7 +10290,7 @@ function setupEventSource() {
       // Alone, the page would open a tab without a user gesture, which the browser blocks; the
       // CLI prints the link instead.
       if (data.type === 'session:cost' && hub.inHub) {
-        openCost(data.id, data.agent);
+        openCost(data.id, { agent: data.agent, pane: false });
       }
 
       if (data.type === 'session:pin') {
@@ -13148,31 +13163,33 @@ function openFolderInEditor(folder, file) {
   postAndToast('/api/open-folder', body, 'folder');
 }
 
-function openCost(sessionId, agentId) {
-  if (sessionId && agentId && hub.can('agent.cost'))
-    return hub.invoke('agent.cost', { session: sessionId, agent: agentId });
-  hub.invoke('session.cost', sessionId ? { session: sessionId } : {});
+// Opens the app in a pane of `sid` and brings the pane into view. With no session, or `pane: false`
+// (a Shift-click), the hub switches to the app's tab instead.
+async function openAppAction(action, params, sid, { pane = true, label }) {
+  if (!sid || !pane) return hub.invoke(action, params);
+  const { url } = await hub.invoke(action, params, { open: 'pane' });
+  if (!url) return;
+  const onScreen = await postPane(sid, { target: url, title: label });
+  if (onScreen !== null) revealPane(sid, onScreen);
 }
 
-function openMarketplace(projectPath) {
-  hub.invoke('project.plugins', projectPath ? { project: projectPath } : {});
+function openCost(sid, { agent, pane } = {}) {
+  const opts = { pane, label: 'Cost' };
+  if (sid && agent && hub.can('agent.cost')) return openAppAction('agent.cost', { session: sid, agent }, sid, opts);
+  return openAppAction('session.cost', sid ? { session: sid } : {}, sid, opts);
 }
 
-function openMemory(projectPath) {
-  hub.invoke('project.memory', projectPath ? { project: projectPath } : {});
+function openProjectApp(action, label, sid, { pane } = {}) {
+  const project = sessions.find((s) => s.id === sid)?.project;
+  return openAppAction(action, project ? { project } : {}, sid, { pane, label });
 }
+const openMarketplace = (sid, opts) => openProjectApp('project.plugins', 'Marketplace', sid, opts);
+const openMemory = (sid, opts) => openProjectApp('project.memory', 'Memory', sid, opts);
 
-function openForInfoModalProject(open) {
-  const s = sessions.find((x) => x.id === _infoModalSessionId);
-  if (s?.project) open(s.project);
-}
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
-function openMarketplaceForInfoModal() {
-  openForInfoModalProject(openMarketplace);
-}
-// biome-ignore lint/correctness/noUnusedVariables: used in HTML
-function openMemoryForInfoModal() {
-  openForInfoModalProject(openMemory);
+function openAppForInfoModal(open, e) {
+  closeTeamModal();
+  open(_infoModalSessionId, { pane: !e.shiftKey });
 }
 
 //#endregion
@@ -13883,6 +13900,11 @@ async function loadPaneView(sid, pane, view, scroll) {
     frame.setAttribute('referrerpolicy', 'no-referrer');
     frame.title = pane.title;
     frame.src = pane.target;
+    frame.addEventListener('load', () => {
+      view.classList.remove('keys-bridged');
+      frame.hostKeysSig = null;
+      pushTerminalClaims();
+    });
     view.appendChild(frame);
     view.insertAdjacentHTML('beforeend', paneUrlBarHtml());
     // Framed at once; a refusal found by the probe swaps the frame for the card.
@@ -15574,13 +15596,36 @@ function bridgeClaims(claims) {
   return { ...claims, keys: [...claims.keys, ...ZOOM_CLAIMS, ...PANE_CLAIMS, ...review] };
 }
 
-function sendBridgeClaimsAll(frames, claims) {
-  const base = bridgeClaims(claims);
+function sendBridgeClaimsAll(frames, base) {
   const rest = frames.filter((f) => f !== showState.frame);
   sendBridgeClaims(rest, base);
   if (rest.length < frames.length)
     sendBridgeClaims([showState.frame], { ...base, keys: [...base.keys, ...SHOW_CLAIMS] });
 }
+
+// A hub app in a URL pane runs the SDK, which hands back these keys (hub protocol §5.2). Only keys with
+// Ctrl, Alt or Meta: the page keeps Escape, brackets and its own letter keys.
+function sendHostKeys(frames, bridged) {
+  const keys = bridged.keys.filter((k) => k.ctrlKey || k.altKey || k.metaKey);
+  const sig = JSON.stringify(keys);
+  for (const f of frames) {
+    const origin = URL.parse(f.src)?.origin;
+    if (!origin || origin === 'null' || f.hostKeysSig === sig) continue;
+    f.hostKeysSig = sig;
+    f.contentWindow?.postMessage({ type: 'hub:hostKeys', keys }, origin);
+  }
+}
+
+const urlPaneFrames = () => [...paneViews.querySelectorAll('.pane-url-frame')];
+
+window.addEventListener('message', (e) => {
+  const type = e.data?.type;
+  if (type !== 'hub:hostKey' && type !== 'hub:hostReady') return;
+  const frame = urlPaneFrames().find((f) => f.contentWindow === e.source);
+  if (!frame || URL.parse(frame.src)?.origin !== e.origin) return;
+  if (type === 'hub:hostReady') frame.parentElement.classList.add('keys-bridged');
+  else replayKey(e.data, frame);
+});
 
 function pushTerminalClaims() {
   if (terminalClaimsQueued) return;
@@ -15588,9 +15633,12 @@ function pushTerminalClaims() {
   queueMicrotask(() => {
     terminalClaimsQueued = false;
     const bridged = bridgedFrameEls();
-    if (!termFrame.inited && !kanbotState.inited && !bridged.length) return;
+    const urlFrames = urlPaneFrames();
+    if (!termFrame.inited && !kanbotState.inited && !bridged.length && !urlFrames.length) return;
     const claims = keyClaims();
-    sendBridgeClaimsAll(bridged, claims);
+    const base = bridgeClaims(claims);
+    sendBridgeClaimsAll(bridged, base);
+    sendHostKeys(urlFrames, base);
     const sig = JSON.stringify(claims);
     sendFrameClaims(kanbotState, claims, sig, postToKanbotFrame);
     sendFrameClaims(termFrame, claims, sig, terminalFrameSend);
@@ -16999,10 +17047,15 @@ async function openShowInPane() {
 }
 
 // `onScreen` is postPane's result: null failed, true is already in view unless the terminal covers it.
+function revealPane(sid, onScreen) {
+  if (onScreen && !wantsTerminal()) syncPanes();
+  else if (sid === currentSessionId && wantsTerminal()) toggleTerminal();
+  else openSession(sid);
+}
+
 function toastPaneAdded(sid, onScreen, label) {
   if (onScreen === null || (onScreen && !wantsTerminal())) return;
-  const open = () => (sid === currentSessionId && wantsTerminal() ? toggleTerminal() : openSession(sid));
-  showToast(`${label} added as a pane`, 'success', { label: 'Open', onClick: open });
+  showToast(`${label} added as a pane`, 'success', { label: 'Open', onClick: () => revealPane(sid, false) });
 }
 
 function showCommand(cmd) {
