@@ -16829,9 +16829,13 @@ function withHeadFirst(content, head) {
   return content.slice(0, cut) + inject + content.slice(cut);
 }
 
+// The board's scrollbar rules do not reach into a frame, which would show the OS default.
+// Grey, not a board token, because the page paints its own background.
+const FRAME_SCROLLBAR_CSS = ':where(html){scrollbar-width:thin;scrollbar-color:rgba(128,128,128,.45) transparent}';
+
 // A whole document gets the tokens and base styles first in its head, so its own styles win.
 function showSrcdoc(content, restoreY) {
-  const head = `<meta http-equiv="Content-Security-Policy" content="${SHOW_CSP}"><style>:root{${showTokenCss()}}${SHOW_FRAME_BASE}</style>`;
+  const head = `<meta http-equiv="Content-Security-Policy" content="${SHOW_CSP}"><style>:root{${showTokenCss()}}${SHOW_FRAME_BASE}${FRAME_SCROLLBAR_CSS}</style>`;
   const bridge = `<script>(${showBridge})(${Math.max(0, Math.round(restoreY) || 0)}, ${modalZoom});</script>${REVIEW_BRIDGE_TAG}`;
   if (!/^\s*(<!doctype|<html)/i.test(content)) {
     return `<!doctype html><html><head><meta charset="utf-8">${head}</head><body>${content}${bridge}</body></html>`;
@@ -16842,7 +16846,7 @@ function showSrcdoc(content, restoreY) {
 // An HTML file preview gets only the tokens, first in its head: its own :root rules win, and
 // a page that declares its defaults in :where(:root) follows the board theme.
 function themedSrcdoc(content) {
-  const head = `<style id="cck-tokens">:root{${showTokenCss()}}</style>`;
+  const head = `<style id="cck-tokens">:root{${showTokenCss()}}${FRAME_SCROLLBAR_CSS}</style>`;
   return withHeadFirst(content, head) + THEME_BRIDGE_TAG + REVIEW_BRIDGE_TAG;
 }
 

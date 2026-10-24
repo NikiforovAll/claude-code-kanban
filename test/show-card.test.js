@@ -121,6 +121,7 @@ describe('showSrcdoc', () => {
     SHOW_CSP: csp,
     SHOW_FRAME_BASE: 'body{base}',
     REVIEW_BRIDGE_TAG: '<script>review</script>',
+    FRAME_SCROLLBAR_CSS: 'html{bar}',
     showTokenCss: () => '--color-bg:#111',
     withHeadFirst: appFunction('withHeadFirst'),
     showBridge: function showBridge() {},
@@ -132,7 +133,7 @@ describe('showSrcdoc', () => {
     const doc = srcdoc('<p>hi</p>', 0);
     assert.ok(doc.startsWith('<!doctype html><html><head><meta charset="utf-8">'));
     assert.ok(doc.indexOf(cspMeta) < doc.indexOf(':root{--color-bg:#111}'));
-    assert.ok(doc.includes(':root{--color-bg:#111}body{base}</style>'));
+    assert.ok(doc.includes(':root{--color-bg:#111}body{base}html{bar}</style></head>'));
     assert.match(doc, /<body><p>hi<\/p><script>\(function showBridge\(\) \{\}\)\(0, 1\.2\);<\/script><script>review<\/script><\/body>/);
   });
 
@@ -165,8 +166,9 @@ describe('themedSrcdoc', () => {
     withHeadFirst: appFunction('withHeadFirst'),
     THEME_BRIDGE_TAG: '<script>theme</script>',
     REVIEW_BRIDGE_TAG: '<script>review</script>',
+    FRAME_SCROLLBAR_CSS: 'html{bar}',
   });
-  const style = '<style id="cck-tokens">:root{--color-bg:#111}</style>';
+  const style = '<style id="cck-tokens">:root{--color-bg:#111}html{bar}</style>';
 
   it('puts only the tokens first in the head, before the page styles', () => {
     const doc = themed('<!doctype html><html><head><meta charset="utf-8"><style>:root{--color-bg:#fff}</style></head><body>b</body></html>');
