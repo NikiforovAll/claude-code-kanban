@@ -2808,7 +2808,7 @@ function isAnyModalOpen() {
 
 // An open modal owns the zoom keys even when it has nothing to scale.
 function isZoomableOnScreen() {
-  return isAnyModalOpen() ? isZoomableModalOpen() : isPaneDocOnScreen() || isShowCardFocused();
+  return isAnyModalOpen() ? isZoomableModalOpen() : isAskOnScreen() || isPaneDocOnScreen() || isShowCardFocused();
 }
 
 const ZOOM_KEYS = { '+': 0.1, '=': 0.1, NumpadAdd: 0.1, '-': -0.1, _: -0.1, NumpadSubtract: -0.1, 0: 0, Numpad0: 0 };
@@ -15217,9 +15217,10 @@ function inPageField(e) {
 function terminalShortcut(e, probe = false) {
   const ctrlAlt = hubModDown(e);
   const ctrlShift = e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey;
-  // Ctrl+_ is Claude Code's undo, so the zoom keys leave it to the terminal.
+  // Ctrl+_ is Claude Code's undo, so the zoom keys leave it to the terminal. An open ask card,
+  // which sits in the terminal pane, takes them for its own text zoom.
   const zoom = e.key === '_' ? undefined : zoomDelta(e);
-  if (zoom !== undefined && termFrame.inited && (probe || terminalPaneFocused())) {
+  if (zoom !== undefined && termFrame.inited && (probe || (terminalPaneFocused() && !isAskOnScreen()))) {
     return () => adjustTerminalFontSize(Math.sign(zoom));
   }
   if (ctrlAlt && e.code === 'KeyS') return swapToPreviousSession;
@@ -16439,6 +16440,10 @@ const ASK_BRIDGE_TAG = `<script>(${askBridge})();</script>`;
 
 function askEl() {
   return document.getElementById('ask-modal');
+}
+
+function isAskOnScreen() {
+  return !!askState.ask && !askEl().hidden;
 }
 
 function syncAsk(tid) {
