@@ -11275,8 +11275,9 @@ function loadMermaid() {
 }
 
 let mermaidQueue = Promise.resolve();
+let mermaidSeq = 0;
 
-// mermaid.run is async, and two runs that overlap draw diagrams over each other.
+// mermaid.render is async, and two renders that overlap draw diagrams over each other.
 function queueMermaid(work) {
   mermaidQueue = mermaidQueue.then(work).catch((err) => console.warn(err.message));
 }
@@ -11303,10 +11304,15 @@ function initMermaidBlocks(container) {
     return;
   }
   queueMermaid(async () => {
-    // One block per run, so a bad diagram shows its own error and the others still render.
+    // One block per render, so a bad diagram shows its own error and the others still render.
+    // render, not run: run measures labels in place, and under a modal's CSS zoom the measured
+    // widths are off, so node boxes clip their text.
     for (const b of stampPending()) {
       try {
-        await mermaid.run({ nodes: [b] });
+        const { svg, bindFunctions } = await mermaid.render(`mermaid-${++mermaidSeq}`, b.textContent.trim());
+        b.innerHTML = svg;
+        b.setAttribute('data-processed', 'true');
+        bindFunctions?.(b);
       } catch (err) {
         showMermaidError(b, err);
       }

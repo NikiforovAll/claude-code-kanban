@@ -123,10 +123,12 @@ describe('initMermaidBlocks', () => {
     const context = vm.createContext({
       MERMAID_PENDING: appConst('MERMAID_PENDING'),
       document: { querySelector: () => blocks[0], querySelectorAll: () => blocks },
+      mermaidSeq: 0,
       mermaid: {
-        run: async ({ nodes }) => {
-          await run?.(nodes);
-          ran.push(...nodes);
+        render: async (_id, text) => {
+          await run?.(text);
+          ran.push(text);
+          return { svg: '<svg/>' };
         },
       },
       queueMermaid: (work) => {
@@ -144,18 +146,20 @@ describe('initMermaidBlocks', () => {
     const ran = await runBlocks([fresh, kept]);
     assert.equal(fresh.attrs['data-original'], 'flowchart LR\n  A --> B');
     assert.equal(kept.attrs['data-original'], 'pie\n  "a": 1');
-    assert.deepEqual(ran, [fresh, kept]);
+    assert.deepEqual(ran, ['flowchart LR\n  A --> B', '<svg/>']);
+    assert.equal(fresh.innerHTML, '<svg/>');
+    assert.ok('data-processed' in fresh.attrs);
   });
 
   it('shows the error in place of a bad diagram and still renders the next one', async () => {
     const bad = block('flowchart LR\n  A -->');
     const good = block('pie\n  "a": 1');
-    const ran = await runBlocks([bad, good], (nodes) => {
-      if (nodes[0] === bad) throw new Error('Parse error on line 2');
+    const ran = await runBlocks([bad, good], (text) => {
+      if (text === 'flowchart LR\n  A -->') throw new Error('Parse error on line 2');
     });
     assert.equal(bad.textContent, 'Parse error on line 2');
     assert.ok('data-mermaid-error' in bad.attrs && 'data-processed' in bad.attrs);
     assert.equal(bad.attrs['data-original'], 'flowchart LR\n  A -->');
-    assert.deepEqual(ran, [good]);
+    assert.deepEqual(ran, ['pie\n  "a": 1']);
   });
 });
