@@ -51,6 +51,7 @@ const { createTerminalClient } = require('./lib/terminal-client');
 const { kanbotOn, kanbotModel, createKanbot, findCostCli, readCostServer } = require('./lib/kanbot');
 const { AGENT_ID_RE } = require('./cli');
 const { createShowStore, mountShowRoutes, showBodyParser, SHOW_PATH } = require('./lib/show');
+const { createAskStore, mountAskRoutes, askBodyParser, ASK_PATH } = require('./lib/ask');
 const { readLiveSessions, isPidAlive, noteReplacedSessions } = require('./lib/live-sessions');
 const { createProcStats } = require('./lib/proc-stats');
 const { createUserGroupStore } = require('./lib/user-groups');
@@ -666,6 +667,7 @@ app.param('name', (_req, res, next, val) => {
 });
 
 app.use(SHOW_PATH, showBodyParser());
+app.use(ASK_PATH, askBodyParser());
 // Parse JSON bodies. A review of 50 comments at the field caps is about 450 kB.
 app.use(express.json({ limit: '1mb' }));
 // #endregion
@@ -3326,6 +3328,7 @@ let savedTerminals = terminalsFile.load() || {};
 function saveTerminals() {
   const kept = new Set(Object.values(savedTerminals.terminalIds || {}));
   const showSessions = show.prune((id) => kept.has(id) || terminal.hasTerminal(id));
+  ask.prune((id) => terminal.hasTerminal(id));
   terminalsFile.save({ ...savedTerminals, showSessions });
 }
 
@@ -3459,6 +3462,14 @@ mountShowRoutes(app, {
   readPreviewFile,
   broadcast,
   onRemoved: (sessionId, paths) => panes.removeShow(sessionId, paths),
+});
+const ask = createAskStore();
+mountAskRoutes(app, {
+  store: ask,
+  authorized: (token) => terminal.authorized(token),
+  hasTerminal: (id) => terminal.hasTerminal(id),
+  readPreviewFile,
+  broadcast,
 });
 
 // Served from node_modules, never a CDN: any script on this page can use the token.

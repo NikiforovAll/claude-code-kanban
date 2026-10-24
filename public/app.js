@@ -9073,6 +9073,7 @@ function reviewOptsOfFrame(frame) {
 
 async function sendPreviewAction(frame, msg) {
   if (!navigator.userActivation?.isActive) return;
+  if (frame === askState.frame) return answerAsk({ action: msg.action, label: msg.label, fields: msg.data });
   const opts = reviewOptsOfFrame(frame);
   if (!opts?.sessionId) return;
   const key = `${msg.action}\n${JSON.stringify(msg.data)}`;
@@ -10250,6 +10251,8 @@ function setupEventSource() {
 
       if (data.type === 'show:cleared') onShowCleared(data);
       if (data.type === 'show:removed') onShowRemoved(data);
+      if (data.type === 'ask:opened') onAskOpened(data);
+      if (data.type === 'ask:closed') onAskClosed(data);
 
       if (data.type === 'agent-update') {
         if (!data.unreadOnly) pendingAgentSessionIds.add(data.sessionId);
@@ -16417,6 +16420,173 @@ window.addEventListener('message', (e) => {
 
 //#endregion
 
+//#region ASK
+// The question the session in the embedded terminal asks with the ask tool; the tool call waits for
+// the answer. Hiding keeps the frame, so a half-filled card comes back as it was. Only an answer, a
+// skip or the agent's interrupt ends the question.
+const ASK_MSG = 'cck-ask:';
+const askState = { terminalId: null, ask: null, frame: null, frameH: 0, hidden: false, busy: false, seq: 0 };
+
+// Runs inside the card as source text, ahead of the card's own scripts. The JSON round trip makes
+// the answer cloneable, and a value that is not JSON throws in the card.
+function askBridge() {
+  window.cck = {
+    send: (data) => parent.postMessage({ type: 'cck-ask:send', data: JSON.parse(JSON.stringify(data ?? null)) }, '*'),
+  };
+}
+
+const ASK_BRIDGE_TAG = `<script>(${askBridge})();</script>`;
+
+function askEl() {
+  return document.getElementById('ask-modal');
+}
+
+function syncAsk(tid) {
+  if (tid === askState.terminalId) return;
+  askState.terminalId = tid;
+  setAsk(null);
+  if (tid) loadAsk(tid);
+}
+
+async function loadAsk(tid) {
+  const seq = ++askState.seq;
+  const data = await getJson(apiPath`/api/terminals/${tid}/ask`, null, { cache: 'no-store' });
+  if (seq !== askState.seq || tid !== askState.terminalId) return;
+  const a = data?.ask ?? null;
+  if (a?.id !== askState.ask?.id) setAsk(a);
+}
+
+function setAsk(a) {
+  const modal = askEl();
+  const body = modal.querySelector('.ask-body');
+  Object.assign(askState, { ask: a, frame: null, frameH: 0, hidden: false, busy: false });
+  body.replaceChildren();
+  if (a) {
+    modal.querySelector('.ask-title').textContent = a.title;
+    modal.querySelector('.ask-box').dataset.size = a.size;
+    if (a.content == null) {
+      body.innerHTML = '<p class="ask-missing">The card file is gone. Skip, so the agent stops waiting.</p>';
+    } else {
+      const frame = createPreviewFrame('ask-frame', showSrcdoc(a.content, 0, ASK_BRIDGE_TAG), SHOW_SANDBOX);
+      frame.addEventListener('load', () => {
+        if (askState.frame === frame && !askState.hidden) frame.focus();
+      });
+      askState.frame = frame;
+      body.append(frame);
+    }
+  }
+  renderAsk();
+}
+
+function renderAsk() {
+  const a = askState.ask;
+  askEl().hidden = !a || askState.hidden;
+  const chip = document.getElementById('ask-reopen');
+  chip.hidden = !a || !askState.hidden;
+  if (a) {
+    chip.querySelector('.ask-reopen-n').textContent = a.title;
+    chip.title = `Open the question: ${a.title}`;
+  }
+  layoutAsk();
+}
+
+// A full card fills the modal; a smaller one takes its content's height, up to the terminal's.
+function layoutAsk() {
+  const frame = askState.frame;
+  const box = askEl().querySelector('.ask-box');
+  if (!frame || askEl().hidden || box.dataset.size === 'full') return;
+  const host = document.getElementById('terminal-host');
+  const chrome = box.querySelector('.ask-head').offsetHeight + box.querySelector('.ask-foot').offsetHeight + 2;
+  frame.style.height = `${Math.max(SHOW_MIN_H, Math.min(askState.frameH || SHOW_MIN_H, host.clientHeight - 32 - chrome))}px`;
+}
+
+function hideAsk() {
+  askState.hidden = true;
+  renderAsk();
+  focusTerminalPane();
+}
+
+function reopenAsk() {
+  askState.hidden = false;
+  renderAsk();
+  askState.frame?.focus();
+}
+
+async function endAsk(body) {
+  const a = askState.ask;
+  const tid = askState.terminalId;
+  if (!a || !tid || askState.busy) return;
+  askState.busy = true;
+  try {
+    const res = await terminalFetch(apiPath`/api/terminals/${tid}/ask/${a.id}`, 'POST', body);
+    if (res.status === 404) showToast('The question is no longer open');
+    else if (!res.ok) {
+      const out = await res.json().catch(() => ({}));
+      return showToast(out.error || `Send failed (HTTP ${res.status})`, 'error');
+    }
+    if (askState.ask?.id !== a.id) return;
+    setAsk(null);
+    focusTerminalPane();
+  } catch {
+    showToast('Failed to send the answer', 'error');
+  } finally {
+    if (askState.ask?.id === a.id) askState.busy = false;
+  }
+}
+
+function answerAsk(data) {
+  return endAsk({ status: 'answered', data });
+}
+
+function onAskOpened(d) {
+  if (typeof d.terminalId !== 'string') return;
+  if (d.terminalId === askState.terminalId) return loadAsk(d.terminalId);
+  if (askState.terminalId || !wantsTerminal()) return;
+  if (!terminalIds.has(currentSessionId)) showState.lookup = null;
+  syncShowCard();
+}
+
+function onAskClosed(d) {
+  if (d.terminalId !== askState.terminalId || askState.ask?.id !== d.id) return;
+  if (d.status === 'cancelled') showToast('The agent stopped waiting for the answer');
+  setAsk(null);
+}
+
+// A script can send without a click, so a send needs transient user activation, as a card action does.
+window.addEventListener('message', (e) => {
+  const frame = askState.frame;
+  if (!frame || e.source !== frame.contentWindow || typeof e.data?.type !== 'string') return;
+  if (e.data.type === `${ASK_MSG}send`) {
+    if (navigator.userActivation?.isActive) answerAsk(e.data.data);
+  } else if (e.data.type === `${SHOW_MSG}height`) {
+    askState.frameH = Number(e.data.h) || askState.frameH;
+    layoutAsk();
+  }
+});
+
+function initAsk() {
+  const modal = askEl();
+  modal.addEventListener('click', (e) => {
+    const cmd = e.target === modal ? 'hide' : e.target.closest('[data-ask]')?.dataset.ask;
+    if (cmd === 'hide') hideAsk();
+    else if (cmd === 'skip') endAsk({ status: 'dismissed' });
+  });
+  document.getElementById('ask-reopen').addEventListener('click', reopenAsk);
+  // Capture, ahead of the board's own Escape. The card's frame hands Escape back as a key on the frame.
+  window.addEventListener(
+    'keydown',
+    (e) => {
+      if (e.key !== 'Escape' || modal.hidden || !modal.contains(e.target)) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      hideAsk();
+    },
+    true,
+  );
+  window.addEventListener('resize', layoutAsk);
+}
+//#endregion
+
 //#region SHOW
 // The card the session in the embedded terminal posts to with the show tool. It belongs to the
 // terminal, not the session: /clear and the --resume picker change the session id, the terminal id
@@ -16629,6 +16799,7 @@ function syncShowCard() {
     loadTerminals().catch(() => {});
   }
   const tid = pty ? (terminalIds.get(pty) ?? null) : null;
+  syncAsk(tid);
   if (tid === showState.terminalId) return;
   const view = (tid && showViews[tid]) || { collapsed: true };
   Object.assign(showState, { terminalId: tid, sessionId: null, idx: 0 });
@@ -16882,8 +17053,8 @@ function withHeadFirst(content, head) {
 const FRAME_SCROLLBAR_CSS = ':where(html){scrollbar-width:thin;scrollbar-color:rgba(128,128,128,.45) transparent}';
 
 // A whole document gets the tokens and base styles first in its head, so its own styles win.
-function showSrcdoc(content, restoreY) {
-  const head = `<meta http-equiv="Content-Security-Policy" content="${SHOW_CSP}"><style>:root{${showTokenCss()}}${SHOW_FRAME_BASE}${FRAME_SCROLLBAR_CSS}</style>`;
+function showSrcdoc(content, restoreY, extraHead = '') {
+  const head = `<meta http-equiv="Content-Security-Policy" content="${SHOW_CSP}"><style>:root{${showTokenCss()}}${SHOW_FRAME_BASE}${FRAME_SCROLLBAR_CSS}</style>${extraHead}`;
   const bridge = `<script>(${showBridge})(${Math.max(0, Math.round(restoreY) || 0)}, ${modalZoom});</script>${REVIEW_BRIDGE_TAG}`;
   if (!/^\s*(<!doctype|<html)/i.test(content)) {
     return `<!doctype html><html><head><meta charset="utf-8">${head}</head><body>${content}${bridge}</body></html>`;
@@ -16989,7 +17160,7 @@ new MutationObserver(() => {
 
 // Builds the message only when a frame is there, because showTokens forces a style recalc.
 function postToShowFrames(makeMsg) {
-  const frames = [showState.frame, ...document.querySelectorAll('.show-pane-frame, .themed-frame')].filter(
+  const frames = [showState.frame, ...document.querySelectorAll('.show-pane-frame, .themed-frame, .ask-frame')].filter(
     (f) => f?.contentWindow,
   );
   if (!frames.length) return;
@@ -17929,6 +18100,7 @@ initSessionGroupsDnd();
 initSessionPicker();
 initProjectPicker();
 initShowCard();
+initAsk();
 for (const k of readStoredList(ACTIVITY_FILTER_KEY)) activityFilter.add(k);
 initSidebarResize();
 applyModalZoom();

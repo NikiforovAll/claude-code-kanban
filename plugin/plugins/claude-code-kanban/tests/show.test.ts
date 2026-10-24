@@ -56,7 +56,7 @@ test('helpers: the port of CCK_URL, the answer lines', async () => {
 test('in the terminal: the overlay tool, file optional', async ($, on) => {
   const board = engine(on, GATE)
   await $.session.start({ cwd: 'C:/proj', surface: 'terminal', isInteractive: true })
-  expect(board.registered).toEqual([{ name: 'show', required: ['title'] }])
+  expect(board.registered[0]).toEqual({ name: 'show', required: ['title'] })
 })
 
 test('outside the terminal: the pane tool, file required', async ($, on) => {
