@@ -818,6 +818,7 @@ async function fetchTasks(sessionId) {
 //#region TIMINGS
 const WAITING_TTL_MS = 30 * 60 * 1000;
 const AGENT_LOG_MAX = 8;
+const ZEN_AGENTS_MAX = 5;
 const LIVE_INDICATOR_MS = 10 * 1000;
 const JUST_NOW_MS = 60 * 1000;
 //#endregion
@@ -3400,17 +3401,63 @@ function formatDuration(ms) {
 //#endregion
 
 //#region AGENTS
-function renderAgentFooter() {
-  const footer = document.getElementById('agent-footer');
-  const content = document.getElementById('agent-footer-content');
-  const label = document.getElementById('agent-footer-label');
-  const now = Date.now();
+function agentTypeParts(a) {
+  const raw = a.type || 'unknown';
+  const colonIdx = raw.indexOf(':');
+  return colonIdx > 0
+    ? { raw, ns: raw.substring(0, colonIdx + 1), name: raw.substring(colonIdx + 1) }
+    : { raw, ns: '', name: raw };
+}
 
-  const agents = currentAgents;
-  // Filter shutdown ghosts: for same-type agents, keep if they overlapped (parallel)
-  // or started >30s after previous stopped (legitimate re-spawn). Filter the rest.
+function agentTaskText(a) {
+  if (a.description) return a.description;
+  const prompt = stripAnsi(stripTeammateWrapper((a.prompt || '').trim())).replace(/[\r\n]+/g, ' ');
+  return prompt || agentTypeParts(a).name;
+}
+
+function agentElapsed(a, now) {
+  return a.status === 'stopped' && a.stoppedAt
+    ? new Date(a.stoppedAt).getTime() - new Date(a.startedAt || a.stoppedAt).getTime()
+    : now - new Date(a.startedAt || a.updatedAt).getTime();
+}
+
+function agentIdentHtml(a) {
+  const { raw, ns, name } = agentTypeParts(a);
+  const fullModel = agentModel(a);
+  const model = shortModelName(fullModel);
+  const modelHtml = model
+    ? `<span class="agent-card-model" title="${escapeHtml(fullModel)}">${escapeHtml(model)}</span><span class="agent-ident-sep">·</span>`
+    : '';
+  return `${modelHtml}<span class="agent-type-name" title="${escapeHtml(raw)}">${ns ? `<span class="agent-type-ns">${escapeHtml(ns)}</span>` : ''}${escapeHtml(name)}</span>`;
+}
+
+// The count names every running agent; the rows stop at ZEN_AGENTS_MAX, and the Agents Log
+// below the board lists the rest.
+function zenAgentsHtml(agents) {
+  const active = agents.filter((a) => a.status === 'active');
+  if (!active.length) return '';
+  const now = Date.now();
+  const rows = active.slice(0, ZEN_AGENTS_MAX).map((a) => {
+    const task = truncateAtWord(agentTaskText(a), 200);
+    return `<button type="button" class="zen-agent" title="${escapeHtml(task)}" onclick="showAgentModal('${escAttrJs(a.agentId)}')">
+      <span class="agent-dot active"></span>
+      <span class="zen-agent-text"><span class="zen-agent-task">${escapeHtml(task)}</span><span class="agent-ident-row">${agentIdentHtml(a)}</span></span>
+      <span class="zen-agent-time">${formatDuration(agentElapsed(a, now))}</span>
+    </button>`;
+  });
+  return `<div class="panel-section-header"><span>Agents</span><span class="panel-section-count">${active.length}</span></div>${rows.join('')}`;
+}
+
+function renderZenAgents(agents) {
+  const el = zenMode && sessionsList.querySelector('.zen-agents');
+  if (el) el.innerHTML = zenAgentsHtml(agents);
+}
+
+// Filter shutdown ghosts: for same-type agents, keep if they overlapped (parallel)
+// or started >30s after previous stopped (legitimate re-spawn). Filter the rest.
+function visibleAgents() {
   const byType = {};
-  for (const a of agents) {
+  for (const a of currentAgents) {
     const groupKey = a.agentName || a.type;
     if (!byType[groupKey]) byType[groupKey] = [];
     byType[groupKey].push(a);
@@ -3434,13 +3481,21 @@ function renderAgentFooter() {
   }
   // Sort: active/idle first, then by updatedAt desc
   const statusOrder = { active: 0, idle: 1, stopped: 2 };
-  const visible = filtered
-    .sort(
-      (a, b) =>
-        (statusOrder[a.status] ?? 2) - (statusOrder[b.status] ?? 2) ||
-        new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0),
-    )
-    .slice(0, AGENT_LOG_MAX);
+  return filtered.sort(
+    (a, b) =>
+      (statusOrder[a.status] ?? 2) - (statusOrder[b.status] ?? 2) ||
+      new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0),
+  );
+}
+
+function renderAgentFooter() {
+  const footer = document.getElementById('agent-footer');
+  const content = document.getElementById('agent-footer-content');
+  const label = document.getElementById('agent-footer-label');
+  const now = Date.now();
+  const agents = visibleAgents();
+  renderZenAgents(agents);
+  const visible = agents.slice(0, AGENT_LOG_MAX);
 
   const permFresh = isWaitingFresh();
 
@@ -3464,23 +3519,14 @@ function renderAgentFooter() {
     permHtml +
     visible
       .map((a) => {
-        const elapsed =
-          a.status === 'stopped' && a.stoppedAt
-            ? new Date(a.stoppedAt).getTime() - new Date(a.startedAt || a.stoppedAt).getTime()
-            : now - new Date(a.startedAt || a.updatedAt).getTime();
+        const elapsed = agentElapsed(a, now);
         const statusText =
           a.status === 'stopped'
             ? `stopped · ${formatDuration(elapsed)}`
             : a.status === 'idle'
               ? `idle · ${formatDuration(elapsed)}`
               : `active · ${formatDuration(elapsed)}`;
-        const descText = a.description || '';
-        const promptTrimmed = stripAnsi(stripTeammateWrapper((a.prompt || '').trim())).replace(/[\r\n]+/g, ' ');
-        const rawType = a.type || 'unknown';
-        const colonIdx = rawType.indexOf(':');
-        const typeNs = colonIdx > 0 ? rawType.substring(0, colonIdx + 1) : '';
-        const typeName = colonIdx > 0 ? rawType.substring(colonIdx + 1) : rawType;
-        const displayText = descText || promptTrimmed || typeName;
+        const displayText = agentTaskText(a);
         const taskHtml = `<div class="agent-task" title="${escapeHtml(displayText)}">${escapeHtml(displayText)}</div>`;
         const agentNameVal = a.agentName || null;
         const nameColor = agentNameVal ? getOwnerColor(agentNameVal) : null;
@@ -3490,15 +3536,10 @@ function renderAgentFooter() {
         const agentColor = resolveNamedColor(a.color);
         const colorStyle = agentColor ? ` style="border-left:3px solid ${agentColor.color}"` : '';
         const selectedClass = a.agentId === currentAgentModalId ? ' selected' : '';
-        const fullModel = agentModel(a);
-        const cardModel = shortModelName(fullModel);
-        const modelHtml = cardModel
-          ? `<span class="agent-card-model" title="${escapeHtml(fullModel)}">${escapeHtml(cardModel)}</span><span class="agent-ident-sep">·</span>`
-          : '';
         return `<div class="agent-card${selectedClass}" data-agent-id="${escapeHtml(a.agentId)}"${colorStyle} onclick="showAgentModal('${escAttrJs(a.agentId)}')">
           ${agentLogButton(a.agentId, 'agent-card-log-btn')}
           ${taskHtml}
-          <div class="agent-ident-row">${modelHtml}<span class="agent-type-name" title="${escapeHtml(rawType)}">${typeNs ? `<span class="agent-type-ns">${escapeHtml(typeNs)}</span>` : ''}${escapeHtml(typeName)}</span>${nameBadgeHtml}</div>
+          <div class="agent-ident-row">${agentIdentHtml(a)}${nameBadgeHtml}</div>
           <div class="agent-status-row"><span class="agent-dot ${a.status}"></span><span class="agent-status">${statusText}</span></div>
         </div>`;
       })
@@ -4069,7 +4110,8 @@ function renderSessions() {
         ${renderArtifactsHtml(zenSession.id)}
         ${renderZenBookmarksHtml(zenSession.id)}
       </div>
-      ${zenSession.hasWorkflow ? renderWorkflowLiveHtml(zenSession.id) : ''}`;
+      ${zenSession.hasWorkflow ? renderWorkflowLiveHtml(zenSession.id) : ''}
+      <div class="zen-agents">${zenAgentsHtml(visibleAgents())}</div>`;
     bindLinkedDocsHandlers(sessionsList.querySelector('.linked-docs-section'), zenSession.id);
     artifactsSection.load(zenSession.id);
     scratchFilesSection.load(zenSession.id);

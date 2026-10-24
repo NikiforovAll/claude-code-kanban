@@ -895,6 +895,50 @@ body::before {
   flex-shrink: 0;
 }
 
+/* After the ::after spacer, so the agents sit at the bottom of the free space. */
+.zen-agents {
+  order: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 6px;
+}
+.zen-agents:empty {
+  display: none;
+}
+.zen-agent {
+  display: grid;
+  grid-template-columns: 5px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.zen-agent:hover {
+  background: var(--bg-hover);
+}
+.zen-agent-text {
+  min-width: 0;
+}
+.zen-agent-task {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+}
+.zen-agent-time {
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-tertiary);
+}
+
 .session-item {
   position: relative;
   display: block;
