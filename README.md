@@ -8,58 +8,45 @@ Start, watch and answer Claude Code sessions from one live board, with a termina
 
 **[Documentation](https://nikiforovall.blog/claude-code-kanban/)**
 
-<a href="https://youtu.be/QbvDBFyfC7s">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="website/public/video/cck-dark.webp">
-    <img alt="Claude Code Kanban tour video (74 seconds). Opens on YouTube." src="website/public/video/cck-light.webp">
-  </picture>
-</a>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="website/public/shots/themes/ember-01-board-session-log-dark.webp">
+  <img alt="The board with the session list, task columns, the agents log and the session log of tool calls." src="website/public/shots/themes/ember-01-board-session-log-light.webp">
+</picture>
 
-Watch the tour on YouTube: [light](https://youtu.be/QbvDBFyfC7s), [dark](https://youtu.be/bXZ4_QCmD7k).
+<table>
+  <tr>
+    <td width="33%"><picture><source media="(prefers-color-scheme: dark)" srcset="website/public/shots/themes/ember-terminal-dark.webp"><img alt="The embedded terminal with a show card checklist next to it." src="website/public/shots/themes/ember-terminal-light.webp"></picture></td>
+    <td width="33%"><picture><source media="(prefers-color-scheme: dark)" srcset="website/public/shots/themes/ember-13b-split-view-dark.webp"><img alt="The board split with an HTML preview pane." src="website/public/shots/themes/ember-13b-split-view-light.webp"></picture></td>
+    <td width="33%"><picture><source media="(prefers-color-scheme: dark)" srcset="website/public/shots/themes/ember-14b-show-chart-dark.webp"><img alt="A show card with a spend chart over the terminal." src="website/public/shots/themes/ember-14b-show-chart-light.webp"></picture></td>
+  </tr>
+  <tr>
+    <td align="center">Embedded terminal</td>
+    <td align="center">Panes and split view</td>
+    <td align="center">Show cards</td>
+  </tr>
+</table>
+
+Watch the 74-second tour on YouTube: [light](https://youtu.be/QbvDBFyfC7s), [dark](https://youtu.be/bXZ4_QCmD7k).
 
 ## Getting started
 
 You need Node.js 20 or later and the `claude` CLI.
 
-### 1. Install the command
+### 1. Run it in Claude Code Hub
+
+[Claude Code Hub](https://nikiforovall.blog/claude-code-hub/) runs the board as a tab next to Cost, Marketplace and Memory, in one window with keyboard switching. The embedded terminal is on by default, and the board opens a session's cost, plugins and memory in the other tabs.
 
 ```bash
-npm install -g claude-code-kanban
+npm install -g claude-code-hub
+claude-code-hub --install   # one time: installs this board's plugin
+claude-code-hub --open
 ```
 
-To update, run the same command again.
+The hub runs at `http://localhost:3540`. See [Claude Code Hub](https://nikiforovall.blog/claude-code-kanban/guides/claude-code-hub/) for how the board works there. To run the board without the hub, see [Appendix: run the board standalone](#appendix-run-the-board-standalone).
 
-To try it without an install, run `npx claude-code-kanban --open`. npx keeps a copy of each version in its cache and can run an old copy, so use the global install to keep the board and to update it.
+### 2. Use Claude Code as usual
 
-### 2. Install the integration (one time)
-
-```bash
-claude-code-kanban --install
-```
-
-The installer adds a Claude Code plugin with hooks, skills and a mod for context use and cost (Claude Code 2.1.287 or later). It asks before it installs and keeps your other settings. Without the hooks, the board shows tasks only: no agent log, no live activity, no waiting prompts.
-
-To remove it, run `claude-code-kanban --uninstall`. For another Claude config dir, pass the same `--dir=<path>` (or set `CLAUDE_CONFIG_DIR`) to `--install`, `--uninstall` and the server. See [Getting started](https://nikiforovall.blog/claude-code-kanban/getting-started/) for each install step.
-
-### 3. Start the board
-
-```bash
-claude-code-kanban --open
-```
-
-The board runs at `http://localhost:3541`.
-
-### 4. Use Claude Code as usual
-
-Run `claude` in any project. You do not configure anything per project. Claude Code writes task files and transcripts to the config dir, and the board watches them and sends each change to the browser.
-
-> **Empty board?** Claude Code ships the task tools off by default on some models, so Claude writes no tasks. Turn them on in the `env` block of Claude Code `settings.json`, then restart Claude Code:
->
-> ```json
-> { "env": { "CLAUDE_CODE_ENABLE_TODO_TOOLS": "true" } }
-> ```
->
-> You can also add a task by hand with **Add task** in the Pending column.
+Run `claude` in any project. You do not configure anything per project. Claude Code writes task files and transcripts to the config dir, and the board watches them and sends each change to the browser. If the board stays empty, see [Appendix: empty board](#appendix-empty-board).
 
 ## Features
 
@@ -133,7 +120,45 @@ EDITOR="code -w" claude-code-kanban        # Command for Open in editor (default
 
 See [Configuration](https://nikiforovall.blog/claude-code-kanban/reference/configuration/) for every setting, and [Troubleshooting](https://nikiforovall.blog/claude-code-kanban/troubleshooting/) for common problems.
 
-Claude Code Kanban also runs as a tab in [Claude Code Hub](https://nikiforovall.blog/claude-code-kanban/guides/claude-code-hub/), where the terminal is on by default.
+## Appendix: run the board standalone
+
+### 1. Install the command
+
+```bash
+npm install -g claude-code-kanban
+```
+
+To update, run the same command again.
+
+To try it without an install, run `npx claude-code-kanban --open`. npx keeps a copy of each version in its cache and can run an old copy, so use the global install to keep the board and to update it.
+
+### 2. Install the integration (one time)
+
+```bash
+claude-code-kanban --install
+```
+
+The installer adds a Claude Code plugin with hooks, skills and a mod for context use and cost (Claude Code 2.1.287 or later). It asks before it installs and keeps your other settings. Without the hooks, the board shows tasks only: no agent log, no live activity, no waiting prompts.
+
+To remove it, run `claude-code-kanban --uninstall`. For another Claude config dir, pass the same `--dir=<path>` (or set `CLAUDE_CONFIG_DIR`) to `--install`, `--uninstall` and the server. See [Getting started](https://nikiforovall.blog/claude-code-kanban/getting-started/) for each install step.
+
+### 3. Start the board
+
+```bash
+claude-code-kanban --open
+```
+
+The board runs at `http://localhost:3541`. Then use Claude Code as usual.
+
+## Appendix: empty board
+
+Claude Code ships the task tools off by default on some models, so Claude writes no tasks. Turn them on in the `env` block of Claude Code `settings.json`, then restart Claude Code:
+
+```json
+{ "env": { "CLAUDE_CODE_ENABLE_TODO_TOOLS": "true" } }
+```
+
+You can also add a task by hand with **Add task** in the Pending column.
 
 ## License
 
