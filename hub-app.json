@@ -5,6 +5,29 @@
   "icon": "columns",
   "run": { "entry": "server.js", "defaultPort": 3541 },
   "publishes": ["session.changed"],
+  "settings": [
+    {
+      "key": "zenCentered",
+      "type": "boolean",
+      "label": "Center zen mode",
+      "help": "In zen mode, centers the session card and its panel in the sidebar's height.",
+      "default": false
+    },
+    {
+      "key": "zenPattern",
+      "type": "choice",
+      "label": "Zen mode pattern",
+      "help": "In zen mode, fills the sidebar's free space with a pattern tinted by the session's state.",
+      "options": [
+        { "value": "none", "label": "None" },
+        { "value": "dots", "label": "Dots" },
+        { "value": "diagonal", "label": "Diagonal" },
+        { "value": "rings", "label": "Rings" },
+        { "value": "grid", "label": "Grid" }
+      ],
+      "default": "dots"
+    }
+  ],
   "keys": { "keeps": ["ctrl+alt+1", "ctrl+alt+2", "ctrl+alt+3", "ctrl+alt+4", "ctrl+alt+5", "ctrl+alt+6", "ctrl+alt+7", "ctrl+alt+8", "ctrl+alt+9", "ctrl+alt+n", "ctrl+alt+r", "ctrl+alt+s", "ctrl+shift+d", "ctrl+shift+k", "ctrl+shift+l", "ctrl+shift+m", "ctrl+shift+p", "ctrl+shift+z"] },
   "plugin": {
     "marketplace": "plugin",

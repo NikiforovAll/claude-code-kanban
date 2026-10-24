@@ -1,4 +1,4 @@
-// claude-hub-sdk 1.6.0 (sha256 71a58022516d). Copied by npm run sdk:sync in claude-code-hub. Do not edit.
+// claude-hub-sdk 1.7.0 (sha256 904e53d87ec4). Copied by npm run sdk:sync in claude-code-hub. Do not edit.
 // Claude Code Hub SDK: the one rule that names a key press, shared by the hub page, client.js and
 // stub.js. The hub serves it to its page as /sdk/keys.js; mount() and sdk:sync put it in front of
 // client.js and stub.js, so an app still loads one file.
@@ -130,6 +130,7 @@ if (typeof module === 'object' && module.exports) module.exports = ClaudeHubKeys
       const pending = new Map();
       const tokenWaiters = new Set();
       const themesFns = new Set();
+      const settingsFns = new Set();
       const queued = [];
       // Topic → payload: the latest publish before welcome.
       const outbox = new Map();
@@ -141,6 +142,7 @@ if (typeof module === 'object' && module.exports) module.exports = ClaudeHubKeys
       let linkOpened = null;
       let themeBinding = null;
       let lastTheme = null;
+      let settings = null;
       let swatchesPainted = false;
       let nextId = 0;
 
@@ -212,6 +214,11 @@ if (typeof module === 'object' && module.exports) module.exports = ClaudeHubKeys
         return welcome.themes.map(({ id, label }) => ({ id, label }));
       }
 
+      function setSettings(s) {
+        settings = Object.freeze(s && typeof s === 'object' && !Array.isArray(s) ? { ...s } : {});
+        for (const fn of settingsFns) fn(settings);
+      }
+
       function onWelcome(m) {
         if (m.protocol !== 1 || welcome) return;
         welcome = {
@@ -221,6 +228,7 @@ if (typeof module === 'object' && module.exports) module.exports = ClaudeHubKeys
         };
         forward = strings(m.forward);
         appOrigins = strings(m.origins);
+        setSettings(m.settings);
         setStatus('live');
         if (welcome.themes.length) for (const fn of themesFns) fn(pickerThemes());
         themesFns.clear();
@@ -255,6 +263,9 @@ if (typeof module === 'object' && module.exports) module.exports = ClaudeHubKeys
           }
           case 'hub:terminalToken':
             for (const done of [...tokenWaiters]) done(typeof m.token === 'string' ? m.token : null);
+            return;
+          case 'hub:settings':
+            if (welcome) setSettings(m.settings);
             return;
         }
       }
@@ -396,6 +407,18 @@ if (typeof module === 'object' && module.exports) module.exports = ClaudeHubKeys
           }
           if (welcome.themes.length) fn(pickerThemes());
           return () => {};
+        },
+        // The values of the settings in the app's manifest `settings`, as {key: value}. Null before
+        // welcome, standalone, or with no welcome: the app then uses its own defaults.
+        get settings() {
+          return settings;
+        },
+        // Calls fn with the values at welcome and after each change in the hub's settings. A call after
+        // welcome gets the current values at once.
+        onSettings(fn) {
+          settingsFns.add(fn);
+          if (settings) fn(settings);
+          return () => settingsFns.delete(fn);
         },
         subscribe(topic, fn) {
           const fns = topicFns(topic);

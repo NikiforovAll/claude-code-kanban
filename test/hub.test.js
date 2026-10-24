@@ -17,6 +17,7 @@ async function loadShim({ enabled = true, costUrl = null, marketplaceUrl = null,
   const opened = [];
   const timers = [];
   const calls = [];
+  const hubSettings = [];
   let light = false;
   const body = { classList: { contains: () => light }, dataset: {}, style: { setProperty() {}, removeProperty() {} } };
   const parent = { postMessage: (message, origin) => posted.push({ message, origin }) };
@@ -36,6 +37,7 @@ async function loadShim({ enabled = true, costUrl = null, marketplaceUrl = null,
     appConfig: { costUrl, marketplaceUrl, memoryUrl },
     onHubActive: (active) => calls.push(['active', active]),
     pushTerminalClaims() {},
+    applyHubSettings: (s) => hubSettings.push({ ...s }),
     sessions: [],
     currentSessionId: null,
     isSessionActive: (s) => !!s.live,
@@ -64,6 +66,7 @@ async function loadShim({ enabled = true, costUrl = null, marketplaceUrl = null,
 
   return {
     calls,
+    hubSettings,
     context,
     hub: vm.runInContext('hub', context),
     terminalKeeps: (init) => {
@@ -154,6 +157,20 @@ describe('hub key forwarding', () => {
   it('forwards nothing standalone', async () => {
     const shim = await loadShim({ enabled: false });
     assert.equal(shim.press({ ctrlKey: true, altKey: true, key: 'q', code: 'KeyQ' }), false);
+  });
+});
+
+describe('hub settings', () => {
+  it('applies the settings from welcome and from each change', async () => {
+    const shim = await loadShim();
+    shim.receive({ ...welcome([]), settings: { zenCentered: true } });
+    shim.receive({ type: 'hub:settings', settings: { zenCentered: false } });
+    assert.deepEqual(shim.hubSettings, [{ zenCentered: true }, { zenCentered: false }]);
+  });
+
+  it('keeps the defaults with no hub', async () => {
+    const shim = await loadShim({ enabled: false });
+    assert.deepEqual(shim.hubSettings, []);
   });
 });
 

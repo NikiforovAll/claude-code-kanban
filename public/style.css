@@ -834,6 +834,67 @@ body::before {
   padding: 0 14px 12px;
 }
 
+.sessions-list.zen {
+  --zen-dot: var(--border);
+  display: flex;
+  flex-direction: column;
+}
+
+.sessions-list.zen[data-zen-state='working'] {
+  --zen-dot: color-mix(in srgb, var(--success) 45%, var(--border));
+}
+
+.sessions-list.zen[data-zen-state='waiting'] {
+  --zen-dot: color-mix(in srgb, var(--warning) 55%, var(--border));
+}
+
+/* The spacers fill the free space. Centered, they split it 1:2, so a growing panel moves the card up by a third of the growth, not a half. With no free space they are 0 and the list scrolls from the top. */
+.sessions-list.zen::after,
+.sessions-list.zen.zen-centered::before {
+  content: '';
+  flex: 1 0 0;
+}
+
+/* Dots unless the hub's zenPattern setting names another pattern. Line patterns use a lighter color, because a line has more ink than a dot. */
+.sessions-list.zen {
+  --zen-line: color-mix(in srgb, var(--zen-dot) 50%, transparent);
+  --zen-fill: radial-gradient(circle, var(--zen-dot) 1px, transparent 1.5px) 0 0 / 20px 20px;
+  --zen-glow-y: 0;
+}
+
+.sessions-list.zen[data-zen-pattern='diagonal'] {
+  --zen-fill: repeating-linear-gradient(-45deg, var(--zen-line) 0 1px, transparent 1px 14px);
+}
+
+.sessions-list.zen[data-zen-pattern='rings'] {
+  --zen-fill: radial-gradient(circle, transparent 2.5px, var(--zen-line) 3px 3.5px, transparent 4px) 0 0 / 28px 28px;
+}
+
+.sessions-list.zen[data-zen-pattern='grid'] {
+  --zen-fill:
+    linear-gradient(var(--zen-line) 1px, transparent 1px) 0 0 / 24px 24px,
+    linear-gradient(90deg, var(--zen-line) 1px, transparent 1px) 0 0 / 24px 24px;
+}
+
+/* The pattern glows out from the card. The glow has a fixed height, so it looks the same in a short space and a tall one. */
+.sessions-list.zen:not([data-zen-pattern='none'])::after,
+.sessions-list.zen.zen-centered:not([data-zen-pattern='none'])::before {
+  background: var(--zen-fill);
+  mask-image: radial-gradient(110% 260px at 50% var(--zen-glow-y), rgb(0 0 0 / 0.9), transparent);
+}
+
+.sessions-list.zen.zen-centered::before {
+  --zen-glow-y: 100%;
+}
+
+.sessions-list.zen.zen-centered::after {
+  flex-grow: 2;
+}
+
+.sessions-list.zen > * {
+  flex-shrink: 0;
+}
+
 .session-item {
   position: relative;
   display: block;

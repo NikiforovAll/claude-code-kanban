@@ -571,6 +571,9 @@ function sessionBarClass(s) {
 function isActiveSession(s) {
   return !isWaitingSession(s) && (s.inProgress > 0 || s.hasRecentLog || s.hasRunningAgents);
 }
+function sessionState(s) {
+  return isWaitingSession(s) ? 'waiting' : isActiveSession(s) ? 'working' : 'idle';
+}
 // hasRecentLog carries the server's registry-idle correction: an open-but-idle
 // terminal keeps touching its JSONL, so mtime alone is not proof of activity.
 function isSessionLive(s) {
@@ -3889,6 +3892,8 @@ function renderSessions() {
   // and still offers everything, or there would be no way to switch sessions without leaving zen.
   // Group zen renders only its subtree's buckets, so it takes every session unfiltered.
   const zenSession = zenMode && currentSessionId ? sessions.find((s) => s.id === currentSessionId) : null;
+  sessionsList.classList.toggle('zen', !!zenSession);
+  sessionsList.dataset.zenState = zenSession ? sessionState(zenSession) : '';
   let filteredSessions;
   if (zenGroup) filteredSessions = applyStableSessionOrder(sessions);
   else if (zenMode) filteredSessions = zenSession ? [zenSession] : [];
@@ -11569,6 +11574,12 @@ function toggleZenMode() {
   if (!leavingSessionZen) fetchSessions(false);
 }
 
+function applyHubSettings(s) {
+  sessionsList.classList.toggle('zen-centered', s.zenCentered === true);
+  if (s.zenPattern) sessionsList.dataset.zenPattern = s.zenPattern;
+  else delete sessionsList.dataset.zenPattern;
+}
+
 function renderZenState() {
   const btn = document.getElementById('zen-mode-btn');
   if (!btn) return;
@@ -16067,17 +16078,18 @@ async function terminalFetch(url, method, body) {
   return res.status === 401 && (await refreshTerminalToken()) ? send() : res;
 }
 
-const TERMINAL_STATE_LABEL = { busy: 'working', wait: 'waiting', idle: 'idle' };
+const TERMINAL_DOT_STATE = { working: 'busy', waiting: 'wait', idle: 'idle' };
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
 async function endAllTerminals() {
   const items = [...document.querySelectorAll('#terminal-manager-body [data-end]')].map((b) => {
     const id = b.dataset.end;
     const session = sessions.find((s) => s.id === id);
-    const state = !session ? 'idle' : isWaitingSession(session) ? 'wait' : isActiveSession(session) ? 'busy' : 'idle';
+    const label = session ? sessionState(session) : 'idle';
+    const state = TERMINAL_DOT_STATE[label];
     const started = Number(b.dataset.started);
     const meta = [
-      TERMINAL_STATE_LABEL[state],
+      label,
       started && `up ${formatDuration(Date.now() - started)}`,
       formatTerminalProc(terminalProcStats[id]),
     ]
@@ -18105,6 +18117,7 @@ hub.onActive((active) => {
   pushTerminalClaims();
 });
 hub.onStatus(pushTerminalClaims);
+hub.onSettings(applyHubSettings);
 
 // session.changed goes out once the switch settles, so arrowing through the list sends one event.
 let publishTimer = 0;
