@@ -596,7 +596,7 @@
       </div>
       <div id="team-modal-body" class="modal-body modal-zoomable"></div>
       <div class="modal-footer">
-        <button id="session-info-dismiss-btn" class="btn btn-secondary" onclick="toggleDismissSession(_infoModalSessionId); closeTeamModal()">Dismiss</button>
+        <button id="session-info-dismiss-btn" class="btn btn-secondary" onclick="toggleDismissSession(_infoModalSessionId); closeTeamModal()">Hide session</button>
         <button class="btn btn-secondary" onclick="showToolStatsModal(_infoModalSessionId)" title="Tool invocation statistics">Tool Stats</button>
         <button class="btn btn-secondary" onclick="closeTeamModal()">Close</button>
       </div>
@@ -727,7 +727,7 @@
       </div>
       <div id="agent-modal-body" class="modal-body modal-zoomable" style="overflow-y: auto; overflow-x: hidden; flex: 0 1 auto; min-height: 0;"></div>
       <div class="modal-footer">
-        <button id="agent-modal-dismiss-btn" class="btn agent-dismiss-btn" style="display:none" onclick="dismissAgent(currentAgentModalId);closeAgentModal()">Dismiss</button>
+        <button id="agent-modal-dismiss-btn" class="btn btn-secondary" style="display:none" onclick="dismissAgent(currentAgentModalId);closeAgentModal()" title="Mark this agent as stopped">Mark stopped</button>
         <button class="btn btn-secondary" onclick="closeAgentModal()">Close</button>
       </div>
     </div>

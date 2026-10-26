@@ -10477,7 +10477,7 @@ function renderContextBar(session) {
             ${renderMarkers(ctx.markers)}
           </div>
           <div class="context-bar-labels">
-            <span style="color:${color}">${Math.round(ctx.pct)}% (${used})</span>
+            <span style="color:color-mix(in srgb, ${color} 70%, var(--text-primary))">${Math.round(ctx.pct)}% (${used})</span>
             <span>${Math.round(ctx.remaining)}% free</span>
           </div>
         </div>`;
@@ -12369,8 +12369,8 @@ function updateDismissBtnState() {
   const btn = document.getElementById('session-info-dismiss-btn');
   if (!btn || !_infoModalSessionId) return;
   const isDismissed = dismissedSessionIds.has(_infoModalSessionId);
-  btn.textContent = isDismissed ? 'Restore' : 'Dismiss';
-  btn.title = isDismissed ? 'Restore — show in active list again' : 'Dismiss — hide from active list';
+  btn.textContent = isDismissed ? 'Show session' : 'Hide session';
+  btn.title = isDismissed ? 'Show in the active list again' : 'Hide from the active list';
 }
 
 let _planSessionId = null;
@@ -18193,7 +18193,13 @@ function makeLimitCell(label, bucket) {
 function makeLimitSpan(rl) {
   const span = document.createElement('span');
   span.className = 'footer-limits';
-  span.append(makeLimitCell('5h', rl?.five_hour), document.createTextNode(' · '), makeLimitCell('7d', rl?.seven_day));
+  span.title = 'Plan usage: 5-hour and 7-day limits, used % (time until reset)';
+  span.append(
+    'Usage ',
+    makeLimitCell('5h', rl?.five_hour),
+    document.createTextNode(' · '),
+    makeLimitCell('7d', rl?.seven_day),
+  );
   return span;
 }
 function renderSidebarFooter(rateLimits) {

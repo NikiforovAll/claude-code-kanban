@@ -13,7 +13,7 @@
   --text-primary: #f0f1f3;
   --text-secondary: #c2c4c9;
   --text-tertiary: #9a9da5;
-  --text-muted: #7d808a;
+  --text-muted: #868994;
   --accent: #e86f33;
   --accent-text: #f0a070;
   --accent-dim: rgba(232, 111, 51, 0.25);
@@ -1097,7 +1097,7 @@ body.booting .boot-splash {
 }
 
 .session-item.warm .session-time {
-  color: var(--success);
+  color: color-mix(in srgb, var(--success) 70%, var(--text-primary));
 }
 
 .session-item.warm .session-time::before {
@@ -1333,7 +1333,7 @@ body.booting .boot-splash {
   justify-content: space-between;
   gap: 6px;
   margin-top: 4px;
-  font-size: 10px;
+  font-size: 11px;
   font-family: var(--font-mono);
   color: var(--text-tertiary);
   white-space: nowrap;
@@ -1936,7 +1936,7 @@ body.booting .boot-splash {
 .view-progress .progress-text {
   font-size: 14px;
   font-weight: 500;
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .icon-btn {
@@ -2111,7 +2111,7 @@ body.booting .boot-splash {
   color: var(--text-tertiary);
 }
 .column-title.in-progress {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 .column-title.completed {
   color: var(--success);
@@ -2131,7 +2131,7 @@ body.booting .boot-splash {
 
 .column-count.in-progress {
   background: var(--accent-dim);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .column-count.completed {
@@ -2313,7 +2313,7 @@ body.booting .boot-splash {
   border-top: 1px solid var(--border);
   font-size: 11px;
   font-weight: 500;
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .task-active::before {
@@ -2343,7 +2343,7 @@ body.booting .boot-splash {
 }
 
 .task-chip-accent {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .task-desc {
@@ -2554,7 +2554,7 @@ body.booting .boot-splash {
 
 .detail-status.in_progress {
   background: var(--accent-dim);
-  color: var(--accent);
+  color: var(--accent-text);
   border: 1px solid var(--accent);
 }
 
@@ -2596,7 +2596,7 @@ body.booting .boot-splash {
 }
 
 .detail-box.active strong {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .detail-desc {
@@ -2944,7 +2944,7 @@ code.ct .ct-has[aria-expanded='false'] .ct-name::after {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--accent);
+  color: var(--accent-text);
   margin: 0 0 8px 0;
 }
 
@@ -2994,7 +2994,7 @@ code.ct .ct-has[aria-expanded='false'] .ct-name::after {
 .shared-tasklist-badge {
   display: inline-flex;
   align-items: center;
-  color: var(--accent);
+  color: var(--accent-text);
   flex-shrink: 0;
 }
 
@@ -3440,7 +3440,7 @@ code.ct .ct-has[aria-expanded='false'] .ct-name::after {
 
 .team-member-card .member-tasks {
   font-size: 11px;
-  color: var(--accent);
+  color: var(--accent-text);
   margin-top: 4px;
 }
 
@@ -3457,6 +3457,18 @@ code.ct .ct-has[aria-expanded='false'] .ct-name::after {
   overflow-y: auto;
   min-height: 0;
   padding-right: 8px;
+}
+/* Scroll shadows: the covers scroll with the content (local), the shadows stay at the edges,
+   so a shadow shows only while more content is above or below. */
+.modal-help .modal-body {
+  padding-bottom: 16px;
+  --scroll-shadow: color-mix(in srgb, var(--text-primary) 30%, transparent);
+  background:
+    linear-gradient(var(--bg-surface) 30%, transparent) center top / 100% 40px no-repeat local,
+    linear-gradient(transparent, var(--bg-surface) 70%) center bottom / 100% 40px no-repeat local,
+    radial-gradient(farthest-side at 50% 0, var(--scroll-shadow), transparent) center top / 100% 18px no-repeat scroll,
+    radial-gradient(farthest-side at 50% 100%, var(--scroll-shadow), transparent) center bottom / 100% 18px no-repeat
+    scroll;
 }
 #team-modal .modal-footer {
   flex-shrink: 0;
@@ -4286,7 +4298,7 @@ body.light .show-card.focused {
 }
 
 .show-md a {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .show-md blockquote {
@@ -4968,7 +4980,7 @@ body.show-resizing iframe {
 
 .pane-tool:disabled,
 .pane-split-btn:disabled {
-  opacity: 0.35;
+  opacity: 0.55;
   cursor: default;
   background: none;
 }
@@ -5470,6 +5482,26 @@ body.show-resizing iframe {
 .message-panel-content > * + * {
   margin-top: 8px;
 }
+/* Under the pinned block, rows scrolled past the top fade out instead of showing as a cut row.
+   The fade grows over the first 48px of scroll, so an unscrolled list shows its first row whole. */
+@property --msg-top-fade {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
+}
+@keyframes msg-top-fade {
+  to {
+    --msg-top-fade: 48px;
+  }
+}
+@supports (animation-timeline: scroll()) {
+  #message-panel-pinned:not(:empty) + .message-panel-content {
+    mask-image: linear-gradient(to bottom, transparent, #000 var(--msg-top-fade));
+    animation: msg-top-fade linear both;
+    animation-timeline: scroll(self);
+    animation-range: 0 48px;
+  }
+}
 .msg-item {
   display: flex;
   gap: 8px;
@@ -5624,7 +5656,7 @@ body.show-resizing iframe {
   font-size: 9px;
 }
 .msg-agent-link {
-  color: var(--accent);
+  color: var(--accent-text);
   font-size: 0.85rem;
   margin-left: 4px;
   opacity: 0.7;
@@ -5669,6 +5701,10 @@ body.show-resizing iframe {
 #message-panel-pinned {
   flex-shrink: 0;
   padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  box-shadow: 0 4px 6px -4px color-mix(in srgb, var(--text-primary) 25%, transparent);
+  position: relative;
+  z-index: 1;
 }
 .pinned-section {
   border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
@@ -5679,7 +5715,7 @@ body.show-resizing iframe {
   padding: 6px 10px;
   font-size: 11px;
   font-weight: 600;
-  color: var(--accent);
+  color: var(--accent-text);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -5807,7 +5843,7 @@ body.show-resizing iframe {
   border-bottom-color: var(--text-muted);
 }
 .agent-tab.active {
-  color: var(--accent);
+  color: var(--accent-text);
   border-bottom-color: var(--accent);
 }
 .agent-tab-panel {
@@ -5900,7 +5936,7 @@ body.show-resizing iframe {
 }
 .toast.toast-info {
   border-color: var(--accent);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 .rendered-md h1,
 .rendered-md h2,
@@ -5931,7 +5967,7 @@ body.show-resizing iframe {
   list-style: none;
 }
 .rendered-md a {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 .rendered-md pre {
   margin: 0.6em 0;
@@ -6049,7 +6085,7 @@ body.show-resizing iframe {
 .expand-toggle-btn {
   background: none;
   border: none;
-  color: var(--accent);
+  color: var(--accent-text);
   cursor: pointer;
   text-decoration: underline;
   margin-left: 6px;
@@ -6247,12 +6283,15 @@ body.show-resizing iframe {
   cursor: pointer;
   transition: all 0.15s ease;
 }
+/* --accent-text is tuned to 4.5:1 on --bg-surface, so the pair holds as fill and text in every theme. */
 .waiting-btn-allow {
-  color: var(--accent);
-  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  color: var(--bg-surface);
+  background: var(--accent-text);
+  border-color: var(--accent-text);
+  font-weight: 600;
 }
 .waiting-btn-allow:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  background: color-mix(in srgb, var(--accent-text) 85%, var(--text-primary));
 }
 .waiting-btn-deny {
   color: var(--text-secondary);
@@ -6287,7 +6326,7 @@ body.show-resizing iframe {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: var(--accent);
+  color: var(--accent-text);
   margin-bottom: 4px;
 }
 .waiting-question-text {
@@ -6447,7 +6486,7 @@ body.show-resizing iframe {
 }
 .waiting-option.selected .waiting-option-key {
   border-color: var(--accent);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 .waiting-qtabs {
   display: flex;
@@ -7105,13 +7144,6 @@ body.show-resizing iframe {
   color: var(--text-primary);
 }
 
-.agent-dismiss-btn {
-  font-size: 12px;
-  padding: 4px 10px;
-  background: var(--bg-elevated);
-  color: var(--text-secondary);
-  border: 1px solid var(--border);
-}
 .agent-badge {
   display: inline-flex;
   align-items: center;
@@ -7729,7 +7761,7 @@ body.light {
   --text-primary: #0a0a0a;
   --text-secondary: #2c2c2c;
   --text-tertiary: #565656;
-  --text-muted: #767676;
+  --text-muted: #666666;
   --accent-text: #a0501c;
   --accent-dim: rgba(184, 90, 32, 0.18);
   --accent-glow: rgba(232, 111, 51, 0.5);
@@ -8248,7 +8280,7 @@ body.light .msg-assistant .msg-text {
 }
 
 .preview-fm .fm-k {
-  color: var(--accent);
+  color: var(--accent-text);
   font-weight: 600;
 }
 
@@ -8429,8 +8461,8 @@ body.light .msg-assistant .msg-text {
    small type, and scrolls its body (rule shared with #team-modal) instead of growing past
    the viewport cap. */
 .modal-help {
-  max-width: 900px;
-  height: min(700px, 90vh);
+  max-width: 1080px;
+  height: min(760px, 90vh);
   padding: 16px 20px 20px;
   display: flex;
   flex-direction: column;
@@ -8470,8 +8502,8 @@ body.light .msg-assistant .msg-text {
 .shortcuts {
   margin: 0;
   display: grid;
-  grid-template-columns: max-content 1fr 28px max-content 1fr;
-  column-gap: 14px;
+  grid-template-columns: fit-content(160px) 1fr 32px fit-content(160px) 1fr;
+  column-gap: 16px;
 }
 
 .shortcuts dt.sc-l {
@@ -8496,6 +8528,7 @@ body.light .msg-assistant .msg-text {
 .shortcuts dt {
   margin: 0;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   align-self: center;
   gap: 4px;
@@ -8621,9 +8654,10 @@ body.light .msg-assistant .msg-text {
 .modal-close {
   width: 32px;
   height: 32px;
-  border: none;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
   background: none;
-  color: var(--text-secondary);
+  color: var(--text-tertiary);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -8632,9 +8666,15 @@ body.light .msg-assistant .msg-text {
   transition: all 0.15s ease;
 }
 
+.modal-close svg {
+  width: 16px;
+  height: 16px;
+}
+
 .modal-close:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
+  border-color: var(--text-muted);
 }
 
 .modal-body {
@@ -9163,6 +9203,10 @@ select.form-input option:checked {
   background: var(--bg-hover);
 }
 
+.sp-row:hover .sp-branch {
+  background: var(--bg-elevated);
+}
+
 .sp-row.selected {
   background: var(--bg-elevated);
   border-color: var(--accent);
@@ -9182,7 +9226,7 @@ select.form-input option:checked {
 }
 
 .sp-state.active {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .sp-state.waiting {
@@ -10059,7 +10103,7 @@ select.form-input option:checked {
 
 .storage-tab.active,
 .help-tab.active {
-  color: var(--accent);
+  color: var(--accent-text);
   border-bottom-color: var(--accent);
 }
 
@@ -10120,7 +10164,7 @@ select.form-input option:checked {
 
 .storage-item-badge.pinned {
   background: color-mix(in srgb, var(--accent) 15%, transparent);
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .storage-item-badge.sticky {
@@ -10242,7 +10286,7 @@ select.form-input option:checked {
     --text-primary: #0a0a0a;
     --text-secondary: #2c2c2c;
     --text-tertiary: #565656;
-    --text-muted: #767676;
+    --text-muted: #666666;
     --accent-text: #a0501c;
     --accent-dim: rgba(184, 90, 32, 0.18);
     --accent-glow: rgba(232, 111, 51, 0.5);
@@ -10710,7 +10754,7 @@ pre.mermaid[data-mermaid-error]::before {
 }
 
 .session-group-header.sg-zen {
-  color: var(--accent);
+  color: var(--accent-text);
 }
 
 .sg-sub-label {
