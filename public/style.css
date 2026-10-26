@@ -98,6 +98,8 @@ body {
   line-height: 1.5;
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
+  /* On body, not :root: the hub SDK sets the theme vars inline on body. Some hub palettes put --text-muted under 4.5:1 for small text. */
+  --text-meta: color-mix(in srgb, var(--text-muted), var(--text-tertiary));
 }
 
 /* #endregion */
@@ -2151,7 +2153,7 @@ body.booting .boot-splash {
 
 .column-empty,
 .column-add {
-  color: var(--text-muted);
+  color: var(--text-meta);
   font-size: 12px;
   border: 1px dashed var(--border);
   border-radius: 8px;
@@ -2243,7 +2245,6 @@ body.booting .boot-splash {
 }
 
 .task-card.completed {
-  opacity: 0.85;
   border-left: 2px solid var(--success);
 }
 
@@ -2286,7 +2287,7 @@ body.booting .boot-splash {
 
 .task-id {
   font-size: 11px;
-  color: var(--text-muted);
+  color: var(--text-meta);
   margin-bottom: 6px;
   display: flex;
   align-items: center;
@@ -2328,7 +2329,7 @@ body.booting .boot-splash {
 
 .task-blocked {
   margin-left: auto;
-  color: var(--text-muted);
+  color: var(--text-meta);
   white-space: nowrap;
 }
 
@@ -3554,6 +3555,10 @@ code.ct .ct-has[aria-expanded='false'] .ct-name::after {
   margin-top: 16px;
   padding-top: 12px;
   border-top: 1px solid var(--border);
+}
+
+.team-modal-meta:first-child {
+  margin-top: 0;
 }
 
 .info-grid {
@@ -6553,7 +6558,7 @@ body.show-resizing iframe {
 .waiting-footer-hint {
   margin-left: auto;
   font-size: 11px;
-  color: var(--text-muted);
+  color: var(--text-meta);
   display: inline-flex;
   gap: 4px;
   align-items: center;
@@ -6615,12 +6620,12 @@ body.show-resizing iframe {
 .perm-wait {
   font-family: var(--mono);
   font-size: 11px;
-  color: var(--text-muted);
+  color: var(--text-tertiary);
 }
 .perm-label {
   font-size: 11px;
   letter-spacing: 0.3px;
-  color: var(--text-muted);
+  color: var(--text-tertiary);
   font-family: var(--mono);
   word-break: break-all;
 }
@@ -6642,7 +6647,7 @@ body.show-resizing iframe {
 .perm-cwd {
   font-family: var(--mono);
   font-size: 11px;
-  color: var(--text-muted);
+  color: var(--text-tertiary);
 }
 .perm-diff {
   border: 1px solid var(--border);
@@ -6758,8 +6763,8 @@ body.show-resizing iframe {
   color: var(--text-muted);
 }
 .msg-time {
-  font-size: 10px;
-  color: var(--text-muted);
+  font-size: 11px;
+  color: var(--text-tertiary);
   margin-top: 4px;
 }
 .msg-empty {
@@ -9560,7 +9565,7 @@ select.form-input option:checked {
   margin-top: 4px;
   font-family: var(--mono);
   font-size: 11px;
-  color: var(--text-muted);
+  color: var(--text-tertiary);
 }
 
 .ns-body textarea.form-input {
@@ -9891,7 +9896,7 @@ select.form-input option:checked {
   height: 100%;
   border-radius: 3px;
   background: var(--accent);
-  min-width: 2px;
+  min-width: 4px;
 }
 
 .impact-pct {

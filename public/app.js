@@ -10944,6 +10944,9 @@ function renderProjectIdentity(session) {
   return `${escapeHtml(repo)}<span class="wt-chip" title="Worktree of ${escapeHtml(wt.repo)}">⑂ ${escapeHtml(name)}</span>`;
 }
 
+const SHORT_DATE = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' });
+const SHORT_DATE_YEAR = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+
 function formatDate(dateStr) {
   const date = new Date(dateStr);
   const now = new Date();
@@ -10952,7 +10955,8 @@ function formatDate(dateStr) {
   if (diff < JUST_NOW_MS) return 'just now';
   if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
   if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
-  return date.toLocaleDateString();
+  if (diff < 7 * 86400000) return `${Math.floor(diff / 86400000)}d ago`;
+  return (date.getFullYear() === now.getFullYear() ? SHORT_DATE : SHORT_DATE_YEAR).format(date);
 }
 
 // Terminal output reaches the transcript raw. A CSI-only pattern left OSC
