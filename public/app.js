@@ -1939,6 +1939,8 @@ const ICON_AGENT_ACTIVE =
 const ICON_TERMINAL =
   '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>';
 const TERMINAL_TITLE = 'Running in a terminal here';
+const ICON_FORK =
+  '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9"/><path d="M12 12v3"/></svg>';
 const ICON_DISPATCHED =
   '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z"/><path d="m21.854 2.147-10.94 10.939"/></svg>';
 const ICON_CHAT =
@@ -4042,6 +4044,7 @@ function renderSessions() {
                 ${session.planSourceSessionId ? `<span class="plan-indicator" title="Implements plan — click to reveal plan session" onclick="event.stopPropagation(); revealPlanSession('${escAttrJs(session.planSourceSessionId)}')">${ICON_PLAN}</span>` : ''}
                 ${session.sharedTaskList ? `<span class="shared-tasklist-badge" title="Shared task list: ${escapeHtml(session.sharedTaskList)}">${linkSvg(12)}</span>` : ''}
                 ${session.dispatched ? `<span class="dispatched-badge"${session.dispatched.parent ? ` onclick="event.stopPropagation(); revealSession('${escAttrJs(session.dispatched.parent)}')"` : ''} title="${escapeHtml(dispatchedTitle(session.dispatched))}">${ICON_DISPATCHED}</span>` : ''}
+                ${session.forkedFromSessionId ? `<span class="fork-badge" onclick="event.stopPropagation(); revealSession('${escAttrJs(session.forkedFromSessionId)}')" title="Forked from ${escapeHtml(session.forkedFromSessionId)}, click to reveal">${ICON_FORK}</span>` : ''}
                 ${runningTerminals.has(session.id) ? `<span class="terminal-badge" onclick="event.stopPropagation(); showSessionTerminal('${escAttrJs(session.id)}')" title="${TERMINAL_TITLE}">${ICON_TERMINAL}</span>` : ''}
                 ${isWaitingSession(session) ? `<span class="agent-badge agent-badge-waiting" title="Waiting for user">${ICON_AGENT_WAITING}</span>` : ''}
                 ${session.hasRunningAgents && !isWaitingSession(session) ? `<span class="agent-badge agent-badge-active" title="Agents running">${ICON_AGENT_ACTIVE}</span>` : ''}

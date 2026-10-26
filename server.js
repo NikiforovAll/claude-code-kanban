@@ -74,7 +74,7 @@ const { countTaskDir } = require('./lib/task-counts');
 const { readTaskDir } = require('./lib/task-dir');
 const { foldAgentLines } = require('./lib/agent-log');
 const { projectMatcher, normalizeProjectPath, sessionProjectKey } = require('./public/project-match');
-const { getParentVerdict, setParentVerdict } = require('./lib/parent-cache');
+const { getParentVerdict, setParentVerdict, peekParentVerdict } = require('./lib/parent-cache');
 
 if (process.argv.includes("--install") || process.argv.includes("--uninstall")) {
   const { runInstall, runUninstall } = require("./install");
@@ -1562,10 +1562,11 @@ app.get('/api/sessions', async (req, res) => {
     const compactSuppressed = new Set();
     for (const [sid] of sessionsMap) {
       // Cheap pre-gate: only a session with a boundary anchor can be a continuation,
-      // and lookupParentSession reads JSONLs on a cold cache.
-      if (!metadata[sid]?.logicalParentUuid) continue;
-      const parent = lookupParentSession(sid);
-      if (parent.relation !== 'compact' || !sessionsMap.has(parent.parentSessionId)) continue;
+      // and lookupParentSession reads JSONLs on a cold cache. A fork with no boundary
+      // gets its badge only once a verdict exists (the info modal computes one).
+      const parent = metadata[sid]?.logicalParentUuid ? lookupParentSession(sid) : peekParentVerdict(sid);
+      if (parent?.relation === 'fork') sessionsMap.get(sid).forkedFromSessionId = parent.parentSessionId;
+      if (parent?.relation !== 'compact' || !sessionsMap.has(parent.parentSessionId)) continue;
       compactSuppressed.add(parent.parentSessionId);
       sessionsMap.get(sid).continuedFromSessionId = parent.parentSessionId;
     }

@@ -3006,6 +3006,7 @@ code.ct .ct-has[aria-expanded='false'] .ct-name::after {
 .loop-badge,
 .workflow-badge,
 .dispatched-badge,
+.fork-badge,
 .terminal-badge {
   width: 18px;
   height: 18px;
@@ -7179,6 +7180,10 @@ body.show-resizing iframe {
 .dispatched-badge:not([onclick]) {
   cursor: default;
 }
+.fork-badge {
+  cursor: pointer;
+}
+.fork-badge:hover,
 .dispatched-badge[onclick]:hover {
   color: var(--accent, var(--text-primary));
 }
