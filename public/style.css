@@ -290,11 +290,11 @@ body::before {
   padding: 4px 10px;
   font: inherit;
   font-size: 11px;
-  font-weight: 500;
+  font-weight: 600;
   letter-spacing: 0.04em;
-  color: var(--text-secondary);
+  color: var(--accent-text);
   background: transparent;
-  border: 1px dashed color-mix(in srgb, var(--text-secondary) 40%, var(--border));
+  border: 1px solid var(--accent-text);
   border-radius: 999px;
   white-space: nowrap;
   cursor: pointer;
@@ -1134,13 +1134,14 @@ body.booting .boot-splash {
   background: var(--warning);
 }
 
+/* Stale rows render at 0.85 opacity, which takes --text-muted below 4.5:1. */
 .session-item.stale .session-time {
-  color: var(--text-muted);
+  color: var(--text-tertiary);
 }
 
 .session-item.stale .session-time::before {
   background: transparent;
-  border: 1px solid var(--text-muted);
+  border: 1px solid var(--text-tertiary);
 }
 
 .session-name {
@@ -3021,6 +3022,17 @@ code.ct .ct-has[aria-expanded='false'] .ct-name::after {
   transition: all 0.15s ease;
 }
 
+/* A 22×24px hit area around each 18px icon without growing the card. The 5px row gap
+   keeps neighbouring areas from overlapping. */
+.session-indicators > [onclick] {
+  position: relative;
+}
+.session-indicators > [onclick]::after {
+  content: '';
+  position: absolute;
+  inset: -3px -2px;
+}
+
 .team-info-btn:hover,
 .loop-badge:hover,
 .workflow-badge:hover {
@@ -3553,10 +3565,11 @@ code.ct .ct-has[aria-expanded='false'] .ct-name::after {
 }
 /* Shared hover-reveal icon-button group, also used by the linked-doc rows. Each host
    supplies its own reveal trigger — the base only sets the resting opacity. */
+/* 0.55 is the lowest opacity that keeps the icons at 3:1 in light and dark. */
 .row-actions {
   display: flex;
   gap: 4px;
-  opacity: 0.3;
+  opacity: 0.55;
   transition: opacity 0.15s ease;
 }
 .info-grid:hover .row-actions {
@@ -5483,7 +5496,8 @@ body.show-resizing iframe {
   margin-top: 8px;
 }
 /* Under the pinned block, rows scrolled past the top fade out instead of showing as a cut row.
-   The fade grows over the first 48px of scroll, so an unscrolled list shows its first row whole. */
+   The fade grows over the first 64px of scroll, so an unscrolled list shows its first row whole.
+   Its top 24px are fully clear, which covers the meta line of a cut row. */
 @property --msg-top-fade {
   syntax: '<length>';
   inherits: false;
@@ -5491,15 +5505,15 @@ body.show-resizing iframe {
 }
 @keyframes msg-top-fade {
   to {
-    --msg-top-fade: 48px;
+    --msg-top-fade: 64px;
   }
 }
 @supports (animation-timeline: scroll()) {
   #message-panel-pinned:not(:empty) + .message-panel-content {
-    mask-image: linear-gradient(to bottom, transparent, #000 var(--msg-top-fade));
+    mask-image: linear-gradient(to bottom, transparent calc(var(--msg-top-fade) * 0.375), #000 var(--msg-top-fade));
     animation: msg-top-fade linear both;
     animation-timeline: scroll(self);
-    animation-range: 0 48px;
+    animation-range: 0 64px;
   }
 }
 .msg-item {
@@ -6604,7 +6618,7 @@ body.show-resizing iframe {
   color: var(--text-muted);
 }
 .perm-label {
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.3px;
   color: var(--text-muted);
   font-family: var(--mono);
@@ -8462,7 +8476,7 @@ body.light .msg-assistant .msg-text {
    the viewport cap. */
 .modal-help {
   max-width: 1080px;
-  height: min(760px, 90vh);
+  height: min(800px, 90vh);
   padding: 16px 20px 20px;
   display: flex;
   flex-direction: column;
@@ -9431,7 +9445,7 @@ select.form-input option:checked {
 }
 
 .ns-notched legend {
-  margin: 0 8px 0 auto;
+  margin: 0 auto 0 8px;
   padding: 0 4px;
   font-size: 11px;
   font-weight: 500;
@@ -9829,10 +9843,11 @@ select.form-input option:checked {
   gap: 6px;
 }
 
+/* The pure status colors on their own 15% tint measure 2.7–3.8:1 in light. Mixing in the text color keeps the hue and passes 4.5:1. */
 .badge-success {
   display: inline-block;
   background: color-mix(in srgb, var(--success) 15%, transparent);
-  color: var(--success);
+  color: color-mix(in srgb, var(--success) 65%, var(--text-primary));
   border-radius: 4px;
   padding: 1px 6px;
   font-size: 12px;
@@ -9842,7 +9857,7 @@ select.form-input option:checked {
 .badge-failed {
   display: inline-block;
   background: color-mix(in srgb, var(--danger) 15%, transparent);
-  color: var(--danger);
+  color: color-mix(in srgb, var(--danger) 65%, var(--text-primary));
   border-radius: 4px;
   padding: 1px 6px;
   font-size: 12px;
@@ -9852,7 +9867,7 @@ select.form-input option:checked {
 .badge-rejected {
   display: inline-block;
   background: color-mix(in srgb, var(--warning) 15%, transparent);
-  color: var(--warning);
+  color: color-mix(in srgb, var(--warning) 65%, var(--text-primary));
   border-radius: 4px;
   padding: 1px 6px;
   font-size: 12px;

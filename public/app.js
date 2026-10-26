@@ -4444,7 +4444,7 @@ function renderSession() {
   const completed = currentTasks.filter((t) => t.status === 'completed').length;
   const percent = currentTasks.length > 0 ? Math.round((completed / currentTasks.length) * 100) : 0;
 
-  progressPercent.textContent = `${percent}%`;
+  progressPercent.textContent = `${percent}% done`;
   progressBar.style.width = `${percent}%`;
   const hasInProgress = currentTasks.some((t) => t.status === 'in_progress');
   progressBar.classList.toggle('shimmer', hasInProgress && percent < 100);
@@ -4468,7 +4468,7 @@ function renderProjectView() {
   const completed = currentTasks.filter((t) => t.status === 'completed').length;
   const percent = currentTasks.length > 0 ? Math.round((completed / currentTasks.length) * 100) : 0;
 
-  progressPercent.textContent = `${percent}%`;
+  progressPercent.textContent = `${percent}% done`;
   progressBar.style.width = `${percent}%`;
   const hasInProgress = currentTasks.some((t) => t.status === 'in_progress');
   progressBar.classList.toggle('shimmer', hasInProgress && percent < 100);
@@ -10371,6 +10371,8 @@ const CONTEXT_COLORS = {
   red: 'var(--danger)',
 };
 const COST_THRESHOLDS = { green: 0.5, yellow: 2, orange: 5 };
+// Status colors as small text measure 3.7–3.9:1 on light surfaces; bars and dots keep the pure color.
+const textTone = (color) => `color-mix(in srgb, ${color} 70%, var(--text-primary))`;
 const MODEL_THRESHOLDS = [
   { match: /sonnet/i, yellow: 120000, orange: 200000, red: 300000 },
   { match: /haiku/i, yellow: 100000, orange: 130000, red: 150000 },
@@ -10477,7 +10479,7 @@ function renderContextBar(session) {
             ${renderMarkers(ctx.markers)}
           </div>
           <div class="context-bar-labels">
-            <span style="color:color-mix(in srgb, ${color} 70%, var(--text-primary))">${Math.round(ctx.pct)}% (${used})</span>
+            <span>ctx <span style="color:${textTone(color)}">${Math.round(ctx.pct)}% (${used})</span></span>
             <span>${Math.round(ctx.remaining)}% free</span>
           </div>
         </div>`;
@@ -10518,7 +10520,7 @@ function formatCacheLeft(expiresAt, expiredText) {
   if (left === 0) return { text: expiredText, color: 'var(--text-muted)' };
   const text = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
   const color = left < 120 ? CONTEXT_COLORS.red : left < 300 ? CONTEXT_COLORS.orange : CONTEXT_COLORS.green;
-  return { text, color };
+  return { text, color: textTone(color) };
 }
 
 let cacheTimerInterval = null;
@@ -10587,7 +10589,7 @@ function renderContextDetail(session, { tokens = true } = {}) {
             </div>
           </div>
           <div class="detail-context-summary">
-            <span style="color:${color}">${Math.round(ctx.pct)}% used</span>
+            <span style="color:${textTone(color)}">${Math.round(ctx.pct)}% used</span>
             <span${ctx.compacts ? ` title="Auto-compact window · model window ${escapeHtml(formatTokens(ctx.modelSize / 1000))}"` : ''}>${formatTokens(ctx.usedTokens / 1000)} / ${formatTokens(ctx.size / 1000)}</span>
           </div>`
     : '';
@@ -10599,11 +10601,11 @@ function renderContextDetail(session, { tokens = true } = {}) {
           <div class="detail-context-stats">
             ${usageRows}
             ${totalRows}
-            ${ctx ? `<div class="stat-item"><span class="stat-label">Cost</span><span class="stat-value" style="color:${getCostColor(cost.total_cost_usd)}">${formatCost(cost.total_cost_usd)}</span></div>` : ''}
+            ${ctx ? `<div class="stat-item"><span class="stat-label">Cost</span><span class="stat-value" style="color:${textTone(getCostColor(cost.total_cost_usd))}">${formatCost(cost.total_cost_usd)}</span></div>` : ''}
             ${reply ? renderCacheTimer(reply) : ''}
             ${cost.total_duration_ms != null ? `<div class="stat-item"><span class="stat-label">Duration</span><span class="stat-value">${formatDuration(cost.total_duration_ms)}</span></div>` : ''}
             ${cost.total_api_duration_ms != null ? `<div class="stat-item"><span class="stat-label">API time</span><span class="stat-value">${formatDuration(cost.total_api_duration_ms)}</span></div>` : ''}
-            ${cost.total_lines_added != null ? `<div class="stat-item"><span class="stat-label">Lines</span><span class="stat-value"><span style="color:${CONTEXT_COLORS.green}">+${(cost.total_lines_added || 0).toLocaleString()}</span> / <span style="color:${CONTEXT_COLORS.red}">-${(cost.total_lines_removed || 0).toLocaleString()}</span></span></div>` : ''}
+            ${cost.total_lines_added != null ? `<div class="stat-item"><span class="stat-label">Lines</span><span class="stat-value"><span style="color:${textTone(CONTEXT_COLORS.green)}">+${(cost.total_lines_added || 0).toLocaleString()}</span> / <span style="color:${textTone(CONTEXT_COLORS.red)}">-${(cost.total_lines_removed || 0).toLocaleString()}</span></span></div>` : ''}
           </div>
         </div>`;
 }
@@ -10876,8 +10878,8 @@ function showWaitingDetail() {
   // With actions on screen the form/buttons are the content — tuck the raw
   // JSON behind a toggle, but keep what the user is approving visible: for a
   // permission ask surface the command (or description) as a one-line summary
+  let summaryHtml = '';
   if ((actionsHtml || footerHtml) && inputHtml) {
-    let summaryHtml = '';
     if (currentWaiting.kind === 'plan' && typeof params?.plan === 'string' && params.plan) {
       // A plan ask IS the plan — render it in full so it can be reviewed and
       // approved right here (follow mode included) instead of a JSON dump. The
@@ -10900,7 +10902,8 @@ function showWaitingDetail() {
   autoSizeModal(modal, body);
   setMsgDetailFollow(msgDetailFollowLatest);
   const overlay = document.getElementById('msg-detail-modal');
-  const meta = [formatDate(currentWaiting.timestamp), 'waiting'];
+  // The permission card's header already shows how long the ask has waited.
+  const meta = summaryHtml ? [] : [formatDate(currentWaiting.timestamp), 'waiting'];
   document.getElementById('msg-detail-meta').textContent = meta.join(' · ');
   currentPinDetailId = null;
   updateMsgDetailPinState();
