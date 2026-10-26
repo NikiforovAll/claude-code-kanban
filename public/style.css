@@ -98,8 +98,6 @@ body {
   line-height: 1.5;
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
-  /* On body, not :root: the hub SDK sets the theme vars inline on body. Some hub palettes put --text-muted under 4.5:1 for small text. */
-  --text-meta: color-mix(in srgb, var(--text-muted), var(--text-tertiary));
 }
 
 /* #endregion */
@@ -2153,7 +2151,7 @@ body.booting .boot-splash {
 
 .column-empty,
 .column-add {
-  color: var(--text-meta);
+  color: var(--text-muted);
   font-size: 12px;
   border: 1px dashed var(--border);
   border-radius: 8px;
@@ -2287,7 +2285,7 @@ body.booting .boot-splash {
 
 .task-id {
   font-size: 11px;
-  color: var(--text-meta);
+  color: var(--text-muted);
   margin-bottom: 6px;
   display: flex;
   align-items: center;
@@ -2329,7 +2327,7 @@ body.booting .boot-splash {
 
 .task-blocked {
   margin-left: auto;
-  color: var(--text-meta);
+  color: var(--text-muted);
   white-space: nowrap;
 }
 
@@ -6558,7 +6556,7 @@ body.show-resizing iframe {
 .waiting-footer-hint {
   margin-left: auto;
   font-size: 11px;
-  color: var(--text-meta);
+  color: var(--text-muted);
   display: inline-flex;
   gap: 4px;
   align-items: center;

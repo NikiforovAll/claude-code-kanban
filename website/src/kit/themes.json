@@ -14,7 +14,7 @@
    "ink1": "#f0f1f3",
    "ink2": "#c2c4c9",
    "ink3": "#9a9da5",
-   "inkMuted": "#7d808a"
+   "inkMuted": "#858891"
   },
   "light": {
    "ember": "#e86f33",
@@ -28,7 +28,7 @@
    "ink1": "#0a0a0a",
    "ink2": "#2c2c2c",
    "ink3": "#565656",
-   "inkMuted": "#767676"
+   "inkMuted": "#666666"
   }
  },
  {
@@ -46,7 +46,7 @@
    "ink1": "#ebdbb2",
    "ink2": "#d5c4a1",
    "ink3": "#bdae93",
-   "inkMuted": "#928374"
+   "inkMuted": "#a69782"
   },
   "light": {
    "ember": "#d65d0e",
@@ -59,8 +59,8 @@
    "border": "#c9bc9d",
    "ink1": "#3c3836",
    "ink2": "#504945",
-   "ink3": "#665c54",
-   "inkMuted": "#7c6f64"
+   "ink3": "#5f564f",
+   "inkMuted": "#70645b"
   }
  },
  {
@@ -78,7 +78,7 @@
    "ink1": "#cdd6f4",
    "ink2": "#bac2de",
    "ink3": "#a6adc8",
-   "inkMuted": "#7f849c"
+   "inkMuted": "#82879f"
   },
   "light": {
    "ember": "#8839ef",
@@ -91,8 +91,8 @@
    "border": "#bcc0cc",
    "ink1": "#4c4f69",
    "ink2": "#5c5f77",
-   "ink3": "#6c6f85",
-   "inkMuted": "#8c8fa1"
+   "ink3": "#545770",
+   "inkMuted": "#63667d"
   }
  },
  {
@@ -109,8 +109,8 @@
    "border": "#3b4261",
    "ink1": "#c0caf5",
    "ink2": "#a9b1d6",
-   "ink3": "#787c99",
-   "inkMuted": "#565f89"
+   "ink3": "#959cbe",
+   "inkMuted": "#838aaf"
   },
   "light": {
    "ember": "#2e7de9",
@@ -123,8 +123,8 @@
    "border": "#a8aecb",
    "ink1": "#343b58",
    "ink2": "#565a6e",
-   "ink3": "#6c6e75",
-   "inkMuted": "#848cb5"
+   "ink3": "#505466",
+   "inkMuted": "#5d627a"
   }
  },
  {
@@ -141,8 +141,8 @@
    "border": "#586e75",
    "ink1": "#e2dfd0",
    "ink2": "#b7c0bf",
-   "ink3": "#93a1a1",
-   "inkMuted": "#839496"
+   "ink3": "#b7beb7",
+   "inkMuted": "#9faaa7"
   },
   "light": {
    "ember": "#2280c2",
@@ -157,8 +157,8 @@
    "border": "#cdc4ab",
    "ink1": "#073642",
    "ink2": "#4f6369",
-   "ink3": "#586e75",
-   "inkMuted": "#728589"
+   "ink3": "#385861",
+   "inkMuted": "#4a666e"
   }
  },
  {
@@ -175,8 +175,8 @@
    "border": "#565a75",
    "ink1": "#f8f8f2",
    "ink2": "#d8d8d2",
-   "ink3": "#b0b3c5",
-   "inkMuted": "#6272a4"
+   "ink3": "#b2b5c6",
+   "inkMuted": "#9aa1bc"
   },
   "light": {
    "ember": "#7c3aed",
@@ -189,8 +189,8 @@
    "border": "#c9c9d6",
    "ink1": "#16161e",
    "ink2": "#34343f",
-   "ink3": "#5a5a68",
-   "inkMuted": "#787885"
+   "ink3": "#575765",
+   "inkMuted": "#666674"
   }
  },
  {
@@ -207,8 +207,8 @@
    "border": "#4c566a",
    "ink1": "#eceff4",
    "ink2": "#d8dee9",
-   "ink3": "#aeb6c5",
-   "inkMuted": "#7b88a1"
+   "ink3": "#bec4d1",
+   "inkMuted": "#a7b0c1"
   },
   "light": {
    "ember": "#5e81ac",
@@ -222,7 +222,7 @@
    "ink1": "#2e3440",
    "ink2": "#3b4252",
    "ink3": "#4c566a",
-   "inkMuted": "#6b7589"
+   "inkMuted": "#5e687c"
   }
  },
  {
@@ -239,8 +239,8 @@
    "border": "#403d52",
    "ink1": "#e0def4",
    "ink2": "#c5c2dd",
-   "ink3": "#908caa",
-   "inkMuted": "#6e6a86"
+   "ink3": "#a09db9",
+   "inkMuted": "#8e8ba7"
   },
   "light": {
    "ember": "#907aa9",
@@ -253,8 +253,8 @@
    "border": "#cecacd",
    "ink1": "#575279",
    "ink2": "#635e87",
-   "ink3": "#6e6a88",
-   "inkMuted": "#857f96"
+   "ink3": "#5a557b",
+   "inkMuted": "#6a6485"
   }
  },
  {
@@ -271,8 +271,8 @@
    "border": "#475258",
    "ink1": "#d3c6aa",
    "ink2": "#bfb6a3",
-   "ink3": "#9da9a0",
-   "inkMuted": "#859289"
+   "ink3": "#c3bea7",
+   "inkMuted": "#a8ab9a"
   },
   "light": {
    "ember": "#6f8352",
@@ -285,8 +285,8 @@
    "border": "#d3d2bf",
    "ink1": "#3d484e",
    "ink2": "#55636b",
-   "ink3": "#66705f",
-   "inkMuted": "#7a8577"
+   "ink3": "#515b56",
+   "inkMuted": "#606a62"
   }
  },
  {
@@ -304,7 +304,7 @@
    "ink1": "#dcd7ba",
    "ink2": "#c8c093",
    "ink3": "#a6a69c",
-   "inkMuted": "#727169"
+   "inkMuted": "#94948a"
   },
   "light": {
    "ember": "#4d699b",
@@ -317,8 +317,8 @@
    "border": "#d2ccb6",
    "ink1": "#545464",
    "ink2": "#66667a",
-   "ink3": "#716e61",
-   "inkMuted": "#8a8775"
+   "ink3": "#565564",
+   "inkMuted": "#666469"
   }
  },
  {
@@ -335,8 +335,8 @@
    "border": "#4b5263",
    "ink1": "#d7dae0",
    "ink2": "#abb2bf",
-   "ink3": "#8b919e",
-   "inkMuted": "#5c6370"
+   "ink3": "#acb0ba",
+   "inkMuted": "#999ea8"
   },
   "light": {
    "ember": "#4078f2",
@@ -349,8 +349,8 @@
    "border": "#d4d4d6",
    "ink1": "#383a42",
    "ink2": "#50525a",
-   "ink3": "#696c77",
-   "inkMuted": "#a0a1a7"
+   "ink3": "#575963",
+   "inkMuted": "#666871"
   }
  },
  {
@@ -367,8 +367,8 @@
    "border": "#5f7e97",
    "ink1": "#d6deeb",
    "ink2": "#b8c5d6",
-   "ink3": "#8ba3b8",
-   "inkMuted": "#637777"
+   "ink3": "#9bb0c3",
+   "inkMuted": "#899eab"
   },
   "light": {
    "ember": "#0c969b",
@@ -381,8 +381,8 @@
    "border": "#d0d0d0",
    "ink1": "#403f53",
    "ink2": "#545167",
-   "ink3": "#6f6e85",
-   "inkMuted": "#989fb1"
+   "ink3": "#5a596f",
+   "inkMuted": "#68687e"
   }
  },
  {
@@ -399,8 +399,8 @@
    "border": "#5b595c",
    "ink1": "#fcfcfa",
    "ink2": "#d9d8d6",
-   "ink3": "#939293",
-   "inkMuted": "#727072"
+   "ink3": "#bfbfbe",
+   "inkMuted": "#ababab"
   },
   "light": {
    "ember": "#c08a00",
@@ -413,8 +413,8 @@
    "border": "#cdc8c5",
    "ink1": "#2c292d",
    "ink2": "#46434a",
-   "ink3": "#6b686d",
-   "inkMuted": "#8d8a8d"
+   "ink3": "#59565b",
+   "inkMuted": "#68656a"
   }
  },
  {
@@ -431,8 +431,8 @@
    "border": "#444d56",
    "ink1": "#e1e4e8",
    "ink2": "#d1d5da",
-   "ink3": "#959da5",
-   "inkMuted": "#6a737d"
+   "ink3": "#a6adb4",
+   "inkMuted": "#929aa2"
   },
   "light": {
    "ember": "#0366d6",
@@ -445,8 +445,8 @@
    "border": "#d1d5da",
    "ink1": "#24292e",
    "ink2": "#444d56",
-   "ink3": "#586069",
-   "inkMuted": "#6a737d"
+   "ink3": "#575f68",
+   "inkMuted": "#666e78"
   }
  },
  {
@@ -463,8 +463,8 @@
    "border": "#2d3343",
    "ink1": "#bfbdb6",
    "ink2": "#a8a6a0",
-   "ink3": "#8a9199",
-   "inkMuted": "#6c7380"
+   "ink3": "#8d949b",
+   "inkMuted": "#7c838d"
   },
   "light": {
    "ember": "#c97612",
@@ -477,8 +477,8 @@
    "border": "#d8dde2",
    "ink1": "#3d4149",
    "ink2": "#5c6166",
-   "ink3": "#787b80",
-   "inkMuted": "#8a9199"
+   "ink3": "#5a5e64",
+   "inkMuted": "#686d74"
   }
  },
  {
@@ -495,8 +495,8 @@
    "border": "#333333",
    "ink1": "#dbd7ca",
    "ink2": "#bfbaaa",
-   "ink3": "#8f8f85",
-   "inkMuted": "#758575"
+   "ink3": "#99998e",
+   "inkMuted": "#7e8a7b"
   },
   "light": {
    "ember": "#1c6b48",
@@ -509,8 +509,8 @@
    "border": "#d6d6d6",
    "ink1": "#393a34",
    "ink2": "#4e4f47",
-   "ink3": "#6b6d63",
-   "inkMuted": "#a0ada0"
+   "ink3": "#5d5e56",
+   "inkMuted": "#6a6d64"
   }
  },
  {
@@ -528,7 +528,7 @@
    "ink1": "#ffffff",
    "ink2": "#d8d6e8",
    "ink3": "#b6b1d8",
-   "inkMuted": "#848bbd"
+   "inkMuted": "#8f94c3"
   },
   "light": {
    "ember": "#c936a6",
@@ -541,8 +541,8 @@
    "border": "#c5bcdd",
    "ink1": "#241b2f",
    "ink2": "#3d3455",
-   "ink3": "#5c5380",
-   "inkMuted": "#7d76a3"
+   "ink3": "#59507c",
+   "inkMuted": "#675f8b"
   }
  }
 ]
