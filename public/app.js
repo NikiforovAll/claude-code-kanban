@@ -4989,6 +4989,12 @@ function sgGroupById(id) {
 // Matches MAX_DEPTH in lib/user-groups.js.
 const SG_MAX_DEPTH = 8;
 
+function kbSelectedGroup() {
+  if (focusZone !== 'sidebar') return null;
+  const header = sessionsList.querySelector('.session-group-header.kb-selected');
+  return header ? sgGroupById(header.dataset.groupId) : null;
+}
+
 function sgSubtreeIds(rootId) {
   const ids = new Set([rootId]);
   for (const id of ids) for (const g of sessionGroups) if (g.parent === id) ids.add(g.id);
@@ -6514,7 +6520,7 @@ const SHORTCUT_TABS = [
           { keys: ['>'], label: 'Toggle sticky' },
           { keys: ['Ctrl', 'Shift', '.'], combo: true, label: 'Toggle sticky (from the terminal)' },
           { keys: ['Shift', 'F10'], combo: true, label: 'Session menu: move to group, fork (or Menu key)' },
-          { keys: ['Ctrl', 'D'], combo: true, label: 'Dismiss session (pinned: to Pinned group)' },
+          { keys: ['Ctrl', 'D'], combo: true, label: 'Dismiss session, or delete the group under the cursor' },
           { keys: ['Ctrl', 'Shift', 'L'], combo: true, label: 'Toggle session log' },
           { keys: ['Ctrl', 'Shift', 'M'], combo: true, label: 'Open last message' },
           { keys: ['↑', '↓'], label: 'Previous / next message in detail' },
@@ -8123,7 +8129,9 @@ document.addEventListener('keydown', (e) => {
   }
   if (ClaudeHub.comboOf(e) === 'ctrl+d') {
     e.preventDefault();
-    dismissContextSession();
+    const group = kbSelectedGroup();
+    if (group) sgConfirmDelete(group);
+    else dismissContextSession();
     return;
   }
   if (e.code === 'KeyC' && e.shiftKey && !e.altKey && !e.metaKey) {
@@ -11650,8 +11658,7 @@ function toggleZenMode() {
   if (zenMode) zenMode = false;
   else if (zenGroup) zenGroup = null;
   else {
-    const header = focusZone === 'sidebar' ? sessionsList.querySelector('.session-group-header.kb-selected') : null;
-    zenGroup = header?.dataset.groupId || null;
+    zenGroup = kbSelectedGroup()?.id || null;
     zenMode = !zenGroup;
   }
   store.setItem(ZEN_KEY, String(zenMode));
