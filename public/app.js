@@ -2769,32 +2769,58 @@ function createResizeGrip({ onReset, ...drag }) {
 }
 
 const MODAL_ZOOM_KEY = 'modal-zoom';
-const MODAL_ZOOM_MIN = 0.7;
-const MODAL_ZOOM_MAX = 2.0;
-let modalZoom = clampModalZoom(Number.parseFloat(store.getItem(MODAL_ZOOM_KEY)) || 1);
+const SHOW_ZOOM_KEY = 'show-zoom';
+const ZOOM_MIN = 0.7;
+const ZOOM_MAX = 2.0;
+let modalZoom = readZoom(MODAL_ZOOM_KEY);
+let showZoom = readZoom(SHOW_ZOOM_KEY);
 
-function clampModalZoom(v) {
-  return Math.min(MODAL_ZOOM_MAX, Math.max(MODAL_ZOOM_MIN, v));
+function clampZoom(v) {
+  return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, v));
+}
+
+function readZoom(key) {
+  return clampZoom(Number.parseFloat(store.getItem(key)) || 1);
+}
+
+function zoomLabel(z) {
+  return `${Math.round(z * 100)}%`;
 }
 
 function modalZoomLabel() {
-  return `${Math.round(modalZoom * 100)}%`;
+  return zoomLabel(modalZoom);
+}
+
+// delta 0 resets to 100%. At a limit it returns z as is; else it saves and toasts the new zoom.
+function stepZoom(z, delta, key, label) {
+  const next = delta === 0 ? 1 : clampZoom(Math.round((z + delta) * 10) / 10);
+  if (next === z && delta !== 0) return z;
+  store.setItem(key, String(next));
+  showToast(`${label} ${zoomLabel(next)}`);
+  return next;
 }
 
 function applyModalZoom() {
   document.documentElement.style.setProperty('--modal-zoom', String(modalZoom));
   for (const el of document.querySelectorAll('.pane-zoom-val')) el.textContent = modalZoomLabel();
-  postToShowFrames(() => ({ type: `${SHOW_MSG}zoom`, z: modalZoom }));
+  postToShowFrames(() => ({ type: `${SHOW_MSG}zoom`, z: modalZoom }), document.querySelectorAll(PANE_SHOW_FRAMES));
 }
 
-// delta 0 resets to 100%
 function adjustModalZoom(delta) {
-  const next = delta === 0 ? 1 : clampModalZoom(Math.round((modalZoom + delta) * 10) / 10);
-  if (next === modalZoom && delta !== 0) return;
-  modalZoom = next;
-  store.setItem(MODAL_ZOOM_KEY, String(modalZoom));
+  modalZoom = stepZoom(modalZoom, delta, MODAL_ZOOM_KEY, 'Text');
   applyModalZoom();
-  showToast(`Text ${modalZoomLabel()}`);
+}
+
+// The show card above the terminal keeps its own text zoom: it sits beside a pane, so one
+// shared scale would resize both.
+function applyShowZoom() {
+  document.documentElement.style.setProperty('--show-zoom', String(showZoom));
+  postToShowFrames(() => ({ type: `${SHOW_MSG}zoom`, z: showZoom }), [showState.frame]);
+}
+
+function adjustShowZoom(delta) {
+  showZoom = stepZoom(showZoom, delta, SHOW_ZOOM_KEY, 'Card text');
+  applyShowZoom();
 }
 
 // The markup decides what scales: `.modal-zoomable` marks a modal's reading
@@ -2808,9 +2834,12 @@ function isAnyModalOpen() {
   return document.querySelector('.modal-overlay.visible') !== null;
 }
 
-// An open modal owns the zoom keys even when it has nothing to scale.
-function isZoomableOnScreen() {
-  return isAnyModalOpen() ? isZoomableModalOpen() : isAskOnScreen() || isPaneDocOnScreen() || isShowCardFocused();
+// The zoom the keys change, or null. An open modal owns the keys even when it has nothing to scale.
+function zoomTarget() {
+  if (isAnyModalOpen()) return isZoomableModalOpen() ? adjustModalZoom : null;
+  if (isAskOnScreen()) return adjustModalZoom;
+  if (isShowCardFocused()) return adjustShowZoom;
+  return isPaneDocOnScreen() ? adjustModalZoom : null;
 }
 
 const ZOOM_KEYS = { '+': 0.1, '=': 0.1, NumpadAdd: 0.1, '-': -0.1, _: -0.1, NumpadSubtract: -0.1, 0: 0, Numpad0: 0 };
@@ -7773,9 +7802,10 @@ document.addEventListener('keydown', (e) => {
   // the whole page. Sits above the text-field guard so it still works with the
   // caret in a field inside the modal.
   const zoom = zoomDelta(e);
-  if (zoom !== undefined && isZoomableOnScreen()) {
+  const zoomTo = zoom !== undefined && zoomTarget();
+  if (zoomTo) {
     e.preventDefault();
-    adjustModalZoom(zoom);
+    zoomTo(zoom);
     return;
   }
   if (isShowCardFocused() && !isAnyModalOpen() && showCardKey(e)) {
@@ -13962,7 +13992,7 @@ async function loadPaneView(sid, pane, view, scroll) {
   if (data?.kind === 'html') {
     // A show card's own zoom follows the text zoom (showBridge), so its frame is not .modal-zoomable.
     const [cls, doc] = pane.show
-      ? ['pane-frame show-pane-frame', showSrcdoc(data.content, scroll?.y)]
+      ? ['pane-frame show-pane-frame', showSrcdoc(data.content, scroll?.y, modalZoom)]
       : ['pane-frame modal-zoomable themed-frame', themedSrcdoc(data.content)];
     const frame = createPreviewFrame(cls, doc);
     frame.title = pane.title;
@@ -16508,7 +16538,7 @@ function setAsk(a) {
     if (a.content == null) {
       body.innerHTML = '<p class="ask-missing">The card file is gone. Skip, so the agent stops waiting.</p>';
     } else {
-      const frame = createPreviewFrame('ask-frame', showSrcdoc(a.content, 0, ASK_BRIDGE_TAG), SHOW_SANDBOX);
+      const frame = createPreviewFrame('ask-frame', showSrcdoc(a.content, 0, modalZoom, ASK_BRIDGE_TAG), SHOW_SANDBOX);
       frame.addEventListener('load', () => {
         if (askState.frame === frame && !askState.hidden) frame.focus();
       });
@@ -16994,10 +17024,10 @@ async function renderShowBody(p, samePost) {
     const restoreY = samePost && showState.frame ? showState.frameY : 0;
     showState.frameY = restoreY;
     if (samePost && showState.frame?.isConnected) {
-      showState.frame.srcdoc = showSrcdoc(data.content, restoreY);
+      showState.frame.srcdoc = showSrcdoc(data.content, restoreY, showZoom);
     } else {
       showState.frameH = 0;
-      body.replaceChildren(createShowFrame(p.title, showSrcdoc(data.content, 0)));
+      body.replaceChildren(createShowFrame(p.title, showSrcdoc(data.content, 0, showZoom)));
     }
     refocus();
     setShowReview(showReviewOpts(p, data, body, showState.frame));
@@ -17007,7 +17037,7 @@ async function renderShowBody(p, samePost) {
   showState.frame = null;
   const keepScroll = samePost ? body.scrollTop : 0;
   const md = document.createElement('div');
-  md.className = 'show-md modal-zoomable';
+  md.className = 'show-md';
   if (!data) md.innerHTML = '<p class="show-gone">This post is gone.</p>';
   else if (data.waiting) md.innerHTML = '<p class="show-gone">Waiting for content.</p>';
   else renderPreviewContent(md, data.file || p.file || '', data.content ?? '', data.kind);
@@ -17094,9 +17124,9 @@ function withHeadFirst(content, head) {
 const FRAME_SCROLLBAR_CSS = ':where(html){scrollbar-width:thin;scrollbar-color:rgba(128,128,128,.45) transparent}';
 
 // A whole document gets the tokens and base styles first in its head, so its own styles win.
-function showSrcdoc(content, restoreY, extraHead = '') {
+function showSrcdoc(content, restoreY, textZoom, extraHead = '') {
   const head = `<meta http-equiv="Content-Security-Policy" content="${SHOW_CSP}"><style>:root{${showTokenCss()}}${SHOW_FRAME_BASE}${FRAME_SCROLLBAR_CSS}</style>${extraHead}`;
-  const bridge = `<script>(${showBridge})(${Math.max(0, Math.round(restoreY) || 0)}, ${modalZoom});</script>${REVIEW_BRIDGE_TAG}`;
+  const bridge = `<script>(${showBridge})(${Math.max(0, Math.round(restoreY) || 0)}, ${textZoom});</script>${REVIEW_BRIDGE_TAG}`;
   if (!/^\s*(<!doctype|<html)/i.test(content)) {
     return `<!doctype html><html><head><meta charset="utf-8">${head}</head><body>${content}${bridge}</body></html>`;
   }
@@ -17199,11 +17229,11 @@ new MutationObserver(() => {
   });
 }).observe(document.body, { attributes: true, attributeFilter: ['class', 'data-color-theme', 'style'] });
 
+const PANE_SHOW_FRAMES = '.show-pane-frame, .themed-frame, .ask-frame';
+
 // Builds the message only when a frame is there, because showTokens forces a style recalc.
-function postToShowFrames(makeMsg) {
-  const frames = [showState.frame, ...document.querySelectorAll('.show-pane-frame, .themed-frame, .ask-frame')].filter(
-    (f) => f?.contentWindow,
-  );
+function postToShowFrames(makeMsg, frames = [showState.frame, ...document.querySelectorAll(PANE_SHOW_FRAMES)]) {
+  frames = [...frames].filter((f) => f?.contentWindow);
   if (!frames.length) return;
   const msg = makeMsg();
   if (!msg) return;
@@ -18145,6 +18175,7 @@ initAsk();
 for (const k of readStoredList(ACTIVITY_FILTER_KEY)) activityFilter.add(k);
 initSidebarResize();
 applyModalZoom();
+applyShowZoom();
 loadModalFullscreen();
 initModalResize();
 loadPanelWidths();

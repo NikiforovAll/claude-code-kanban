@@ -125,12 +125,11 @@ describe('showSrcdoc', () => {
     showTokenCss: () => '--color-bg:#111',
     withHeadFirst: appFunction('withHeadFirst'),
     showBridge: function showBridge() {},
-    modalZoom: 1.2,
   });
   const cspMeta = `<meta http-equiv="Content-Security-Policy" content="${csp}">`;
 
   it('wraps a fragment with the CSP, the tokens and the base styles', () => {
-    const doc = srcdoc('<p>hi</p>', 0);
+    const doc = srcdoc('<p>hi</p>', 0, 1.2);
     assert.ok(doc.startsWith('<!doctype html><html><head><meta charset="utf-8">'));
     assert.ok(doc.indexOf(cspMeta) < doc.indexOf(':root{--color-bg:#111}'));
     assert.ok(doc.includes(':root{--color-bg:#111}body{base}html{bar}</style></head>'));
@@ -150,7 +149,7 @@ describe('showSrcdoc', () => {
   });
 
   it('passes the scroll to restore and the text zoom', () => {
-    assert.ok(srcdoc('<p>x</p>', 97.4).includes('(97, 1.2);'));
+    assert.ok(srcdoc('<p>x</p>', 97.4, 1.2).includes('(97, 1.2);'));
   });
 
   it('blocks script channels and remote sub-resources', () => {

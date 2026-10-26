@@ -62,6 +62,7 @@
   --font-serif: var(--serif);
   /* reading-surface scale for the message-detail and preview modals (Ctrl +/-/0) */
   --modal-zoom: 1;
+  --show-zoom: 1;
   --review-panel-w: 320px;
 }
 
@@ -4271,6 +4272,7 @@ body.light .show-card.focused {
   padding: 0.8em 1.1em 1em;
   /* The same scale as an HTML card's frame (the zoom in showBridge). */
   font-size: clamp(12.5px, calc(9.7px + 0.58cqi), 17.5px);
+  zoom: var(--show-zoom, 1);
   line-height: 1.6;
   color: var(--text-secondary);
   overflow-wrap: anywhere;
