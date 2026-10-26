@@ -9447,7 +9447,7 @@ async function openPreviewByPath(filePath, base, onUnsupported, sessionId = prev
   try {
     const r = await api('/api/preview', { query: { path: filePath, base: base || null } });
     if (!r.ok) {
-      showToast('Preview file unavailable', 'error');
+      showToast('Preview file unavailable', 'error', { label: 'Copy path', onClick: () => copyText(filePath, 'path') });
       return;
     }
     const data = await r.json();
