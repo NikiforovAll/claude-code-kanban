@@ -3984,16 +3984,15 @@ function renderSessions() {
     return out;
   };
 
-  const renderSessionCard = (session) => {
-    if (session.placeholder) return renderPlaceholderCard(session, childDepth.get(session.id));
+  const renderSessionCard = (session, hostProject = null) => {
+    if (session.placeholder) return renderPlaceholderCard(session, childDepth.get(session.id), hostProject);
     const total = session.taskCount;
     const pct = (n) => Math.round((n / total) * 100);
     const isActive = session.id === currentSessionId && viewMode === 'session';
     const isLive = isSessionLive(session);
     const sessionName = sessionDisplayName(session);
-    const projectHtml = renderProjectIdentity(session);
+    const projectHtml = renderProjectIdentity(session, hostProject);
 
-    const gitBranch = session.gitBranch ? escapeHtml(session.gitBranch) : null;
     const isTeam = session.isTeam;
     const memberCount = session.memberCount || 0;
 
@@ -4027,8 +4026,7 @@ function renderSessions() {
           <button onclick="openSession('${sid}')" draggable="true" data-session-id="${escapeHtml(session.id)}" class="session-item ${isActive ? 'active' : ''} ${sessionBarClass(session)} ${tempClass} ${idleClass} ${justFinishedClass}${childDepthClass(childDepth.get(session.id))}">
             <span class="session-pin-btn${pinClass}" onclick="event.stopPropagation();toggleSessionPin('${sid}')" title="${pinTitle} session">${pinState === 'sticky' ? SESSION_STAR_SVG : SESSION_PIN_SVG}</span>
             <div class="session-name">${escapeHtml(sessionName)}</div>
-            ${projectHtml ? `<div class="session-secondary">${projectHtml}</div>` : ''}
-            ${gitBranch ? `<div class="session-branch">${gitBranch}</div>` : ''}
+            ${renderSessionIdentity(projectHtml, session.gitBranch)}
             ${metricsHtml ? `<div class="session-metrics">${metricsHtml}</div>` : ''}
             <div class="session-footer">
               <div class="session-time">${formatDate(session.modifiedAt)}</div>
@@ -4075,7 +4073,7 @@ function renderSessions() {
         SECTION_OUTSIDE,
         `Outside current filters ${countHtml(outside.rows)}`,
         false,
-        collapsedProjectGroups.has(SECTION_OUTSIDE) ? '' : outside.rows.map(renderSessionCard).join(''),
+        collapsedProjectGroups.has(SECTION_OUTSIDE) ? '' : outside.rows.map((s) => renderSessionCard(s)).join(''),
       )
     : '';
 
@@ -4137,10 +4135,11 @@ function renderSessions() {
   const groupPinned = store.getItem(GROUP_PINNED_KEY) !== 'false';
   const pinWeight = (s) => (isPlacedSticky(s.id) ? 2 : isInPinnedGroup(s) ? 1 : 0);
   const pinSort = (a, b) => pinWeight(b) - pinWeight(a);
-  const renderGroupSessions = (list, pinKey) => {
-    if (!groupPinned || pinnedSessionIds.size === 0) return nestChildren(list).map(renderSessionCard).join('');
+  const renderGroupSessions = (list, pinKey, hostProject = null) => {
+    const card = (s) => renderSessionCard(s, hostProject);
+    if (!groupPinned || pinnedSessionIds.size === 0) return nestChildren(list).map(card).join('');
     const gPinned = nestChildren(list.filter(isInPinnedGroup));
-    if (gPinned.length === 0) return nestChildren(list).map(renderSessionCard).join('');
+    if (gPinned.length === 0) return nestChildren(list).map(card).join('');
     const gUnpinned = nestChildren(list.filter((s) => !isInPinnedGroup(s)));
     const pinCollapsed = collapsedProjectGroups.has(pinKey);
     return (
@@ -4160,10 +4159,10 @@ function renderSessions() {
       '<div class="pinned-sub-items' +
       (pinCollapsed ? ' collapsed' : '') +
       '">' +
-      gPinned.map(renderSessionCard).join('') +
+      gPinned.map(card).join('') +
       '</div>' +
       '</div>' +
-      gUnpinned.map(renderSessionCard).join('')
+      gUnpinned.map(card).join('')
     );
   };
 
@@ -4195,7 +4194,7 @@ function renderSessions() {
             </div>
             <div class="project-group-breadcrumb${nestedCls}" data-full-path="${escapedPath}" title="Click to copy path">${breadcrumbHtml}</div>
             <div class="project-group-sessions${isCollapsed ? ' collapsed' : ''}${nestedCls}" data-project-path="${escapedPath}">
-              ${renderGroupSessions(projectSessions, pinKey(projectPath))}
+              ${renderGroupSessions(projectSessions, pinKey(projectPath), projectPath)}
             </div>
           `;
   };
@@ -4258,7 +4257,7 @@ function renderSessions() {
     let body = '';
     if (flat) {
       body = nestChildren([...bucket].sort(byMemberOrder))
-        .map(renderSessionCard)
+        .map((s) => renderSessionCard(s))
         .join('');
     } else {
       const loose = [];
@@ -4364,7 +4363,7 @@ function renderSessions() {
             </div>
           `;
       } else {
-        projectsHtml += ungrouped.map(renderSessionCard).join('');
+        projectsHtml += ungrouped.map((s) => renderSessionCard(s)).join('');
       }
     }
 
@@ -4375,7 +4374,7 @@ function renderSessions() {
   } else {
     const sectioned = sessionGroups.length > 0;
     const restHtml =
-      sectioned && collapsedProjectGroups.has(SECTION_SESSIONS) ? '' : sgRest.map(renderSessionCard).join('');
+      sectioned && collapsedProjectGroups.has(SECTION_SESSIONS) ? '' : sgRest.map((s) => renderSessionCard(s)).join('');
     const tail = sectioned ? sectionHtml(SECTION_SESSIONS, 'Sessions', true, restHtml, sgRest.length === 0) : restHtml;
     sessionsList.innerHTML = html + sgSectionHtml(true) + tail + outsideHtml;
   }
@@ -10936,15 +10935,29 @@ function pathBasename(p) {
 
 // `session.worktree` is resolved server-side from the `.git` pointer file, so it holds for a
 // worktree parked beside its repo as well as one under <repo>/.claude/worktrees/.
-function renderProjectIdentity(session) {
+// Under its own project group the card leaves the repo name out: the group header shows it.
+function renderProjectIdentity(session, hostProject) {
   if (!session.project) return null;
+  const underHost = !!hostProject && sessionProjectKey(session) === hostProject;
   const wt = session.worktree;
-  if (!wt) return escapeHtml(pathBasename(session.project));
+  if (!wt) {
+    return underHost ? null : `<span class="session-project">${escapeHtml(pathBasename(session.project))}</span>`;
+  }
   const repo = pathBasename(wt.repo);
   // Worktrees beside the repo are conventionally named `<repo>-<branch>`, and repeating the
   // repo inside a chip that already sits next to it wastes the whole width of the card.
   const name = wt.name.startsWith(repo) ? wt.name.slice(repo.length).replace(/^[-._]/, '') || wt.name : wt.name;
-  return `${escapeHtml(repo)}<span class="wt-chip" title="Worktree of ${escapeHtml(wt.repo)}">⑂ ${escapeHtml(name)}</span>`;
+  const chip = `<span class="wt-chip" title="Worktree of ${escapeHtml(wt.repo)}">⑂ ${escapeHtml(name)}</span>`;
+  return underHost ? chip : `<span class="session-project">${escapeHtml(repo)}</span>${chip}`;
+}
+
+function renderSessionIdentity(projectHtml, gitBranch) {
+  if (!projectHtml && !gitBranch) return '';
+  const branch = gitBranch
+    ? `<span class="session-branch" title="${escapeHtml(gitBranch)}">${escapeHtml(gitBranch)}</span>`
+    : '';
+  const sep = projectHtml && branch ? '<span class="agent-ident-sep">·</span>' : '';
+  return `<div class="session-secondary">${projectHtml || ''}${sep}${branch}</div>`;
 }
 
 const SHORT_DATE = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' });
@@ -17484,13 +17497,13 @@ function forgetPlaceholder(id) {
   return true;
 }
 
-function renderPlaceholderCard(session, depth) {
+function renderPlaceholderCard(session, depth, hostProject) {
   const isActive = session.id === currentSessionId && viewMode === 'session';
-  const projectHtml = renderProjectIdentity(session);
+  const projectHtml = renderProjectIdentity(session, hostProject);
   return `
           <button onclick="openSession('${escAttrJs(session.id)}')" data-session-id="${escapeHtml(session.id)}" class="session-item session-placeholder ${isActive ? 'active' : ''}${childDepthClass(depth)}" title="${escapeHtml(`${session.id} | ${session.project}`)}">
             <div class="session-name">${escapeHtml(session.name)}</div>
-            ${projectHtml ? `<div class="session-secondary">${projectHtml}</div>` : ''}
+            ${renderSessionIdentity(projectHtml, null)}
             ${
               trustWaiting.has(session.id)
                 ? `<div class="session-waiting"><span class="agent-badge agent-badge-waiting" title="Waiting for user">${ICON_AGENT_WAITING}</span>trust this folder?</div>`
