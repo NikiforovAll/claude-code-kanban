@@ -13498,20 +13498,20 @@ async function paneRequest(method, path, body) {
   }
 }
 
-// Per-session pane state in sessionStorage, {[sessionId]: value} in recency order.
+// Per-session pane state, {[sessionId]: value} in recency order; sessionStorage unless the caller passes `store`.
 const PANE_STATE_CAP = 20;
 
-function loadPaneState(key) {
-  const map = tabStore.readJson(key);
+function loadPaneState(key, area = tabStore) {
+  const map = area.readJson(key);
   return map && typeof map === 'object' ? map : {};
 }
 
 // Puts `sid` last, so the cap drops the least recent session. A null value removes it.
-function savePaneState(key, map, sid, value) {
+function savePaneState(key, map, sid, value, area = tabStore) {
   delete map[sid];
   if (value != null) map[sid] = value;
   const capped = Object.fromEntries(Object.entries(map).slice(-PANE_STATE_CAP));
-  tabStore.writeJson(key, capped);
+  area.writeJson(key, capped);
   return capped;
 }
 
@@ -13593,7 +13593,8 @@ function neighborPair(sid, id, pairs) {
 // tab, so grouping leaves the server's order alone; a drag saves the order on screen.
 const PANE_GROUPS_KEY = 'pane-groups';
 const PANE_GROUP_COLORS = ['blue', 'purple', 'teal', 'orange', 'yellow', 'pink', 'green', 'red'];
-let paneGroups = loadPaneState(PANE_GROUPS_KEY);
+// Groups outlive the window; a save re-reads the map, so other windows' groups stay.
+let paneGroups = loadPaneState(PANE_GROUPS_KEY, store);
 
 // Tabs that are gone, or in an earlier group, drop out, and so do groups left empty.
 function getPaneGroups(sid) {
@@ -13611,7 +13612,8 @@ function getPaneGroups(sid) {
 }
 
 function setPaneGroups(sid, groups) {
-  paneGroups = savePaneState(PANE_GROUPS_KEY, paneGroups, sid, groups.length ? groups : null);
+  const map = loadPaneState(PANE_GROUPS_KEY, store);
+  paneGroups = savePaneState(PANE_GROUPS_KEY, map, sid, groups.length ? groups : null, store);
 }
 
 // A pair is in the group of either side, and the board is in none.
