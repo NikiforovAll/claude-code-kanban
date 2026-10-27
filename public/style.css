@@ -5917,7 +5917,7 @@ body.show-resizing iframe {
   padding: 8px 14px;
   font-size: 11px;
   color: var(--text-secondary);
-  z-index: 10000;
+  z-index: 10020;
   opacity: 0;
   transform: translateY(10px);
   transition:

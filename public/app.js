@@ -9473,8 +9473,10 @@ function openFileInEditor(filePath) {
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
-function copyPreviewPath() {
-  if (currentPreviewPath) copyText(currentPreviewPath, 'path');
+async function copyPreviewPath(el) {
+  if (currentPreviewPath && (await copyText(currentPreviewPath, 'path'))) {
+    el.animate([{ color: 'var(--success)' }, {}], { duration: 800, easing: 'ease-out' });
+  }
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
