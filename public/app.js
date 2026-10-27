@@ -9473,6 +9473,11 @@ function openFileInEditor(filePath) {
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
+function copyPreviewPath() {
+  if (currentPreviewPath) copyText(currentPreviewPath, 'path');
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
 function openPreviewInEditor() {
   if (!currentPreviewPath) return;
   openFileInEditor(currentPreviewPath);

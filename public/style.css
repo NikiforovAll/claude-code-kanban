@@ -8132,6 +8132,12 @@ body.light .msg-assistant .msg-text {
   font-size: 11px;
   color: var(--text-muted);
   flex-shrink: 0;
+  cursor: copy;
+  align-self: flex-start;
+}
+
+#preview-modal-meta:hover {
+  color: var(--text-primary);
 }
 
 /* Rendered HTML pages need far more room than a markdown doc. */
