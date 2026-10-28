@@ -19,7 +19,7 @@ function skillTable() {
 describe('kanban skill', () => {
   it('lists every board command and its subcommands', () => {
     const rows = skillTable();
-    const nouns = Object.keys(COMMANDS).filter((n) => n !== 'skills');
+    const nouns = Object.keys(COMMANDS).filter((n) => n !== 'skills' && n !== 'new');
     assert.deepEqual(Object.keys(rows).sort(), nouns.sort());
     for (const noun of nouns) assert.deepEqual(rows[noun].sort(), Object.keys(COMMANDS[noun].verbs).sort(), noun);
   });

@@ -5,6 +5,11 @@
   "icon": "columns",
   "run": { "entry": "server.js", "defaultPort": 3541 },
   "publishes": ["session.changed"],
+  "actions": {
+    "handles": {
+      "session.open": { "params": { "session": "string" }, "mode": "message" }
+    }
+  },
   "settings": [
     {
       "key": "zenCentered",

@@ -350,6 +350,30 @@ claude-code-kanban project list [--json]
 
 Lists the project paths the board knows, newest activity first. These are the folders `dispatch start --cwd` accepts. A path under the OS temp dir is marked `(temp)`.
 
+## new
+
+```bash
+claude-code-kanban new [prompt...] [--cwd <dir>] [--name <n>] [--model <m>] [--json] [-- <claude args>...]
+```
+
+Starts Claude Code in the board's embedded terminal from any shell, and shows it on the board. Use it in place of `claude` when you want the session in the board and not in the shell you typed it in.
+
+| Flag | What it does |
+| --- | --- |
+| `[prompt...]` | The first message. The words are joined with spaces. With no words, the session waits for your first message. |
+| `--cwd <dir>` | Folder to run in. Default is the current folder. |
+| `--name <n>` | Session name. |
+| `--model <m>` | `fable`, `opus`, `sonnet` or `haiku`. |
+| `--json` | Prints `{session, cwd}`. |
+| `-- <claude args>` | Passed to `claude` as they are, for example `--permission-mode auto`. |
+
+Every open board tab adds the session's card and opens its terminal. Under Claude Code Hub, the hub also switches to the Kanban tab. With no board tab open, the command fails with `409 no board tab is open`, because the session would run where no one sees it. When tabs are open but none can show the terminal in 3 seconds (the terminal is off there, or its terminal token is from an earlier server run), the server ends the session and the command fails with `409 no open board tab can show the terminal`. Like `dispatch start`, it needs the terminal token, so it runs on the machine of the cck server. The session is not marked as dispatched.
+
+```bash
+claude-code-kanban new
+claude-code-kanban new fix the login redirect -- --permission-mode auto
+```
+
 ## dispatch
 
 Starts a Claude Code session in the embedded terminal to do a task. See [Dispatch tasks to other sessions](/claude-code-kanban/guides/dispatch/) for how to use it.

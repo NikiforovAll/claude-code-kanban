@@ -3,6 +3,9 @@ const path = require('node:path');
 const { getClaudeDir, displayPath } = require('./lib/claude-dir');
 const { linkUrl } = require('./public/link-url');
 const { sessionProjectKey } = require('./public/project-match');
+const { MODELS } = require('./lib/terminal');
+
+const MODEL_HELP = [...MODELS].join(', ').replace(/, (\w+)$/, ' or $1');
 // Help is auto-generated from this table — keep flags/usage in sync with `run` behavior.
 const SESSION_FLAG = '--session <id>';
 const SESSION_FLAG_HELP = 'Session, full id or unique prefix (default: $PREVIEW_SESSION, else $CLAUDE_CODE_SESSION_ID)';
@@ -340,7 +343,7 @@ const COMMANDS = {
           '--spec-file <path>': 'Read the task from a file',
           '--name <n>': 'Session name; also its peer name for SendMessage',
           '--group <g>': 'Add it to this group: a name, path or id. The groups it makes are transient (see `help group list`)',
-          '--model <m>': 'fable, opus, sonnet or haiku',
+          '--model <m>': MODEL_HELP,
           '--worktree [name]': 'Run in a new git worktree',
           '--task-list [id]': 'Use this task list instead of its own (default: this session\'s list), so its cards show on one board with yours. Off unless given',
           '--json': 'Output JSON',
@@ -376,6 +379,24 @@ const COMMANDS = {
       },
     },
   },
+  new: {
+    summary: 'Start claude in the board\'s terminal from any shell, and show it there',
+    usage: 'claude-code-kanban new [prompt...] [--cwd <dir>] [--name <n>] [--model <m>] [--json] [-- <claude args>...]',
+    flags: {
+      '[prompt...]': 'First message; the words are joined with spaces. None starts an empty session',
+      '--cwd <dir>': 'Folder to run in (default: current dir)',
+      '--name <n>': 'Session name',
+      '--model <m>': MODEL_HELP,
+      '--json': 'Output JSON: {session, cwd}',
+      '-- <claude args>': 'Passed to claude as they are, e.g. --permission-mode auto',
+    },
+    notes: 'For the user at a shell, not for agents: agents use `dispatch start`. A board tab with the terminal on must be open, else the session is ended; the tab shows it, and under the hub the hub switches to Kanban. Needs the terminal token, so it runs on the machine of the cck server.',
+    examples: [
+      'claude-code-kanban new',
+      'claude-code-kanban new fix the login redirect -- --permission-mode auto',
+    ],
+    run: runNewCli,
+  },
   terminal: {
     summary: 'Read the terminals running in cck',
     verbs: {
@@ -408,8 +429,16 @@ for (const [noun, cmd] of Object.entries(COMMANDS)) {
   cmd.name = noun;
   for (const [verb, v] of Object.entries(cmd.verbs || {})) v.name = `${noun} ${verb}`;
 }
+// Words after `--` belong to claude, so cck's own --help and --version are looked for before it.
+function ownArgs(argv) {
+  const sep = argv.indexOf('--');
+  return sep === -1 ? argv : argv.slice(0, sep);
+}
+const hasOwnFlag = (a, ...flags) => ownArgs(a).some((x) => flags.includes(x));
+const hasHelp = (a) => hasOwnFlag(a, '--help', '-h');
+
 function runCli(argv) {
-  if (argv.includes('--version') || argv.includes('-v')) {
+  if (hasOwnFlag(argv, '--version', '-v')) {
     console.log(require('./package.json').version);
     process.exit(0);
   }
@@ -435,10 +464,10 @@ function runCli(argv) {
   }
   if (cli.kind === 'noun') {
     printNounHelp(cli.noun);
-    process.exit(argv.includes('--help') || argv.includes('-h') ? 0 : 1);
+    process.exit(hasHelp(argv) ? 0 : 1);
   }
   if (cli.kind === 'leaf') {
-    if (cli.args.includes('--help') || cli.args.includes('-h')) {
+    if (hasHelp(cli.args)) {
       printLeafHelp(cli.entry);
       process.exit(0);
     }
@@ -452,7 +481,6 @@ function runCli(argv) {
 
 function resolveCliCommand(argv) {
   const noun = argv[2] && !argv[2].startsWith('-') ? argv[2] : null;
-  const hasHelp = (a) => a.includes('--help') || a.includes('-h');
   if (!noun) return hasHelp(argv) ? { kind: 'help' } : { kind: 'server' };
   if (noun === 'help') return { kind: 'help', target: argv[3], verb: argv[4] };
   if (!Object.hasOwn(COMMANDS, noun)) return { kind: 'unknown-noun', noun };
@@ -506,8 +534,8 @@ function printTopHelp() {
 
 function printNounHelp(noun) {
   const entry = COMMANDS[noun];
-  console.log(`${entry.summary}\n`);
   if (entry.verbs) {
+    console.log(`${entry.summary}\n`);
     console.log(`Usage: claude-code-kanban ${noun} <subcommand> [args] [--flags]\n`);
     console.log('Subcommands:');
     for (const [vName, v] of Object.entries(entry.verbs)) {
@@ -1426,10 +1454,28 @@ function readTerminalToken() {
   return token;
 }
 
+function splitClaudeArgs(argv) {
+  const args = ownArgs(argv);
+  return { args, claudeArgs: argv.slice(args.length + 1) };
+}
+
+// A help key is `--name`, `--name <value>` or `--name [value]`; anything else is a positional
+// or the `--` separator. test/cli-flags.test.js checks every key in COMMANDS against this.
+const FLAG_KEY = /^(--[a-z][\w-]*)(?: (<[^>]+>|\[[^\]]+\]))?$/;
+function flagSpec(entry) {
+  const names = [];
+  const valueFlags = [];
+  for (const key of Object.keys(entry.flags || {})) {
+    const m = key.match(FLAG_KEY);
+    if (!m) continue;
+    names.push(m[1]);
+    if (m[2]?.startsWith('<')) valueFlags.push(m[1]);
+  }
+  return { names, valueFlags };
+}
+
 async function runDispatchStartCli(argv) {
-  const sep = argv.indexOf('--');
-  const args = sep === -1 ? argv : argv.slice(0, sep);
-  const claudeArgs = sep === -1 ? [] : argv.slice(sep + 1);
+  const { args, claudeArgs } = splitClaudeArgs(argv);
   const token = readTerminalToken();
   if (!token) return 1;
   let spec;
@@ -1465,6 +1511,31 @@ async function runDispatchStartCli(argv) {
     if (args.includes('--json')) console.log(JSON.stringify(out, null, 2));
     else console.log(`Started session ${out.session} in ${out.cwd}${out.group ? ` [${out.group}${out.transient ? ', transient' : ''}]` : ''}`);
     if (out.groupError) console.error(`Not grouped: ${out.groupError}`);
+    return 0;
+  } catch (e) { reportCliError(e); return 1; }
+}
+
+async function runNewCli(argv) {
+  const { args, claudeArgs } = splitClaudeArgs(argv);
+  const { names, valueFlags } = flagSpec(COMMANDS.new);
+  const unknown = args.find(a => a.startsWith('--') && !names.includes(a.split('=')[0]));
+  if (unknown) return usageError(COMMANDS.new, `Unknown flag ${unknown}; put claude's own flags after --`);
+  const words = positionals(args, valueFlags);
+  const token = readTerminalToken();
+  if (!token) return 1;
+  const body = {
+    cwd: canonicalDir(getArgValue(args, 'cwd') || '.'),
+    prompt: words.join(' '),
+    name: getArgValue(args, 'name'),
+    model: getArgValue(args, 'model'),
+    claudeArgs,
+    show: true,
+  };
+  try {
+    const out = await cliPostJson('/api/terminal/start', body, 'Start', { 'x-terminal-token': token });
+    if (!out) return 1;
+    if (args.includes('--json')) console.log(JSON.stringify(out, null, 2));
+    else console.log(`Started session ${out.session} in ${out.cwd}; it shows on the board.`);
     return 0;
   } catch (e) { reportCliError(e); return 1; }
 }
@@ -1555,4 +1626,4 @@ async function runSkillsGetCli(args) {
   return 0;
 }
 
-module.exports = { runCli, topHelp, COMMANDS, SERVER_FLAGS, AGENT_ID_RE };
+module.exports = { runCli, topHelp, COMMANDS, SERVER_FLAGS, AGENT_ID_RE, FLAG_KEY, flagSpec, splitClaudeArgs };

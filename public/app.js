@@ -9536,6 +9536,25 @@ function handleSessionOpenEvent(data) {
   fetchTasks(id);
 }
 
+// `claude-code-kanban new` started the PTY; this tab shows it as if its New session dialog had.
+// Under the hub the action round trip brings this tab on screen first.
+async function handleSessionLaunchedEvent(t) {
+  const { id } = t;
+  if (!id || !terminalAvailable()) return;
+  const claim = await terminalFetch(apiPath`/api/terminal/launched/${id}`, 'POST').catch(() => null);
+  if (!claim?.ok) return;
+  if (!newSpecs.has(id)) newSpecs.set(id, specFromTerminal({ mode: 'new', startedAt: Date.now(), ...t }));
+  setTerminalMode(id, true);
+  termState.focusNext = true;
+  if (hub.can('session.open')) hub.invoke('session.open', { session: id });
+  else openSessionFromOutside(id);
+}
+
+function openSessionFromOutside(id) {
+  if (newSpecs.has(id)) openPlaceholder(id);
+  else handleSessionOpenEvent({ id });
+}
+
 async function handlePreviewOpenEvent(data) {
   const { path: filePath, sessionId } = data;
   if (sessionId && sessionId !== currentSessionId) {
@@ -10335,6 +10354,10 @@ function setupEventSource() {
 
       if (data.type === 'session:open') {
         handleSessionOpenEvent(data);
+      }
+
+      if (data.type === 'session:launched') {
+        handleSessionLaunchedEvent(data);
       }
 
       // Alone, the page would open a tab without a user gesture, which the browser blocks; the
@@ -16064,7 +16087,10 @@ function onTerminalMessage(sessionId, msg, tail = '') {
   if (msg.t === 'ready') {
     // The server has the prompt now; a later start of the same placeholder must not send it again.
     const spec = newSpecs.get(sessionId);
-    if (spec) spec.prompt = null;
+    if (spec) {
+      spec.prompted ||= !!spec.prompt;
+      spec.prompt = null;
+    }
     clearTerminalSlow();
     hideTerminalPrompt();
     setTerminalStatus('');
@@ -17446,6 +17472,7 @@ const PLACEHOLDER_HINTS = {
   pick: 'pick a session to resume',
   dispatch: 'starting',
   new: 'waiting for your first message',
+  prompted: 'starting',
   edit: 'press Enter in the terminal to start',
 };
 
@@ -17460,6 +17487,7 @@ function placeholderSession(id, spec) {
     placeholder: true,
     mode: spec.mode,
     edit: !!spec.edit,
+    prompted: !!(spec.prompted || spec.prompt),
     name: spec.name || (spec.forkOf && forkLabel(spec.forkOf)) || PLACEHOLDER_NAMES[spec.mode] || PLACEHOLDER_NAMES.new,
     dispatched: spec.mode === 'dispatch' ? { parent: spec.parent || null } : undefined,
     project: spec.cwd,
@@ -17553,13 +17581,26 @@ function renderPlaceholderCard(session, depth, hostProject) {
             ${
               trustWaiting.has(session.id)
                 ? `<div class="session-waiting"><span class="agent-badge agent-badge-waiting" title="Waiting for user">${ICON_AGENT_WAITING}</span>trust this folder?</div>`
-                : `<div class="session-waiting"><span class="pulse"></span>${PLACEHOLDER_HINTS[session.edit ? 'edit' : session.mode] || PLACEHOLDER_HINTS.new}</div>`
+                : `<div class="session-waiting"><span class="pulse"></span>${PLACEHOLDER_HINTS[session.edit ? 'edit' : session.prompted ? 'prompted' : session.mode] || PLACEHOLDER_HINTS.new}</div>`
             }
           </button>
         `;
 }
 
 // After a reload the form is gone, but the PTY still runs; its hello options come back from the server.
+function specFromTerminal(t) {
+  return {
+    cwd: t.cwd,
+    name: t.name,
+    worktree: t.worktree,
+    mode: t.mode,
+    edit: t.edit,
+    forkOf: t.forkOf,
+    prompted: t.prompted,
+    startedAt: t.startedAt,
+  };
+}
+
 async function restorePendingSessions() {
   document.getElementById('new-session-btn').hidden = !terminalAvailable();
   const terminals = terminalAvailable() ? loadTerminals() : null;
@@ -17567,15 +17608,7 @@ async function restorePendingSessions() {
   try {
     for (const t of terminals ? await terminals : []) {
       if ((t.mode !== 'new' && t.mode !== 'pick') || newSpecs.has(t.id) || dispatchSpecs.has(t.id)) continue;
-      newSpecs.set(t.id, {
-        cwd: t.cwd,
-        name: t.name,
-        worktree: t.worktree,
-        mode: t.mode,
-        edit: t.edit,
-        forkOf: t.forkOf,
-        startedAt: t.startedAt,
-      });
+      newSpecs.set(t.id, specFromTerminal(t));
     }
   } catch (_) {}
   // Sessions that were already running keep the collapse state saved before the reload.
@@ -18476,6 +18509,7 @@ hub.onActive((active) => {
 });
 hub.onStatus(pushTerminalClaims);
 hub.onSettings(applyHubSettings);
+hub.handle('session.open', (p) => p.session && openSessionFromOutside(p.session));
 
 // session.changed goes out once the switch settles, so arrowing through the list sends one event.
 let publishTimer = 0;

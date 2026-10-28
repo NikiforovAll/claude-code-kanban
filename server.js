@@ -3382,12 +3382,41 @@ app.post('/api/terminal/pick-folder', async (req, res) => {
   }
 });
 
+// A tab whose terminal is off, or whose token died with an earlier server, ignores
+// `session:launched`, so only a tab that claims the session counts as showing it.
+const LAUNCH_CLAIM_MS = 3000;
+const launchClaims = new Map();
+function awaitLaunchClaim(id) {
+  const claimed = new Promise((resolve) => {
+    launchClaims.set(id, resolve);
+    setTimeout(resolve, LAUNCH_CLAIM_MS, false);
+  });
+  return claimed.finally(() => launchClaims.delete(id));
+}
+
+app.post('/api/terminal/launched/:id', (req, res) => {
+  if (!terminal.authorized(req.get('x-terminal-token'))) return res.status(401).json({ error: 'invalid terminal token' });
+  launchClaims.get(req.params.id)?.(true);
+  res.status(204).end();
+});
+
 // The New session dialog's "Stay here": the PTY starts headless and the board keeps its view.
+// `show` is `claude-code-kanban new` from a shell outside the board: a board tab adds its card
+// and attaches, and with no tab to claim it the PTY is ended, because no one would see it.
 app.post('/api/terminal/start', terminalRoute(async (req, res) => {
   if (!terminal.authorized(req.get('x-terminal-token'))) return res.status(401).json({ error: 'invalid terminal token' });
-  const { id, cwd, name, model, effort, worktree, prompt } = req.body || {};
-  const started = await terminal.startNew({ id, cwd, name, model, effort, worktree, prompt });
+  const { id, cwd, name, model, effort, worktree, prompt, claudeArgs, show } = req.body || {};
+  if (show && !clients.size) return res.status(409).json({ error: 'no board tab is open' });
+  const started = await terminal.startNew({ id, cwd, name, model, effort, worktree, prompt, extraArgs: claudeArgs });
   if (started.error) return res.status(started.status).json({ error: started.error });
+  if (show) {
+    const claimed = awaitLaunchClaim(started.id);
+    broadcast({ type: 'session:launched', ...started });
+    if (!(await claimed)) {
+      await terminal.end(started.id, terminal.token);
+      return res.status(409).json({ error: 'no open board tab can show the terminal' });
+    }
+  }
   res.status(201).json({ session: started.id, cwd: started.cwd });
 }));
 
