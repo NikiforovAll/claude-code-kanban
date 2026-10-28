@@ -9,6 +9,7 @@ const fn = (name) => new RegExp(`^(async )?function ${name}\\([^)]*\\) \\{[\\s\\
 
 const { sgHostOf } = vm.runInNewContext(`${fn('sgHostOf')}\n({ sgHostOf })`, {
   sessionProjectKey: (s) => s.project,
+  placementOf: (s) => s,
 });
 
 describe('sgHostOf', () => {

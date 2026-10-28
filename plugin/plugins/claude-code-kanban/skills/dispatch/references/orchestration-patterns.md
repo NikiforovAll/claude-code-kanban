@@ -28,11 +28,11 @@ One worker, one reply. The reply can go to any peer. When another session owns t
 
 ## Handoff
 
-One worker, no reply line. The worker owns the task, and you save the turn a reply costs.
+One worker, no reply line, `--group`. The worker owns the task, and you save the turn a reply costs.
 
 ## Orchestrator-workers
 
-One worker per independent part, all started before you wait on any. They run at the same time, and each holds only its own part in context. Give each a unique `--name` and one shared `--group`, then combine the replies.
+One worker per independent part, all started before you wait on any. They run at the same time, and each holds only its own part in context. Give each a unique `--name` and `--child`, then combine the replies.
 
 ## Prompt chaining
 

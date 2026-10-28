@@ -3529,7 +3529,7 @@ const linkedDocs = createLinkedDocStore(jsonFile(LINKED_DOCS_FILE));
 function withDispatchMarker(sessions) {
   return sessions.map((s) => {
     const marker = dispatched.get(s.id);
-    return marker ? { ...s, dispatched: { parent: marker.parent } } : s;
+    return marker ? { ...s, dispatched: { parent: marker.parent, child: marker.child } } : s;
   });
 }
 
@@ -3537,13 +3537,15 @@ function withDispatchMarker(sessions) {
 // TERMINAL_TOKEN_FILE. The started session never holds it.
 app.post('/api/dispatch', terminalRoute(async (req, res) => {
   if (!terminal.authorized(req.get('x-terminal-token'))) return res.status(401).json({ error: 'invalid terminal token' });
-  const { cwd, spec, name, model, worktree, taskList, parent, group, claudeArgs } = req.body || {};
+  const { cwd, spec, name, model, worktree, taskList, parent, child, group, claudeArgs } = req.body || {};
   if (typeof spec !== 'string' || !spec.trim()) return res.status(400).json({ error: 'spec is required' });
   if (parent != null && !(typeof parent === 'string' && isUUID(parent))) return res.status(400).json({ error: 'invalid parent' });
   if (group != null && !(typeof group === 'string' && group.trim())) return res.status(400).json({ error: 'group must be a group name, path or id' });
+  if (child && !parent) return res.status(400).json({ error: 'child needs a parent session' });
+  if (child && group) return res.status(400).json({ error: 'pass child or group, not both' });
   const started = await terminal.startNew({ cwd, name, model, worktree, taskList, prompt: spec.trim(), extraArgs: claudeArgs });
   if (started.error) return res.status(started.status).json({ error: started.error });
-  dispatched.record(started.id, { parent, cwd: started.cwd, name, group, worktree });
+  dispatched.record(started.id, { parent, child: child === true, cwd: started.cwd, name, group, worktree });
   // Joined before dispatch-update, so the board places the session from its first frame. The
   // starter stays where it is: moving it would jump it under the user.
   let joined = null;

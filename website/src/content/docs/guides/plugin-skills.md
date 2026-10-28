@@ -75,7 +75,7 @@ To turn this off, set `boardEvents.enabled` to `false` in `<config-dir>/.cck/con
 ## dispatch
 
 ```text
-/claude-code-kanban:dispatch <task> [--handoff] [--group <name>] [--model haiku|sonnet|opus|fable] [--worktree [name]] [-- <claude args>]
+/claude-code-kanban:dispatch <task> [--handoff] [--child | --group <name>] [--model haiku|sonnet|opus|fable] [--worktree [name]] [-- <claude args>]
 ```
 
 This skill starts other Claude Code sessions through the board. You can type it, and Claude can also start it when you ask it to dispatch or delegate a task. The skill tells Claude to load the dispatch guide first:

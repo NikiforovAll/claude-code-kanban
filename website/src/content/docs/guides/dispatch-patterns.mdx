@@ -51,7 +51,7 @@ The orchestrator splits a task into parts, starts one worker per part, and combi
   actors={['Orchestrator', 'Worker A', 'Worker B', 'Worker C']}
   hub={0}
   steps={[
-    { from: 0, to: 1, label: 'dispatch start', detail: '--group audit' },
+    { from: 0, to: 1, label: 'dispatch start', detail: '--child' },
     { from: 0, to: 2, label: 'dispatch start' },
     { from: 0, to: 3, label: 'dispatch start' },
     { from: 1, to: 0, label: 'SendMessage', detail: 'result A', alt: true },
@@ -62,12 +62,12 @@ The orchestrator splits a task into parts, starts one worker per part, and combi
 
 ```bash
 for part in api ui docs; do
-  claude-code-kanban dispatch start --cwd . --spec-file "spec-$part.md" --name "audit-$part" --group audit -- --permission-mode auto
+  claude-code-kanban dispatch start --cwd . --spec-file "spec-$part.md" --name "audit-$part" --child -- --permission-mode auto
 done
 ```
 
 - Give each worker a unique `--name`, so each reply shows who sent it.
-- One `--group` keeps the workers together in the sidebar.
+- `--child` shows the workers under the orchestrator's card in the sidebar.
 - Workers that edit the same files each need their own `--worktree`.
 
 The `dispatch` skill uses request-reply, handoff and orchestrator-workers on its own. For the patterns below, it proposes the pattern and waits for your answer, unless you named the pattern yourself.

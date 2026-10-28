@@ -112,7 +112,7 @@ describe('CLI server resolution', () => {
       for (const [port, token] of [[ownerPort, 'owner-token'], [pinnedPort, 'pinned-token']]) {
         fs.writeFileSync(path.join(tokens, `${port}.json`), JSON.stringify({ pid: process.pid, token }));
       }
-      const start = ['dispatch', 'start', '--spec', 'x', '--cwd', dir];
+      const start = ['dispatch', 'start', '--spec', 'x', '--cwd', dir, '--group', 'g'];
       assert.equal((await runCli(start, { CLAUDE_CONFIG_DIR: dir })).code, 0);
       assert.equal((await runCli(start, { CLAUDE_CONFIG_DIR: dir, CCK_URL: `http://127.0.0.1:${pinnedPort}` })).code, 0);
       assert.deepEqual(seen, [{ port: ownerPort, token: 'owner-token' }, { port: pinnedPort, token: 'pinned-token' }]);
@@ -135,11 +135,49 @@ describe('CLI server resolution', () => {
     await new Promise((r) => srv.listen(0, '127.0.0.1', r));
     try {
       const dir = tempConfigDir({ port: srv.address().port, pid: process.pid }, 't');
-      const argv = ['dispatch', 'start', '--spec', 'x', '--cwd', dir, '--name', 'a', '--', '--permission-mode', 'auto', '--worktree'];
+      const argv = ['dispatch', 'start', '--spec', 'x', '--cwd', dir, '--name', 'a', '--group', 'g', '--', '--permission-mode', 'auto', '--worktree'];
       assert.equal((await runCli(argv, { CLAUDE_CONFIG_DIR: dir })).code, 0);
       assert.deepEqual(body.claudeArgs, ['--permission-mode', 'auto', '--worktree']);
       assert.equal(body.name, 'a');
       assert.equal(body.worktree, false);
+    } finally {
+      srv.close();
+    }
+  });
+
+  it('dispatch start takes one of --child or --group', async () => {
+    const parent = '11111111-1111-4111-8111-111111111111';
+    const bodies = [];
+    const srv = http.createServer((req, res) => {
+      let raw = '';
+      req.on('data', (c) => { raw += c; });
+      req.on('end', () => {
+        bodies.push(JSON.parse(raw));
+        res.setHeader('Content-Type', 'application/json');
+        res.end('{"session":"s1","cwd":"."}');
+      });
+    });
+    await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    try {
+      const dir = tempConfigDir({ port: srv.address().port, pid: process.pid }, 't');
+      const base = ['dispatch', 'start', '--spec', 'x', '--cwd', dir];
+      const env = { CLAUDE_CONFIG_DIR: dir, CLAUDE_CODE_SESSION_ID: parent };
+
+      const child = await runCli([...base, '--child'], env);
+      assert.equal(child.code, 0);
+      assert.match(child.stdout, /\[child\]/);
+      assert.deepEqual([bodies[0].child, bodies[0].group, bodies[0].parent], [true, null, parent]);
+
+      const neither = await runCli(base, env);
+      assert.equal(neither.code, 1);
+      assert.match(neither.stderr, /Pass one of --child .+ or --group/);
+      const both = await runCli([...base, '--child', '--group', 'g'], env);
+      assert.equal(both.code, 1);
+      assert.match(both.stderr, /Pass one of --child/);
+      const outside = await runCli([...base, '--child'], { ...env, CLAUDE_CODE_SESSION_ID: '' });
+      assert.equal(outside.code, 1);
+      assert.match(outside.stderr, /--child runs only inside a Claude Code session/);
+      assert.equal(bodies.length, 1);
     } finally {
       srv.close();
     }

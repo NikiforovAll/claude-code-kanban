@@ -336,23 +336,24 @@ const COMMANDS = {
     verbs: {
       start: {
         summary: 'Start claude in cck\'s terminal with a task; prints the session id',
-        usage: 'claude-code-kanban dispatch start --cwd <dir> (--spec <text> | --spec-file <path>) [--name <n>] [--group <g>] [--model <m>] [--worktree [name]] [--task-list [id]] [--json] [-- <claude args>...]',
+        usage: 'claude-code-kanban dispatch start --cwd <dir> (--spec <text> | --spec-file <path>) (--child | --group <g>) [--name <n>] [--model <m>] [--worktree [name]] [--task-list [id]] [--json] [-- <claude args>...]',
         flags: {
           '--cwd <dir>': 'Folder to run in (any existing folder, default: current dir)',
           '--spec <text>': 'The task, self-contained; sent as the first message',
           '--spec-file <path>': 'Read the task from a file',
           '--name <n>': 'Session name; also its peer name for SendMessage',
-          '--group <g>': 'Add it to this group: a name, path or id. The groups it makes are transient (see `help group list`)',
+          '--child': 'Part of your work: its card shows under yours, wherever yours is. Needs a Claude Code session',
+          '--group <g>': 'Separate work: add it to this group, a name, path or id. The groups it makes are transient (see `help group list`)',
           '--model <m>': MODEL_HELP,
           '--worktree [name]': 'Run in a new git worktree',
           '--task-list [id]': 'Use this task list instead of its own (default: this session\'s list), so its cards show on one board with yours. Off unless given',
           '--json': 'Output JSON',
           '-- <claude args>': 'Passed to claude as they are, e.g. --permission-mode auto. No quotes, % or control characters; cck sets --session-id, --name, --model and --worktree',
         },
-        notes: 'Needs the terminal token, so it runs on the machine of the cck server. cck sends no report: say in the spec how the session reports back. Run `claude-code-kanban skills get dispatch` for how to write the spec.',
+        notes: 'Pass one of --child or --group. Needs the terminal token, so it runs on the machine of the cck server. cck sends no report: say in the spec how the session reports back. Run `claude-code-kanban skills get dispatch` for how to write the spec.',
         examples: [
-          'claude-code-kanban dispatch start --cwd . --spec-file spec.md --name fix-login-redirect --group auth-refactor --model sonnet -- --permission-mode auto',
-          'claude-code-kanban dispatch start --cwd . --spec-file spec.md --name api-worker --task-list',
+          'claude-code-kanban dispatch start --cwd . --spec-file spec.md --name fix-login-redirect --child --model sonnet -- --permission-mode auto',
+          'claude-code-kanban dispatch start --cwd . --spec-file spec.md --name api-worker --group auth-refactor --task-list',
         ],
         run: runDispatchStartCli,
       },
@@ -1487,6 +1488,10 @@ async function runDispatchStartCli(argv) {
   const hasGroup = args.some(a => a === '--group' || a.startsWith('--group='));
   const group = hasGroup ? getArgValue(args, 'group') || '' : null;
   if (hasGroup && !group.trim()) return usageError(COMMANDS.dispatch.verbs.start, '--group needs a group name, path or id');
+  const child = args.includes('--child');
+  if (child === hasGroup) return usageError(COMMANDS.dispatch.verbs.start, 'Pass one of --child (part of your work) or --group <g> (separate work)');
+  const parent = process.env.CLAUDE_CODE_SESSION_ID || null;
+  if (child && !parent) return usageError(COMMANDS.dispatch.verbs.start, '--child runs only inside a Claude Code session; pass --group <g>');
   const worktree = args.includes('--worktree') ? getArgValue(args, 'worktree') || true : false;
   const hasTaskList = args.some(a => a === '--task-list' || a.startsWith('--task-list='));
   const ownList = process.env.CLAUDE_CODE_TASK_LIST_ID || process.env.CLAUDE_CODE_SESSION_ID;
@@ -1502,14 +1507,15 @@ async function runDispatchStartCli(argv) {
     worktree,
     taskList,
     group,
+    child,
     claudeArgs,
-    parent: process.env.CLAUDE_CODE_SESSION_ID || null,
+    parent,
   };
   try {
     const out = await cliPostJson('/api/dispatch', body, 'Dispatch', { 'x-terminal-token': token });
     if (!out) return 1;
     if (args.includes('--json')) console.log(JSON.stringify(out, null, 2));
-    else console.log(`Started session ${out.session} in ${out.cwd}${out.group ? ` [${out.group}${out.transient ? ', transient' : ''}]` : ''}`);
+    else console.log(`Started session ${out.session} in ${out.cwd}${child ? ' [child]' : ''}${out.group ? ` [${out.group}${out.transient ? ', transient' : ''}]` : ''}`);
     if (out.groupError) console.error(`Not grouped: ${out.groupError}`);
     return 0;
   } catch (e) { reportCliError(e); return 1; }

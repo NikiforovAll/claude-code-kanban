@@ -38,7 +38,7 @@ describe('createDispatchedStore', () => {
   it('records a marker with its starter and saves it', () => {
     const { s, writes } = store();
     s.record('a', { parent: 'p', name: 'w', group: 'g', cwd: '/a', worktree: true });
-    assert.deepEqual(s.get('a'), { parent: 'p', at: 1_000_000_000, name: 'w', group: 'g', cwd: '/a', worktree: true });
+    assert.deepEqual(s.get('a'), { parent: 'p', child: false, at: 1_000_000_000, name: 'w', group: 'g', cwd: '/a', worktree: true });
     assert.equal(writes.length, 1);
   });
 
@@ -49,7 +49,7 @@ describe('createDispatchedStore', () => {
         sessions: { ok: { parent: 'p', status: 'failed', at: 5 }, bad: { status: 'x' }, worse: null },
       },
     });
-    assert.deepEqual(s.get('ok'), { parent: 'p', at: 5, name: null, group: null, cwd: null, worktree: null });
+    assert.deepEqual(s.get('ok'), { parent: 'p', child: false, at: 5, name: null, group: null, cwd: null, worktree: null });
     assert.equal(s.get('bad'), null);
     assert.equal(s.get('worse'), null);
   });
@@ -97,7 +97,7 @@ describe('createDispatchedStore', () => {
     s.record('s-1', { parent: 'p-1', cwd: '/a', name: 'one', group: 'g' });
     s.record('s-2', { parent: 'p-2', cwd: '/b' });
     assert.deepEqual(s.running(() => true, { parent: 'p-1' }), [
-      { session: 's-1', parent: 'p-1', cwd: '/a', name: 'one', group: 'g', worktree: null, startedAt: 1_000_000_000 },
+      { session: 's-1', parent: 'p-1', child: false, cwd: '/a', name: 'one', group: 'g', worktree: null, startedAt: 1_000_000_000 },
     ]);
     assert.deepEqual(s.running((id) => id === 's-2').map((r) => r.session), ['s-2']);
   });

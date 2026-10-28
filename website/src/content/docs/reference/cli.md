@@ -381,7 +381,7 @@ Starts a Claude Code session in the embedded terminal to do a task. See [Dispatc
 ### dispatch start
 
 ```bash
-claude-code-kanban dispatch start --cwd <dir> (--spec <text> | --spec-file <path>) [--name <n>] [--group <g>] [--model <m>] [--worktree [name]] [--task-list [id]] [--json] [-- <claude args>...]
+claude-code-kanban dispatch start --cwd <dir> (--spec <text> | --spec-file <path>) (--child | --group <g>) [--name <n>] [--model <m>] [--worktree [name]] [--task-list [id]] [--json] [-- <claude args>...]
 ```
 
 | Flag | What it does |
@@ -390,7 +390,10 @@ claude-code-kanban dispatch start --cwd <dir> (--spec <text> | --spec-file <path
 | `--spec <text>` | The task. Write it so that it makes sense with no other context. |
 | `--spec-file <path>` | Reads the task from a file. |
 | `--name <n>` | Session name: up to 80 letters, digits, spaces, `.`, `_` and `-`. The first character must be a letter or a digit. It is also the session's peer name for `SendMessage`. |
-| `--group <g>` | Adds the new session to this [session group](/claude-code-kanban/guides/session-groups/#groups-from-dispatch): a name, a path such as `auth-refactor/api`, or an id. A missing group is made as a temporary group. Without it, the session goes to its project. |
+| `--child` | The work is part of the current session's work. The new card shows under the current session's card. Works only inside a Claude Code session. See [Place in the sidebar](/claude-code-kanban/guides/dispatch/#place-in-the-sidebar). |
+| `--group <g>` | Separate work. Adds the new session to this [session group](/claude-code-kanban/guides/session-groups/#groups-from-dispatch): a name, a path such as `auth-refactor/api`, or an id. A missing group is made as a temporary group. |
+
+Pass exactly one of `--child` and `--group`.
 | `--model <m>` | `fable`, `opus`, `sonnet` or `haiku`. |
 | `--worktree [name]` | Runs the session in a new git worktree. |
 | `--task-list [id]` | The session uses this task list instead of its own. With no value, it uses the current session's list. Off unless given. See [Share one task list](/claude-code-kanban/guides/dispatch/#share-one-task-list). |
@@ -400,7 +403,7 @@ claude-code-kanban dispatch start --cwd <dir> (--spec <text> | --spec-file <path
 On success it prints:
 
 ```text
-Started session <uuid> in <cwd> [group]
+Started session <uuid> in <cwd> [child | group]
 ```
 
 cck sends no report back. Say in the spec how the session reports, for example with `SendMessage`.

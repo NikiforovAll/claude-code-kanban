@@ -1,7 +1,7 @@
 ---
 name: dispatch
 description: Dispatch tasks to new Claude Code sessions in the kanban board's terminal. Use when the user asks to dispatch or delegate a task to another session.
-argument-hint: '<task> [--handoff] [--group <name>] [--model haiku|sonnet|opus|fable] [--worktree [name]] [-- <claude args>]'
+argument-hint: '<task> [--handoff] [--child | --group <name>] [--model haiku|sonnet|opus|fable] [--worktree [name]] [-- <claude args>]'
 ---
 
 # Kanban dispatch

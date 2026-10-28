@@ -2,14 +2,14 @@
 
 `claude-code-kanban dispatch start` lets one Claude Code session start another through cck. It is a thin wrapper: cck runs `claude` in its embedded terminal with a fresh session id, the cck flags and any args after `--`, and types the spec as the first message. The user can open the terminal at any time.
 
-The started session is an ordinary session, not a child: the board shows no tree. Its card carries a marker: `/api/sessions` carries `dispatched: {parent}`, and the card shows a send icon whose tooltip names the starter and whose click reveals it. The markers are kept in `<config dir>/.cck/dispatched.json` (`lib/retention.js`), so they outlive the terminal and a restart, and they expire with the session's transcript (see `docs/retention.md`).
+The started session is an ordinary session. Its card carries a marker: `/api/sessions` carries `dispatched: {parent, child}`, and the card shows a send icon whose tooltip names the starter and whose click reveals it. The markers are kept in `<config dir>/.cck/dispatched.json` (`lib/retention.js`), so they outlive the terminal and a restart, and they expire with the session's transcript (see `docs/retention.md`).
 
 cck has no report channel. The two sessions talk with Claude Code's own `SendMessage`, and the starter writes the report instruction into the spec (`skill-guides/dispatch.md`).
 
 ## Flow
 
 ```
-starter  dispatch start --cwd <dir> --spec-file <f> --name <n> [--group <g>] [--model <m>] [--worktree [n]] [-- <claude args>]
+starter  dispatch start --cwd <dir> --spec-file <f> --name <n> (--child | --group <g>) [--model <m>] [--worktree [n]] [-- <claude args>]
 cck      POST /api/dispatch -> terminal.startNew -> {session, cwd, group}
 started  SendMessage to the starter, as the spec says
 ```
@@ -25,7 +25,12 @@ started  SendMessage to the starter, as the spec says
 
 ## Placement
 
-A started session must not jump into a group after it appears, so its place is decided when it starts. Only an explicit `--group <g>` puts it in a group; without the flag it goes to its project block. The starter's own group is never inherited, so each dispatch states its group.
+A started session must not jump after it appears, so its place is decided when it starts. The CLI takes exactly one of two flags, and the dispatch skill makes the agent choose: will the result come back to the starter?
+
+- `--child` (yes): the marker gets `child: true`, and the session joins no group. The sidebar renders it in its starter's place, nested under the starter's card, wherever the starter is: a group, a project block of a group, a project block, or Sessions (`computeChildAnchors`, `placementOf` and `nestChildren` in `public/app.js`; `sgGroupForSession` and `sgHostOf` resolve through `placementOf`, so drag, pins, search and reveal agree with the render). It works across projects, so a worktree or another cwd still nests. A child the user places in a group keeps that place. When the starter is not in the shown list (ended, dismissed, filtered out, or on a page not loaded), the child shows in its own project block. The CLI refuses `--child` outside a Claude Code session, and the server refuses it with no `parent` or with a `group`.
+- `--group <g>` (no): the session joins that group, as below. It is not nested.
+
+The server API still takes neither, which places the session in its project block; only the CLI insists on a choice.
 
 `POST /api/dispatch` adds the started id to the group (`joinDispatch` in `lib/user-groups.js`) and broadcasts `group:changed` before `dispatch-update`. `dispatch-update` makes the board fetch `GET /api/dispatch` and show a "starting" placeholder in that place until the transcript appears. A new placeholder expands the collapsed sections that would hide it once, and the Recent project filter keeps any session modified in its window, because a new folder is in no recent project until the project list reloads. The real card is a member of the group, so it lands in the same place.
 

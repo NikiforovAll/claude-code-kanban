@@ -59,7 +59,7 @@ To keep a temporary group, select **Keep** on its header, rename it, or move a s
 
 ### Where a started session goes
 
-Claude Code Kanban picks the place for a started session when it starts, so the card does not move after it shows. A session started with `--group` goes to that group. A session started without it goes to its project block, even when the starting session is in a group.
+Claude Code Kanban picks the place for a started session when it starts, so the card does not move after it shows. A session started with `--group` goes to that group. A session started with `--child` shows under the starting session's card, also when that card is in a group. A child does not join the group, so it does not keep a temporary group alive.
 
 Until the first transcript line arrives, the board shows a "starting" placeholder card in that place.
 <Lightbox />

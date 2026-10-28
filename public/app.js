@@ -3986,6 +3986,10 @@ function renderSessions() {
   const childDepth = new Map();
   const parentOf = new Map();
   for (const g of sessionGroups) for (const m of g.members) if (m.parent) parentOf.set(m.ref, m.parent);
+  childAnchors = computeChildAnchors(filteredSessions);
+  for (const s of filteredSessions) {
+    if (childAnchors.has(s.id) && !parentOf.has(s.id)) parentOf.set(s.id, s.dispatched.parent);
+  }
   const nestChildren = (list) => {
     if (parentOf.size === 0) return list;
     const ids = new Set(list.map((s) => s.id));
@@ -4161,6 +4165,10 @@ function renderSessions() {
     return;
   }
 
+  const nestedCards = (list) =>
+    nestChildren(list)
+      .map((s) => renderSessionCard(s))
+      .join('');
   const groupPinned = store.getItem(GROUP_PINNED_KEY) !== 'false';
   const pinWeight = (s) => (isPlacedSticky(s.id) ? 2 : isInPinnedGroup(s) ? 1 : 0);
   const pinSort = (a, b) => pinWeight(b) - pinWeight(a);
@@ -4281,13 +4289,14 @@ function renderSessions() {
     // Placed sessions follow the order the user dragged them into; a session that is here through
     // its project takes the project's slot.
     const slot = new Map(group.members.map((m, i) => [`${m.type}:${m.ref}`, i]));
-    const slotOf = (s) => slot.get(`session:${s.id}`) ?? slot.get(`project:${sessionProjectKey(s)}`) ?? 0;
+    const slotOf = (placed) => {
+      const s = placementOf(placed);
+      return slot.get(`session:${s.id}`) ?? slot.get(`project:${sessionProjectKey(s)}`) ?? 0;
+    };
     const byMemberOrder = (a, b) => (groupPinned ? 0 : pinSort(a, b)) || slotOf(a) - slotOf(b);
     let body = '';
     if (flat) {
-      body = nestChildren([...bucket].sort(byMemberOrder))
-        .map((s) => renderSessionCard(s))
-        .join('');
+      body = nestedCards([...bucket].sort(byMemberOrder));
     } else {
       const loose = [];
       const byProject = new Map();
@@ -4341,7 +4350,7 @@ function renderSessions() {
     const groups = new Map();
     const ungrouped = [];
     for (const session of sgRest) {
-      const key = sessionProjectKey(session);
+      const key = sessionProjectKey(placementOf(session));
       if (key) {
         if (!groups.has(key)) groups.set(key, []);
         groups.get(key).push(session);
@@ -4392,7 +4401,7 @@ function renderSessions() {
             </div>
           `;
       } else {
-        projectsHtml += ungrouped.map((s) => renderSessionCard(s)).join('');
+        projectsHtml += nestedCards(ungrouped);
       }
     }
 
@@ -4402,8 +4411,7 @@ function renderSessions() {
     sessionsList.innerHTML = html + outsideHtml;
   } else {
     const sectioned = sessionGroups.length > 0;
-    const restHtml =
-      sectioned && collapsedProjectGroups.has(SECTION_SESSIONS) ? '' : sgRest.map((s) => renderSessionCard(s)).join('');
+    const restHtml = sectioned && collapsedProjectGroups.has(SECTION_SESSIONS) ? '' : nestedCards(sgRest);
     const tail = sectioned ? sectionHtml(SECTION_SESSIONS, 'Sessions', true, restHtml, sgRest.length === 0) : restHtml;
     sessionsList.innerHTML = html + sgSectionHtml(true) + tail + outsideHtml;
   }
@@ -5048,8 +5056,35 @@ function sgSessionParent(id) {
 
 // An individually placed session wins over the placement of its project.
 function sgGroupForSession(session) {
-  const project = sessionProjectKey(session);
-  return sgGroupOf('session', session.id) || (project ? sgGroupOf('project', project) : null);
+  const s = placementOf(session);
+  const project = sessionProjectKey(s);
+  return sgGroupOf('session', s.id) || (project ? sgGroupOf('project', project) : null);
+}
+
+// A `dispatch start --child` session renders in its starter's place, unless the user placed it or
+// the starter is not in the rendered list. Set by renderSessions, so every other placement lookup
+// (drag, pins, search, reveal) agrees with what the sidebar shows.
+let childAnchors = new Map();
+const placementOf = (session) => childAnchors.get(session.id) ?? session;
+
+function computeChildAnchors(list) {
+  const out = new Map();
+  if (!list.some((s) => s.dispatched?.child)) return out;
+  const byId = new Map(list.map((s) => [s.id, s]));
+  const placed = new Set();
+  for (const g of sessionGroups) for (const m of g.members) if (m.type === 'session') placed.add(m.ref);
+  const up = (s) => (s.dispatched?.child && !placed.has(s.id) ? byId.get(s.dispatched.parent) : null);
+  for (const s of list) {
+    let anchor = up(s);
+    if (!anchor) continue;
+    for (let hop = 1; hop < 4; hop++) {
+      const next = up(anchor);
+      if (!next || next === s) break;
+      anchor = next;
+    }
+    out.set(s.id, anchor);
+  }
+  return out;
 }
 
 function sgListFiltered() {
@@ -5095,8 +5130,9 @@ function sgDetach(type, ref) {
 
 // Where a session renders inside a group: the project block it was moved under, its own
 // project's block, or - when the user lifted it out - the group's own loose list.
-function sgHostOf(group, session) {
-  if (!group || !session) return null;
+function sgHostOf(group, placed) {
+  if (!group || !placed) return null;
+  const session = placementOf(placed);
   const m = group.members.find((x) => x.type === 'session' && x.ref === session.id);
   const isMemberProject = (path) => !!path && group.members.some((x) => x.type === 'project' && x.ref === path);
   if (m?.under && isMemberProject(m.under)) return m.under;
@@ -5981,7 +6017,8 @@ function expandActiveGroups({ onlyNew = false } = {}) {
 // (a collapsed Pinned sub-section opens only for the open session, see syncPinPeek):
 // Groups for a grouped session, else Projects or Sessions, which depends on the view. Returns
 // whether anything changed.
-function uncollapseFor(session) {
+function uncollapseFor(placed) {
+  const session = placementOf(placed);
   const group = sgGroupForSession(session);
   const keys = [
     ...(group
@@ -5998,7 +6035,7 @@ function uncollapseFor(session) {
 function pinnedCollapseKeys(session) {
   if (!isInPinnedGroup(session)) return [];
   const group = sgGroupForSession(session);
-  if (!group) return [pinKey(sessionProjectKey(session) || '__ungrouped__')];
+  if (!group) return [pinKey(sessionProjectKey(placementOf(session)) || '__ungrouped__')];
   const host = sgHostOf(group, session);
   return [host ? pinKey(host) : `__pinned_group_${group.id}__`];
 }
@@ -17489,7 +17526,7 @@ function placeholderSession(id, spec) {
     edit: !!spec.edit,
     prompted: !!(spec.prompted || spec.prompt),
     name: spec.name || (spec.forkOf && forkLabel(spec.forkOf)) || PLACEHOLDER_NAMES[spec.mode] || PLACEHOLDER_NAMES.new,
-    dispatched: spec.mode === 'dispatch' ? { parent: spec.parent || null } : undefined,
+    dispatched: spec.mode === 'dispatch' ? { parent: spec.parent || null, child: !!spec.child } : undefined,
     project: spec.cwd,
     worktree: spec.worktree ? { repo: spec.cwd, name: spec.worktree === true ? 'new' : spec.worktree } : null,
     modifiedAt: new Date(spec.startedAt).toISOString(),
@@ -17538,6 +17575,7 @@ async function loadDispatches() {
       worktree: r.worktree,
       group: r.group,
       parent: r.parent,
+      child: r.child,
       startedAt: r.startedAt,
     });
   }

@@ -25,6 +25,8 @@ claude-code-kanban dispatch start --cwd ~/src/my-app --spec-file spec.md --name 
 
 - The new session sees only the spec, not your conversation, so write a spec that is complete on its own. Use `--spec-file` for a spec longer than one line, so you do not need shell quotes.
 - `--name` is the sidebar name and the session's peer name for `SendMessage`. Use kebab-case that says what the session does.
+- Pass one of `--child` or `--group`. See [Place in the sidebar](#place-in-the-sidebar).
+
 Without `--json`, the command prints the session id, the folder and the group:
 
 ```text
@@ -38,7 +40,7 @@ The `--cwd` folder can be any folder that exists, also a new empty one. For this
 Everything after `--` goes to `claude` as it is, so any flag in `claude --help` works:
 
 ```bash
-claude-code-kanban dispatch start --cwd . --spec-file spec.md --name docs-audit -- --permission-mode plan --add-dir ../shared
+claude-code-kanban dispatch start --cwd . --spec-file spec.md --name docs-audit --child -- --permission-mode plan --add-dir ../shared
 ```
 
 - Each value must be one shell word with no quotes, `%` or control characters, because it reaches a shell command line. Put long text in the spec.
@@ -58,7 +60,7 @@ The `dispatch` skill has the session that dispatches assign the card, because it
 By default, each started session keeps its own task list. Pass `--task-list` to make it use another list, so its cards show on one board with yours:
 
 ```bash
-claude-code-kanban dispatch start --cwd . --spec-file spec.md --name api-worker --task-list
+claude-code-kanban dispatch start --cwd . --spec-file spec.md --name api-worker --child --task-list
 ```
 
 - With no value, it uses the current session's list. Pass `--task-list <id>` for another list.
@@ -74,9 +76,16 @@ When you move a card, the board tells the sessions about it:
 | `--task-list <id>`, the card has an owner that links | The owner only |
 | `--task-list <id>`, no owner or no link | The session that started the list's sessions. If they were started by more than one session, or by none, no session gets the move |
 
-## Groups
+## Place in the sidebar
 
-Pass `--group` to show the new session under that group in the sidebar. Pass it on each dispatch that belongs in the group: a dispatch without it goes to its project. The session that ran `dispatch start` stays where it is.
+Each dispatch takes one of two flags. Use the one that matches how the work relates to the session that starts it:
+
+| Flag | Use it when | Where the card shows |
+|---|---|---|
+| `--child` | The result comes back to the session that starts it: a fix, a review, research it uses | Under the card of the session that started it, in a group or in a project block. This is also true when the new session runs in another folder |
+| `--group <group>` | It is separate work that you follow on the board: a handoff, an unrelated task | In that group |
+
+`--child` works only from inside a Claude Code session. When the starting session does not show in the sidebar (it ended, you dismissed it, or a filter hides it), a child shows in its own project block. The session that ran `dispatch start` stays where it is.
 
 A group that `--group` makes is temporary: it goes when the Active view shows none of its sessions. Select **Keep** on the group header to keep it. For details, see [Groups from dispatch](/claude-code-kanban/guides/session-groups/#groups-from-dispatch).
 
