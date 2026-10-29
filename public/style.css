@@ -4106,6 +4106,7 @@ code.ct .ct-has[aria-expanded='false'] .ct-name::after {
   display: flex;
   flex-direction: column;
   border-left: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
   background: var(--bg-surface);
   color: var(--text-secondary);
   font-family: var(--font-mono);
@@ -4213,11 +4214,13 @@ body.light .show-card {
   max-height: none;
 }
 
+/* Off the bottom edge: the Windows 11 window frame covers the last pixel row, which hides the
+   bottom border there. */
 .dock-addon,
 .show-card.docked {
   top: 0;
   right: var(--dock-rail-w);
-  bottom: 0;
+  bottom: 2px;
   width: var(--show-dock-drag, var(--show-dock-w));
 }
 
@@ -4227,7 +4230,7 @@ body.light .show-card {
   min-width: 0;
   max-width: none;
   max-height: none;
-  border-width: 0 0 0 1px;
+  border-width: 0 0 1px 1px;
   border-radius: 0;
   box-shadow: none;
 }
@@ -4333,6 +4336,12 @@ body.light .show-card.focused {
   box-shadow:
     0 0 0 1px var(--accent),
     0 0 10px var(--accent-glow);
+}
+
+.dock-addon:focus-within,
+.dock-addon.focused,
+.show-card.docked.focused {
+  border-bottom-color: var(--border);
 }
 
 .show-actions {
