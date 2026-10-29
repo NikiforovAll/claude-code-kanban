@@ -135,4 +135,29 @@ describe('add-on store', () => {
     assert.equal(open().list(null).global[0].cwd, undefined);
     assert.equal(addons.add('global', { url }).addon.run, 'node b.js');
   });
+
+  it('finds an entry by key, else adopts the same URL, and a repeat add replaces its fields and keeps its id', () => {
+    const { open, clock } = memoryStore();
+    const addons = open();
+    const cwd = process.cwd();
+    const old = addons.add('global', { url: 'http://localhost:4117/?cwd={cwd}', title: 'Changes', run: 'node old.js' });
+    const adopted = addons.add('global', { key: 'git-changes', url: 'http://localhost:4117/?cwd={cwd}', title: 'Changes', icon: '±', run: 'node server.js', cwd });
+    assert.deepEqual(adopted, {
+      added: false,
+      addon: { id: old.addon.id, key: 'git-changes', url: 'http://localhost:4117/?cwd={cwd}', title: 'Changes', icon: '±', run: 'node server.js', cwd, params: {}, addedAt: clock.t },
+    });
+    let writes = 0;
+    const watched = open(() => writes++);
+    writes = 0;
+    const moved = watched.add('global', { key: 'git-changes', url: 'http://localhost:4118/?cwd={cwd}', title: 'Changes' });
+    assert.equal(moved.addon.id, old.addon.id);
+    assert.equal(moved.addon.run, undefined);
+    assert.equal(moved.addon.icon, undefined);
+    assert.equal(writes, 1);
+    watched.add('global', { key: 'git-changes', url: 'http://localhost:4118/?cwd={cwd}', title: 'Changes' });
+    assert.equal(writes, 1);
+    assert.equal(open().list(null).global.length, 1);
+    assert.equal(addons.add('global', { key: 'other', url: 'http://localhost:4118/?cwd={cwd}' }).added, true);
+    assert.throws(() => addons.add('global', { key: 'Bad Key', url: 'http://localhost:1/' }), code('bad_key'));
+  });
 });

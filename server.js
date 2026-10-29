@@ -4,7 +4,7 @@
 const express = require('express');
 const path = require('node:path');
 const fs = require('node:fs').promises;
-const { existsSync, readdirSync, readFileSync, writeFileSync, statSync, unlinkSync, rmSync, mkdirSync, renameSync, openSync, readSync, closeSync, realpathSync } = require('node:fs');
+const { existsSync, readdirSync, readFileSync, writeFileSync, statSync, unlinkSync, mkdirSync, openSync, readSync, closeSync, realpathSync } = require('node:fs');
 const _readline = require('node:readline');
 const chokidar = require('chokidar');
 const os = require('node:os');
@@ -68,6 +68,7 @@ const { readGitBranch, sessionGitBranch } = require('./lib/git-branch');
 const { createLinkedDocStore, linkUrl } = require('./lib/linked-docs');
 const { createPaneStore, isOwnOrigin } = require('./lib/panes');
 const { createAddonStore, sampleUrl } = require('./lib/addons');
+const { writeJsonAtomic } = require('./lib/write-json-atomic');
 const { createAddonRunner } = require('./lib/addon-runner');
 const { probeFraming, parseOrigin } = require('./lib/frame-policy');
 const { pickFolder } = require('./lib/folder-dialog');
@@ -152,18 +153,6 @@ const SCRATCHPAD_ROOT = (() => {
 // #endregion
 
 // #region SERVER_STATE
-function writeJsonAtomic(file, obj, mode) {
-  mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
-  try {
-    writeFileSync(tmp, JSON.stringify(obj, null, 2), { encoding: 'utf8', mode });
-    renameSync(tmp, file);
-  } catch (e) {
-    rmSync(tmp, { force: true });
-    throw e;
-  }
-}
-
 // Claude Code reads task files while the board writes them, so it must never see half a file.
 // On Windows a rename over a file another handle has open fails with EPERM or EBUSY until it closes.
 let taskWriteSeq = 0;
@@ -4427,13 +4416,16 @@ app.delete('/api/panes/:sessionId/:paneId', (req, res) => {
 // Web pages on the dock rail (lib/addons.js). The board fills each URL for its terminal's
 // session, so the routes carry the templates; every change sends one `addon:changed` and the
 // boards refetch.
-const addons = createAddonStore({
-  ...stampedJsonFile(ADDONS_FILE, writeJsonAtomic),
-  onChange: () => broadcast({ type: 'addon:changed' }),
-  isOwnOrigin: (url) => isOwnOrigin(url, { boardPort, boardHosts, hubUrl: process.env.HUB_URL }),
-});
 const addonRunner = createAddonRunner({ logDir: path.join(CCK_DIR, 'addons') });
 process.on('exit', addonRunner.shutdown);
+const addons = createAddonStore({
+  ...stampedJsonFile(ADDONS_FILE, writeJsonAtomic),
+  onChange: (global) => {
+    addonRunner.retain(global);
+    broadcast({ type: 'addon:changed' });
+  },
+  isOwnOrigin: (url) => isOwnOrigin(url, { boardPort, boardHosts, hubUrl: process.env.HUB_URL }),
+});
 chokidar.watch(ADDONS_FILE, { ignoreInitial: true }).on('all', (event) => {
   if (event === 'add' || event === 'change') addons.reload();
 });
@@ -4445,11 +4437,11 @@ app.get('/api/addons', (req, res) => {
 
 app.post('/api/addons', (req, res) => {
   try {
-    const { scope, url, title, icon, params, run, cwd } = req.body || {};
+    const { scope, url, title, icon, params, run, cwd, key } = req.body || {};
     if (typeof scope !== 'string' || !scope) throw previewError(400, "scope must be 'global' or a session id", 'bad_scope');
     // A run command is a command line the board will start, so it needs what dispatch needs.
     if (run && !terminal.authorized(req.get('x-terminal-token'))) return res.status(401).json({ error: 'invalid terminal token' });
-    const result = addons.add(scope, { url, title, icon, params, run, cwd });
+    const result = addons.add(scope, { url, title, icon, params, run, cwd, key });
     res.status(result.added ? 201 : 200).json(result);
   } catch (error) {
     paneRouteError(res, error, 'POST /api/addons');
@@ -4470,16 +4462,10 @@ app.patch('/api/addons/:id', (req, res) => {
 
 app.delete('/api/addons/:id', (req, res) => {
   const session = typeof req.query.session === 'string' ? req.query.session : null;
-  const removed = removeAddon(session, req.params.id);
+  const removed = addons.remove(session, req.params.id);
   if (!removed) return res.status(404).json({ error: `No add-on ${req.params.id} here`, code: 'no_addon' });
   res.json(removed);
 });
-
-function removeAddon(session, id) {
-  const removed = addons.remove(session, id);
-  if (removed?.addon.run) addonRunner.stop(removed.addon.id);
-  return removed;
-}
 
 app.post('/api/addons/:id/start', async (req, res) => {
   const entry = addons.getGlobal(req.params.id);
@@ -4529,7 +4515,7 @@ app.post(`${LAUNCHER_ITEMS}/:id/restart`, async (req, res) => {
 });
 
 app.post(`${LAUNCHER_ITEMS}/:id/remove`, (req, res) => {
-  const removed = removeAddon(null, req.params.id);
+  const removed = addons.remove(null, req.params.id);
   if (!removed) return res.status(404).json({ error: `No global add-on ${req.params.id}`, code: 'no_addon' });
   res.json({ message: `Removed ${removed.addon.title}` });
 });

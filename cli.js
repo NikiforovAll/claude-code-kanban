@@ -106,9 +106,11 @@ const COMMANDS = {
     verbs: {
       add: {
         summary: 'Add a URL to the dock rail; the user opens it from the rail',
-        usage: 'claude-code-kanban addon add <url> [--title <text>] [--icon <glyph>] [--param <k=v> ...] [--global [--run <cmd> [--cwd <dir>]]] [--session <id>] [--json]',
+        usage: 'claude-code-kanban addon add <url> | --manifest <dir> [--title <text>] [--icon <glyph>] [--param <k=v> ...] [--global [--run <cmd> [--cwd <dir>]] [--offline]] [--session <id>] [--json]',
         flags: {
           '<url>': 'An http(s) URL. {sessionId}, {cwd} and {project} are filled for each session, {<name>} from --param',
+          '--manifest <dir>': 'Add the add-on in <dir> from its addon.json (url, title, icon, run), as a global entry that runs in <dir>. Its id names the entry, so a repeat add updates it',
+          '--offline': 'With --global: write the board\'s addons.json directly, with no board running and no terminal token. A running board picks the change up',
           '--title <text>': 'Rail and header title (default: the host)',
           '--icon <glyph>': 'One or two characters on the rail button (default: the first letter of the title)',
           '--param <k=v>': 'A value for {k} in the URL; repeat for each. `addon set` changes it for one session',
@@ -118,8 +120,9 @@ const COMMANDS = {
           [SESSION_FLAG]: SESSION_FLAG_HELP,
           '--json': 'Output JSON (the add-on entry)',
         },
-        notes: 'Quote the URL so the shell keeps the braces. Each value is URL-encoded when filled. A placeholder with no value is refused. A session add-on goes when the session expires; a global one stays until `addon rm`. The same URL added again prints the entry it already has; with --run it takes the new command. --run needs the board\'s terminal, like `dispatch start`. The server stops with the board; its output goes to .cck/addons/<id>.log.',
+        notes: 'Quote the URL so the shell keeps the braces. Each value is URL-encoded when filled. A placeholder with no value is refused. A session add-on goes when the session expires; a global one stays until `addon rm`. The same URL added again prints the entry it already has; with --run it takes the new command. --run needs the board\'s terminal, like `dispatch start`, unless --offline. The server stops with the board; its output goes to .cck/addons/<id>.log.',
         examples: [
+          'claude-code-kanban addon add --manifest ~/.claude-hub/extensions/git-changes/examples/git-changes --offline',
           'claude-code-kanban addon add "http://localhost:4100/?cwd={cwd}" --title Changes',
           'claude-code-kanban addon add "http://localhost:4200/{sessionId}" --title Notes --global',
           'claude-code-kanban addon add "http://localhost:4117/?cwd={cwd}" --title Changes --global --run "node server.js" --cwd C:/tools/changes',
@@ -148,12 +151,14 @@ const COMMANDS = {
       },
       rm: {
         summary: 'Take an add-on off the rail: a global one from every session',
-        usage: 'claude-code-kanban addon rm <id> [--session <id>]',
+        usage: 'claude-code-kanban addon rm <id> | --key <key> [--offline] [--session <id>]',
         flags: {
           '<id>': 'The id `addon add` or `addon list` printed',
+          '--key <key>': 'The global add-on with this key, the id in its addon.json. No such add-on is not an error',
+          '--offline': 'Remove a global add-on from the board\'s addons.json directly, with no board running',
           [SESSION_FLAG]: SESSION_FLAG_HELP,
         },
-        examples: ['claude-code-kanban addon rm a3'],
+        examples: ['claude-code-kanban addon rm a3', 'claude-code-kanban addon rm --key git-changes --offline'],
         run: runAddonRmCli,
       },
     },
@@ -885,28 +890,69 @@ async function optionalSession(entry, args) {
 
 const sessionQuery = (resolved) => (resolved.id ? `?session=${encodeURIComponent(resolved.id)}` : '');
 
+// The add-on's own manifest (addon.json); the store checks the fields it keeps.
+function readAddonManifest(entry, dir) {
+  const file = path.join(dir, 'addon.json');
+  let m;
+  try {
+    m = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (e) {
+    usageError(entry, `Cannot read ${file}: ${e.code || e.message}`);
+    return null;
+  }
+  if (m?.kind !== 'addon' || typeof m.id !== 'string' || typeof m.url !== 'string') {
+    usageError(entry, `${file} is not an add-on manifest: it needs "kind": "addon", an id and a url`);
+    return null;
+  }
+  return m;
+}
+
+// With no board: the store writes addons.json itself, and a running board reads the change.
+function offlineAddons() {
+  const { createAddonStore } = require('./lib/addons');
+  const { stampedJsonFile } = require('./lib/stamped-json-file');
+  const { writeJsonAtomic } = require('./lib/write-json-atomic');
+  return createAddonStore(stampedJsonFile(path.join(getClaudeDir(), '.cck', 'addons.json'), writeJsonAtomic));
+}
+
 async function runAddonAddCli(args, entry) {
-  const [url] = positionals(args, ['--session', '--title', '--icon', '--param', '--run', '--cwd']);
-  if (!url) {
+  const [urlArg] = positionals(args, ['--session', '--title', '--icon', '--param', '--run', '--cwd', '--manifest']);
+  const manifestDir = getArgValue(args, 'manifest');
+  if (!urlArg && !manifestDir) {
     printLeafHelp(entry);
     return 1;
   }
+  if (urlArg && manifestDir) return usageError(entry, '--manifest takes the URL from addon.json');
+  let spec;
+  if (manifestDir) {
+    if (getArgValue(args, 'run') || getArgValue(args, 'cwd')) return usageError(entry, '--manifest takes run from addon.json and runs it in that folder');
+    const dir = path.resolve(manifestDir);
+    const m = readAddonManifest(entry, dir);
+    if (!m) return 1;
+    spec = { url: m.url, run: m.run, cwd: m.run && dir, title: m.title, icon: m.icon, key: m.id, isGlobal: true };
+  } else {
+    const cwd = getArgValue(args, 'cwd');
+    spec = { url: urlArg, run: getArgValue(args, 'run'), cwd: cwd && path.resolve(cwd), isGlobal: args.includes('--global') };
+  }
+  const { url, run, cwd, key, isGlobal } = spec;
   const params = addonParams(entry, argValues(args, 'param'));
   if (!params) return 1;
-  const isGlobal = args.includes('--global');
-  const run = getArgValue(args, 'run');
-  const cwd = getArgValue(args, 'cwd');
+  const offline = args.includes('--offline');
+  if (offline && !isGlobal) return usageError(entry, '--offline needs --global');
   if (run && !isGlobal) return usageError(entry, '--run needs --global');
   if (cwd && !run) return usageError(entry, '--cwd needs --run');
-  const token = run ? readTerminalToken() : null;
-  if (run && !token) return 1;
+  const needsToken = run && !offline;
+  const token = needsToken ? readTerminalToken() : null;
+  if (needsToken && !token) return 1;
   const resolved = isGlobal ? { id: 'global' } : await resolveSessionArg(entry, args, ADDONS_WHY);
   if (!resolved) return 1;
   try {
-    const icon = getArgValue(args, 'icon');
-    const start = run ? { run, ...(cwd && { cwd: path.resolve(cwd) }) } : {};
-    const body = { scope: resolved.id, url, title: getArgValue(args, 'title') || '', ...(icon && { icon }), params, ...start };
-    const out = await cliPostJson('/api/addons', body, 'Add-on add', token ? { 'x-terminal-token': token } : undefined);
+    const icon = getArgValue(args, 'icon') || spec.icon;
+    const title = getArgValue(args, 'title') || spec.title || '';
+    const fields = { ...(key && { key }), url, title, ...(icon && { icon }), params, ...(run && { run, ...(cwd && { cwd }) }) };
+    const out = offline
+      ? offlineAddons().add(resolved.id, fields)
+      : await cliPostJson('/api/addons', { scope: resolved.id, ...fields }, 'Add-on add', token ? { 'x-terminal-token': token } : undefined);
     if (!out) return 1;
     if (args.includes('--json')) console.log(JSON.stringify(out.addon, null, 2));
     else console.log(`${out.addon.id}  ${out.addon.title} (${isGlobal ? 'every session' : 'this session'})${out.added ? '' : ' (already there)'}`);
@@ -951,14 +997,32 @@ async function runAddonSetCli(args, entry) {
 }
 
 async function runAddonRmCli(args, entry) {
-  const [id] = positionals(args, ['--session']);
-  if (!id) {
+  const [idArg] = positionals(args, ['--session', '--key']);
+  const key = getArgValue(args, 'key');
+  if (!idArg && !key) {
     printLeafHelp(entry);
     return 1;
   }
-  const resolved = await optionalSession(entry, args);
+  if (idArg && key) return usageError(entry, 'Pass an id or --key, not both');
+  const offline = args.includes('--offline');
+  const resolved = offline ? {} : await optionalSession(entry, args);
   if (!resolved) return 1;
   try {
+    const store = offline ? offlineAddons() : null;
+    const global = key && (store ? store.list(null) : await cliGetJson('/api/addons', 'Add-on list')).global;
+    const id = idArg ?? global.find((a) => a.key === key)?.id;
+    if (!id) {
+      console.log(`No add-on has the key ${key}`);
+      return 0;
+    }
+    if (store) {
+      if (!store.remove(null, id)) {
+        console.error(`No global add-on ${id}`);
+        return 1;
+      }
+      console.log(`Removed add-on ${id} from every session`);
+      return 0;
+    }
     const out = await cliSendJson(
       'DELETE',
       `/api/addons/${encodeURIComponent(id)}${sessionQuery(resolved)}`,

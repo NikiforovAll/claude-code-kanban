@@ -68,6 +68,31 @@ describe('add-on runner', () => {
     }
   });
 
+  it('keeps a server whose entry is the same, and stops it once the entry changes or goes', async () => {
+    const runner = createAddonRunner({ logDir: tmpDir() });
+    const entry = {
+      id: 'a5',
+      url: 'http://127.0.0.1:4122/',
+      run: `node -e "require('net').createServer().listen(+process.env.PORT, '127.0.0.1')"`,
+    };
+    const gone = async () => {
+      for (let i = 0; i < 30 && (await runner.status(entry)) !== 'stopped'; i++) await new Promise((r) => setTimeout(r, 100));
+      return runner.status(entry);
+    };
+    try {
+      assert.deepEqual(await runner.ensure(entry), { state: 'up' });
+      runner.retain([{ ...entry, title: 'Renamed' }]);
+      assert.equal(await runner.status(entry), 'running');
+      runner.retain([{ ...entry, cwd: os.tmpdir() }]);
+      assert.equal(await gone(), 'stopped');
+      assert.deepEqual(await runner.ensure(entry), { state: 'up' });
+      runner.retain([]);
+      assert.equal(await gone(), 'stopped');
+    } finally {
+      runner.shutdown();
+    }
+  });
+
   it('fails with the exit code and the log when the command exits, and stops after 3 starts a minute', async () => {
     const logDir = tmpDir();
     const runner = createAddonRunner({ logDir, probe: async () => false });

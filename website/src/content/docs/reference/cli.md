@@ -194,12 +194,16 @@ Puts web pages on the dock rail beside the embedded terminal. An add-on is for t
 ### addon add
 
 ```bash
-claude-code-kanban addon add <url> [--title <text>] [--icon <glyph>] [--param <k=v> ...] [--global [--run <cmd> [--cwd <dir>]]] [--session <id>] [--json]
+claude-code-kanban addon add <url> | --manifest <dir> [--title <text>] [--icon <glyph>] [--param <k=v> ...] [--global [--run <cmd> [--cwd <dir>]] [--offline]] [--session <id>] [--json]
 ```
 
 Adds a URL to the rail and prints its id and title. The board fills these placeholders for each session, URL-encoded: `{sessionId}`, `{cwd}`, `{project}`, and `{<name>}` from `--param <name>=<value>`. A placeholder with no value is refused, as is a URL on the board's or the hub's own origin. Quote the URL so the shell keeps the braces. `--icon` sets one or two characters on the rail button; the default is the first letter of the title. The same URL added again in the same scope prints the entry it already has. A session add-on goes when the session expires; a global one stays until `addon rm`.
 
 `--run <cmd>` (with `--global` and a localhost URL) is the command that starts the page's server. When you open the add-on and its port does not answer, the board runs the command in `--cwd <dir>`, with `PORT` set to the URL's port, and loads the page once the port answers. The server stops with the board, and `addon rm` stops it. Its output goes to `.cck/addons/<id>.log` in the config dir. `--run` needs the board's terminal, like `dispatch start`. To change the command, add the same URL again with a new `--run`.
+
+`--manifest <dir>` adds the add-on in `<dir>` from its `addon.json`: `url`, `title`, `icon` and `run`, as a global entry whose command runs in `<dir>`. The manifest's `id` is the entry's `key`, so the same manifest added again updates that entry and keeps its id, also after the URL changes. An entry with the same URL and no key takes the key.
+
+`--offline` (with `--global`) writes `.cck/addons.json` of the config dir directly, so it needs no board and no terminal token. A running board picks the change up, and stops a server it runs for the entry when its `run`, `cwd` or URL changed, so the next open starts the new one.
 
 ### addon list
 
@@ -220,10 +224,10 @@ Sets a param of an add-on for this session only. `k=` with no value goes back to
 ### addon rm
 
 ```bash
-claude-code-kanban addon rm <id> [--session <id>]
+claude-code-kanban addon rm <id> | --key <key> [--offline] [--session <id>]
 ```
 
-Takes the add-on off the rail. A global add-on goes from every session.
+Takes the add-on off the rail. A global add-on goes from every session. `--key <key>` names the global add-on with that key; when none has it, the command prints so and succeeds. `--offline` removes a global add-on from `.cck/addons.json` directly, and a running board stops its server.
 
 ## session
 

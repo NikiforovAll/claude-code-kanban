@@ -437,4 +437,35 @@ describe('CLI argument parsing', () => {
       srv.close();
     }
   });
+
+  it('addon add --manifest --offline writes the global entry from addon.json with no board, and a repeat updates it', async () => {
+    const configDir = tempConfigDir();
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cck-addon-'));
+    const manifest = { manifest: 1, kind: 'addon', id: 'git-changes', title: 'Changes', icon: '±', url: 'http://localhost:4117/?cwd={cwd}', run: 'node server.js' };
+    fs.writeFileSync(path.join(dir, 'addon.json'), JSON.stringify(manifest));
+    const cliEnv = { CLAUDE_CONFIG_DIR: configDir, PORT: '1' };
+    const first = await runCli(['addon', 'add', '--manifest', dir, '--offline'], cliEnv);
+    assert.equal(first.code, 0, first.stderr);
+    assert.match(first.stdout, /^a1 {2}Changes \(every session\)/);
+    fs.writeFileSync(path.join(dir, 'addon.json'), JSON.stringify({ ...manifest, url: 'http://localhost:4118/?cwd={cwd}' }));
+    assert.equal((await runCli(['addon', 'add', '--manifest', dir, '--offline'], cliEnv)).code, 0);
+    const file = JSON.parse(fs.readFileSync(path.join(configDir, '.cck', 'addons.json'), 'utf8'));
+    assert.deepEqual(
+      file.global.map(({ addedAt, ...e }) => e),
+      [{ id: 'a1', key: 'git-changes', url: 'http://localhost:4118/?cwd={cwd}', title: 'Changes', icon: '±', run: 'node server.js', cwd: path.resolve(dir), params: {} }],
+    );
+    const url = await runCli(['addon', 'add', 'http://localhost:1/', '--manifest', dir], cliEnv);
+    assert.equal(url.code, 1);
+    fs.writeFileSync(path.join(dir, 'addon.json'), JSON.stringify({ id: 'x' }));
+    const bad = await runCli(['addon', 'add', '--manifest', dir, '--offline'], cliEnv);
+    assert.equal(bad.code, 1);
+    assert.match(bad.stderr, /not an add-on manifest/);
+    const rm = await runCli(['addon', 'rm', '--key', 'git-changes', '--offline'], cliEnv);
+    assert.equal(rm.code, 0, rm.stderr);
+    assert.match(rm.stdout, /Removed add-on a1 from every session/);
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(configDir, '.cck', 'addons.json'), 'utf8')).global, []);
+    const again = await runCli(['addon', 'rm', '--key', 'git-changes', '--offline'], cliEnv);
+    assert.equal(again.code, 0);
+    assert.match(again.stdout, /No add-on has the key git-changes/);
+  });
 });
