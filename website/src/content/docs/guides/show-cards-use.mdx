@@ -46,6 +46,34 @@ Press <kbd>Ctrl+Alt+&#96;</kbd> to move focus between the terminal and the card.
 
 A text field inside an HTML card keeps these keys. See [Keyboard shortcuts](/claude-code-kanban/reference/keyboard-shortcuts/#show-card).
 
+## Add-ons in the dock
+
+An add-on is a web page that sits in the dock next to the card, such as a list of the files the session changed. It comes from a server you run. Ask Claude with `/addon` to build one or to add a URL, or add it yourself:
+
+```bash
+claude-code-kanban addon add "http://localhost:4100/?cwd={cwd}" --title Changes
+```
+
+The board fills `{sessionId}`, `{cwd}` and `{project}` for each session, so one add-on shows each session its own view. A `{name}` of your own takes its value from `--param name=value`, and `addon set <id> name=value` changes it for one session. An add-on is for this session; add `--global` to put it on the rail of every session. A global add-on can also start its own server: with `--run "<command>" --cwd <folder>`, the board runs the command the first time you open the add-on and its port does not answer, and stops it when the board stops.
+
+To dock a web page that is already a pane, right-click its tab and click **Dock beside the terminal**. It stays a pane of the session.
+
+A rail appears at the right edge of the terminal, with one icon for the card and one for each add-on. Click an icon to put it in the dock. Click the icon on screen to hide the dock and give the terminal its width back. <kbd>Alt+↑</kbd> and <kbd>Alt+↓</kbd> move to the previous or next icon while the terminal or the card has focus. When Claude posts a card while an add-on is open, a dot shows on the card's icon.
+
+The add-on's header has these buttons:
+
+| Button | What it does |
+|---|---|
+| Open | Open the page in a new browser tab. |
+| Expand | Widen the add-on over the terminal, stopping above the prompt. Click it again to go back to the dock width. The board keeps this choice for every add-on. |
+| Reload | Load the page again. |
+| Remove | Take the add-on off the rail. A global add-on goes from every session, after a confirm. A docked pane goes back to being only a pane. |
+| Close | Hide the dock. <kbd>Alt+W</kbd> does the same while the header has focus. |
+
+When the session has no card, <kbd>Ctrl+Alt+&#96;</kbd> moves focus between the terminal and the add-on's header, and opens the first add-on when none is open. With the header focused, <kbd>Alt+↑</kbd> and <kbd>Alt+↓</kbd> move along the rail, <kbd>Alt+Enter</kbd> expands the add-on or takes it back to the dock width, and <kbd>Esc</kbd> takes it back, or focuses the terminal when it is not expanded.
+
+A page hidden for a minute is unloaded and loads again when you open it. The page gets the board's theme colors. The board sends it nothing else: what it needs, such as the folder, goes in its URL.
+
 ## Open a card as a pane
 
 The Pane button adds the card's file as a [pane](/claude-code-kanban/guides/panes/) of the posting session. The pane uses the same theme colors as the card. When Claude changes the file, the pane reloads. When you remove the post, its pane goes too.

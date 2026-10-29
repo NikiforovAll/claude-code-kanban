@@ -67,6 +67,8 @@ const { readSettings } = require('./lib/claude-settings');
 const { readGitBranch, sessionGitBranch } = require('./lib/git-branch');
 const { createLinkedDocStore, linkUrl } = require('./lib/linked-docs');
 const { createPaneStore, isOwnOrigin } = require('./lib/panes');
+const { createAddonStore } = require('./lib/addons');
+const { createAddonRunner } = require('./lib/addon-runner');
 const { probeFraming, parseOrigin } = require('./lib/frame-policy');
 const { pickFolder } = require('./lib/folder-dialog');
 const { loadSessionCache, saveSessionCache } = require('./lib/session-cache');
@@ -123,6 +125,7 @@ const DISPATCHED_FILE = path.join(CCK_DIR, 'dispatched.json');
 const WORKTREES_FILE = path.join(CCK_DIR, 'worktrees.json');
 const LINKED_DOCS_FILE = path.join(CCK_DIR, 'linked-docs.json');
 const PANES_FILE = path.join(CCK_DIR, 'panes.json');
+const ADDONS_FILE = path.join(CCK_DIR, 'addons.json');
 const SERVER_INFO_FILE = path.join(CCK_DIR, 'server.json');
 const TERMINAL_TOKENS_DIR = path.join(CCK_DIR, 'terminal-tokens');
 const SESSION_CACHE_FILE = path.join(CCK_DIR, 'session-cache.json');
@@ -4400,9 +4403,11 @@ app.get('/api/panes/:sessionId/:paneId/framing', async (req, res) => {
 app.patch('/api/panes/:sessionId/:paneId', (req, res) => {
   try {
     const { sessionId, paneId } = req.params;
-    const title = req.body?.title;
-    if (typeof title !== 'string') throw previewError(400, 'title must be a string', 'bad_title');
-    const layout = panes.rename(sessionId, paneId, title);
+    const { title, dock } = req.body || {};
+    if (typeof dock !== 'boolean' && typeof title !== 'string') {
+      throw previewError(400, 'title must be a string, or dock a boolean', 'bad_title');
+    }
+    const layout = typeof dock === 'boolean' ? panes.setDock(sessionId, paneId, dock) : panes.rename(sessionId, paneId, title);
     if (!layout) throw previewError(404, `No pane ${paneId} in session ${sessionId}`, 'no_pane');
     res.json({ layout });
   } catch (error) {
@@ -4415,6 +4420,70 @@ app.delete('/api/panes/:sessionId/:paneId', (req, res) => {
   const layout = panes.remove(sessionId, paneId);
   if (!layout) return res.status(404).json({ error: `No pane ${paneId} in session ${sessionId}`, code: 'no_pane' });
   res.json({ layout });
+});
+// #endregion
+
+// #region ADDONS
+// Web pages on the dock rail (lib/addons.js). The board fills each URL for its terminal's
+// session, so the routes carry the templates; every change sends one `addon:changed` and the
+// boards refetch.
+const addons = createAddonStore({
+  ...stampedJsonFile(ADDONS_FILE, writeJsonAtomic),
+  onChange: () => broadcast({ type: 'addon:changed' }),
+  isOwnOrigin: (url) => isOwnOrigin(url, { boardPort, boardHosts, hubUrl: process.env.HUB_URL }),
+});
+const addonRunner = createAddonRunner({ logDir: path.join(CCK_DIR, 'addons') });
+process.on('exit', addonRunner.shutdown);
+chokidar.watch(ADDONS_FILE, { ignoreInitial: true }).on('all', (event) => {
+  if (event === 'add' || event === 'change') addons.reload();
+});
+
+app.get('/api/addons', (req, res) => {
+  const sessionId = typeof req.query.session === 'string' ? req.query.session : null;
+  res.json(addons.list(sessionId));
+});
+
+app.post('/api/addons', (req, res) => {
+  try {
+    const { scope, url, title, icon, params, run, cwd } = req.body || {};
+    if (typeof scope !== 'string' || !scope) throw previewError(400, "scope must be 'global' or a session id", 'bad_scope');
+    // A run command is a command line the board will start, so it needs what dispatch needs.
+    if (run && !terminal.authorized(req.get('x-terminal-token'))) return res.status(401).json({ error: 'invalid terminal token' });
+    const result = addons.add(scope, { url, title, icon, params, run, cwd });
+    res.status(result.added ? 201 : 200).json(result);
+  } catch (error) {
+    paneRouteError(res, error, 'POST /api/addons');
+  }
+});
+
+app.patch('/api/addons/:id', (req, res) => {
+  try {
+    const { session, params } = req.body || {};
+    if (typeof session !== 'string' || !session) throw previewError(400, 'session is required', 'bad_scope');
+    const list = addons.setParams(session, req.params.id, params);
+    if (!list) throw previewError(404, `No add-on ${req.params.id} in session ${session}`, 'no_addon');
+    res.json(list);
+  } catch (error) {
+    paneRouteError(res, error, 'PATCH /api/addons/:id');
+  }
+});
+
+app.delete('/api/addons/:id', (req, res) => {
+  const session = typeof req.query.session === 'string' ? req.query.session : null;
+  const removed = addons.remove(session, req.params.id);
+  if (!removed) return res.status(404).json({ error: `No add-on ${req.params.id} here`, code: 'no_addon' });
+  if (removed.addon.run) addonRunner.stop(removed.addon.id);
+  res.json(removed);
+});
+
+app.post('/api/addons/:id/start', async (req, res) => {
+  const entry = addons.list(null).global.find((e) => e.id === req.params.id);
+  if (!entry) return res.status(404).json({ error: `No global add-on ${req.params.id}`, code: 'no_addon' });
+  try {
+    res.json(await addonRunner.ensure(entry));
+  } catch (error) {
+    res.status(500).json({ state: 'failed', error: error.message });
+  }
 });
 // #endregion
 
@@ -4852,7 +4921,7 @@ async function cleanupAgentActivity() {
   } catch { /* agent-activity dir may not exist */ }
 }
 
-// Dispatch markers, pane layouts, reviews, attachments, context status and worktrees: see docs/retention.md.
+// Dispatch markers, pane layouts, add-on sessions, reviews, attachments, context status and worktrees: see docs/retention.md.
 async function runRetention() {
   try {
     const scan = await scanTranscripts(PROJECTS_DIR);
@@ -4860,14 +4929,15 @@ async function runRetention() {
     const markers = dispatched.prune(opts);
     const layouts = panes.prune(opts);
     if (layouts) queuePaneFileWatch();
+    const addonSessions = addons.prune(opts);
     const reviews = await pruneSessionDirs(REVIEW_DIR, opts);
     const attachments = await pruneSessionDirs(ATTACHMENTS_DIR, opts);
     const contexts = await pruneContextStatus(CONTEXT_STATUS_DIR, opts);
     const wts = worktrees.prune(scan?.dirs);
     const taskMaps = await pruneTaskMaps(TASK_MAPS_DIR, opts);
     const grouped = expireGroupMembers(scan?.ids);
-    if (markers || layouts || reviews || attachments || contexts || wts || taskMaps || grouped.members) {
-      console.log(`[retention] removed ${markers} dispatch markers, ${layouts} pane layouts, ${reviews} reviews, ${attachments} attachments, ${contexts} context status files, ${wts} worktrees, ${taskMaps} task-list mappings, ${grouped.members} group members, ${grouped.groups} groups`);
+    if (markers || layouts || addonSessions || reviews || attachments || contexts || wts || taskMaps || grouped.members) {
+      console.log(`[retention] removed ${markers} dispatch markers, ${layouts} pane layouts, ${addonSessions} add-on sessions, ${reviews} reviews, ${attachments} attachments, ${contexts} context status files, ${wts} worktrees, ${taskMaps} task-list mappings, ${grouped.members} group members, ${grouped.groups} groups`);
     }
   } catch (e) {
     console.warn('[retention] failed:', e.message);

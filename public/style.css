@@ -4003,6 +4003,162 @@ code.ct .ct-has[aria-expanded='false'] .ct-name::after {
   position: relative;
 }
 
+.terminal-pane {
+  --dock-rail-w: 0px;
+  --dock-panel-w: 0px;
+}
+
+.terminal-pane.dock-rail-on {
+  --dock-rail-w: 30px;
+}
+
+.terminal-pane.show-docked {
+  --dock-panel-w: var(--show-dock-w);
+}
+
+.terminal-pane.dock-rail-on,
+.terminal-pane.show-docked {
+  padding-top: 0;
+  padding-right: 0;
+  padding-bottom: 0;
+}
+
+.terminal-pane.dock-rail-on .terminal-frame,
+.terminal-pane.show-docked .terminal-frame {
+  width: calc(100% - var(--dock-panel-w) - var(--dock-rail-w));
+}
+
+.terminal-pane.dock-rail-on .terminal-bar,
+.terminal-pane.show-docked .terminal-bar {
+  top: 8px;
+  right: calc(8px + var(--dock-panel-w) + var(--dock-rail-w));
+}
+
+.dock-rail {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  box-sizing: border-box;
+  width: var(--dock-rail-w);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding-top: 6px;
+  border-left: 1px solid var(--border);
+  background: var(--bg-surface);
+}
+
+.dock-rail[hidden],
+.dock-addon[hidden] {
+  display: none;
+}
+
+.dock-rail-btn {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-tertiary);
+  font: 600 11px var(--font-mono);
+  cursor: pointer;
+}
+
+.dock-rail-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.dock-rail-btn.on {
+  color: var(--accent);
+  background: var(--bg-deep);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.dock-rail-btn svg {
+  width: 13px;
+  height: 13px;
+}
+
+.dock-rail-btn.dot::after {
+  content: '';
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.dock-addon {
+  position: absolute;
+  z-index: 2;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+
+.dock-addon:focus-within {
+  border-color: var(--accent);
+  box-shadow:
+    0 0 0 1px var(--accent),
+    0 0 10px var(--accent-glow);
+}
+
+.dock-addon-head:focus {
+  outline: none;
+}
+
+/* Stops above the prompt rows, as the expanded show card does. */
+.dock-addon.expanded {
+  left: 0;
+  bottom: calc(7.2 * var(--show-term-font, 13px));
+  width: auto;
+  border-bottom: 1px solid var(--border);
+}
+
+.dock-addon.expanded .show-dock-edge {
+  display: none;
+}
+
+.dock-addon-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.dock-addon-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: var(--bg-surface);
+}
+
+.dock-addon-view {
+  height: 100%;
+}
+
+.dock-addon-frame[hidden] {
+  display: none;
+}
+
+.show-card.open.under-addon {
+  display: none;
+}
+
 .show-card {
   --show-inset: 8px;
   /* Six terminal rows (prompt, its rules, status line) at xterm's cell height of about 1.2 × font size. */
@@ -4010,7 +4166,7 @@ code.ct .ct-has[aria-expanded='false'] .ct-name::after {
   position: absolute;
   z-index: 2;
   top: var(--show-inset);
-  right: var(--show-inset);
+  right: calc(var(--show-inset) + var(--dock-rail-w));
   display: none;
   flex-direction: column;
   box-sizing: border-box;
@@ -4059,12 +4215,16 @@ body.light .show-card {
   max-height: none;
 }
 
+.dock-addon,
 .show-card.docked {
   top: 0;
-  right: 0;
+  right: var(--dock-rail-w);
   bottom: 0;
-  left: auto;
   width: var(--show-dock-drag, var(--show-dock-w));
+}
+
+.show-card.docked {
+  left: auto;
   height: auto;
   min-width: 0;
   max-width: none;
@@ -4072,14 +4232,6 @@ body.light .show-card {
   border-width: 0 0 0 1px;
   border-radius: 0;
   box-shadow: none;
-}
-
-.terminal-pane.show-docked .terminal-frame {
-  width: calc(100% - var(--show-dock-w));
-}
-
-.terminal-pane.show-docked .terminal-bar {
-  right: calc(20px + var(--show-dock-w));
 }
 
 .show-card.collapsed {

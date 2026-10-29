@@ -50,6 +50,20 @@ describe('pane store', () => {
     assert.equal(open().get('s1').panes[0].show, true);
   });
 
+  it('docks and undocks a URL pane, and refuses a file pane', () => {
+    const panes = memoryStore().open();
+    const a = panes.add('s1', url(1));
+    panes.add('s1', { kind: 'html', target: 'C:\\pad\\a.html' });
+    const docked = panes.setDock('s1', 'p1', true);
+    assert.equal(docked.panes[0].dock, true);
+    assert.equal(panes.setDock('s1', 'p1', true).rev, docked.rev);
+    const undocked = panes.setDock('s1', 'p1', false);
+    assert.equal('dock' in undocked.panes[0], false);
+    assert.equal(undocked.rev, a.layout.rev + 3);
+    assert.throws(() => panes.setDock('s1', 'p2', true), { code: 'bad_dock' });
+    assert.equal(panes.setDock('s1', 'p9', true), null);
+  });
+
   it('drops the show panes of removed posts and keeps a plain pane of the same file', () => {
     const panes = memoryStore().open();
     panes.add('s1', { kind: 'html', target: 'C:\\pad\\a.html', show: true });

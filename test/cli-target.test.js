@@ -394,4 +394,47 @@ describe('CLI argument parsing', () => {
       srv.close();
     }
   });
+
+  it('addon verbs call the add-on routes, with the session or the global scope', async () => {
+    const seen = [];
+    const global = { id: 'a1', url: 'http://localhost:4200/{sessionId}', title: 'Notes', params: {} };
+    const own = { id: 'a2', url: 'http://localhost:4100/?cwd={cwd}&r={repo}', title: 'Changes', params: { repo: 'cck' } };
+    const srv = http.createServer((req, res) => {
+      let raw = '';
+      req.on('data', (c) => { raw += c; });
+      req.on('end', () => {
+        seen.push(`${req.method} ${req.url} ${raw}`.trim());
+        res.setHeader('Content-Type', 'application/json');
+        if (req.url.startsWith('/api/session/resolve')) return res.end('{"id":"abcdef12-full"}');
+        if (req.method === 'POST') return res.end(JSON.stringify({ addon: own, added: true }));
+        if (req.method === 'DELETE') return res.end(JSON.stringify({ addon: own, scope: 'abcdef12-full' }));
+        res.end(JSON.stringify({ global: [global], session: [own], params: { a2: { repo: 'kanban' } } }));
+      });
+    });
+    await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    try {
+      const cliEnv = { CLAUDE_CONFIG_DIR: tempConfigDir(), PORT: String(srv.address().port) };
+      const run = (args) => runCli(['addon', ...args, '--session', 'abcdef'], cliEnv);
+      const add = await run(['add', 'http://localhost:4100/?cwd={cwd}&r={repo}', '--title', 'Changes', '--param', 'repo=cck']);
+      assert.equal(add.code, 0, add.stderr);
+      assert.match(add.stdout, /^a2 {2}Changes \(this session\)/);
+      const glob = await run(['add', 'http://localhost:4200/{sessionId}', '--global']);
+      assert.equal(glob.code, 0, glob.stderr);
+      const list = await run(['list']);
+      assert.match(list.stdout, /a1 +global +Notes +http:\/\/localhost:4200\/\{sessionId\}/);
+      assert.match(list.stdout, /a2 +session +Changes .*repo=kanban/);
+      assert.equal((await run(['set', 'a2', 'repo=hub'])).code, 0);
+      assert.equal((await run(['rm', 'a2'])).code, 0);
+      assert.equal((await run(['set', 'a2', 'bad'])).code, 1);
+      assert.deepEqual(seen.filter((s) => !s.includes('/resolve')), [
+        'POST /api/addons {"scope":"abcdef12-full","url":"http://localhost:4100/?cwd={cwd}&r={repo}","title":"Changes","params":{"repo":"cck"}}',
+        'POST /api/addons {"scope":"global","url":"http://localhost:4200/{sessionId}","title":"","params":{}}',
+        'GET /api/addons?session=abcdef12-full',
+        'PATCH /api/addons/a2 {"session":"abcdef12-full","params":{"repo":"hub"}}',
+        'DELETE /api/addons/a2?session=abcdef12-full',
+      ]);
+    } finally {
+      srv.close();
+    }
+  });
 });

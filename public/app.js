@@ -7850,6 +7850,10 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
     return;
   }
+  if (isDockFocused() && !isAnyModalOpen() && dockHeadKey(e)) {
+    e.preventDefault();
+    return;
+  }
 
   // Above the text-field guard: xterm's input is a textarea, and the toggle must work from it.
   const terminalPrompt = document.getElementById('terminal-prompt');
@@ -10415,6 +10419,10 @@ function setupEventSource() {
 
       if (data.type === 'pane:changed') {
         applyPaneLayout(data.sessionId, data.layout);
+      }
+
+      if (data.type === 'addon:changed' && dockSid) {
+        fetchDockAddons(dockSid);
       }
 
       if (data.type === 'pane:file-changed') {
@@ -13488,6 +13496,10 @@ let paneLayoutSid = null;
 
 // Targets the server's probe found refusing framing, kept for the page's life; a reload asks again.
 const paneRefused = new Set();
+// Targets it found frameable, so a docked pane loaded again skips the probe.
+const paneFramed = new Set();
+// Run add-ons whose port answered once while this page lives.
+const dockAddonUp = new Set();
 
 // Every origin above a pane's frame. Firefox has no ancestorOrigins, so under the hub there it
 // names the board only; a refused frame then shows the browser's own error.
@@ -13535,6 +13547,7 @@ function applyPaneLayout(sid, layout) {
     if (targets.get(p.id) !== p.target) unmountPane(sid, p.id);
   }
   if (!targets.has(getActivePaneId(sid))) setActivePaneId(sid, 'board');
+  if (sid === dockSid) renderDockRail();
   if (sid !== paneSessionId()) return;
   syncPanes();
   autoRevealLog(sid);
@@ -14014,32 +14027,37 @@ function mountPane(sid, pane) {
   return key;
 }
 
-async function loadPaneView(sid, pane, view, scroll) {
+// The card in place of a URL pane that cannot be framed, or '' when it can.
+function paneBlockedHtml(pane) {
   if (paneOwnOrigin(pane)) {
-    view.insertAdjacentHTML(
-      'beforeend',
-      paneCardHtml('A pane cannot show the board or the hub', pane.target, 'Open in new tab'),
-    );
-    return;
+    return paneCardHtml('A pane cannot show the board or the hub', pane.target, 'Open in new tab');
   }
-  if (!paneFrameable(pane)) {
-    view.insertAdjacentHTML(
-      'beforeend',
-      paneCardHtml(
-        `${new URL(pane.target).host} does not allow framing`,
-        'The site sends X-Frame-Options or a frame-ancestors policy. The pane keeps the link with the session.',
-        'Open in new tab',
-      ),
-    );
+  if (paneFrameable(pane)) return '';
+  return paneCardHtml(
+    `${new URL(pane.target).host} does not allow framing`,
+    'The site sends X-Frame-Options or a frame-ancestors policy. The pane keeps the link with the session.',
+    'Open in new tab',
+  );
+}
+
+function paneUrlFrame(pane, className) {
+  const frame = document.createElement('iframe');
+  frame.className = className;
+  frame.setAttribute('sandbox', PANE_URL_SANDBOX);
+  frame.setAttribute('referrerpolicy', 'no-referrer');
+  frame.title = pane.title;
+  frame.src = pane.target;
+  return frame;
+}
+
+async function loadPaneView(sid, pane, view, scroll) {
+  const blocked = paneBlockedHtml(pane);
+  if (blocked) {
+    view.insertAdjacentHTML('beforeend', blocked);
     return;
   }
   if (pane.kind === 'url') {
-    const frame = document.createElement('iframe');
-    frame.className = 'pane-frame pane-url-frame modal-zoomable';
-    frame.setAttribute('sandbox', PANE_URL_SANDBOX);
-    frame.setAttribute('referrerpolicy', 'no-referrer');
-    frame.title = pane.title;
-    frame.src = pane.target;
+    const frame = paneUrlFrame(pane, 'pane-frame pane-url-frame modal-zoomable');
     frame.addEventListener('load', () => {
       view.classList.remove('keys-bridged');
       frame.hostKeysSig = null;
@@ -14474,6 +14492,7 @@ async function reloadPane(id) {
   } else {
     unmountPane(sid, pane.id);
     paneRefused.delete(pane.target);
+    paneFramed.delete(pane.target);
     syncPanes();
   }
   showToast('Pane reloaded', 'success');
@@ -14686,6 +14705,7 @@ function openPaneMenu(x, y, id) {
         : paneMenuItem('link', paneIsLinked(pane) ? 'Remove from linked documents' : 'Add to linked documents')) +
       paneMenuItem('rename', 'Rename') +
       paneMenuItem('reload', 'Reload') +
+      (url ? paneMenuItem('dock', pane.dock ? 'Remove from the dock' : 'Dock beside the terminal') : '') +
       paneGroupMenuItems(pane.id) +
       paneMenuItem('close', 'Close pane'),
   );
@@ -14695,6 +14715,20 @@ function openPaneMenu(x, y, id) {
 function paneIsLinked(pane) {
   const key = canonicalPath(pane.target);
   return getSessionPreviewPaths(paneSessionId()).some((p) => canonicalPath(p) === key);
+}
+
+function togglePaneDock(id) {
+  const pane = paneById(id);
+  const sid = paneSessionId();
+  if (pane && sid) setPaneDock(sid, id, !pane.dock);
+}
+
+async function setPaneDock(sid, id, on) {
+  const res = await paneRequest('PATCH', apiPath`/api/panes/${sid}/${id}`, { dock: on });
+  if (res.error) return showToast(res.error, 'error');
+  applyPaneLayout(sid, res.layout);
+  if (on) showToast('Docked: click its icon in the rail beside the terminal', 'success');
+  else showToast('Removed from the dock. It stays a pane of the session', 'success');
 }
 
 function togglePaneLink(id) {
@@ -14728,6 +14762,7 @@ const PANE_MENU_ACTIONS = {
   link: togglePaneLink,
   rename: beginPaneRename,
   reload: reloadPane,
+  dock: togglePaneDock,
   close: closePane,
   group: (id, to) => groupPaneTab(id, to || null),
   groupRename: beginPaneGroupRename,
@@ -15374,6 +15409,11 @@ function terminalShortcut(e, probe = false) {
   if (ctrlAlt && (e.code === 'KeyN' || e.code === 'KeyR') && terminalAvailable()) {
     return () => openNewSession(null, e.code === 'KeyR');
   }
+  if ((e.code === 'ArrowUp' || e.code === 'ArrowDown') && e.altKey && !e.ctrlKey && !e.shiftKey && !e.metaKey) {
+    if (!(probe || terminalPaneFocused() || isShowCardFocused() || isDockFocused()) || dockRailItems().length < 2)
+      return null;
+    return () => stepDockRail(e.code === 'ArrowDown' ? 1 : -1);
+  }
   if (e.code !== 'Backquote' || e.metaKey) return null;
   if (ctrlAlt) return toggleShowFocus;
   if (e.ctrlKey && !e.altKey) return e.shiftKey ? openTerminalManager : toggleTerminal;
@@ -15417,14 +15457,19 @@ function toggleTerminalFocus() {
 }
 
 function toggleShowFocus() {
-  if (isShowCardFocused()) {
+  if (isShowCardFocused() || isDockFocused()) {
     focusTerminalPane();
     return;
   }
-  if (!wantsTerminal() || !showState.posts.length) return;
-  if (showState.closed || showState.collapsed) {
-    showState.closed = false;
-    showState.collapsed = false;
+  if (!wantsTerminal()) return;
+  if (!showState.posts.length) {
+    focusDockAddon();
+    return;
+  }
+  const addon = dockActivePane();
+  if (addon) setDockAddon(null);
+  if (addon || showState.closed || showState.collapsed) {
+    Object.assign(showState, { closed: false, collapsed: false, ...(addon && { docked: true }) });
     renderShow();
   }
   focusShowBody();
@@ -15434,6 +15479,8 @@ function toggleShowFocus() {
 function syncTerminal() {
   const btn = document.getElementById('terminal-toggle');
   const on = wantsTerminal();
+  // A focused frame keeps the keys after its pane hides, and then the board never sees them.
+  if (!on && document.getElementById('terminal-pane').contains(document.activeElement)) document.activeElement.blur();
   const arrived = viewMode === 'session' ? currentSessionId : null;
   const view = `${arrived}:${on}`;
   // Only on a change of session or terminal state, so a panel opened by hand over the terminal stays.
@@ -16744,6 +16791,8 @@ const SHOW_MIN_H = 120;
 const SHOW_INSET = 8;
 const SHOW_DOCK_KEY = 'cck-show-dock-w';
 const SHOW_DOCK_TERM_MIN = 320;
+const DOCK_ADDON_KEY = 'cck-dock-addon-v1';
+const DOCK_EXPANDED_KEY = 'cck-dock-expanded-v1';
 const SHOW_SANDBOX = 'allow-scripts allow-forms';
 const SHOW_CSP =
   "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; frame-src 'none'; connect-src 'none'; form-action 'none'";
@@ -16797,6 +16846,9 @@ const SHOW_ICONS = {
   clear: '<path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>',
   close: '<path d="M18 6L6 18M6 6l12 12"/>',
   pane: '<use href="#icon-pane"/>',
+  card: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M13 4v7h8"/>',
+  external: '<path d="M15 3h6v6M10 14L21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
+  reload: '<path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/>',
 };
 
 // PTY id → terminal id, from the terminal list. A terminal started after the last list read is
@@ -16831,6 +16883,21 @@ const showViews = store.readJson(SHOW_VIEW_KEY, {});
 for (const [tid, v] of Object.entries(showViews)) if (typeof v === 'string') showViews[tid] = { [v]: true };
 const SHOW_VIEW_FLAGS = ['closed', 'collapsed', 'expanded', 'docked'];
 let showHostObserver = null;
+// Terminal id → the id of the add-on pane in the dock. Ids gone from the terminal list are pruned.
+const dockAddons = store.readJson(DOCK_ADDON_KEY, {});
+let dockExpanded = store.getItem(DOCK_EXPANDED_KEY) === '1';
+// Dock item id → its view, kept while its filled URL stays the same. A view hidden for
+// DOCK_UNLOAD_MS goes, so a page that polls stops until it is opened again.
+const dockFrames = new Map();
+const dockHideTimers = new Map();
+const DOCK_UNLOAD_MS = 60_000;
+let dockSid = null;
+// The add-ons from /api/addons for `sid`, refetched on `addon:changed`.
+let dockAddonList = null;
+let dockRailHtml = '';
+let dockRailClaimed = false;
+let dockShowDot = false;
+let dockObserver = null;
 
 function showCardEl() {
   return document.getElementById('show-card');
@@ -16907,10 +16974,15 @@ function rememberTerminalIds(list) {
   for (const t of list) if (t.terminalId) terminalIds.set(t.id, t.terminalId);
   if (!terminalIds.size) return;
   const live = new Set(terminalIds.values());
-  const gone = Object.keys(showViews).filter((tid) => !live.has(tid));
+  pruneTerminalMap(showViews, SHOW_VIEW_KEY, live);
+  pruneTerminalMap(dockAddons, DOCK_ADDON_KEY, live);
+}
+
+function pruneTerminalMap(map, key, live) {
+  const gone = Object.keys(map).filter((tid) => !live.has(tid));
   if (!gone.length) return;
-  for (const tid of gone) delete showViews[tid];
-  store.writeJson(SHOW_VIEW_KEY, showViews);
+  for (const tid of gone) delete map[tid];
+  store.writeJson(key, map);
 }
 
 // A session resumed after its terminal ended runs under the same PTY id in a new terminal, with a
@@ -17018,12 +17090,16 @@ function onShowRemoved(d) {
   if (dropShowPost(d.id)) renderShow();
 }
 
+// `attr` names the data attribute that the header's click handler reads: show or dock.
+function showBtnHtml(attr, cmd, icon, title, disabled = false, pressed = null) {
+  return `<button type="button" class="show-btn${cmd === 'remove' ? ' remove' : ''}${pressed ? ' active' : ''}" data-${attr}="${escapeHtml(cmd)}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}"${pressed === null ? '' : pressed ? ' aria-pressed="true"' : ' aria-pressed="false"'}${disabled ? ' disabled' : ''}>${showIcon(icon)}</button>`;
+}
+
 function showHeaderHtml(p) {
   const n = showState.posts.length;
   const i = showState.idx;
   const key = p.key ? `<span class="show-sep">·</span><span class="show-key">${escapeHtml(p.key)}</span>` : '';
-  const btn = (cmd, icon, title, disabled = false, pressed = null) =>
-    `<button type="button" class="show-btn${cmd === 'remove' ? ' remove' : ''}${pressed ? ' active' : ''}" data-show="${escapeHtml(cmd)}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}"${pressed === null ? '' : pressed ? ' aria-pressed="true"' : ' aria-pressed="false"'}${disabled ? ' disabled' : ''}>${showIcon(icon)}</button>`;
+  const btn = (...args) => showBtnHtml('show', ...args);
   const { collapsed, expanded, docked } = showState;
   const dockTitle = docked ? 'Back to the overlay · Alt+Shift+Enter' : 'Dock beside the terminal · Alt+Shift+Enter';
   const dock = btn('dock', 'dock', dockTitle, false, docked);
@@ -17061,7 +17137,8 @@ function renderShow({ flash = false } = {}) {
   card.classList.toggle('open', open);
   const docked = open && showState.docked && !showState.collapsed;
   card.classList.toggle('docked', docked);
-  document.getElementById('terminal-pane').classList.toggle('show-docked', docked);
+  if (flash && dockActivePane()) dockShowDot = true;
+  renderDockRail();
   if (!open) {
     showState.rendered = null;
     showState.frame = null;
@@ -17322,7 +17399,7 @@ new MutationObserver(() => {
   });
 }).observe(document.body, { attributes: true, attributeFilter: ['class', 'data-color-theme', 'style'] });
 
-const PANE_SHOW_FRAMES = '.show-pane-frame, .themed-frame, .ask-frame';
+const PANE_SHOW_FRAMES = '.show-pane-frame, .themed-frame, .ask-frame, .dock-addon-frame';
 
 // Builds the message only when a frame is there, because showTokens forces a style recalc.
 function postToShowFrames(makeMsg, frames = [showState.frame, ...document.querySelectorAll(PANE_SHOW_FRAMES)]) {
@@ -17344,17 +17421,15 @@ function showClampSize(size, w, h) {
 
 function layoutShow() {
   const card = showCardEl();
-  if (!card.classList.contains('open')) return;
-  const host = document.getElementById('terminal-host');
-  const w = host.clientWidth;
-  const h = host.clientHeight;
-  if (!w || !h) return;
+  if (!card.classList.contains('open') || card.classList.contains('under-addon')) return;
+  const w = dockHostWidth();
+  const h = document.getElementById('terminal-host').clientHeight;
+  if (w <= 0 || !h) return;
   const fit = showFitSize(w, h);
   card.style.setProperty('--show-fit-w', `${fit.w}px`);
   card.style.setProperty('--show-fit-h', `${fit.h}px`);
   card.style.setProperty('--show-term-font', `${currentTerminalFontSize()}px`);
   const docked = card.classList.contains('docked');
-  if (docked) setShowDockWidth(showDockWidth(showDockW, w));
   const sized = !!showSize && !showState.expanded && !showState.collapsed && !docked;
   card.classList.toggle('sized', sized);
   if (sized) {
@@ -17385,6 +17460,448 @@ function setShowDockWidth(px) {
   const pane = document.getElementById('terminal-pane');
   const value = `${px}px`;
   if (pane.style.getPropertyValue('--show-dock-w') !== value) pane.style.setProperty('--show-dock-w', value);
+}
+
+// The host's width less the rail, which is 0 wide while hidden.
+function dockHostWidth() {
+  return document.getElementById('terminal-host').clientWidth - document.getElementById('dock-rail').offsetWidth;
+}
+
+function fitDockWidth() {
+  if (!document.getElementById('terminal-pane').classList.contains('show-docked')) return;
+  const w = dockHostWidth();
+  if (w > 0) setShowDockWidth(showDockWidth(showDockW, w));
+}
+
+// A terminal with no posts has no session from the show list yet, so its PTY id stands in,
+// which is the session it started.
+function dockSessionId() {
+  return showState.terminalId ? (showState.sessionId ?? currentSessionId) : null;
+}
+
+function dockPanes(sid) {
+  return sid ? paneLayout(sid).panes.filter((p) => p.dock) : [];
+}
+
+function fillAddonUrl(url, values) {
+  return url.replace(/\{([^{}]*)\}/g, (m, k) => (values[k] == null ? m : encodeURIComponent(values[k])));
+}
+
+function addonValues(sid) {
+  const s = sessions.find((x) => x.id === sid);
+  const cwd = s?.cwd || s?.project || newSpecs.get(sid)?.cwd || '';
+  return { sessionId: sid, cwd, project: s?.project || cwd };
+}
+
+// The rail's items after the card: global add-ons, the session's, then its docked URL panes.
+// The same filled URL shows once. Until the list for a new session arrives, the global
+// entries of the last one stand, so their frames are kept when the URL stays the same.
+function dockItems(sid = dockSid) {
+  if (!sid) return [];
+  const list = dockAddonList;
+  const own = list?.sid === sid ? list : null;
+  const items = [];
+  const seen = new Set();
+  const push = (item) => {
+    if (seen.has(item.target)) return;
+    seen.add(item.target);
+    items.push(item);
+  };
+  if (list && (list.global.length || own?.session.length)) {
+    const values = addonValues(sid);
+    const entries = [...list.global.map((a) => [a, true]), ...(own ? own.session.map((a) => [a, false]) : [])];
+    for (const [a, global] of entries) {
+      const target = fillAddonUrl(a.url, { ...a.params, ...own?.params[a.id], ...values });
+      push({ id: a.id, kind: 'url', title: a.title, icon: a.icon, target, addon: true, global, run: !!a.run });
+    }
+  }
+  for (const p of dockPanes(sid)) push(p);
+  return items;
+}
+
+async function fetchDockAddons(sid) {
+  const list = await getJson(`${apiPath`/api/addons`}?session=${encodeURIComponent(sid)}`);
+  if (!list || sid !== dockSid) return;
+  dockAddonList = { sid, ...list };
+  renderDockRail();
+}
+
+function dockActivePane(items = dockItems()) {
+  const id = showState.terminalId && dockAddons[showState.terminalId];
+  return (id && items.find((p) => p.id === id)) || null;
+}
+
+function dropDockView(id) {
+  dockFrames.get(id)?.remove();
+  dockFrames.delete(id);
+  clearTimeout(dockHideTimers.get(id));
+  dockHideTimers.delete(id);
+}
+
+function dockShowOn(active) {
+  return !active && showState.posts.length > 0 && !showState.closed;
+}
+
+function setDockAddon(id) {
+  const tid = showState.terminalId;
+  if (!tid || (dockAddons[tid] ?? null) === id) return;
+  if (id) dockAddons[tid] = id;
+  else delete dockAddons[tid];
+  store.writeJson(DOCK_ADDON_KEY, dockAddons);
+}
+
+function dockRailButton(id, label, title, on, dot) {
+  return `<button type="button" class="dock-rail-btn${on ? ' on' : ''}${dot ? ' dot' : ''}" data-rail="${escapeHtml(id)}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}" aria-pressed="${on ? 'true' : 'false'}">${label}</button>`;
+}
+
+// Runs from every renderShow, so it does no work past a class toggle until a session has add-ons.
+function renderDockRail() {
+  const sid = dockSessionId();
+  if (sid !== dockSid) {
+    dockSid = sid;
+    if (sid && !paneLayouts.has(sid)) fetchPaneLayout(sid);
+    if (sid) fetchDockAddons(sid);
+  }
+  const addons = dockItems(sid);
+  for (const [id, view] of dockFrames) {
+    if (!addons.some((p) => p.id === id && p.target === view.dataset.target)) dropDockView(id);
+  }
+  const on = addons.length > 0;
+  const termPane = document.getElementById('terminal-pane');
+  const rail = document.getElementById('dock-rail');
+  const card = showCardEl();
+  const active = dockActivePane(addons);
+  termPane.classList.toggle('dock-rail-on', on);
+  rail.hidden = !on;
+  card.classList.toggle('under-addon', !!active);
+  const docked = !!active || card.classList.contains('docked');
+  termPane.classList.toggle('show-docked', docked);
+  if (on) document.getElementById('show-reopen').hidden = true;
+  if (!active) dockShowDot = false;
+  let html = '';
+  if (on) {
+    const n = showState.posts.length;
+    if (n) html += dockRailButton('show', showIcon('card'), `Show · ${n}`, dockShowOn(active), dockShowDot);
+    for (const p of addons) {
+      html += dockRailButton(
+        p.id,
+        escapeHtml(p.icon || [...p.title][0]?.toUpperCase() || '?'),
+        p.title,
+        p === active,
+        false,
+      );
+    }
+  }
+  if (html !== dockRailHtml) {
+    dockRailHtml = html;
+    rail.innerHTML = html;
+  }
+  const claimed = dockRailItems(addons).length > 1;
+  if (claimed !== dockRailClaimed) {
+    dockRailClaimed = claimed;
+    pushTerminalClaims();
+  }
+  renderDockAddon(active);
+  if (docked && !dockObserver) {
+    dockObserver = new ResizeObserver(fitDockWidth);
+    dockObserver.observe(document.getElementById('terminal-host'));
+  } else if (!docked) {
+    dockObserver?.disconnect();
+    dockObserver = null;
+  }
+  fitDockWidth();
+}
+
+function renderDockAddon(pane) {
+  const panel = document.getElementById('dock-addon');
+  panel.hidden = !pane;
+  if (pane) {
+    if (!panel.firstChild) {
+      panel.innerHTML = `<header class="show-head dock-addon-head" tabindex="-1"><span class="show-nav"><span class="show-title"></span></span>
+      <span class="show-actions">${showBtnHtml('dock', 'open', 'external', 'Open in a new tab')}
+      ${showBtnHtml('dock', 'expand', 'expand', 'Fill the terminal · Alt+Enter')}
+      ${showBtnHtml('dock', 'reload', 'reload', 'Reload')}
+      ${showBtnHtml('dock', 'remove', 'clear', 'Remove from the rail')}
+      ${showBtnHtml('dock', 'close', 'close', 'Hide the dock · Alt+W')}</span></header>
+      <div class="dock-addon-body"></div><div class="show-dock-edge" title="Resize · double-click to reset"></div>`;
+    }
+    const title = panel.querySelector('.show-title');
+    title.textContent = pane.title;
+    title.title = pane.global ? `${pane.title} · every session` : pane.title;
+    const open = panel.querySelector('[data-dock="open"]');
+    open.title = `Open ${pane.target} in a new tab`;
+    open.setAttribute('aria-label', open.title);
+    panel.classList.toggle('expanded', dockExpanded);
+    panel.style.setProperty('--show-term-font', `${currentTerminalFontSize()}px`);
+    const expand = panel.querySelector('[data-dock="expand"]');
+    const expandTitle = dockExpanded ? 'Back to the dock · Alt+Enter or Esc' : 'Fill the terminal · Alt+Enter';
+    if (expand.title !== expandTitle) {
+      expand.innerHTML = showIcon(dockExpanded ? 'restore' : 'expand');
+      expand.title = expandTitle;
+      expand.setAttribute('aria-label', expandTitle);
+    }
+    if (!dockFrames.has(pane.id)) {
+      const view = createDockView(pane);
+      panel.querySelector('.dock-addon-body').appendChild(view);
+      dockFrames.set(pane.id, view);
+    }
+  }
+  for (const [id, view] of dockFrames) {
+    view.hidden = id !== pane?.id;
+    if (!view.hidden) {
+      clearTimeout(dockHideTimers.get(id));
+      dockHideTimers.delete(id);
+    } else if (!dockHideTimers.has(id))
+      dockHideTimers.set(
+        id,
+        setTimeout(() => dropDockView(id), DOCK_UNLOAD_MS),
+      );
+  }
+}
+
+function createDockView(pane) {
+  const blocked = paneBlockedHtml(pane);
+  if (blocked) {
+    const view = document.createElement('div');
+    view.className = 'dock-addon-view';
+    view.innerHTML = blocked;
+    view.dataset.target = pane.target;
+    return view;
+  }
+  if (pane.run && !dockAddonUp.has(pane.id)) return startDockAddon(pane);
+  const frame = paneUrlFrame(pane, 'dock-addon-frame');
+  frame.dataset.target = pane.target;
+  frame.addEventListener('load', () => {
+    postToShowFrames(() => ({ type: `${SHOW_MSG}tokens`, tokens: showTokens() }), [frame]);
+    postToShowFrames(() => ({ type: `${SHOW_MSG}keys`, keys: dockFrameKeys() }), [frame]);
+  });
+  if (pane.addon || paneFramed.has(pane.target)) return frame;
+  const sid = dockSid;
+  probePaneFraming(sid, pane).then((frameable) => {
+    if (frameable) paneFramed.add(pane.target);
+    if (frameable !== false || dockFrames.get(pane.id) !== frame) return;
+    dropDockView(pane.id);
+    if (sid === dockSid) renderDockRail();
+  });
+  return frame;
+}
+
+// The board starts the page's server when its port does not answer (lib/addon-runner.js);
+// the frame comes once it does. Reload asks again.
+function startDockAddon(pane) {
+  const view = document.createElement('div');
+  view.className = 'dock-addon-view';
+  view.dataset.target = pane.target;
+  view.innerHTML = `<div class="pane-card"><div class="pane-card-box"><p>Starting ${escapeHtml(pane.title)}…</p></div></div>`;
+  paneRequest('POST', apiPath`/api/addons/${pane.id}/start`).then((r) => {
+    if (dockFrames.get(pane.id) !== view) return;
+    if (r.state === 'up' || r.state === 'none') {
+      dockAddonUp.add(pane.id);
+      dropDockView(pane.id);
+      renderDockRail();
+      return;
+    }
+    const log = r.log ? `<p>Log: <code>${escapeHtml(r.log)}</code></p>` : '';
+    view.innerHTML = `<div class="pane-card"><div class="pane-card-box">${PANE_ICONS.warning}<h3>${escapeHtml(pane.title)} did not start</h3><p>${escapeHtml(r.error || 'No answer')}</p>${log}<button class="btn btn-primary" data-dock="reload">Retry</button></div></div>`;
+  });
+  return view;
+}
+
+async function removeDockItem(item) {
+  if (!item.addon) return setPaneDock(dockSid, item.id, false);
+  if (item.global) {
+    const ok = await confirmModal({
+      title: 'Remove this add-on from every session?',
+      message: 'It was added with --global, so it is on the rail of each session.',
+      chip: item.title,
+      okLabel: 'Remove',
+    });
+    if (!ok) return;
+  }
+  const r = await paneRequest('DELETE', `${apiPath`/api/addons/${item.id}`}?session=${encodeURIComponent(dockSid)}`);
+  if (r.error) showToast(r.error, 'error');
+}
+
+// Page-wide, like the session log's full width. The panel covers the terminal above its prompt
+// rows, so the PTY keeps its size.
+function setDockExpanded(on) {
+  dockExpanded = on;
+  store.setItem(DOCK_EXPANDED_KEY, on ? '1' : '');
+  renderDockAddon(dockActivePane());
+}
+
+// Alt+Enter toggles the full width and Esc goes back; Esc in the dock focuses the terminal.
+function dockHeadKey(e) {
+  const combo = ClaudeHub.comboOf(e);
+  const pane = dockActivePane();
+  if (!pane) return false;
+  if (combo === 'alt+w') {
+    dockRailCommand(pane.id);
+    focusTerminalPane();
+  } else if (combo === 'alt+Enter') setDockExpanded(!dockExpanded);
+  else if (combo === 'Escape' && dockExpanded) setDockExpanded(false);
+  else if (combo === 'Escape') focusTerminalPane();
+  else return false;
+  return true;
+}
+
+function isDockFocused() {
+  return dockFrameKeyDown || !!document.activeElement?.closest('#dock-addon');
+}
+
+// True while a press handed back by a dock frame replays: focus in a nested frame on another
+// origin does not always show in this document's activeElement.
+let dockFrameKeyDown = false;
+
+// An add-on page on another origin keeps every key it has focus for. A page that loads the snippet
+// in skills/addon/references/build.md hands back a press whose signature (ClaudeHubKeys.keySigs)
+// is in this list; the board replays only those.
+function comboSigs(combo) {
+  const parts = combo.split('+');
+  const key = parts.pop() || '+';
+  const mods = parts.filter(Boolean).join('+');
+  const sigs = [`${mods}|k:${key.toLowerCase()}`];
+  if (/^[a-z]$/.test(key)) sigs.push(`${mods}|c:Key${key.toUpperCase()}`);
+  else if (/^[1-9]$/.test(key)) sigs.push(`${mods}|c:Digit${key}`);
+  else if (key === '`') sigs.push(`${mods}|c:Backquote`);
+  return sigs;
+}
+
+const DOCK_FRAME_COMBOS = ['alt+Enter', 'alt+w', 'alt+ArrowUp', 'alt+ArrowDown', 'ctrl+`', 'alt+`', 'ctrl+alt+`'];
+
+function dockFrameKeys() {
+  return [...new Set([...DOCK_FRAME_COMBOS, ...hub.forwardCombos()].flatMap(comboSigs))];
+}
+
+window.addEventListener('message', (e) => {
+  if (e.data?.type !== `${SHOW_MSG}key`) return;
+  const frame = [...dockFrames.values()].find((v) => v.contentWindow === e.source);
+  if (!frame) return;
+  const m = e.data;
+  const sigs = ClaudeHubKeys.keySigs({
+    key: m.key,
+    code: m.code,
+    ctrlKey: m.ctrl,
+    altKey: m.alt,
+    shiftKey: m.shift,
+    metaKey: m.meta,
+  });
+  const keys = dockFrameKeys();
+  if (!sigs.some((s) => keys.includes(s))) return;
+  dockFrameKeyDown = true;
+  try {
+    replayKey(m, frame);
+  } finally {
+    dockFrameKeyDown = false;
+  }
+});
+
+// Focus goes to the header, not the page: a frame on another origin would keep the keys.
+function focusDockAddon() {
+  const items = dockItems();
+  if (!items.length) return;
+  if (!dockActivePane(items)) {
+    setDockAddon(items[0].id);
+    renderShow();
+  }
+  document.querySelector('#dock-addon .dock-addon-head')?.focus();
+}
+
+// Show and each add-on take the dock in turn; the one on screen hides it.
+function dockRailCommand(id) {
+  const active = dockActivePane();
+  if (id === 'show') {
+    const showOn = dockShowOn(active);
+    setDockAddon(null);
+    if (showOn) showState.closed = true;
+    else Object.assign(showState, { closed: false, collapsed: false });
+  } else if (active?.id === id) {
+    setDockAddon(null);
+    if (showState.docked) showState.closed = true;
+  } else setDockAddon(id);
+  renderShow();
+}
+
+function dockRailItems(items = dockItems()) {
+  const ids = items.map((p) => p.id);
+  return ids.length && showState.posts.length ? ['show', ...ids] : ids;
+}
+
+// With nothing in the dock, Down starts at the first item and Up at the last.
+function stepDockRail(dir) {
+  const items = dockRailItems();
+  const active = dockActivePane();
+  const cur = active ? active.id : dockShowOn(active) ? 'show' : null;
+  const i = items.indexOf(cur);
+  const next = items[i < 0 ? (dir > 0 ? 0 : items.length - 1) : (i + dir + items.length) % items.length];
+  if (!next || next === cur) return;
+  const cardFocused = isShowCardFocused();
+  dockRailCommand(next);
+  if (cardFocused && next !== 'show') focusTerminalPane();
+}
+
+// The panel follows the pointer over the terminal; the terminal takes the new width on release.
+function startDockDrag(e, panel) {
+  const edge = e.target.closest('.show-dock-edge');
+  if (!edge || e.button !== 0) return;
+  e.preventDefault();
+  edge.setPointerCapture(e.pointerId);
+  const hostW = dockHostWidth();
+  const start = { x: e.clientX, w: panel.offsetWidth };
+  let w = start.w;
+  let raf = 0;
+  document.body.classList.add('show-resizing');
+  const move = (ev) => {
+    w = showDockWidth(Math.round(start.w + start.x - ev.clientX), hostW);
+    raf ||= requestAnimationFrame(() => {
+      raf = 0;
+      panel.style.setProperty('--show-dock-drag', `${w}px`);
+    });
+  };
+  const up = () => {
+    cancelAnimationFrame(raf);
+    edge.removeEventListener('pointermove', move);
+    edge.removeEventListener('pointerup', up);
+    edge.removeEventListener('pointercancel', up);
+    document.body.classList.remove('show-resizing');
+    panel.style.removeProperty('--show-dock-drag');
+    showDockW = w;
+    store.writeJson(SHOW_DOCK_KEY, showDockW);
+    fitDockWidth();
+  };
+  edge.addEventListener('pointermove', move);
+  edge.addEventListener('pointerup', up);
+  edge.addEventListener('pointercancel', up);
+}
+
+function resetDockWidth() {
+  showDockW = null;
+  store.removeItem(SHOW_DOCK_KEY);
+  fitDockWidth();
+}
+
+function initDockRail() {
+  document.getElementById('dock-rail').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-rail]');
+    if (b) dockRailCommand(b.dataset.rail);
+  });
+  const panel = document.getElementById('dock-addon');
+  panel.addEventListener('click', (e) => {
+    const pane = dockActivePane();
+    if (!pane) return;
+    if (e.target.closest('[data-dock="close"]')) dockRailCommand(pane.id);
+    else if (e.target.closest('[data-dock="expand"]')) setDockExpanded(!dockExpanded);
+    else if (e.target.closest('[data-dock="remove"]')) removeDockItem(pane);
+    else if (e.target.closest('[data-dock="reload"]')) {
+      dockAddonUp.delete(pane.id);
+      dropDockView(pane.id);
+      renderDockRail();
+    } else if (e.target.closest('[data-dock="open"], [data-pane-open]')) hub.openExternal(pane.target);
+  });
+  panel.addEventListener('pointerdown', (e) => startDockDrag(e, panel));
+  panel.addEventListener('dblclick', (e) => {
+    if (e.target.closest('.show-dock-edge')) resetDockWidth();
+  });
 }
 
 async function openShowInPane() {
@@ -17509,44 +18026,10 @@ function initShowCard() {
     grip.addEventListener('pointerup', up);
     grip.addEventListener('pointercancel', up);
   });
-  // The card follows the pointer over the terminal; the terminal takes the new width on release.
-  card.addEventListener('pointerdown', (e) => {
-    const edge = e.target.closest('.show-dock-edge');
-    if (!edge || e.button !== 0) return;
-    e.preventDefault();
-    edge.setPointerCapture(e.pointerId);
-    const hostW = document.getElementById('terminal-host').clientWidth;
-    const start = { x: e.clientX, w: card.offsetWidth };
-    let w = start.w;
-    let raf = 0;
-    document.body.classList.add('show-resizing');
-    const move = (ev) => {
-      w = showDockWidth(Math.round(start.w + start.x - ev.clientX), hostW);
-      raf ||= requestAnimationFrame(() => {
-        raf = 0;
-        card.style.setProperty('--show-dock-drag', `${w}px`);
-      });
-    };
-    const up = () => {
-      cancelAnimationFrame(raf);
-      edge.removeEventListener('pointermove', move);
-      edge.removeEventListener('pointerup', up);
-      edge.removeEventListener('pointercancel', up);
-      document.body.classList.remove('show-resizing');
-      card.style.removeProperty('--show-dock-drag');
-      showDockW = w;
-      store.writeJson(SHOW_DOCK_KEY, showDockW);
-      layoutShow();
-    };
-    edge.addEventListener('pointermove', move);
-    edge.addEventListener('pointerup', up);
-    edge.addEventListener('pointercancel', up);
-  });
+  card.addEventListener('pointerdown', (e) => startDockDrag(e, card));
   card.addEventListener('dblclick', (e) => {
     if (e.target.closest('.show-dock-edge')) {
-      showDockW = null;
-      store.removeItem(SHOW_DOCK_KEY);
-      layoutShow();
+      resetDockWidth();
       return;
     }
     if (!e.target.closest('.show-grip')) return;
@@ -18329,6 +18812,7 @@ initSessionGroupsDnd();
 initSessionPicker();
 initProjectPicker();
 initShowCard();
+initDockRail();
 initAsk();
 for (const k of readStoredList(ACTIVITY_FILTER_KEY)) activityFilter.add(k);
 initSidebarResize();

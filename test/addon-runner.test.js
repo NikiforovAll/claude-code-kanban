@@ -1,0 +1,59 @@
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { createAddonRunner, urlPort } = require('../lib/addon-runner');
+
+const tmpDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'cck-addon-runner-'));
+
+describe('add-on runner', () => {
+  it('reads the port of a URL, with the protocol default', () => {
+    assert.deepEqual(urlPort('http://localhost:4117/?cwd=x'), { host: 'localhost', port: 4117 });
+    assert.deepEqual(urlPort('http://127.0.0.1/'), { host: '127.0.0.1', port: 80 });
+    assert.deepEqual(urlPort('http://[::1]:5000/'), { host: '::1', port: 5000 });
+  });
+
+  it('starts nothing for an entry with no run, or when the port answers', async () => {
+    const logDir = tmpDir();
+    const runner = createAddonRunner({ logDir, probe: async () => true });
+    assert.deepEqual(await runner.ensure({ id: 'a1', url: 'http://localhost:4117/' }), { state: 'none' });
+    assert.deepEqual(await runner.ensure({ id: 'a1', url: 'http://localhost:4117/', run: 'node -e "process.exit(1)"' }), { state: 'up' });
+    assert.equal(fs.existsSync(path.join(logDir, 'a1.log')), false);
+  });
+
+  it('runs the command with PORT set and is up once the port answers', async () => {
+    const logDir = tmpDir();
+    let up = false;
+    const runner = createAddonRunner({ logDir, probe: async () => up });
+    const entry = {
+      id: 'a2',
+      url: 'http://localhost:4118/{cwd}',
+      run: `node -e "console.log('port ' + process.env.PORT); setInterval(() => {}, 1000)"`,
+    };
+    const pending = runner.ensure(entry);
+    const second = runner.ensure(entry);
+    setTimeout(() => {
+      up = true;
+    }, 400);
+    assert.deepEqual(await pending, { state: 'up' });
+    assert.deepEqual(await second, { state: 'up' });
+    runner.shutdown();
+    assert.match(fs.readFileSync(path.join(logDir, 'a2.log'), 'utf8'), /port 4118/);
+    runner.stop('a2');
+    assert.equal(fs.existsSync(path.join(logDir, 'a2.log')), false);
+  });
+
+  it('fails with the exit code and the log when the command exits, and stops after 3 starts a minute', async () => {
+    const logDir = tmpDir();
+    const runner = createAddonRunner({ logDir, probe: async () => false });
+    const entry = { id: 'a3', url: 'http://localhost:4119/', run: 'node -e "process.exit(3)"' };
+    const r = await runner.ensure(entry);
+    assert.equal(r.state, 'failed');
+    assert.match(r.error, /code 3/);
+    assert.equal(r.log, path.join(logDir, 'a3.log'));
+    await runner.ensure(entry);
+    await runner.ensure(entry);
+    assert.match((await runner.ensure(entry)).error, /3 times in a minute/);
+  });
+});

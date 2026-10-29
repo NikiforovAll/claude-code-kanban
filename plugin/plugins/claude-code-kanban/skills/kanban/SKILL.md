@@ -21,6 +21,7 @@ This session id is `${CLAUDE_SESSION_ID}`. `--session` defaults to it through `$
 | `task` | `list` for a session, a project or the whole board |
 | `project` | `list` |
 | `dispatch` | `start`, `list`, `end` — run `/claude-code-kanban:dispatch` instead |
+| `addon` | `add`, `list`, `set`, `rm` a page on the dock rail — run `/claude-code-kanban:addon` instead |
 | `terminal` | `list` every terminal in cck, read-only |
 
 ## Run a command

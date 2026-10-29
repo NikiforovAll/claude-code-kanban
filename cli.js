@@ -101,6 +101,63 @@ const COMMANDS = {
       },
     },
   },
+  addon: {
+    summary: 'Put web pages on the dock rail beside the embedded terminal, for this session or every session',
+    verbs: {
+      add: {
+        summary: 'Add a URL to the dock rail; the user opens it from the rail',
+        usage: 'claude-code-kanban addon add <url> [--title <text>] [--icon <glyph>] [--param <k=v> ...] [--global [--run <cmd> [--cwd <dir>]]] [--session <id>] [--json]',
+        flags: {
+          '<url>': 'An http(s) URL. {sessionId}, {cwd} and {project} are filled for each session, {<name>} from --param',
+          '--title <text>': 'Rail and header title (default: the host)',
+          '--icon <glyph>': 'One or two characters on the rail button (default: the first letter of the title)',
+          '--param <k=v>': 'A value for {k} in the URL; repeat for each. `addon set` changes it for one session',
+          '--global': 'Show it on the rail of every session. Use only when the user asks for every session',
+          '--run <cmd>': 'With --global: the command that starts the page\'s server. The board runs it when the rail opens the page and its localhost port does not answer, with PORT set',
+          '--cwd <dir>': 'Absolute folder to run --run in (default: the board\'s folder)',
+          [SESSION_FLAG]: SESSION_FLAG_HELP,
+          '--json': 'Output JSON (the add-on entry)',
+        },
+        notes: 'Quote the URL so the shell keeps the braces. Each value is URL-encoded when filled. A placeholder with no value is refused. A session add-on goes when the session expires; a global one stays until `addon rm`. The same URL added again prints the entry it already has; with --run it takes the new command. --run needs the board\'s terminal, like `dispatch start`. The server stops with the board; its output goes to .cck/addons/<id>.log.',
+        examples: [
+          'claude-code-kanban addon add "http://localhost:4100/?cwd={cwd}" --title Changes',
+          'claude-code-kanban addon add "http://localhost:4200/{sessionId}" --title Notes --global',
+          'claude-code-kanban addon add "http://localhost:4117/?cwd={cwd}" --title Changes --global --run "node server.js" --cwd C:/tools/changes',
+        ],
+        run: runAddonAddCli,
+      },
+      list: {
+        summary: 'List the add-ons on a session\'s rail: the global ones, then the session\'s',
+        usage: 'claude-code-kanban addon list [--session <id>] [--json]',
+        flags: {
+          [SESSION_FLAG]: SESSION_FLAG_HELP,
+          '--json': 'Output JSON ({global, session, params: {<id>: {k: v}}})',
+        },
+        run: runAddonListCli,
+      },
+      set: {
+        summary: 'Set a param of an add-on for one session; an empty value goes back to the add-on\'s own',
+        usage: 'claude-code-kanban addon set <id> <k=v> ... [--session <id>]',
+        flags: {
+          '<id>': 'The id `addon add` or `addon list` printed',
+          '<k=v>': 'The new value of {k}; k= with no value drops this session\'s value',
+          [SESSION_FLAG]: SESSION_FLAG_HELP,
+        },
+        examples: ['claude-code-kanban addon set a3 repo=claude-code-hub'],
+        run: runAddonSetCli,
+      },
+      rm: {
+        summary: 'Take an add-on off the rail: a global one from every session',
+        usage: 'claude-code-kanban addon rm <id> [--session <id>]',
+        flags: {
+          '<id>': 'The id `addon add` or `addon list` printed',
+          [SESSION_FLAG]: SESSION_FLAG_HELP,
+        },
+        examples: ['claude-code-kanban addon rm a3'],
+        run: runAddonRmCli,
+      },
+    },
+  },
   session: {
     summary: 'List, search, open, inspect and group Claude Code sessions',
     verbs: {
@@ -707,9 +764,11 @@ async function postDocLink(target, sessionId, { unlink = false, open = false } =
   } catch (e) { reportCliError(e); return 1; }
 }
 
+const sessionArgOf = (args) => getArgValue(args, 'session') || process.env.PREVIEW_SESSION || process.env.CLAUDE_CODE_SESSION_ID;
+
 // Resolved to the full id because the browser keys linked docs by it, so a prefix won't match.
 async function resolveSessionArg(entry, args, why) {
-  const sessionArg = getArgValue(args, 'session') || process.env.PREVIEW_SESSION || process.env.CLAUDE_CODE_SESSION_ID;
+  const sessionArg = sessionArgOf(args);
   if (!sessionArg) {
     usageError(entry, `--session is required: ${why}`);
     return null;
@@ -792,7 +851,117 @@ async function runPaneListCli(args, entry) {
     const layout = await cliGetJson(panesPath(resolved.id), 'Pane list');
     if (args.includes('--json')) console.log(JSON.stringify(layout, null, 2));
     else if (!layout.panes.length) console.log(`No panes for session ${resolved.id.slice(0, 8)}.`);
-    else printTable(['ID', 'KIND', 'TITLE', 'TARGET'], layout.panes.map((p) => [p.id, p.kind, p.title, p.target]));
+    else printTable(['ID', 'KIND', 'TITLE', 'TARGET'], layout.panes.map((p) => [p.id, p.dock ? `${p.kind} (dock)` : p.kind, p.title, p.target]));
+    return 0;
+  } catch (e) { reportCliError(e); return 1; }
+}
+
+const ADDONS_WHY = 'a session add-on is stored with its session.';
+
+// `k=v` words; a repeated `--param` takes one each. Returns null after printing the error.
+function addonParams(entry, words) {
+  const params = {};
+  for (const w of words) {
+    const i = w.indexOf('=');
+    if (i < 1) {
+      usageError(entry, `Expected k=v, got: ${w}`);
+      return null;
+    }
+    params[w.slice(0, i)] = w.slice(i + 1);
+  }
+  return params;
+}
+
+const argValues = (args, name) =>
+  args.flatMap((a, i) => {
+    if (a.startsWith(`--${name}=`)) return [a.slice(name.length + 3)];
+    return a === `--${name}` && args[i + 1] && !args[i + 1].startsWith('--') ? [args[i + 1]] : [];
+  });
+
+// A global add-on needs no session; take one only when one is named or set.
+async function optionalSession(entry, args) {
+  return sessionArgOf(args) ? resolveSessionArg(entry, args, ADDONS_WHY) : { id: null };
+}
+
+async function runAddonAddCli(args, entry) {
+  const [url] = positionals(args, ['--session', '--title', '--icon', '--param', '--run', '--cwd']);
+  if (!url) {
+    printLeafHelp(entry);
+    return 1;
+  }
+  const params = addonParams(entry, argValues(args, 'param'));
+  if (!params) return 1;
+  const isGlobal = args.includes('--global');
+  const run = getArgValue(args, 'run');
+  const cwd = getArgValue(args, 'cwd');
+  if (run && !isGlobal) return usageError(entry, '--run needs --global');
+  if (cwd && !run) return usageError(entry, '--cwd needs --run');
+  const token = run ? readTerminalToken() : null;
+  if (run && !token) return 1;
+  const resolved = isGlobal ? { id: 'global' } : await resolveSessionArg(entry, args, ADDONS_WHY);
+  if (!resolved) return 1;
+  try {
+    const icon = getArgValue(args, 'icon');
+    const start = run ? { run, ...(cwd && { cwd: path.resolve(cwd) }) } : {};
+    const body = { scope: resolved.id, url, title: getArgValue(args, 'title') || '', ...(icon && { icon }), params, ...start };
+    const out = await cliPostJson('/api/addons', body, 'Add-on add', token ? { 'x-terminal-token': token } : undefined);
+    if (!out) return 1;
+    if (args.includes('--json')) console.log(JSON.stringify(out.addon, null, 2));
+    else console.log(`${out.addon.id}  ${out.addon.title} (${isGlobal ? 'every session' : 'this session'})${out.added ? '' : ' (already there)'}`);
+    return 0;
+  } catch (e) { reportCliError(e); return 1; }
+}
+
+async function runAddonListCli(args, entry) {
+  const resolved = await optionalSession(entry, args);
+  if (!resolved) return 1;
+  try {
+    const q = resolved.id ? `?session=${encodeURIComponent(resolved.id)}` : '';
+    const list = await cliGetJson(`/api/addons${q}`, 'Add-on list');
+    if (args.includes('--json')) {
+      console.log(JSON.stringify(list, null, 2));
+      return 0;
+    }
+    const rows = [...list.global.map((a) => ['global', a]), ...list.session.map((a) => ['session', a])].map(([scope, a]) => {
+      const params = Object.entries({ ...a.params, ...list.params[a.id] }).map(([k, v]) => `${k}=${v}`).join(' ');
+      return [a.id, scope, a.title, a.url, params];
+    });
+    if (!rows.length) console.log('No add-ons on the rail.');
+    else printTable(['ID', 'SCOPE', 'TITLE', 'URL', 'PARAMS'], rows);
+    return 0;
+  } catch (e) { reportCliError(e); return 1; }
+}
+
+async function runAddonSetCli(args, entry) {
+  const [id, ...words] = positionals(args, ['--session']);
+  if (!id || !words.length) {
+    printLeafHelp(entry);
+    return 1;
+  }
+  const params = addonParams(entry, words);
+  if (!params) return 1;
+  const resolved = await resolveSessionArg(entry, args, 'a param value is set per session.');
+  if (!resolved) return 1;
+  try {
+    if (!await cliSendJson('PATCH', `/api/addons/${encodeURIComponent(id)}`, { session: resolved.id, params }, 'Add-on set')) return 1;
+    console.log(`Set ${Object.keys(params).join(', ')} of ${id} for session ${resolved.id.slice(0, 8)}`);
+    return 0;
+  } catch (e) { reportCliError(e); return 1; }
+}
+
+async function runAddonRmCli(args, entry) {
+  const [id] = positionals(args, ['--session']);
+  if (!id) {
+    printLeafHelp(entry);
+    return 1;
+  }
+  const resolved = await optionalSession(entry, args);
+  if (!resolved) return 1;
+  try {
+    const q = resolved.id ? `?session=${encodeURIComponent(resolved.id)}` : '';
+    const out = await cliSendJson('DELETE', `/api/addons/${encodeURIComponent(id)}${q}`, undefined, 'Add-on rm');
+    if (!out) return 1;
+    console.log(`Removed add-on ${id}${out.scope === 'global' ? ' from every session' : ''}`);
     return 0;
   } catch (e) { reportCliError(e); return 1; }
 }

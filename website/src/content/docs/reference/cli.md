@@ -187,6 +187,44 @@ claude-code-kanban pane list [--session <id>] [--json]
 
 Lists the session's panes in tab order as a table of id, kind, title and target. `--json` prints `{rev, panes: [{id, kind, target, title, addedAt}], updatedAt}`.
 
+## addon
+
+Puts web pages on the dock rail beside the embedded terminal. An add-on is for this session, or for every session with `--global`. See [Add-ons in the dock](/claude-code-kanban/guides/show-cards-use/#add-ons-in-the-dock).
+
+### addon add
+
+```bash
+claude-code-kanban addon add <url> [--title <text>] [--icon <glyph>] [--param <k=v> ...] [--global [--run <cmd> [--cwd <dir>]]] [--session <id>] [--json]
+```
+
+Adds a URL to the rail and prints its id and title. The board fills these placeholders for each session, URL-encoded: `{sessionId}`, `{cwd}`, `{project}`, and `{<name>}` from `--param <name>=<value>`. A placeholder with no value is refused, as is a URL on the board's or the hub's own origin. Quote the URL so the shell keeps the braces. `--icon` sets one or two characters on the rail button; the default is the first letter of the title. The same URL added again in the same scope prints the entry it already has. A session add-on goes when the session expires; a global one stays until `addon rm`.
+
+`--run <cmd>` (with `--global` and a localhost URL) is the command that starts the page's server. When you open the add-on and its port does not answer, the board runs the command in `--cwd <dir>`, with `PORT` set to the URL's port, and loads the page once the port answers. The server stops with the board, and `addon rm` stops it. Its output goes to `.cck/addons/<id>.log` in the config dir. `--run` needs the board's terminal, like `dispatch start`. To change the command, add the same URL again with a new `--run`.
+
+### addon list
+
+```bash
+claude-code-kanban addon list [--session <id>] [--json]
+```
+
+Lists the global add-ons, then the session's, as a table of id, scope, title, URL and params. `--json` prints `{global, session, params}`, where `params` holds the session's own values by add-on id.
+
+### addon set
+
+```bash
+claude-code-kanban addon set <id> <k=v> ... [--session <id>]
+```
+
+Sets a param of an add-on for this session only. `k=` with no value goes back to the add-on's own value.
+
+### addon rm
+
+```bash
+claude-code-kanban addon rm <id> [--session <id>]
+```
+
+Takes the add-on off the rail. A global add-on goes from every session.
+
 ## session
 
 Lists and opens Claude Code sessions. Where a command takes `<id>`, you can give the full session id or a unique prefix. An ambiguous prefix prints the matching sessions and fails.
