@@ -4125,14 +4125,16 @@ code.ct .ct-has[aria-expanded='false'] .ct-name::after {
 }
 
 /* Stops above the prompt rows, as the expanded show card does. */
-.dock-addon.expanded {
+.dock-addon.expanded,
+.show-card.docked.expanded {
   left: 0;
   bottom: calc(7.2 * var(--show-term-font, 13px));
   width: auto;
   border-bottom: 1px solid var(--border);
 }
 
-.dock-addon.expanded .show-dock-edge {
+.dock-addon.expanded .show-dock-edge,
+.show-card.docked.expanded .show-dock-edge {
   display: none;
 }
 

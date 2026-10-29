@@ -247,12 +247,13 @@ const press = (key, mods = {}) => ({ key, code: '', ctrlKey: false, altKey: fals
 
 describe('showCardKey', () => {
   const { comboOf } = require('./vendor/claude-hub-sdk.js');
-  function setup(state = {}) {
+  function setup(state = {}, dockExpanded = false) {
     const log = [];
     const showState = { idx: 0, posts: [{ id: 'p1', title: 'T' }], expanded: false, ...state };
     const key = appFunction('showCardKey', {
       ClaudeHub: { comboOf },
       showState,
+      showExpanded: () => (showState.docked ? dockExpanded : showState.expanded),
       SHOW_KEY_COMMANDS: appConst('SHOW_KEY_COMMANDS'),
       matchKey: appFunction('matchKey'),
       focusShowBody: () => log.push('focus body'),
@@ -290,12 +291,15 @@ describe('showCardKey', () => {
     assert.deepEqual(log, ['dock', 'focus body']);
   });
 
-  it('docked, collapses on Esc even when expanded, and leaves Alt+Enter alone', () => {
+  it("docked, follows the dock's expand, not the card's", () => {
     const docked = setup({ docked: true, expanded: true });
     docked.key(press('Escape'));
     assert.deepEqual(docked.log, ['collapse', 'focus terminal']);
-    assert.equal(docked.key(press('Enter', { altKey: true })), false);
-    assert.deepEqual(docked.log, ['collapse', 'focus terminal']);
+    assert.equal(docked.key(press('Enter', { altKey: true })), true);
+    assert.deepEqual(docked.log, ['collapse', 'focus terminal', 'expand', 'focus body']);
+    const wide = setup({ docked: true }, true);
+    wide.key(press('Escape'));
+    assert.deepEqual(wide.log, ['expand', 'focus body']);
   });
 
   it('leaves Enter, Ctrl+Enter and plain letters alone', () => {

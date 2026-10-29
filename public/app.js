@@ -16951,6 +16951,11 @@ function focusShowBody() {
 
 const SHOW_KEY_COMMANDS = { 'alt+Enter': 'expand', 'alt+shift+Enter': 'dock', 'alt+w': 'close' };
 
+// Docked, the card is a dock item, so it shares the dock's expand with the add-ons.
+const showExpanded = () => (showState.docked ? dockExpanded : showState.expanded);
+
+const expandTitle = (on, home) => (on ? `Back to the ${home} · Alt+Enter or Esc` : 'Fill the terminal · Alt+Enter');
+
 // The body keeps focus, because a render replaces an HTML card's frame.
 function showCardKey(e) {
   if (matchKey(e, '[', ']')) {
@@ -16960,8 +16965,7 @@ function showCardKey(e) {
   }
   const combo = ClaudeHub.comboOf(e);
   let cmd = SHOW_KEY_COMMANDS[combo];
-  if (combo === 'Escape') cmd = showState.expanded && !showState.docked ? 'expand' : 'collapse';
-  else if (cmd === 'expand' && showState.docked) cmd = null;
+  if (combo === 'Escape') cmd = showExpanded() ? 'expand' : 'collapse';
   if (cmd) {
     showCommand(cmd);
     if (cmd === 'expand' || cmd === 'dock') focusShowBody();
@@ -17126,16 +17130,11 @@ function showHeaderHtml(p) {
   const i = showState.idx;
   const key = p.key ? `<span class="show-sep">·</span><span class="show-key">${escapeHtml(p.key)}</span>` : '';
   const btn = (...args) => showBtnHtml('show', ...args);
-  const { collapsed, expanded, docked } = showState;
+  const { collapsed, docked } = showState;
+  const expanded = showExpanded();
   const dockTitle = docked ? 'Back to the overlay · Alt+Shift+Enter' : 'Dock beside the terminal · Alt+Shift+Enter';
   const dock = btn('dock', 'dock', dockTitle, false, docked);
-  const expand = docked
-    ? ''
-    : btn(
-        'expand',
-        expanded ? 'restore' : 'expand',
-        expanded ? 'Back to the card · Alt+Enter or Esc' : 'Fill the terminal · Alt+Enter',
-      );
+  const expand = btn('expand', expanded ? 'restore' : 'expand', expandTitle(expanded, docked ? 'dock' : 'card'));
   return `<span class="show-nav"><span class="show-title" title="${escapeHtml(p.title)}">${escapeHtml(p.title)}</span>${key}</span>
     <span class="show-pager">${btn('prev', 'prev', 'Previous post', i === 0)}<span class="show-pos">${i + 1}/${n}</span>${btn('next', 'next', 'Next post', i === n - 1)}</span>
     <span class="show-actions">${btn('pane', 'pane', 'Open in a pane of the session')}${dock}${btn('collapse', collapsed ? 'uncollapse' : 'collapse', collapsed ? 'Show the post' : 'Collapse to the header · Esc')}${expand}${btn('remove', 'clear', 'Remove this post · Ctrl+D · Shift+click clears every post')}${btn('close', 'close', 'Close until the next post · Alt+W')}</span>`;
@@ -17176,7 +17175,7 @@ function renderShow({ flash = false } = {}) {
   }
   const p = showState.posts[showState.idx];
   showState.marked.delete(p.id);
-  card.classList.toggle('expanded', showState.expanded && !showState.collapsed && !showState.docked);
+  card.classList.toggle('expanded', showExpanded() && !showState.collapsed);
   card.classList.toggle('collapsed', showState.collapsed);
   if (!card.firstChild) {
     card.innerHTML = `<header class="show-head"></header><div class="show-ticks"></div><div class="show-body" tabindex="-1"></div>
@@ -17670,11 +17669,11 @@ function renderDockAddon(pane) {
     panel.classList.toggle('expanded', dockExpanded);
     panel.style.setProperty('--show-term-font', `${currentTerminalFontSize()}px`);
     const expand = panel.querySelector('[data-dock="expand"]');
-    const expandTitle = dockExpanded ? 'Back to the dock · Alt+Enter or Esc' : 'Fill the terminal · Alt+Enter';
-    if (expand.title !== expandTitle) {
+    const label = expandTitle(dockExpanded, 'dock');
+    if (expand.title !== label) {
       expand.innerHTML = showIcon(dockExpanded ? 'restore' : 'expand');
-      expand.title = expandTitle;
-      expand.setAttribute('aria-label', expandTitle);
+      expand.title = label;
+      expand.setAttribute('aria-label', label);
     }
     if (!dockFrames.has(pane.id)) {
       const view = createDockView(pane);
@@ -17769,7 +17768,7 @@ async function removeDockItem(item) {
 function setDockExpanded(on) {
   dockExpanded = on;
   store.setItem(DOCK_EXPANDED_KEY, on ? '1' : '');
-  renderDockAddon(dockActivePane());
+  renderShow();
 }
 
 // Alt+Enter toggles the full width and Esc goes back; Esc in the dock focuses the terminal.
@@ -17966,8 +17965,9 @@ function showCommand(cmd) {
     showState.docked = !showState.docked;
     showState.collapsed = false;
   } else if (cmd === 'expand') {
-    showState.expanded = !showState.expanded;
     showState.collapsed = false;
+    if (showState.docked) return setDockExpanded(!dockExpanded);
+    showState.expanded = !showState.expanded;
   } else if (cmd === 'close') showState.closed = true;
   else if (cmd === 'remove') {
     const id = showState.posts[showState.idx]?.id;
