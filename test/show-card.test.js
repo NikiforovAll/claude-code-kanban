@@ -38,6 +38,23 @@ describe('showFitSize', () => {
   });
 });
 
+describe('showDockWidth', () => {
+  const SHOW_MIN_W = appConst('SHOW_MIN_W');
+  const SHOW_DOCK_TERM_MIN = appConst('SHOW_DOCK_TERM_MIN');
+  const dock = appFunction('showDockWidth', { SHOW_MIN_W, SHOW_DOCK_TERM_MIN });
+
+  it('takes 40% of the terminal until dragged', () => {
+    assert.equal(dock(null, 1200), 480);
+    assert.equal(dock(600, 1200), 600);
+  });
+
+  it('leaves the terminal its minimum, but never goes under the card minimum', () => {
+    assert.equal(dock(1100, 1200), 1200 - SHOW_DOCK_TERM_MIN);
+    assert.equal(dock(100, 1200), SHOW_MIN_W);
+    assert.equal(dock(null, 400), SHOW_MIN_W);
+  });
+});
+
 describe('the card on screen per terminal', () => {
   const SHOW_VIEW_FLAGS = appConst('SHOW_VIEW_FLAGS');
 
@@ -66,6 +83,13 @@ describe('the card on screen per terminal', () => {
     const v = viewStore({ t1: { collapsed: true, post: 'p2' } });
     v.set('t1', { collapsed: true }, 'p3');
     assert.deepEqual(v.writes, [{ t1: { collapsed: true, post: 'p3' } }]);
+  });
+
+  it('keeps the dock per terminal, with the other flags', () => {
+    const v = viewStore({ t2: { collapsed: true } });
+    v.set('t1', { docked: true, collapsed: true });
+    assert.deepEqual({ ...v.showViews.t1 }, { collapsed: true, docked: true });
+    assert.deepEqual({ ...v.showViews.t2 }, { collapsed: true });
   });
 
   function loader(posts, state) {
@@ -258,6 +282,20 @@ describe('showCardKey', () => {
     const { key, log } = setup();
     assert.equal(key(press('w', { altKey: true, code: 'KeyW' })), true);
     assert.deepEqual(log, ['close', 'focus terminal']);
+  });
+
+  it('toggles the dock on Alt+Shift+Enter and keeps focus on the body', () => {
+    const { key, log } = setup();
+    assert.equal(key(press('Enter', { altKey: true, shiftKey: true })), true);
+    assert.deepEqual(log, ['dock', 'focus body']);
+  });
+
+  it('docked, collapses on Esc even when expanded, and leaves Alt+Enter alone', () => {
+    const docked = setup({ docked: true, expanded: true });
+    docked.key(press('Escape'));
+    assert.deepEqual(docked.log, ['collapse', 'focus terminal']);
+    assert.equal(docked.key(press('Enter', { altKey: true })), false);
+    assert.deepEqual(docked.log, ['collapse', 'focus terminal']);
   });
 
   it('leaves Enter, Ctrl+Enter and plain letters alone', () => {

@@ -6624,6 +6624,7 @@ const SHORTCUT_TABS = [
         rows: [
           { keys: ['[', ']'], label: 'Previous / next post' },
           { keys: ['Alt', 'Enter'], combo: true, label: 'Fill the terminal / back to the card' },
+          { keys: ['Alt', 'Shift', 'Enter'], combo: true, label: 'Dock beside the terminal / back to the overlay' },
           { keys: ['Esc'], label: 'Back to the card, else collapse to the header' },
           { keys: ['Alt', 'W'], combo: true, label: 'Close until the next post' },
           { keys: ['Ctrl', 'D'], combo: true, label: 'Remove the post' },
@@ -8807,10 +8808,11 @@ const PANE_CLAIMS = [
   ...'123456789'.split('').map((n) => ({ ctrlKey: true, altKey: true, key: 'Unidentified', code: `Digit${n}` })),
 ];
 
-// Ctrl+D and Alt+Enter act on the show card (showCardKey); other pages keep them. Alt+W and Esc are in PANE_CLAIMS.
+// Ctrl+D, Alt+Enter and Alt+Shift+Enter act on the show card (showCardKey); other pages keep them. Alt+W and Esc are in PANE_CLAIMS.
 const SHOW_CLAIMS = [
   ...['ctrlKey', 'metaKey'].map((mod) => ({ [mod]: true, key: 'd', code: '' })),
   { altKey: true, key: 'Enter', code: '' },
+  { altKey: true, shiftKey: true, key: 'Enter', code: '' },
 ];
 
 // Claimed only while comments wait, so a previewed page keeps Ctrl+Enter otherwise.
@@ -16740,6 +16742,8 @@ const SHOW_VIEW_KEY = 'cck-show-view-v1';
 const SHOW_MIN_W = 280;
 const SHOW_MIN_H = 120;
 const SHOW_INSET = 8;
+const SHOW_DOCK_KEY = 'cck-show-dock-w';
+const SHOW_DOCK_TERM_MIN = 320;
 const SHOW_SANDBOX = 'allow-scripts allow-forms';
 const SHOW_CSP =
   "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; frame-src 'none'; connect-src 'none'; form-action 'none'";
@@ -16806,6 +16810,7 @@ const showState = {
   closed: false,
   expanded: false,
   collapsed: false,
+  docked: false,
   marked: new Set(),
   rendered: null,
   frame: null,
@@ -16819,11 +16824,12 @@ const showState = {
   path: null,
 };
 let showSize = store.readJson(SHOW_SIZE_KEY);
-// Terminal id → { closed?, collapsed?, expanded? }; a terminal with no entry yet starts collapsed. Ids gone from the terminal list are pruned.
+let showDockW = store.readJson(SHOW_DOCK_KEY);
+// Terminal id → { closed?, collapsed?, expanded?, docked? }; a terminal with no entry yet starts collapsed. Ids gone from the terminal list are pruned.
 const showViews = store.readJson(SHOW_VIEW_KEY, {});
 // Older boards stored the string 'collapsed' or 'expanded'.
 for (const [tid, v] of Object.entries(showViews)) if (typeof v === 'string') showViews[tid] = { [v]: true };
-const SHOW_VIEW_FLAGS = ['closed', 'collapsed', 'expanded'];
+const SHOW_VIEW_FLAGS = ['closed', 'collapsed', 'expanded', 'docked'];
 let showHostObserver = null;
 
 function showCardEl() {
@@ -16851,7 +16857,7 @@ function focusShowBody() {
   else showCardEl()?.querySelector('.show-body')?.focus();
 }
 
-const SHOW_KEY_COMMANDS = { 'alt+Enter': 'expand', 'alt+w': 'close' };
+const SHOW_KEY_COMMANDS = { 'alt+Enter': 'expand', 'alt+shift+Enter': 'dock', 'alt+w': 'close' };
 
 // The body keeps focus, because a render replaces an HTML card's frame.
 function showCardKey(e) {
@@ -16861,10 +16867,12 @@ function showCardKey(e) {
     return true;
   }
   const combo = ClaudeHub.comboOf(e);
-  const cmd = combo === 'Escape' ? (showState.expanded ? 'expand' : 'collapse') : SHOW_KEY_COMMANDS[combo];
+  let cmd = SHOW_KEY_COMMANDS[combo];
+  if (combo === 'Escape') cmd = showState.expanded && !showState.docked ? 'expand' : 'collapse';
+  else if (cmd === 'expand' && showState.docked) cmd = null;
   if (cmd) {
     showCommand(cmd);
-    if (cmd === 'expand') focusShowBody();
+    if (cmd === 'expand' || cmd === 'dock') focusShowBody();
     else focusTerminalPane();
     return true;
   }
@@ -17014,12 +17022,21 @@ function showHeaderHtml(p) {
   const n = showState.posts.length;
   const i = showState.idx;
   const key = p.key ? `<span class="show-sep">·</span><span class="show-key">${escapeHtml(p.key)}</span>` : '';
-  const btn = (cmd, icon, title, disabled = false) =>
-    `<button type="button" class="show-btn${cmd === 'remove' ? ' remove' : ''}" data-show="${escapeHtml(cmd)}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}"${disabled ? ' disabled' : ''}>${showIcon(icon)}</button>`;
-  const { collapsed, expanded } = showState;
+  const btn = (cmd, icon, title, disabled = false, pressed = null) =>
+    `<button type="button" class="show-btn${cmd === 'remove' ? ' remove' : ''}${pressed ? ' active' : ''}" data-show="${escapeHtml(cmd)}" title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}"${pressed === null ? '' : pressed ? ' aria-pressed="true"' : ' aria-pressed="false"'}${disabled ? ' disabled' : ''}>${showIcon(icon)}</button>`;
+  const { collapsed, expanded, docked } = showState;
+  const dockTitle = docked ? 'Back to the overlay · Alt+Shift+Enter' : 'Dock beside the terminal · Alt+Shift+Enter';
+  const dock = btn('dock', 'dock', dockTitle, false, docked);
+  const expand = docked
+    ? ''
+    : btn(
+        'expand',
+        expanded ? 'restore' : 'expand',
+        expanded ? 'Back to the card · Alt+Enter or Esc' : 'Fill the terminal · Alt+Enter',
+      );
   return `<span class="show-nav"><span class="show-title" title="${escapeHtml(p.title)}">${escapeHtml(p.title)}</span>${key}</span>
     <span class="show-pager">${btn('prev', 'prev', 'Previous post', i === 0)}<span class="show-pos">${i + 1}/${n}</span>${btn('next', 'next', 'Next post', i === n - 1)}</span>
-    <span class="show-actions">${btn('pane', 'pane', 'Open in a pane of the session')}${btn('collapse', collapsed ? 'uncollapse' : 'collapse', collapsed ? 'Show the post' : 'Collapse to the header · Esc')}${btn('expand', expanded ? 'restore' : 'expand', expanded ? 'Back to the card · Alt+Enter or Esc' : 'Fill the terminal · Alt+Enter')}${btn('remove', 'clear', 'Remove this post · Ctrl+D · Shift+click clears every post')}${btn('close', 'close', 'Close until the next post · Alt+W')}</span>`;
+    <span class="show-actions">${btn('pane', 'pane', 'Open in a pane of the session')}${dock}${btn('collapse', collapsed ? 'uncollapse' : 'collapse', collapsed ? 'Show the post' : 'Collapse to the header · Esc')}${expand}${btn('remove', 'clear', 'Remove this post · Ctrl+D · Shift+click clears every post')}${btn('close', 'close', 'Close until the next post · Alt+W')}</span>`;
 }
 
 function showTicksHtml() {
@@ -17042,6 +17059,9 @@ function renderShow({ flash = false } = {}) {
   chip.hidden = !n || open;
   chip.querySelector('.show-reopen-n').textContent = `show · ${n}`;
   card.classList.toggle('open', open);
+  const docked = open && showState.docked && !showState.collapsed;
+  card.classList.toggle('docked', docked);
+  document.getElementById('terminal-pane').classList.toggle('show-docked', docked);
   if (!open) {
     showState.rendered = null;
     showState.frame = null;
@@ -17053,12 +17073,13 @@ function renderShow({ flash = false } = {}) {
   }
   const p = showState.posts[showState.idx];
   showState.marked.delete(p.id);
-  card.classList.toggle('expanded', showState.expanded && !showState.collapsed);
+  card.classList.toggle('expanded', showState.expanded && !showState.collapsed && !showState.docked);
   card.classList.toggle('collapsed', showState.collapsed);
   if (!card.firstChild) {
     card.innerHTML = `<header class="show-head"></header><div class="show-ticks"></div><div class="show-body" tabindex="-1"></div>
       <aside class="review-panel show-review" hidden></aside>
-      <div class="show-grip" title="Resize · double-click to fit"><svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M1 1v8h8M1 5l4 4"/></svg></div>`;
+      <div class="show-grip" title="Resize · double-click to fit"><svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M1 1v8h8M1 5l4 4"/></svg></div>
+      <div class="show-dock-edge" title="Resize · double-click to reset"></div>`;
   }
   card.querySelector('.show-head').innerHTML = showHeaderHtml(p);
   card.querySelector('.show-ticks').innerHTML = showTicksHtml();
@@ -17332,7 +17353,9 @@ function layoutShow() {
   card.style.setProperty('--show-fit-w', `${fit.w}px`);
   card.style.setProperty('--show-fit-h', `${fit.h}px`);
   card.style.setProperty('--show-term-font', `${currentTerminalFontSize()}px`);
-  const sized = !!showSize && !showState.expanded && !showState.collapsed;
+  const docked = card.classList.contains('docked');
+  if (docked) setShowDockWidth(showDockWidth(showDockW, w));
+  const sized = !!showSize && !showState.expanded && !showState.collapsed && !docked;
   card.classList.toggle('sized', sized);
   if (sized) {
     const s = showClampSize(showSize, w, h);
@@ -17341,7 +17364,7 @@ function layoutShow() {
   }
   const frame = showState.frame;
   if (!frame) return;
-  const peek = !showState.expanded && !sized;
+  const peek = !card.classList.contains('expanded') && !sized && !docked;
   const chrome =
     card.querySelector('.show-head').offsetHeight +
     card.querySelector('.show-ticks').offsetHeight +
@@ -17349,6 +17372,19 @@ function layoutShow() {
     2;
   frame.style.flex = peek ? 'none' : '1';
   frame.style.height = peek ? `${Math.min(showState.frameH || SHOW_MIN_H, fit.h - chrome)}px` : '';
+}
+
+// A docked card gets 40% of the host until dragged, and always leaves the terminal SHOW_DOCK_TERM_MIN.
+function showDockWidth(want, w) {
+  return Math.max(SHOW_MIN_W, Math.min(want ?? Math.round(w * 0.4), w - SHOW_DOCK_TERM_MIN));
+}
+
+// The terminal pane holds the width, because the terminal frame and the terminal bar read it too.
+// Each change refits the terminal and resizes its PTY, so a drag sets it only at the end.
+function setShowDockWidth(px) {
+  const pane = document.getElementById('terminal-pane');
+  const value = `${px}px`;
+  if (pane.style.getPropertyValue('--show-dock-w') !== value) pane.style.setProperty('--show-dock-w', value);
 }
 
 async function openShowInPane() {
@@ -17384,7 +17420,10 @@ function showCommand(cmd) {
     showState.idx = i;
     showState.collapsed = false;
   } else if (cmd === 'collapse') showState.collapsed = !showState.collapsed;
-  else if (cmd === 'expand') {
+  else if (cmd === 'dock') {
+    showState.docked = !showState.docked;
+    showState.collapsed = false;
+  } else if (cmd === 'expand') {
     showState.expanded = !showState.expanded;
     showState.collapsed = false;
   } else if (cmd === 'close') showState.closed = true;
@@ -17470,7 +17509,46 @@ function initShowCard() {
     grip.addEventListener('pointerup', up);
     grip.addEventListener('pointercancel', up);
   });
+  // The card follows the pointer over the terminal; the terminal takes the new width on release.
+  card.addEventListener('pointerdown', (e) => {
+    const edge = e.target.closest('.show-dock-edge');
+    if (!edge || e.button !== 0) return;
+    e.preventDefault();
+    edge.setPointerCapture(e.pointerId);
+    const hostW = document.getElementById('terminal-host').clientWidth;
+    const start = { x: e.clientX, w: card.offsetWidth };
+    let w = start.w;
+    let raf = 0;
+    document.body.classList.add('show-resizing');
+    const move = (ev) => {
+      w = showDockWidth(Math.round(start.w + start.x - ev.clientX), hostW);
+      raf ||= requestAnimationFrame(() => {
+        raf = 0;
+        card.style.setProperty('--show-dock-drag', `${w}px`);
+      });
+    };
+    const up = () => {
+      cancelAnimationFrame(raf);
+      edge.removeEventListener('pointermove', move);
+      edge.removeEventListener('pointerup', up);
+      edge.removeEventListener('pointercancel', up);
+      document.body.classList.remove('show-resizing');
+      card.style.removeProperty('--show-dock-drag');
+      showDockW = w;
+      store.writeJson(SHOW_DOCK_KEY, showDockW);
+      layoutShow();
+    };
+    edge.addEventListener('pointermove', move);
+    edge.addEventListener('pointerup', up);
+    edge.addEventListener('pointercancel', up);
+  });
   card.addEventListener('dblclick', (e) => {
+    if (e.target.closest('.show-dock-edge')) {
+      showDockW = null;
+      store.removeItem(SHOW_DOCK_KEY);
+      layoutShow();
+      return;
+    }
     if (!e.target.closest('.show-grip')) return;
     showSize = null;
     store.removeItem(SHOW_SIZE_KEY);

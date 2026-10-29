@@ -4059,6 +4059,29 @@ body.light .show-card {
   max-height: none;
 }
 
+.show-card.docked {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: auto;
+  width: var(--show-dock-drag, var(--show-dock-w));
+  height: auto;
+  min-width: 0;
+  max-width: none;
+  max-height: none;
+  border-width: 0 0 0 1px;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.terminal-pane.show-docked .terminal-frame {
+  width: calc(100% - var(--show-dock-w));
+}
+
+.terminal-pane.show-docked .terminal-bar {
+  right: calc(20px + var(--show-dock-w));
+}
+
 .show-card.collapsed {
   left: auto;
   bottom: auto;
@@ -4070,7 +4093,9 @@ body.light .show-card {
 .show-card.collapsed .show-body,
 .show-card.collapsed .show-review,
 .show-card.collapsed .show-grip,
-.show-card.expanded .show-grip {
+.show-card.expanded .show-grip,
+.show-card.docked .show-grip,
+.show-card:not(.docked) .show-dock-edge {
   display: none;
 }
 
@@ -4196,6 +4221,10 @@ body.light .show-card.focused {
 .show-btn svg {
   width: 14px;
   height: 14px;
+}
+
+.show-btn.active {
+  color: var(--accent);
 }
 
 .show-btn.remove:hover:not(:disabled) {
@@ -4459,6 +4488,22 @@ body.light .show-card.focused {
   bottom: 2px;
   width: 9px;
   height: 9px;
+}
+
+.show-dock-edge {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 5px;
+  cursor: col-resize;
+  touch-action: none;
+  transition: background 0.15s;
+}
+
+.show-dock-edge:hover,
+body.show-resizing .show-dock-edge {
+  background: var(--accent-dim);
 }
 
 body.show-resizing {

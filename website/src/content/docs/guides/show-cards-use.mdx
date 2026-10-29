@@ -18,8 +18,9 @@ The header shows the title of the card on screen, the topic that Claude gave it,
 |---|---|
 | <kbd>‹</kbd> <kbd>›</kbd> and the count | Go to the previous or next post. |
 | Pane | Add the card's file as a pane of the session, next to Board. While the terminal covers the board, a toast says "Card added as a pane", with an Open button. |
+| Dock | Put the card in a side panel beside the terminal. The terminal gets narrower, so long lines are easier to read and you see both at once. Drag the panel's left edge to change its width; double-click the edge to reset it. Collapse or close gives the terminal its full width back. Each terminal keeps its own choice. Off by default. |
 | Collapse | Show only the header. Click it again to open the card. |
-| Expand | Fill the terminal with the card. The card stops above the prompt, so you can still type to Claude. |
+| Expand | Fill the terminal with the card. The card stops above the prompt, so you can still type to Claude. Not shown while the card is docked. |
 | Remove | Delete the post on screen, after a confirm. <kbd>Shift</kbd>+click removes every post of the session. |
 | Close | Hide the card until Claude posts again. To open it before that, click **show** in the terminal bar. |
 
@@ -37,7 +38,8 @@ Press <kbd>Ctrl+Alt+&#96;</kbd> to move focus between the terminal and the card.
 | --- | --- |
 | <kbd>[</kbd> or <kbd>]</kbd> | Previous or next post |
 | <kbd>Alt+Enter</kbd> | Fill the terminal with the card, or go back to the card size |
-| <kbd>Esc</kbd> | Go back to the card size. If the card is not expanded, collapse it and focus the terminal. |
+| <kbd>Alt+Shift+Enter</kbd> | Dock the card beside the terminal, or go back to the overlay |
+| <kbd>Esc</kbd> | Go back to the card size. If the card is not expanded, or it is docked, collapse it and focus the terminal. |
 | <kbd>Alt+W</kbd> | Close the card until the next post, and focus the terminal |
 | <kbd>Ctrl+D</kbd> | Remove the post on screen, after a confirm |
 | <kbd>Ctrl++</kbd>, <kbd>Ctrl+-</kbd>, <kbd>Ctrl+0</kbd> | Card text size |
