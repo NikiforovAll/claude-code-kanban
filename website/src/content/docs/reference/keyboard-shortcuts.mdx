@@ -131,7 +131,7 @@ These keys work anywhere on the page, also from inside the terminal. See [Embedd
 | --- | --- |
 | <kbd>Ctrl+&#96;</kbd> | Show or hide the terminal |
 | <kbd>Alt+&#96;</kbd> | Move focus between the terminal and the page. If the terminal is hidden, show it. |
-| <kbd>Ctrl+Alt+&#96;</kbd> | Move focus between the terminal and the show card. A closed or collapsed card opens first. With no card, it moves focus to the add-on in the dock, and opens the first one when none is open. |
+| <kbd>Ctrl+Alt+&#96;</kbd> | Move focus between the terminal and the dock item you used last in that terminal: the show card or an add-on's header. A closed or collapsed card opens first. With no item used yet, it goes to the card, else to the first add-on. |
 | <kbd>Alt+Shift+&#96;</kbd> | End the terminal session and close it. This works in the session view whenever the session has a running terminal, also when the terminal is hidden. |
 | <kbd>Ctrl+Shift+&#96;</kbd> | Open the Terminals manager |
 | <kbd>Alt+↑</kbd>, <kbd>Alt+↓</kbd> | Put the previous or next item of the dock rail in the dock: the show card or an add-on. Only while the terminal or the card has focus and the rail has two items or more. |
@@ -164,7 +164,7 @@ A text field inside an HTML card keeps these keys.
 
 ### Dock add-on
 
-These keys work while the header of an add-on in the dock has focus. With no show card, press <kbd>Ctrl+Alt+&#96;</kbd> to focus it. They also work inside the add-on's page when the page hands them back to the board, as the pages that `/addon` builds do; Esc stays with the page.
+These keys work while the header of an add-on in the dock has focus. Press <kbd>Ctrl+Alt+&#96;</kbd> to focus it when the add-on is the dock item you used last. They also work inside the add-on's page when the page hands them back to the board, as the pages that `/addon` builds do; Esc stays with the page.
 
 | Keys | Action |
 | --- | --- |

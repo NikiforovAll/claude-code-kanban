@@ -15460,11 +15460,21 @@ function toggleShowFocus() {
     return;
   }
   if (!wantsTerminal()) return;
-  if (!showState.posts.length) {
-    focusDockAddon();
+  const items = dockItems();
+  const ids = items.map((p) => p.id);
+  const rail = showState.posts.length ? ['show', ...ids] : ids;
+  const last = showState.terminalId && dockLast[showState.terminalId];
+  const pick = rail.includes(last) ? last : rail[0];
+  if (!pick) return;
+  if (pick !== 'show') {
+    if (dockActivePane(items)?.id !== pick) {
+      setDockAddon(pick);
+      renderShow();
+    }
+    focusDockHead();
     return;
   }
-  const addon = dockActivePane();
+  const addon = dockActivePane(items);
   if (addon) setDockAddon(null);
   if (addon || showState.closed || showState.collapsed) {
     Object.assign(showState, { closed: false, collapsed: false, ...(addon && { docked: true }) });
@@ -16798,6 +16808,7 @@ const SHOW_INSET = 8;
 const SHOW_DOCK_KEY = 'cck-show-dock-w';
 const SHOW_DOCK_TERM_MIN = 320;
 const DOCK_ADDON_KEY = 'cck-dock-addon-v1';
+const DOCK_LAST_KEY = 'cck-dock-last-v1';
 const DOCK_EXPANDED_KEY = 'cck-dock-expanded-v1';
 const SHOW_SANDBOX = 'allow-scripts allow-forms';
 const SHOW_CSP =
@@ -16891,6 +16902,9 @@ const SHOW_VIEW_FLAGS = ['closed', 'collapsed', 'expanded', 'docked'];
 let showHostObserver = null;
 // Terminal id → the id of the add-on pane in the dock. Ids gone from the terminal list are pruned.
 const dockAddons = store.readJson(DOCK_ADDON_KEY, {});
+// Terminal id → the rail item last on screen ('show' or an add-on id), kept while the dock is hidden,
+// so Ctrl+Alt+` goes back to it.
+const dockLast = store.readJson(DOCK_LAST_KEY, {});
 let dockExpanded = store.getItem(DOCK_EXPANDED_KEY) === '1';
 // Dock item id → its view, kept while its filled URL stays the same. A view hidden for
 // DOCK_UNLOAD_MS goes, so a page that polls stops until it is opened again.
@@ -16982,6 +16996,7 @@ function rememberTerminalIds(list) {
   const live = new Set(terminalIds.values());
   pruneTerminalMap(showViews, SHOW_VIEW_KEY, live);
   pruneTerminalMap(dockAddons, DOCK_ADDON_KEY, live);
+  pruneTerminalMap(dockLast, DOCK_LAST_KEY, live);
 }
 
 function pruneTerminalMap(map, key, live) {
@@ -17548,6 +17563,10 @@ function dockShowOn(active) {
   return !active && showState.posts.length > 0 && !showState.closed;
 }
 
+function dockOnScreen(active = dockActivePane()) {
+  return active ? active.id : dockShowOn(active) ? 'show' : null;
+}
+
 function setDockAddon(id) {
   const tid = showState.terminalId;
   if (!tid || (dockAddons[tid] ?? null) === id) return;
@@ -17577,6 +17596,12 @@ function renderDockRail() {
   const rail = document.getElementById('dock-rail');
   const card = showCardEl();
   const active = dockActivePane(addons);
+  const onScreen = dockOnScreen(active);
+  const tid = showState.terminalId;
+  if (tid && onScreen && dockLast[tid] !== onScreen) {
+    dockLast[tid] = onScreen;
+    store.writeJson(DOCK_LAST_KEY, dockLast);
+  }
   termPane.classList.toggle('dock-rail-on', on);
   rail.hidden = !on;
   card.classList.toggle('under-addon', !!active);
@@ -17587,7 +17612,7 @@ function renderDockRail() {
   let html = '';
   if (on) {
     const n = showState.posts.length;
-    if (n) html += dockRailButton('show', showIcon('card'), `Show · ${n}`, dockShowOn(active), dockShowDot);
+    if (n) html += dockRailButton('show', showIcon('card'), `Show · ${n}`, onScreen === 'show', dockShowDot);
     for (const p of addons) {
       html += dockRailButton(
         p.id,
@@ -17803,16 +17828,6 @@ function focusDockHead() {
   document.querySelector('#dock-addon .dock-addon-head')?.focus();
 }
 
-function focusDockAddon() {
-  const items = dockItems();
-  if (!items.length) return;
-  if (!dockActivePane(items)) {
-    setDockAddon(items[0].id);
-    renderShow();
-  }
-  focusDockHead();
-}
-
 // Show and each add-on take the dock in turn; the one on screen hides it.
 function dockRailCommand(id) {
   const active = dockActivePane();
@@ -17836,8 +17851,7 @@ function dockRailItems(items = dockItems()) {
 // With nothing in the dock, Down starts at the first item and Up at the last.
 function stepDockRail(dir) {
   const items = dockRailItems();
-  const active = dockActivePane();
-  const cur = active ? active.id : dockShowOn(active) ? 'show' : null;
+  const cur = dockOnScreen();
   const i = items.indexOf(cur);
   const next = items[i < 0 ? (dir > 0 ? 0 : items.length - 1) : (i + dir + items.length) % items.length];
   if (!next || next === cur) return;
