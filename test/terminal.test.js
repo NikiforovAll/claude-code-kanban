@@ -464,6 +464,10 @@ describe('ptyEnv', () => {
     assert.equal(env.PORT, undefined);
   });
 
+  it('forces OSC 8 hyperlinks', () => {
+    assert.equal(ptyEnv({ claudeDir: '/c', isDefaultDir: true }).FORCE_HYPERLINK, '1');
+  });
+
   it('sets TERM_PROGRAM to the hub or the board, replacing an inherited one', () => {
     const saved = { hub: process.env.CLAUDE_HUB, tp: process.env.TERM_PROGRAM };
     process.env.TERM_PROGRAM = 'vscode';
