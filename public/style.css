@@ -4052,7 +4052,8 @@ code.ct .ct-has[aria-expanded='false'] .ct-name::after {
 }
 
 .dock-rail[hidden],
-.dock-addon[hidden] {
+.dock-addon[hidden],
+.dock-addon-frame[hidden] {
   display: none;
 }
 
@@ -4110,7 +4111,8 @@ code.ct .ct-has[aria-expanded='false'] .ct-name::after {
   font-family: var(--font-mono);
 }
 
-.dock-addon:focus-within {
+.dock-addon:focus-within,
+.dock-addon.focused {
   border-color: var(--accent);
   box-shadow:
     0 0 0 1px var(--accent),
@@ -4149,10 +4151,6 @@ code.ct .ct-has[aria-expanded='false'] .ct-name::after {
 
 .dock-addon-view {
   height: 100%;
-}
-
-.dock-addon-frame[hidden] {
-  display: none;
 }
 
 .show-card.open.under-addon {

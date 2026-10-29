@@ -4477,7 +4477,7 @@ app.delete('/api/addons/:id', (req, res) => {
 });
 
 app.post('/api/addons/:id/start', async (req, res) => {
-  const entry = addons.list(null).global.find((e) => e.id === req.params.id);
+  const entry = addons.getGlobal(req.params.id);
   if (!entry) return res.status(404).json({ error: `No global add-on ${req.params.id}`, code: 'no_addon' });
   try {
     res.json(await addonRunner.ensure(entry));

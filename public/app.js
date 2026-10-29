@@ -13494,10 +13494,8 @@ const PANE_EMPTY_LAYOUT = { panes: [] };
 const paneLayouts = new Map();
 let paneLayoutSid = null;
 
-// Targets the server's probe found refusing framing, kept for the page's life; a reload asks again.
-const paneRefused = new Set();
-// Targets it found frameable, so a docked pane loaded again skips the probe.
-const paneFramed = new Set();
+// Target → whether the server's probe found it frameable, kept for the page's life; a reload asks again.
+const paneFraming = new Map();
 // Run add-ons whose port answered once while this page lives.
 const dockAddonUp = new Set();
 
@@ -13508,7 +13506,7 @@ function paneAncestors() {
 }
 
 function paneFrameable(pane) {
-  return pane.kind !== 'url' || !paneRefused.has(pane.target);
+  return pane.kind !== 'url' || paneFraming.get(pane.target) !== false;
 }
 
 // allow-scripts with allow-same-origin on the board's or the hub's origin would lift the sandbox.
@@ -13530,7 +13528,7 @@ function paneOwnOrigin(pane) {
 async function probePaneFraming(sid, pane) {
   const q = new URLSearchParams({ ancestors: paneAncestors().join(',') });
   const { frameable } = await paneRequest('GET', `${apiPath`/api/panes/${sid}/${pane.id}/framing`}?${q}`);
-  if (frameable === false) paneRefused.add(pane.target);
+  if (typeof frameable === 'boolean') paneFraming.set(pane.target, frameable);
   return frameable;
 }
 
@@ -13996,9 +13994,10 @@ function markPaneFrameFocus() {
   view?.classList.add('frame-focus');
 }
 
-function paneCardHtml(title, text, button) {
-  const btn = button ? `<button class="btn btn-primary" data-pane-open>${escapeHtml(button)}</button>` : '';
-  return `<div class="pane-card"><div class="pane-card-box">${PANE_ICONS.warning}<h3>${escapeHtml(title)}</h3><p>${escapeHtml(text)}</p>${btn}</div></div>`;
+// `extra` is trusted HTML put above the button.
+function paneCardHtml(title, text, button, { attr = 'data-pane-open', extra = '' } = {}) {
+  const btn = button ? `<button class="btn btn-primary" ${attr}>${escapeHtml(button)}</button>` : '';
+  return `<div class="pane-card"><div class="pane-card-box">${PANE_ICONS.warning}<h3>${escapeHtml(title)}</h3><p>${escapeHtml(text)}</p>${extra}${btn}</div></div>`;
 }
 
 // Returns the key of the view to show.
@@ -14491,8 +14490,7 @@ async function reloadPane(id) {
     await reloadPaneView(sid, pane, view);
   } else {
     unmountPane(sid, pane.id);
-    paneRefused.delete(pane.target);
-    paneFramed.delete(pane.target);
+    paneFraming.delete(pane.target);
     syncPanes();
   }
   showToast('Pane reloaded', 'success');
@@ -15809,10 +15807,16 @@ const urlPaneFrames = () => [...paneViews.querySelectorAll('.pane-url-frame')];
 window.addEventListener('message', (e) => {
   const type = e.data?.type;
   if (type !== 'hub:hostKey' && type !== 'hub:hostReady') return;
-  const frame = urlPaneFrames().find((f) => f.contentWindow === e.source);
+  const dock = dockFrameEls().find((f) => f.contentWindow === e.source);
+  const frame = dock || urlPaneFrames().find((f) => f.contentWindow === e.source);
   if (!frame || URL.parse(frame.src)?.origin !== e.origin) return;
-  if (type === 'hub:hostReady') frame.parentElement.classList.add('keys-bridged');
-  else replayKey(e.data, frame);
+  if (type === 'hub:hostReady') {
+    if (!dock) frame.parentElement.classList.add('keys-bridged');
+    return;
+  }
+  // A page has focus when it gets a keydown, even one that never posts its focus.
+  if (dock) setDockFrameFocused(dock, true);
+  replayKey(e.data, frame);
 });
 
 function pushTerminalClaims() {
@@ -15822,11 +15826,13 @@ function pushTerminalClaims() {
     terminalClaimsQueued = false;
     const bridged = bridgedFrameEls();
     const urlFrames = urlPaneFrames();
-    if (!termFrame.inited && !kanbotState.inited && !bridged.length && !urlFrames.length) return;
+    const dockEls = dockFrameEls();
+    if (!termFrame.inited && !kanbotState.inited && !bridged.length && !urlFrames.length && !dockEls.length) return;
     const claims = keyClaims();
     const base = bridgeClaims(claims);
     sendBridgeClaimsAll(bridged, base);
     sendHostKeys(urlFrames, base);
+    sendHostKeys(dockEls, { keys: [...base.keys, ...DOCK_CLAIMS, ...claims.forward.flatMap(comboClaims)] });
     const sig = JSON.stringify(claims);
     sendFrameClaims(kanbotState, claims, sig, postToKanbotFrame);
     sendFrameClaims(termFrame, claims, sig, terminalFrameSend);
@@ -17657,28 +17663,31 @@ function renderDockAddon(pane) {
         setTimeout(() => dropDockView(id), DOCK_UNLOAD_MS),
       );
   }
+  syncDockFocus();
+}
+
+function dockCardView(pane, html) {
+  const view = document.createElement('div');
+  view.className = 'dock-addon-view';
+  view.dataset.target = pane.target;
+  view.innerHTML = html;
+  return view;
 }
 
 function createDockView(pane) {
   const blocked = paneBlockedHtml(pane);
-  if (blocked) {
-    const view = document.createElement('div');
-    view.className = 'dock-addon-view';
-    view.innerHTML = blocked;
-    view.dataset.target = pane.target;
-    return view;
-  }
+  if (blocked) return dockCardView(pane, blocked);
   if (pane.run && !dockAddonUp.has(pane.id)) return startDockAddon(pane);
   const frame = paneUrlFrame(pane, 'dock-addon-frame');
   frame.dataset.target = pane.target;
   frame.addEventListener('load', () => {
     postToShowFrames(() => ({ type: `${SHOW_MSG}tokens`, tokens: showTokens() }), [frame]);
-    postToShowFrames(() => ({ type: `${SHOW_MSG}keys`, keys: dockFrameKeys() }), [frame]);
+    frame.hostKeysSig = null;
+    pushTerminalClaims();
   });
-  if (pane.addon || paneFramed.has(pane.target)) return frame;
+  if (pane.addon || paneFraming.get(pane.target)) return frame;
   const sid = dockSid;
   probePaneFraming(sid, pane).then((frameable) => {
-    if (frameable) paneFramed.add(pane.target);
     if (frameable !== false || dockFrames.get(pane.id) !== frame) return;
     dropDockView(pane.id);
     if (sid === dockSid) renderDockRail();
@@ -17689,10 +17698,10 @@ function createDockView(pane) {
 // The board starts the page's server when its port does not answer (lib/addon-runner.js);
 // the frame comes once it does. Reload asks again.
 function startDockAddon(pane) {
-  const view = document.createElement('div');
-  view.className = 'dock-addon-view';
-  view.dataset.target = pane.target;
-  view.innerHTML = `<div class="pane-card"><div class="pane-card-box"><p>Starting ${escapeHtml(pane.title)}…</p></div></div>`;
+  const view = dockCardView(
+    pane,
+    `<div class="pane-card"><div class="pane-card-box"><p>Starting ${escapeHtml(pane.title)}…</p></div></div>`,
+  );
   paneRequest('POST', apiPath`/api/addons/${pane.id}/start`).then((r) => {
     if (dockFrames.get(pane.id) !== view) return;
     if (r.state === 'up' || r.state === 'none') {
@@ -17702,7 +17711,10 @@ function startDockAddon(pane) {
       return;
     }
     const log = r.log ? `<p>Log: <code>${escapeHtml(r.log)}</code></p>` : '';
-    view.innerHTML = `<div class="pane-card"><div class="pane-card-box">${PANE_ICONS.warning}<h3>${escapeHtml(pane.title)} did not start</h3><p>${escapeHtml(r.error || 'No answer')}</p>${log}<button class="btn btn-primary" data-dock="reload">Retry</button></div></div>`;
+    view.innerHTML = paneCardHtml(`${pane.title} did not start`, r.error || 'No answer', 'Retry', {
+      attr: 'data-dock="reload"',
+      extra: log,
+    });
   });
   return view;
 }
@@ -17733,6 +17745,7 @@ function setDockExpanded(on) {
 // Alt+Enter toggles the full width and Esc goes back; Esc in the dock focuses the terminal.
 function dockHeadKey(e) {
   const combo = ClaudeHub.comboOf(e);
+  if (combo !== 'alt+w' && combo !== 'alt+Enter' && combo !== 'Escape') return false;
   const pane = dockActivePane();
   if (!pane) return false;
   if (combo === 'alt+w') {
@@ -17745,58 +17758,51 @@ function dockHeadKey(e) {
   return true;
 }
 
+// Focus moving from the terminal's frame into a dock page leaves this document's activeElement on the
+// terminal frame and fires no event here, so the page posts its own focus (skills/addon/references/build.md).
+let dockFocusFrame = null;
+
+const dockFrameFocused = () => !!dockFocusFrame?.isConnected && !dockFocusFrame.hidden;
+
 function isDockFocused() {
-  return dockFrameKeyDown || !!document.activeElement?.closest('#dock-addon');
+  return dockFrameFocused() || !!document.activeElement?.closest('#dock-addon');
 }
 
-// True while a press handed back by a dock frame replays: focus in a nested frame on another
-// origin does not always show in this document's activeElement.
-let dockFrameKeyDown = false;
-
-// An add-on page on another origin keeps every key it has focus for. A page that loads the snippet
-// in skills/addon/references/build.md hands back a press whose signature (ClaudeHubKeys.keySigs)
-// is in this list; the board replays only those.
-function comboSigs(combo) {
-  const parts = combo.split('+');
-  const key = parts.pop() || '+';
-  const mods = parts.filter(Boolean).join('+');
-  const sigs = [`${mods}|k:${key.toLowerCase()}`];
-  if (/^[a-z]$/.test(key)) sigs.push(`${mods}|c:Key${key.toUpperCase()}`);
-  else if (/^[1-9]$/.test(key)) sigs.push(`${mods}|c:Digit${key}`);
-  else if (key === '`') sigs.push(`${mods}|c:Backquote`);
-  return sigs;
+function setDockFrameFocused(frame, on) {
+  if (on) dockFocusFrame = frame;
+  else if (dockFocusFrame === frame) dockFocusFrame = null;
+  syncDockFocus();
 }
 
-const DOCK_FRAME_COMBOS = ['alt+Enter', 'alt+w', 'alt+ArrowUp', 'alt+ArrowDown', 'ctrl+`', 'alt+`', 'ctrl+alt+`'];
-
-function dockFrameKeys() {
-  return [...new Set([...DOCK_FRAME_COMBOS, ...hub.forwardCombos()].flatMap(comboSigs))];
+function syncDockFocus() {
+  document.getElementById('dock-addon').classList.toggle('focused', dockFrameFocused());
 }
+
+const dockFrameEls = () => [...dockFrames.values()].filter((v) => v.tagName === 'IFRAME');
 
 window.addEventListener('message', (e) => {
-  if (e.data?.type !== `${SHOW_MSG}key`) return;
-  const frame = [...dockFrames.values()].find((v) => v.contentWindow === e.source);
-  if (!frame) return;
-  const m = e.data;
-  const sigs = ClaudeHubKeys.keySigs({
-    key: m.key,
-    code: m.code,
-    ctrlKey: m.ctrl,
-    altKey: m.alt,
-    shiftKey: m.shift,
-    metaKey: m.meta,
-  });
-  const keys = dockFrameKeys();
-  if (!sigs.some((s) => keys.includes(s))) return;
-  dockFrameKeyDown = true;
-  try {
-    replayKey(m, frame);
-  } finally {
-    dockFrameKeyDown = false;
-  }
+  if (e.data?.type !== `${SHOW_MSG}focus`) return;
+  const frame = dockFrameEls().find((f) => f.contentWindow === e.source);
+  if (frame) setDockFrameFocused(frame, e.data.on === true);
 });
 
+// A dock page gets the pane keys plus these (hub protocol §5.2). A page with no hub SDK cannot
+// forward the hub's own combos, so they go as claims too.
+const DOCK_CLAIMS = [{ altKey: true, key: 'Enter', code: '' }];
+
+function comboClaims(combo) {
+  const parts = combo.split('+');
+  const key = parts.pop() || '+';
+  const mods = Object.fromEntries(parts.filter(Boolean).map((m) => [`${m}Key`, true]));
+  const code = /^[a-z]$/.test(key) ? `Key${key.toUpperCase()}` : /^[1-9]$/.test(key) ? `Digit${key}` : '';
+  return [{ ...mods, key, code: '' }, ...(code ? [{ ...mods, key: 'Unidentified', code }] : [])];
+}
+
 // Focus goes to the header, not the page: a frame on another origin would keep the keys.
+function focusDockHead() {
+  document.querySelector('#dock-addon .dock-addon-head')?.focus();
+}
+
 function focusDockAddon() {
   const items = dockItems();
   if (!items.length) return;
@@ -17804,7 +17810,7 @@ function focusDockAddon() {
     setDockAddon(items[0].id);
     renderShow();
   }
-  document.querySelector('#dock-addon .dock-addon-head')?.focus();
+  focusDockHead();
 }
 
 // Show and each add-on take the dock in turn; the one on screen hides it.
@@ -17835,9 +17841,9 @@ function stepDockRail(dir) {
   const i = items.indexOf(cur);
   const next = items[i < 0 ? (dir > 0 ? 0 : items.length - 1) : (i + dir + items.length) % items.length];
   if (!next || next === cur) return;
-  const cardFocused = isShowCardFocused();
   dockRailCommand(next);
-  if (cardFocused && next !== 'show') focusTerminalPane();
+  if (next === 'show') focusShowBody();
+  else focusDockHead();
 }
 
 // The panel follows the pointer over the terminal; the terminal takes the new width on release.

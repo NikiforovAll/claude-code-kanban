@@ -34,6 +34,8 @@ describe('add-on store', () => {
     assert.equal(g.addon.title, 'localhost:4200');
     assert.deepEqual(open().list('s1'), { global: [g.addon], session: [s.addon], params: {} });
     assert.deepEqual(open().list('s2').session, []);
+    assert.deepEqual(addons.getGlobal('a2'), g.addon);
+    assert.equal(addons.getGlobal('a1'), null);
   });
 
   it('returns the existing entry for the same URL in the same scope', () => {

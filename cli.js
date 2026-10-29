@@ -883,6 +883,8 @@ async function optionalSession(entry, args) {
   return sessionArgOf(args) ? resolveSessionArg(entry, args, ADDONS_WHY) : { id: null };
 }
 
+const sessionQuery = (resolved) => (resolved.id ? `?session=${encodeURIComponent(resolved.id)}` : '');
+
 async function runAddonAddCli(args, entry) {
   const [url] = positionals(args, ['--session', '--title', '--icon', '--param', '--run', '--cwd']);
   if (!url) {
@@ -916,8 +918,7 @@ async function runAddonListCli(args, entry) {
   const resolved = await optionalSession(entry, args);
   if (!resolved) return 1;
   try {
-    const q = resolved.id ? `?session=${encodeURIComponent(resolved.id)}` : '';
-    const list = await cliGetJson(`/api/addons${q}`, 'Add-on list');
+    const list = await cliGetJson(`/api/addons${sessionQuery(resolved)}`, 'Add-on list');
     if (args.includes('--json')) {
       console.log(JSON.stringify(list, null, 2));
       return 0;
@@ -958,8 +959,12 @@ async function runAddonRmCli(args, entry) {
   const resolved = await optionalSession(entry, args);
   if (!resolved) return 1;
   try {
-    const q = resolved.id ? `?session=${encodeURIComponent(resolved.id)}` : '';
-    const out = await cliSendJson('DELETE', `/api/addons/${encodeURIComponent(id)}${q}`, undefined, 'Add-on rm');
+    const out = await cliSendJson(
+      'DELETE',
+      `/api/addons/${encodeURIComponent(id)}${sessionQuery(resolved)}`,
+      undefined,
+      'Add-on rm',
+    );
     if (!out) return 1;
     console.log(`Removed add-on ${id}${out.scope === 'global' ? ' from every session' : ''}`);
     return 0;

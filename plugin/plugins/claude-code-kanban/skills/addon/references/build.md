@@ -37,21 +37,28 @@ addEventListener('message', (e) => {
 });
 ```
 
-## 4. Hand back the board's keys
+## 4. Hand back the board's keys and focus
 
-While the page has focus, it gets every key press, so the board's keys (Alt+Enter to expand, Alt+W, Alt+↑/↓, the terminal and hub keys) stop working. Put this script in the page, as it is. The board sends the list of presses it wants, and the script hands only those back:
+While the page has focus, it gets every key press, so the board's keys (Alt+Enter to expand, Alt+W, Alt+↑/↓, the terminal and hub keys) stop working, and the board cannot tell that the dock has focus. Put this script in the page, as it is. The board sends the presses it wants (`hub:hostKeys`), the script hands only those back, and it reports focus so the dock lights up:
 
 ```js
 let boardKeys = new Set();
+let board = null;
+const sigs = (e) => {
+  const mods = [e.ctrlKey && 'ctrl', e.altKey && 'alt', e.shiftKey && 'shift', e.metaKey && 'meta'].filter(Boolean).join('+');
+  return [e.code && `${mods}|c:${e.code}`, e.key && e.key !== 'Unidentified' && `${mods}|k:${e.key.toLowerCase()}`];
+};
 addEventListener('message', (e) => {
-  if (e.source === parent && e.data?.type === 'cck-show:keys') boardKeys = new Set(e.data.keys);
+  if (e.source !== parent || e.data?.type !== 'hub:hostKeys') return;
+  board = e.origin;
+  boardKeys = new Set(e.data.keys.map((k) => sigs(k).find(Boolean)));
 });
 addEventListener('keydown', (e) => {
-  const mods = [e.ctrlKey && 'ctrl', e.altKey && 'alt', e.shiftKey && 'shift', e.metaKey && 'meta'].filter(Boolean).join('+');
-  if (!boardKeys.has(`${mods}|c:${e.code}`) && !boardKeys.has(`${mods}|k:${e.key.toLowerCase()}`)) return;
+  if (!board || !sigs(e).some((s) => boardKeys.has(s))) return;
   e.preventDefault();
-  parent.postMessage({ type: 'cck-show:key', key: e.key, code: e.code, ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, meta: e.metaKey }, '*');
+  parent.postMessage({ type: 'hub:hostKey', key: e.key, code: e.code, ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, meta: e.metaKey }, board);
 }, true);
+for (const on of [true, false]) addEventListener(on ? 'focus' : 'blur', () => parent.postMessage({ type: 'cck-show:focus', on }, '*'));
 ```
 
 ## 5. Push updates
