@@ -10425,6 +10425,11 @@ function setupEventSource() {
         fetchDockAddons(dockSid);
       }
 
+      if (data.type === 'addon:restarted' && dockFrames.has(data.id)) {
+        dropDockView(data.id);
+        renderShow();
+      }
+
       if (data.type === 'pane:file-changed') {
         onPaneFileChanged(data.path);
       }

@@ -43,6 +43,7 @@
     "projects": { "path": "/api/projects" },
     "terminal": { "liveWork": "/api/terminals" }
   },
+  "launcher": { "items": "/api/hub/launcher-items" },
   "loading": {
     "verbs": [
       "Shuffling cards…",

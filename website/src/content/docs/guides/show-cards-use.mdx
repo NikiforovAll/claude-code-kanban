@@ -56,6 +56,8 @@ claude-code-kanban addon add "http://localhost:4100/?cwd={cwd}" --title Changes
 
 The board fills `{sessionId}`, `{cwd}` and `{project}` for each session, so one add-on shows each session its own view. A `{name}` of your own takes its value from `--param name=value`, and `addon set <id> name=value` changes it for one session. An add-on is for this session; add `--global` to put it on the rail of every session. A global add-on can also start its own server: with `--run "<command>" --cwd <folder>`, the board runs the command the first time you open the add-on and its port does not answer, and stops it when the board stops.
 
+Under Claude Code Hub, the app launcher (<kbd>Ctrl+Alt+A</kbd>) lists the global add-ons under Kanban. For an add-on whose server the board starts, the row shows whether it runs, and <kbd>Ctrl+R</kbd> restarts it; the dock loads the page again. <kbd>Ctrl+C</kbd> copies the path of the file that holds the add-ons, `.cck/addons.json` in the config dir. <kbd>Ctrl+D</kbd>, pressed twice, removes the add-on from every session. A server that the board did not start is not restarted.
+
 To dock a web page that is already a pane, right-click its tab and click **Dock beside the terminal**. It stays a pane of the session.
 
 A rail appears at the right edge of the terminal, with one icon for the card and one for each add-on. Click an icon to put it in the dock. Click the icon on screen to hide the dock and give the terminal its width back. <kbd>Alt+↑</kbd> and <kbd>Alt+↓</kbd> move to the previous or next icon while the terminal or the card has focus, and focus goes to the card or the add-on's header, so <kbd>Alt+Enter</kbd> expands it next. When Claude posts a card while an add-on is open, a dot shows on the card's icon.

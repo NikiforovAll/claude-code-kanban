@@ -44,6 +44,30 @@ describe('add-on runner', () => {
     assert.equal(fs.existsSync(path.join(logDir, 'a2.log')), false);
   });
 
+  it('restarts its own server and leaves one it did not start', async () => {
+    const logDir = tmpDir();
+    const runner = createAddonRunner({ logDir });
+    const entry = {
+      id: 'a4',
+      url: 'http://127.0.0.1:4121/',
+      run: `node -e "console.log(process.pid); require('net').createServer().listen(+process.env.PORT, '127.0.0.1')"`,
+    };
+    const pid = () => fs.readFileSync(path.join(logDir, 'a4.log'), 'utf8').trim();
+    try {
+      assert.equal(await runner.status(entry), 'stopped');
+      assert.deepEqual(await runner.ensure(entry), { state: 'up' });
+      assert.equal(await runner.status(entry), 'running');
+      const first = pid();
+      assert.deepEqual(await runner.restart(entry), { state: 'up' });
+      assert.notEqual(pid(), first);
+      const other = createAddonRunner({ logDir: tmpDir() });
+      assert.equal(await other.status(entry), 'external');
+      assert.equal((await other.restart(entry)).state, 'external');
+    } finally {
+      runner.shutdown();
+    }
+  });
+
   it('fails with the exit code and the log when the command exits, and stops after 3 starts a minute', async () => {
     const logDir = tmpDir();
     const runner = createAddonRunner({ logDir, probe: async () => false });

@@ -67,7 +67,7 @@ const { readSettings } = require('./lib/claude-settings');
 const { readGitBranch, sessionGitBranch } = require('./lib/git-branch');
 const { createLinkedDocStore, linkUrl } = require('./lib/linked-docs');
 const { createPaneStore, isOwnOrigin } = require('./lib/panes');
-const { createAddonStore } = require('./lib/addons');
+const { createAddonStore, sampleUrl } = require('./lib/addons');
 const { createAddonRunner } = require('./lib/addon-runner');
 const { probeFraming, parseOrigin } = require('./lib/frame-policy');
 const { pickFolder } = require('./lib/folder-dialog');
@@ -4470,11 +4470,16 @@ app.patch('/api/addons/:id', (req, res) => {
 
 app.delete('/api/addons/:id', (req, res) => {
   const session = typeof req.query.session === 'string' ? req.query.session : null;
-  const removed = addons.remove(session, req.params.id);
+  const removed = removeAddon(session, req.params.id);
   if (!removed) return res.status(404).json({ error: `No add-on ${req.params.id} here`, code: 'no_addon' });
-  if (removed.addon.run) addonRunner.stop(removed.addon.id);
   res.json(removed);
 });
+
+function removeAddon(session, id) {
+  const removed = addons.remove(session, id);
+  if (removed?.addon.run) addonRunner.stop(removed.addon.id);
+  return removed;
+}
 
 app.post('/api/addons/:id/start', async (req, res) => {
   const entry = addons.getGlobal(req.params.id);
@@ -4484,6 +4489,49 @@ app.post('/api/addons/:id/start', async (req, res) => {
   } catch (error) {
     res.status(500).json({ state: 'failed', error: error.message });
   }
+});
+
+// The hub's app launcher rows (`launcher.items` in hub-app.json): the global add-ons,
+// with Restart for the ones whose server the board runs.
+const LAUNCHER_ITEMS = '/api/hub/launcher-items';
+app.get(LAUNCHER_ITEMS, async (_req, res) => {
+  const items = await Promise.all(
+    addons.list(null).global.map(async (a) => {
+      let detail = a.url;
+      try {
+        detail = new URL(sampleUrl(a.url)).host;
+      } catch {}
+      return {
+        id: a.id,
+        name: a.title,
+        kind: 'add-on',
+        detail,
+        state: a.run ? await addonRunner.status(a) : '',
+        path: ADDONS_FILE,
+        ops: a.run ? ['restart', 'remove'] : ['remove'],
+      };
+    }),
+  );
+  res.json({ items });
+});
+
+app.post(`${LAUNCHER_ITEMS}/:id/restart`, async (req, res) => {
+  const entry = addons.getGlobal(req.params.id);
+  if (!entry?.run) return res.status(404).json({ error: `No global add-on ${req.params.id} with a run command`, code: 'no_addon' });
+  try {
+    const result = await addonRunner.restart(entry);
+    if (result.state === 'failed' || result.state === 'external') return res.status(409).json(result);
+    broadcast({ type: 'addon:restarted', id: entry.id });
+    res.json({ state: 'running', message: `Restarted ${entry.title}` });
+  } catch (error) {
+    res.status(500).json({ state: 'failed', error: error.message });
+  }
+});
+
+app.post(`${LAUNCHER_ITEMS}/:id/remove`, (req, res) => {
+  const removed = removeAddon(null, req.params.id);
+  if (!removed) return res.status(404).json({ error: `No global add-on ${req.params.id}`, code: 'no_addon' });
+  res.json({ message: `Removed ${removed.addon.title}` });
 });
 // #endregion
 
