@@ -69,9 +69,10 @@
 /* Tokens derived from theme colors live on body, where color themes set those colors;
    on :root they would resolve to the defaults before a theme applies. */
 body {
-  /* Selection reads as a recess against the darker surface here, but light theme's deep tone
-     sits within a shade of the sidebar, so there it has to rise instead. */
-  --session-active-bg: var(--bg-deep);
+  /* bg-deep and bg-elevated sit within a few shades of the dark sidebar, so dark themes raise
+     the open session to the hover tone; light themes use bg-elevated. */
+  --session-active-bg: var(--bg-hover);
+  --session-active-border: color-mix(in srgb, var(--text-primary) 30%, transparent);
   --ansi-black: var(--text-muted);
   --ansi-white: var(--text-secondary);
   --ansi-bright-black: var(--text-tertiary);
@@ -1059,7 +1060,7 @@ body.booting .boot-splash {
 
 .session-item.active {
   background: var(--session-active-bg);
-  border-color: var(--border);
+  border-color: var(--session-active-border);
 }
 
 .session-item.kb-selected,
@@ -7996,6 +7997,7 @@ body.light {
   --bg-elevated: #fbfaf9;
   --bg-hover: #d2d0cc;
   --session-active-bg: var(--bg-elevated);
+  --session-active-border: var(--border);
   --border: #cfcbc4;
   --text-primary: #0a0a0a;
   --text-secondary: #2c2c2c;
@@ -10528,6 +10530,7 @@ select.form-input option:checked {
     --bg-elevated: #fbfaf9;
     --bg-hover: #d2d0cc;
     --session-active-bg: var(--bg-elevated);
+    --session-active-border: var(--border);
     --border: #cfcbc4;
     --text-primary: #0a0a0a;
     --text-secondary: #2c2c2c;
