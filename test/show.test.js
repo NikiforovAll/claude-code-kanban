@@ -340,6 +340,17 @@ describe('show claims', () => {
     assert.equal(fs.existsSync(md.path), false);
     assert.equal(fs.readFileSync(html.path, 'utf8'), '# v2');
   });
+
+  it('keeps the claimed file when it is posted back as the file of the same key', async () => {
+    const { body: claim } = await api.call('POST', showUrl(), { sessionId: A, title: 'Plan', key: 'plan', kind: 'html' });
+    const asFile = await api.call('POST', showUrl(), { sessionId: A, title: 'Plan', key: 'plan', kind: 'html', file: claim.path });
+    assert.equal(asFile.status, 200);
+    assert.equal(asFile.body.path, claim.path);
+    assert.equal(fs.readFileSync(claim.path, 'utf8'), '# v2');
+    assert.equal((await api.call('GET', showUrl())).body.posts[0].file, null);
+    await api.call('POST', showUrl(), { sessionId: A, title: 'Plan', key: 'plan', kind: 'html' });
+    assert.equal(fs.readFileSync(claim.path, 'utf8'), '# v2');
+  });
 });
 
 describe('show store', () => {
