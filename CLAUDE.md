@@ -11,7 +11,7 @@ npm start            # port 3541
 npm run dev          # start, restart on file change (node --watch)
 ```
 
-Also: `npm test` (node test runner over `test/*.test.js`), `claude plugin test .` in `plugin/plugins/claude-code-kanban` (the mod's tests), `npm run validate:schemas`, and Biome for lint (`biome.json`). No build step.
+Also: `npm test` (node test runner over `test/*.test.js`), `claude plugin test .` in `plugin/plugins/claude-code-kanban` (the mod's tests), `npm run validate:schemas`, `npm run test:live-dialogs` (by hand after a Claude Code update: starts a real claude for each startup dialog that must hold a session's first prompt, answers it, checks the prompt arrives and rerecords `test/fixtures/startup-dialogs/`, which `npm test` replays; a new dialog that loses a prompt gets a case in `CASES` there), and Biome for lint (`biome.json`). No build step.
 
 Biome covers the files in `files.includes` of `biome.json`, and the pre-commit hook and CI run `biome check` over all of them. The server files are lint-only (an override), because the formatter would rewrite thousands of lines for no benefit. `package.json` sets `"type": "commonjs"` so Biome parses `.js` as script; without it Biome reads the files as modules and flags every `'use strict'` as redundant. Biome rejects a top-level `return`, so server.js runs its body through `startServer()` instead; the body is left unindented.
 

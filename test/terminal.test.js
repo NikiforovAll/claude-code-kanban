@@ -1,7 +1,7 @@
 const { describe, it, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { spawn } = require('node:child_process');
-const { mkdtempSync, readFileSync, realpathSync, rmSync } = require('node:fs');
+const { mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } = require('node:fs');
 const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
@@ -349,6 +349,27 @@ describe('folder trust dialog', () => {
     assert.equal(p.written[0], '\x1b[200~do the task\x1b[201~');
     t.shutdown();
   });
+
+  // Recorded from a real claude by test/live-startup-dialogs.js; rerun it after a Claude Code update.
+  const FIXTURES = path.join(__dirname, 'fixtures', 'startup-dialogs');
+  for (const file of readdirSync(FIXTURES).filter((f) => f.endsWith('.json'))) {
+    const fx = JSON.parse(readFileSync(path.join(FIXTURES, file), 'utf8'));
+    it(`holds the prompt through each dialog of the recorded ${fx.case} start (${fx.claudeVersion})`, async () => {
+      const { t, p } = await started();
+      for (const step of fx.steps) {
+        p.emit(step.output);
+        await wait(800);
+        assert.deepEqual(p.written, [], `prompt sent over the ${step.dialog} dialog`);
+        assert.equal(awaiting(t), step.awaitingTrust);
+        assert.equal(t.paste(A, 'x'), false);
+      }
+      p.emit(fx.ready);
+      await until(() => p.written.length > 0);
+      assert.equal(p.written[0], '\x1b[200~do the task\x1b[201~');
+      assert.equal(awaiting(t), false);
+      t.shutdown();
+    });
+  }
 
   it('sends the prompt when only the folder or session name says trust', async () => {
     const cwd = mkdtempSync(path.join(os.tmpdir(), 'trust-'));

@@ -13,6 +13,7 @@
     "test": "node --test test/*.test.js",
     "test:swarm": "npm --prefix extensions/swarm/plugin/plugins/swarm test",
     "validate:schemas": "node test/validate-live-schemas.js",
+    "test:live-dialogs": "node test/live-startup-dialogs.js",
     "prepare": "husky"
   },
   "repository": {
