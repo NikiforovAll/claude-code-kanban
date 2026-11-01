@@ -12712,6 +12712,8 @@ let spPeekToken = 0;
 let spPeekedId = null;
 let spFromTerminal = false;
 let spRenderedQuery = null;
+// Rows ranked by the caller for the query the picker opened with; the first edit drops them.
+let spRanked = null;
 // Per-open cache: spSource is frozen while the picker is up, so a fetched log stays valid.
 const spPeekCache = new Map();
 // 'board' offers the sidebar's sessions plus a short tail of the newest others; 'all' offers
@@ -12765,10 +12767,11 @@ const spSearch = sessionSearch(() => {
   if (document.getElementById('session-picker-modal').classList.contains('visible')) renderSessionPicker();
 });
 
-function openSessionPicker() {
+function openSessionPicker({ query = '', ranked = null } = {}) {
   spFromTerminal = terminalPaneFocused();
   const input = document.getElementById('session-picker-input');
-  input.value = '';
+  input.value = query;
+  spRanked = ranked;
   spSource = getFilteredSessions().sort((a, b) => Date.parse(b.modifiedAt) - Date.parse(a.modifiedAt));
   spPeekCache.clear();
   spRenderedQuery = null;
@@ -12898,7 +12901,7 @@ function renderSessionPicker() {
   spRenderedQuery = renderKey;
   const all = spScope === 'all';
   const board = new Set(spSource.map((s) => s.id));
-  const local = (all ? spRecent.rows : spSource).filter((s) => spMatches(s, query));
+  const local = spRanked && !all ? spRanked : (all ? spRecent.rows : spSource).filter((s) => spMatches(s, query));
   const found = spSearch.rows(query, local);
   const tail = !all && !query ? spRecent.rows.filter((s) => !board.has(s.id)).slice(0, SP_RECENT_TAIL) : [];
   const extra = [...found.rows, ...tail];
@@ -12962,7 +12965,10 @@ async function spOpen(idx) {
 
 function initSessionPicker() {
   const input = document.getElementById('session-picker-input');
-  input.addEventListener('input', renderSessionPicker);
+  input.addEventListener('input', () => {
+    spRanked = null;
+    renderSessionPicker();
+  });
   // Bound on the input: the global handler returns early on INPUT targets.
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') closeSessionPicker();
@@ -19381,6 +19387,7 @@ hub.onActive((active) => {
 hub.onStatus(pushTerminalClaims);
 hub.onSettings(applyHubSettings);
 hub.handle('session.open', (p) => p.session && openSessionFromOutside(p.session));
+hub.handle('session.find', (p) => findSessionFromHub(p));
 hub.handle('session.paste', (p) => pasteFromHub(p));
 hub.handle('task.add', (p) => addTaskFromHub(p));
 hub.handle('task.live', (p) => liveTaskFromHub(p));
@@ -19441,6 +19448,46 @@ async function newSessionDialogFromHub(v) {
   await opened;
   if (!ns.folder && ns.projects[0]) setNewSessionFolder(ns.projects[0]);
   if (ns.folder) document.getElementById('ns-start').focus();
+}
+
+// session.find from the hub: spoken words name a session in the list. Each session scores the share
+// of the words found in its name, project and branch; a clear best opens at once, else a toast
+// offers the closest.
+const FIND_MIN_SCORE = 0.6;
+const FIND_MIN_LEAD = 0.25;
+const FIND_SKIP = new Set(['the', 'an', 'my', 'session', 'on', 'in', 'of', 'for', 'to', 'and', 'with', 'about']);
+const findWords = (s) =>
+  String(s ?? '')
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((w) => w.length > 1 && !FIND_SKIP.has(w));
+// Speech drops or adds endings ("test" for "tests"), so words of 4+ letters match on a shared start.
+const wordFound = (w, words) =>
+  words.some((x) => x === w || (Math.min(x.length, w.length) >= 4 && (x.startsWith(w) || w.startsWith(x))));
+
+function rankSessions(name) {
+  const said = findWords(name);
+  if (!said.length) return [];
+  return sessions
+    .filter((s) => !s.placeholder)
+    .map((s) => {
+      const words = findWords(
+        `${sessionDisplayName(s)} ${s.project ? pathBasename(s.project) : ''} ${s.gitBranch ?? ''}`,
+      );
+      return { s, score: said.filter((w) => wordFound(w, words)).length / said.length };
+    })
+    .filter((r) => r.score > 0)
+    .sort((a, b) => b.score - a.score || Date.parse(b.s.modifiedAt) - Date.parse(a.s.modifiedAt));
+}
+
+function findSessionFromHub({ name }) {
+  const ranked = rankSessions(name ?? '');
+  const [best, next] = ranked;
+  if (best && best.score >= FIND_MIN_SCORE && (!next || best.score - next.score >= FIND_MIN_LEAD)) {
+    return revealSession(best.s.id);
+  }
+  if (isSessionPickerOpen()) closeSessionPicker({ refocus: false });
+  openSessionPicker({ query: name?.trim() ?? '', ranked: ranked.length ? ranked.map((r) => r.s) : null });
 }
 
 // Voice while the New session dialog is open is dictation into its prompt; Enter on Start sends it.
