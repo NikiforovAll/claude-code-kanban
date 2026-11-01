@@ -19193,8 +19193,9 @@ hub.onStatus(pushTerminalClaims);
 hub.onSettings(applyHubSettings);
 hub.handle('session.open', (p) => p.session && openSessionFromOutside(p.session));
 hub.handle('session.paste', (p) => pasteFromHub(p));
+// After pending session.live calls, so the hub's clear of words typed into the terminal lands there, not in the dialog.
 hub.handle('session.new', (p) => {
-  hubNewSession = newSessionFromHub(p);
+  hubNewSession = liveChain.then(() => newSessionFromHub(p)).catch(() => {});
 });
 hub.handle('session.live', (p) => {
   liveChain = liveChain.then(() => liveFromHub(p)).catch(() => {});
@@ -19279,15 +19280,20 @@ async function pasteFromHub({ session, text, submit }) {
 // order, after a session.new sent just before them has opened its dialog.
 let hubNewSession = Promise.resolve();
 let liveChain = Promise.resolve();
-let liveText = { insert: null, typed: '' };
+let liveText = { insert: null, typed: '', at: 0 };
+// A hold sends text about once a second, so a longer gap means the last hold ended without its
+// final call (the hub page reloaded) and its typed words are not this hold's to erase.
+const LIVE_GAP_MS = 10_000;
 
 // `cancel` comes with an empty final text, which removes what the hold typed; "close" also closes
 // the New session dialog that the hold opened.
 async function liveFromHub({ session, text, final, submit, cancel }) {
   await hubNewSession;
   const done = final === 'true';
+  if (Date.now() - liveText.at > LIVE_GAP_MS) liveText = { insert: null, typed: '', at: 0 };
+  liveText.at = Date.now();
   const hold = liveText;
-  if (done) liveText = { insert: null, typed: '' };
+  if (done) liveText = { insert: null, typed: '', at: 0 };
   if (!session && newSessionOpen()) {
     hold.insert ??= promptInserter();
     hold.insert(text.trim());
