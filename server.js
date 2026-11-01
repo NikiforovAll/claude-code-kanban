@@ -1,5 +1,19 @@
 #!/usr/bin/env node
 
+if (process.argv.includes("--install") || process.argv.includes("--uninstall")) {
+  const { runInstall, runUninstall } = require("./install");
+  const yes = process.argv.includes("--yes");
+  (process.argv.includes("--install") ? runInstall({ yes }) : runUninstall())
+    .then(() => process.exit(0))
+    .catch(e => { console.error(e.message); process.exit(1); });
+} else if (!require("./cli").runCli(process.argv)) {
+  startServer();
+}
+
+// Not indented: the formatter is off for this file, and a reindent would rewrite every line.
+// The requires sit inside, so a CLI call does not load the server's modules.
+function startServer() {
+
 // #region SETUP
 const express = require('express');
 const path = require('node:path');
@@ -78,19 +92,6 @@ const { readTaskDir } = require('./lib/task-dir');
 const { foldAgentLines } = require('./lib/agent-log');
 const { projectMatcher, normalizeProjectPath, sessionProjectKey } = require('./public/project-match');
 const { getParentVerdict, setParentVerdict, peekParentVerdict } = require('./lib/parent-cache');
-
-if (process.argv.includes("--install") || process.argv.includes("--uninstall")) {
-  const { runInstall, runUninstall } = require("./install");
-  const yes = process.argv.includes("--yes");
-  (process.argv.includes("--install") ? runInstall({ yes }) : runUninstall())
-    .then(() => process.exit(0))
-    .catch(e => { console.error(e.message); process.exit(1); });
-} else if (!require("./cli").runCli(process.argv)) {
-  startServer();
-}
-
-// Not indented: the formatter is off for this file, and a reindent would rewrite every line.
-function startServer() {
 
 const app = express();
 const PORT = parseInt(getArgValue('port') || process.env.PORT || '3541', 10);
