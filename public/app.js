@@ -17607,8 +17607,10 @@ function dockOnScreen(active = dockActivePane()) {
 function setDockAddon(id) {
   const tid = showState.terminalId;
   if (!tid || (dockAddons[tid] ?? null) === id) return;
-  if (id) dockAddons[tid] = id;
-  else delete dockAddons[tid];
+  if (id) {
+    dockAddons[tid] = id;
+    showState.closed = true;
+  } else delete dockAddons[tid];
   store.writeJson(DOCK_ADDON_KEY, dockAddons);
 }
 
