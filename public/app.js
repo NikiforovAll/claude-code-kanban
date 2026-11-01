@@ -4732,7 +4732,33 @@ function canAddTask() {
   return viewMode === 'session' && !!currentSessionId;
 }
 
-// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+async function postTask(subject) {
+  const sessionId = currentSessionId;
+  const res = await api(apiPath`/api/tasks/${sessionId}`, { method: 'POST', body: { subject } });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  // The response carries the finished task, and the watcher will resend it within the
+  // SSE debounce anyway -- so show it now rather than paying a session refetch for it.
+  const { task } = await res.json();
+  if (sessionId === currentSessionId) currentTasks.push({ ...task, sessionId });
+}
+
+// task.add from the hub: the subject goes on the board on screen; with none, the Add task input opens.
+async function addTaskFromHub({ subject }) {
+  if (!canAddTask()) return showToast('Open a session to add a task', 'info');
+  const text = subject?.trim();
+  if (!text) {
+    const tile = document.querySelector('.column-add');
+    return tile && startAddTask(tile);
+  }
+  try {
+    await postTask(text);
+    if (!addingTask) renderKanban();
+  } catch (error) {
+    console.error('Failed to create task:', error);
+    showToast('Failed to create task', 'error');
+  }
+}
+
 function startAddTask(tile) {
   if (addingTask) return;
   addingTask = true;
@@ -4761,14 +4787,8 @@ function startAddTask(tile) {
     const subject = input.value.trim();
     if (!subject) return reset();
     input.disabled = true;
-    const sessionId = currentSessionId;
     try {
-      const res = await api(apiPath`/api/tasks/${sessionId}`, { method: 'POST', body: { subject } });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      // The response carries the finished task, and the watcher will resend it within the
-      // SSE debounce anyway -- so show it now rather than paying a session refetch for it.
-      const { task } = await res.json();
-      currentTasks.push({ ...task, sessionId });
+      await postTask(subject);
       addingTask = false;
       renderKanban();
     } catch (error) {
@@ -19193,6 +19213,7 @@ hub.onStatus(pushTerminalClaims);
 hub.onSettings(applyHubSettings);
 hub.handle('session.open', (p) => p.session && openSessionFromOutside(p.session));
 hub.handle('session.paste', (p) => pasteFromHub(p));
+hub.handle('task.add', (p) => addTaskFromHub(p));
 // After pending session.live calls, so the hub's clear of words typed into the terminal lands there, not in the dialog.
 hub.handle('session.new', (p) => {
   hubNewSession = liveChain.then(() => newSessionFromHub(p)).catch(() => {});
