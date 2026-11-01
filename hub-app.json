@@ -7,7 +7,23 @@
   "publishes": ["session.changed"],
   "actions": {
     "handles": {
-      "session.open": { "params": { "session": "string" }, "mode": "message" }
+      "session.open": { "params": { "session": "string" }, "mode": "message" },
+      "session.paste": { "params": { "text": "string", "submit": "string?", "session": "string?" }, "mode": "message" },
+      "session.live": { "params": { "text": "string", "final": "string?", "submit": "string?", "cancel": "string?", "session": "string?" }, "mode": "message" },
+      "session.new": {
+        "params": {
+          "cwd": "string?",
+          "name": "string?",
+          "prompt": "string?",
+          "worktree": "string?",
+          "model": "string?",
+          "effort": "string?",
+          "args": "string?",
+          "edit": "string?",
+          "stay": "string?"
+        },
+        "mode": "message"
+      }
     }
   },
   "settings": [

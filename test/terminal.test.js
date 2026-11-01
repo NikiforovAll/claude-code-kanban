@@ -269,6 +269,56 @@ describe('edit before run', () => {
     t.shutdown();
   });
 
+  it('presses Enter after a paste only when asked to submit', async () => {
+    const live = [];
+    const { t, pty } = service(live);
+    await t.startNew({ id: A, cwd: os.tmpdir(), edit: true });
+    const p = pty.spawned[0];
+    p.emit('prompt> ');
+    live.push({ sessionId: A, pid: 4242, startedAt: Date.now() });
+    await until(() => t.paste(A, 'one'));
+    const before = p.written.length;
+    assert.equal(t.paste(A, 'two', true), true);
+    await until(() => p.written.length === before + 2);
+    assert.deepEqual(p.written.slice(before), ['\x1b[200~two\x1b[201~', '\r']);
+    t.shutdown();
+  });
+
+  it('takes a paste when the conversation on screen says trust', async () => {
+    const live = [];
+    const { t, pty } = service(live);
+    await t.startNew({ id: A, cwd: os.tmpdir(), edit: true });
+    const p = pty.spawned[0];
+    p.emit('prompt> ');
+    live.push({ sessionId: A, pid: 4242, startedAt: Date.now() });
+    await until(() => t.paste(A, 'one'));
+    p.emit('\r\nThe Features section sits before Trust.\r\n> ');
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(t.paste(A, 'two'), true);
+    p.emit('\r\nDo you trust the files in this folder?\r\n');
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(t.paste(A, 'three'), false);
+    t.shutdown();
+  });
+
+  it('types live dictation by backspacing only what changed', async () => {
+    const live = [];
+    const { t, pty } = service(live);
+    await t.startNew({ id: A, cwd: os.tmpdir(), edit: true });
+    const p = pty.spawned[0];
+    p.emit('prompt> ');
+    live.push({ sessionId: A, pid: 4242, startedAt: Date.now() });
+    await until(() => t.type(A, '', 'Fix the'));
+    const from = p.written.length - 1;
+    assert.equal(p.written[from], 'Fix the');
+    assert.equal(t.type(A, 'Fix the', 'Fix this\ntest'), true);
+    assert.equal(p.written.at(-1), '\x7fis test');
+    assert.equal(t.type(A, 'Fix this test', 'Fix this test', true), true);
+    await until(() => p.written.at(-1) === '\r');
+    assert.equal(p.written.at(-1), '\r');
+    t.shutdown();
+  });
+
   it('starts a fork in its parent session folder, not the folder the caller names', async () => {
     const PARENT = 'bbbbbbbb-0000-0000-0000-000000000002';
     const { t, pty } = service([], 'bash', (id) => (id === PARENT ? os.tmpdir() : null));

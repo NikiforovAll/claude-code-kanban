@@ -3392,6 +3392,34 @@ app.post('/api/terminal/launched/:id', (req, res) => {
   res.status(204).end();
 });
 
+// The hub's session.paste action: text into a session's input box, with Enter when `submit`.
+// claude queues a prompt sent while it works. Refused (409) only on a dialog screen, where Enter would answer it.
+app.post('/api/terminal/paste/:id', terminalRoute(async (req, res) => {
+  if (!terminal.authorized(req.get('x-terminal-token'))) return res.status(401).json({ error: 'invalid terminal token' });
+  const { text, submit } = req.body || {};
+  if (typeof text !== 'string' || !text.trim()) return res.status(400).json({ error: 'text is required' });
+  const id = req.params.id;
+  if (!terminal.isRunning(id)) return res.status(404).json({ error: 'no running terminal for this session' });
+  if (!(await terminal.paste(id, text, submit === true))) {
+    return res.status(409).json({ error: 'the session shows a dialog' });
+  }
+  res.status(204).end();
+}));
+
+// The hub's session.live action: dictated words typed into the input box as they come.
+// `from` is what the last call typed; the box loses what differs and gets the rest.
+app.post('/api/terminal/type/:id', terminalRoute(async (req, res) => {
+  if (!terminal.authorized(req.get('x-terminal-token'))) return res.status(401).json({ error: 'invalid terminal token' });
+  const { from = '', text, submit } = req.body || {};
+  if (typeof text !== 'string' || typeof from !== 'string') return res.status(400).json({ error: 'text is required' });
+  const id = req.params.id;
+  if (!terminal.isRunning(id)) return res.status(404).json({ error: 'no running terminal for this session' });
+  if (!(await terminal.type(id, from, text, submit === true))) {
+    return res.status(409).json({ error: 'the session shows a dialog' });
+  }
+  res.status(204).end();
+}));
+
 // The New session dialog's "Stay here": the PTY starts headless and the board keeps its view.
 // `show` is `claude-code-kanban new` from a shell outside the board: a board tab adds its card
 // and attaches, and with no tab to claim it the PTY is ended, because no one would see it.

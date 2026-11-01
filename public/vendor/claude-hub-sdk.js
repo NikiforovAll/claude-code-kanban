@@ -1,4 +1,4 @@
-// claude-hub-sdk 1.8.0 (sha256 9a67dd2aa534). Copied by npm run sdk:sync in claude-code-hub. Do not edit.
+// claude-hub-sdk 1.9.0 (sha256 537745aa3415). Copied by npm run sdk:sync in claude-code-hub. Do not edit.
 // Claude Code Hub SDK: the one rule that names a key press, shared by the hub page, client.js and
 // stub.js. The hub serves it to its page as /sdk/keys.js; mount() and sdk:sync put it in front of
 // client.js and stub.js, so an app still loads one file.
@@ -18,7 +18,7 @@ var ClaudeHubKeys = (() => {
   function comboOf(e) {
     const lower = typeof e.key === 'string' ? e.key.toLowerCase() : '';
     const m = !e.getModifierState?.('AltGraph') && /^(?:Key|Digit)([A-Z1-9])$/.exec(e.code || '');
-    const key = /^[a-z1-9]$/.test(lower) ? lower : m ? m[1].toLowerCase() : e.key;
+    const key = /^[a-z1-9]$/.test(lower) ? lower : m ? m[1].toLowerCase() : e.key === ' ' ? 'Space' : e.key;
     const mods = [e.ctrlKey && 'ctrl', e.altKey && 'alt', e.shiftKey && 'shift', e.metaKey && 'meta'];
     return [...mods, key].filter(Boolean).join('+');
   }

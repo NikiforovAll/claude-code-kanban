@@ -15264,6 +15264,7 @@ panePop.addEventListener('keydown', (e) => {
 const TERMINAL_TOKEN_KEY = 'terminal-token';
 const TERMINAL_TOKEN_RE = /^[0-9a-f]{64}$/;
 const TERMINAL_MODES_KEY = 'terminal-sessions';
+const TERMINAL_SEEN_KEY = 'terminal-seen-sessions';
 const TERMINAL_FONT_KEY = 'terminal-font-size';
 const TERMINAL_FONT_MIN = 8;
 const TERMINAL_FONT_MAX = 32;
@@ -15353,6 +15354,16 @@ function setTerminalMode(sessionId, on) {
   if (on) modes.add(sessionId);
   else modes.delete(sessionId);
   store.writeJson(TERMINAL_MODES_KEY, [...modes].slice(-50));
+}
+
+// A session started elsewhere (dispatch, another board) runs in a terminal this board never turned on,
+// so its first open shows the terminal. Later opens keep what the user chose.
+function defaultToTerminalOnFirstOpen(sessionId) {
+  if (!runningTerminals.has(sessionId)) return;
+  const seen = readStoredList(TERMINAL_SEEN_KEY);
+  if (seen.includes(sessionId)) return;
+  store.writeJson(TERMINAL_SEEN_KEY, [...seen, sessionId].slice(-200));
+  setTerminalMode(sessionId, true);
 }
 
 function wantsTerminal() {
@@ -15543,6 +15554,7 @@ async function openSession(sessionId) {
   setSessionDismissed(sessionId, false);
   // Awaited only when missing, so opening a loaded session stays synchronous up to fetchTasks.
   if (!sessions.some((s) => s.id === sessionId)) await ensureSessionLoaded(sessionId);
+  defaultToTerminalOnFirstOpen(sessionId);
   const alreadyOpen = sessionId === currentSessionId && viewMode === 'session' && termState.shown;
   if (!alreadyOpen) termState.openedByUser = sessionId;
   else if (termState.attached && promptAwaitsUser(sessionId)) focusTerminalPane();
@@ -16121,6 +16133,7 @@ async function openTerminal(sessionId, mode, attempt = 0) {
         effort: spec.effort,
         prompt: spec.prompt,
         edit: spec.edit,
+        extraArgs: spec.extraArgs,
         forkOf: spec.forkOf,
       }),
     },
@@ -18083,7 +18096,17 @@ const newSpecs = new Map();
 // Sessions another session started (`dispatch start`), shown where they will stay until
 // their transcript appears. Kept apart from newSpecs: their prompt is already sent.
 const dispatchSpecs = new Map();
-const ns = { projects: [], picked: [], matches: [], idx: -1, folder: '', busy: false, resume: false, images: [] };
+const ns = {
+  projects: [],
+  picked: [],
+  matches: [],
+  idx: -1,
+  folder: '',
+  busy: false,
+  resume: false,
+  images: [],
+  extraArgs: [],
+};
 // Must match ATTACHMENT_TYPES and the upload limit in server.js.
 const NS_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
 const NS_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
@@ -18291,6 +18314,7 @@ function openNewSession(folder, resume = false) {
   if (!terminalAvailable() || document.getElementById('new-session-modal').classList.contains('visible')) return;
   if (terminalPaneFocused()) leaveTerminalPane();
   ns.resume = resume;
+  ns.extraArgs = [];
   document.querySelector('.new-session-modal').classList.toggle('ns-resume', resume);
   document.getElementById('ns-title').textContent = resume ? 'Resume session' : 'New session';
   for (const id of ['ns-name', 'ns-wt-name', 'ns-prompt']) document.getElementById(id).value = '';
@@ -18308,7 +18332,7 @@ function openNewSession(folder, resume = false) {
   const input = document.getElementById('ns-folder');
   input.focus();
   input.select();
-  loadProjects().then((list) => {
+  return loadProjects().then((list) => {
     ns.projects = list
       .filter((p) => !p.temp)
       .sort((a, b) => (b.modifiedAt || '').localeCompare(a.modifiedAt || ''))
@@ -18324,6 +18348,11 @@ function closeNewSession() {
   closeImagePreview();
   clearNewSessionImages();
   promptVoice.rec?.abort();
+  if (promptVoice.hub) {
+    promptVoice.hub = null;
+    document.getElementById('ns-mic').setAttribute('aria-pressed', 'false');
+    hub.invoke(HUB_DICTATE, { op: 'cancel' });
+  }
 }
 
 function addNewSessionImages(files) {
@@ -18478,6 +18507,7 @@ function newSessionValues() {
     prompt: document.getElementById('ns-prompt').value.trim() || null,
     edit,
     stay: !ns.resume && !edit && document.getElementById('ns-stay').checked,
+    extraArgs: ns.resume ? [] : ns.extraArgs,
   };
 }
 
@@ -18591,7 +18621,7 @@ function forkSession(parentId) {
 async function startNewSessionInBackground(id, v) {
   refreshPlaceholders();
   setNewSessionBusy(true);
-  const r = await newSessionPost('/api/terminal/start', { id, ...v }, 'Start failed');
+  const r = await newSessionPost('/api/terminal/start', { id, ...v, claudeArgs: v.extraArgs }, 'Start failed');
   setNewSessionBusy(false);
   if (r.error) {
     dropPlaceholder(id);
@@ -18609,26 +18639,34 @@ async function startNewSessionInBackground(id, v) {
 }
 
 const SpeechRecognitionApi = window.SpeechRecognition || window.webkitSpeechRecognition;
-const promptVoice = { rec: null };
+const promptVoice = { rec: null, hub: null };
+const HUB_DICTATE = 'voice.dictate';
 
 // Replaces the selection the field had when dictation began, so interim results rewrite
 // themselves in place instead of piling up.
-function togglePromptVoice() {
-  if (promptVoice.rec) return promptVoice.rec.stop();
+function promptInserter() {
   const field = document.getElementById('ns-prompt');
-  const btn = document.getElementById('ns-mic');
   const before = field.value.slice(0, field.selectionStart);
   const after = field.value.slice(field.selectionEnd);
   const lead = before && !/\s$/.test(before) ? ' ' : '';
-  const rec = new SpeechRecognitionApi();
-  rec.lang = navigator.language;
-  rec.interimResults = true;
-  rec.onresult = (e) => {
-    const text = Array.from(e.results, (r) => r[0].transcript).join('');
+  return (text) => {
     field.value = before + lead + text + after;
     const caret = before.length + lead.length + text.length;
     field.setSelectionRange(caret, caret);
+    renderNewSessionForm();
   };
+}
+
+function togglePromptVoice() {
+  if (hub.can(HUB_DICTATE)) return toggleHubDictation();
+  if (promptVoice.rec) return promptVoice.rec.stop();
+  const field = document.getElementById('ns-prompt');
+  const btn = document.getElementById('ns-mic');
+  const insert = promptInserter();
+  const rec = new SpeechRecognitionApi();
+  rec.lang = navigator.language;
+  rec.interimResults = true;
+  rec.onresult = (e) => insert(Array.from(e.results, (r) => r[0].transcript).join(''));
   rec.onerror = (e) => {
     if (e.error === 'not-allowed' || e.error === 'service-not-allowed')
       setNewSessionError('Microphone access is blocked for this page.');
@@ -18642,6 +18680,23 @@ function togglePromptVoice() {
   btn.setAttribute('aria-pressed', 'true');
   field.focus();
   rec.start();
+}
+
+// Under a hub with voice on, the mic uses the hub's speech provider: the text arrives once, on the second click.
+async function toggleHubDictation() {
+  const btn = document.getElementById('ns-mic');
+  const op = promptVoice.hub ? 'stop' : 'start';
+  const insert = promptVoice.hub ?? promptInserter();
+  promptVoice.hub = op === 'start' ? insert : null;
+  btn.setAttribute('aria-pressed', String(op === 'start'));
+  document.getElementById('ns-prompt').focus();
+  const r = await hub.invoke(HUB_DICTATE, { op });
+  if (!r.ok) {
+    promptVoice.hub = null;
+    btn.setAttribute('aria-pressed', 'false');
+    return setNewSessionError(`Dictation failed: ${r.reason}`);
+  }
+  if (op === 'stop' && r.text) insert(r.text);
 }
 
 function pickFolderOption(i) {
@@ -19135,6 +19190,122 @@ hub.onActive((active) => {
 hub.onStatus(pushTerminalClaims);
 hub.onSettings(applyHubSettings);
 hub.handle('session.open', (p) => p.session && openSessionFromOutside(p.session));
+hub.handle('session.paste', (p) => pasteFromHub(p));
+hub.handle('session.new', (p) => {
+  hubNewSession = newSessionFromHub(p);
+});
+hub.handle('session.live', (p) => {
+  liveChain = liveChain.then(() => liveFromHub(p)).catch(() => {});
+});
+
+// Action params are strings, so flags come as "true" and `args` as claude args split on spaces
+// (the terminal refuses quotes in them anyway).
+function hubNewSessionValues(p) {
+  const onScreen = viewMode === 'session' ? sessions.find((s) => s.id === currentSessionId)?.project : null;
+  const filtered = filterProject && filterProject !== '__recent__' ? filterProject : null;
+  const wt = p.worktree?.trim();
+  const edit = p.edit === 'true';
+  return {
+    cwd: p.cwd || onScreen || filtered || '',
+    name: p.name?.trim() || null,
+    worktree: wt === 'true' ? true : wt && wt !== 'false' ? wt : false,
+    model: p.model || null,
+    effort: p.effort || null,
+    prompt: p.prompt?.trim() || null,
+    edit,
+    stay: !edit && p.stay === 'true',
+    extraArgs: p.args?.trim() ? p.args.trim().split(/\s+/) : [],
+  };
+}
+
+function newSessionFromHub(p) {
+  if (!terminalAvailable()) return showToast('The embedded terminal is off', 'error');
+  const v = hubNewSessionValues(p);
+  const problem = newSessionProblem(v);
+  if (problem) return showToast(problem, 'error');
+  return newSessionDialogFromHub(v);
+}
+
+// The dialog with the hub's values filled in, a folder picked (else the most recent project) and Start focused,
+// so the user sees what starts and one Enter starts it.
+async function newSessionDialogFromHub(v) {
+  const opened = openNewSession(v.cwd);
+  if (!opened) return;
+  const set = (id, value) => {
+    document.getElementById(id).value = value ?? '';
+  };
+  set('ns-name', v.name);
+  set('ns-prompt', v.prompt);
+  set('ns-model', v.model);
+  set('ns-effort', v.effort);
+  set('ns-wt-name', typeof v.worktree === 'string' ? v.worktree : '');
+  document.getElementById('ns-wt').checked = v.worktree !== false;
+  if (v.edit) document.getElementById('ns-edit').checked = true;
+  if (v.stay) document.getElementById('ns-stay').checked = true;
+  ns.extraArgs = v.extraArgs;
+  renderNewSessionForm();
+  await opened;
+  if (!ns.folder && ns.projects[0]) setNewSessionFolder(ns.projects[0]);
+  if (ns.folder) document.getElementById('ns-start').focus();
+}
+
+// Voice while the New session dialog is open is dictation into its prompt; Enter on Start sends it.
+function voiceIntoNewSession(text) {
+  promptInserter()(text.trim());
+  if (ns.folder) document.getElementById('ns-start').focus();
+}
+
+// The hub's voice control sends dictated text here; with no session named, it goes to the one on screen.
+const newSessionOpen = () => document.getElementById('new-session-modal').classList.contains('visible');
+const hubTargetSession = (session) => session || (viewMode === 'session' && termState.shown && termState.sessionId);
+const noSessionToast = (text) =>
+  showToast('No session on screen', 'info', { label: 'Copy', onClick: () => copyText(text, 'text') }, text);
+
+async function pasteFromHub({ session, text, submit }) {
+  if (!text) return;
+  if (!session && newSessionOpen()) return voiceIntoNewSession(text);
+  const id = hubTargetSession(session);
+  if (!id) return noSessionToast(text);
+  const res = await terminalFetch(`/api/terminal/paste/${encodeURIComponent(id)}`, 'POST', {
+    text,
+    submit: submit === 'true',
+  });
+  if (!res.ok) showToast((await res.json().catch(() => ({}))).error || `Paste failed (${res.status})`, 'error');
+}
+
+// session.live: one key hold sends the words so far many times, then once with final. Calls run in
+// order, after a session.new sent just before them has opened its dialog.
+let hubNewSession = Promise.resolve();
+let liveChain = Promise.resolve();
+let liveText = { insert: null, typed: '' };
+
+// `cancel` comes with an empty final text, which removes what the hold typed; "close" also closes
+// the New session dialog that the hold opened.
+async function liveFromHub({ session, text, final, submit, cancel }) {
+  await hubNewSession;
+  const done = final === 'true';
+  const hold = liveText;
+  if (done) liveText = { insert: null, typed: '' };
+  if (!session && newSessionOpen()) {
+    hold.insert ??= promptInserter();
+    hold.insert(text.trim());
+    if (cancel === 'close') closeNewSession();
+    else if (done && !cancel && ns.folder) document.getElementById('ns-start').focus();
+    return;
+  }
+  const id = hubTargetSession(session);
+  if (!id) {
+    if (done && text) noSessionToast(text);
+    return;
+  }
+  const res = await terminalFetch(`/api/terminal/type/${encodeURIComponent(id)}`, 'POST', {
+    from: hold.typed,
+    text,
+    submit: done && submit === 'true',
+  });
+  if (res.ok) hold.typed = text;
+  else if (done) showToast((await res.json().catch(() => ({}))).error || `Typing failed (${res.status})`, 'error');
+}
 
 // session.changed goes out once the switch settles, so arrowing through the list sends one event.
 let publishTimer = 0;
