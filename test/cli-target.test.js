@@ -33,7 +33,7 @@ function runCli(args, env) {
   });
 }
 
-describe('CLI server resolution', () => {
+describe('CLI server resolution', { concurrency: true }, () => {
   it('reaches the server named by the config dir beacon', async () => {
     const hits = [];
     const srv = http.createServer((req, res) => {
@@ -276,7 +276,7 @@ describe('CLI server resolution', () => {
   });
 });
 
-describe('CLI help', () => {
+describe('CLI help', { concurrency: true }, () => {
   const env = () => ({ CLAUDE_CONFIG_DIR: tempConfigDir(), PORT: '1' });
 
   it('lists commands at the top, verbs one level down, flags at the leaf', async () => {
@@ -304,7 +304,7 @@ describe('CLI help', () => {
   });
 });
 
-describe('CLI argument parsing', () => {
+describe('CLI argument parsing', { concurrency: true }, () => {
   const env = () => ({ CLAUDE_CONFIG_DIR: tempConfigDir(), PORT: '1' });
   const usage = (cmd) => new RegExp(`Usage: claude-code-kanban ${cmd}`);
 

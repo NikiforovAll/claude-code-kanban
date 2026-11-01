@@ -209,7 +209,7 @@ describe('new session options', () => {
   });
 });
 
-describe('edit before run', () => {
+describe('edit before run', { concurrency: true }, () => {
   const A = 'aaaaaaaa-0000-0000-0000-000000000001';
 
   function service(live = [], shell = 'bash', resolveCwd = () => null) {
@@ -227,6 +227,7 @@ describe('edit before run', () => {
       liveSessions: () => live,
       isPidAlive: () => true,
       exitPollMs: 20,
+      promptQuietMs: QUIET_MS,
     });
     return { t, pty };
   }
@@ -239,7 +240,7 @@ describe('edit before run', () => {
     assert.deepEqual(p.args, shellArgs('bash', null));
     p.emit('prompt> ');
     await until(() => p.written.length > 0);
-    await wait(150);
+    await wait(PAST_QUIET_MS);
     assert.deepEqual(p.written, [`\x1b[200~claude 'line one\rline two' --session-id ${A} --name 'Fix login'\x1b[201~`]);
     assert.equal(t.list()[0].edit, true);
     t.shutdown();
@@ -340,6 +341,9 @@ describe('edit before run', () => {
   });
 });
 
+const QUIET_MS = 20;
+const PAST_QUIET_MS = 5 * QUIET_MS;
+
 async function startWithPrompt(id, overrides, spec) {
   const pty = fakePty();
   const t = createTerminalService({
@@ -355,13 +359,14 @@ async function startWithPrompt(id, overrides, spec) {
     liveSessions: () => [],
     isPidAlive: () => true,
     exitPollMs: 20,
+    promptQuietMs: QUIET_MS,
     ...overrides,
   });
   await t.startNew({ id, cwd: os.tmpdir(), prompt: 'do the task', ...spec });
   return { t, p: pty.spawned[0] };
 }
 
-describe('folder trust dialog', () => {
+describe('folder trust dialog', { concurrency: true }, () => {
   const A = 'aaaaaaaa-0000-0000-0000-000000000001';
   const DIALOG = '\x1b[?2004hDo you trust the files in this folder?\r\n❯ 1. Yes, I trust this folder\r\n  2. No, exit\r\n';
   const INPUT_BOX = '\x1b[2J\x1b[H\x1b[?2004h> ';
@@ -392,7 +397,7 @@ describe('folder trust dialog', () => {
     p.emit(DIALOG);
     await until(() => awaiting(t));
     p.emit('\x1b[2J\x1b[H\x1b[?2031l\x1b[?2004l\x1b[?1016l\r\n');
-    await wait(800);
+    await wait(PAST_QUIET_MS);
     assert.deepEqual(p.written, []);
     p.emit(INPUT_BOX);
     await until(() => p.written.length > 0);
@@ -408,7 +413,7 @@ describe('folder trust dialog', () => {
       const { t, p } = await started();
       for (const step of fx.steps) {
         p.emit(step.output);
-        await wait(800);
+        await wait(PAST_QUIET_MS);
         assert.deepEqual(p.written, [], `prompt sent over the ${step.dialog} dialog`);
         assert.equal(awaiting(t), step.awaitingTrust);
         assert.equal(t.paste(A, 'x'), false);
@@ -434,7 +439,7 @@ describe('folder trust dialog', () => {
   it('does not flag a screen that only says trust', async () => {
     const { t, p } = await started();
     p.emit('\x1b[?2004hI trust the plan\r\n');
-    await wait(600);
+    await wait(PAST_QUIET_MS);
     assert.equal(awaiting(t), false);
     t.shutdown();
   });
@@ -445,14 +450,14 @@ describe('folder trust dialog', () => {
     await until(() => p.written.length > 0);
     const before = changes();
     p.emit(DIALOG);
-    await wait(600);
+    await wait(PAST_QUIET_MS);
     assert.equal(awaiting(t), false);
     assert.equal(changes(), before);
     t.shutdown();
   });
 });
 
-describe('prompt submit', () => {
+describe('prompt submit', { concurrency: true }, () => {
   const A = 'aaaaaaaa-0000-0000-0000-000000000002';
 
   async function started(reg) {
@@ -786,7 +791,7 @@ async function until(check, timeoutMs = 2000) {
   while (!check() && Date.now() < end) await wait(10);
 }
 
-describe('terminal restore', () => {
+describe('terminal restore', { concurrency: true }, () => {
   const A = 'aaaaaaaa-0000-0000-0000-000000000001';
   const B = 'aaaaaaaa-0000-0000-0000-000000000002';
   const ELSEWHERE = 'aaaaaaaa-0000-0000-0000-000000000003';
