@@ -4732,9 +4732,9 @@ function canAddTask() {
   return viewMode === 'session' && !!currentSessionId;
 }
 
-async function postTask(subject) {
+async function postTask(subject, description = '') {
   const sessionId = currentSessionId;
-  const res = await api(apiPath`/api/tasks/${sessionId}`, { method: 'POST', body: { subject } });
+  const res = await api(apiPath`/api/tasks/${sessionId}`, { method: 'POST', body: { subject, description } });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   // The response carries the finished task, and the watcher will resend it within the
   // SSE debounce anyway -- so show it now rather than paying a session refetch for it.
@@ -4743,7 +4743,7 @@ async function postTask(subject) {
 }
 
 // task.add from the hub: the subject goes on the board on screen; with none, the Add task input opens.
-async function addTaskFromHub({ subject }) {
+async function addTaskFromHub({ subject, description }) {
   if (!canAddTask()) return showToast('Open a session to add a task', 'info');
   const text = subject?.trim();
   if (!text) {
@@ -4751,7 +4751,7 @@ async function addTaskFromHub({ subject }) {
     return tile && startAddTask(tile);
   }
   try {
-    await postTask(text);
+    await postTask(text, description?.trim());
     if (!addingTask) renderKanban();
   } catch (error) {
     console.error('Failed to create task:', error);
