@@ -814,6 +814,10 @@
     <div class="modal new-session-modal" onclick="event.stopPropagation()" role="dialog" aria-labelledby="ns-title">
       <div class="modal-header">
         <h3 class="modal-title" id="ns-title">New session</h3>
+        <span id="ns-voice" class="voice-mic" role="status" hidden>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v5"/></svg>
+          <span>Listening</span>
+        </span>
         <button class="modal-close" aria-label="Close dialog" onclick="closeNewSession()">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
         </button>
@@ -896,6 +900,41 @@
         <button type="button" id="ns-start" class="btn btn-primary" onclick="startNewSession()" disabled>Start</button>
       </div>
       <div id="ns-lightbox" class="ns-lightbox" hidden><img alt=""></div>
+    </div>
+  </div>
+
+  <div id="task-modal" class="modal-overlay top-aligned" onclick="closeTaskDialog()">
+    <div class="modal task-modal" onclick="event.stopPropagation()" role="dialog" aria-labelledby="task-modal-title">
+      <div class="modal-header">
+        <h3 class="modal-title" id="task-modal-title">Add task <span id="task-modal-session" class="task-modal-session"></span></h3>
+        <span id="task-modal-mic" class="voice-mic" role="status" hidden>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v5"/></svg>
+          <span id="task-modal-mic-label">Listening</span>
+        </span>
+        <button class="modal-close" aria-label="Close dialog" onclick="closeTaskDialog()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div class="modal-body ns-body">
+        <div class="ns-row">
+          <label class="ns-label" for="task-subject">Title</label>
+          <div class="ns-field">
+            <input type="text" id="task-subject" class="form-input" placeholder="What to do" autocomplete="off" data-bwignore data-1p-ignore data-lpignore="true">
+          </div>
+        </div>
+        <div class="ns-row">
+          <label class="ns-label" for="task-description">Description</label>
+          <div class="ns-field">
+            <textarea id="task-description" class="form-input" rows="4" placeholder="Optional"></textarea>
+          </div>
+        </div>
+        <div id="task-error" class="ns-error" hidden></div>
+      </div>
+      <div class="modal-footer ns-footer">
+        <span class="task-modal-hint"><kbd>Enter</kbd> adds &middot; <kbd>Shift</kbd>+<kbd>Enter</kbd> new line</span>
+        <button type="button" class="btn btn-secondary" onclick="closeTaskDialog()">Cancel</button>
+        <button type="button" id="task-save" class="btn btn-primary" onclick="saveTaskDialog()" disabled>Add</button>
+      </div>
     </div>
   </div>
 

@@ -10,6 +10,7 @@
       "session.open": { "params": { "session": "string" }, "mode": "message" },
       "session.paste": { "params": { "text": "string", "submit": "string?", "session": "string?" }, "mode": "message" },
       "task.add": { "params": { "subject": "string?", "description": "string?" }, "mode": "message" },
+      "task.live": { "params": { "subject": "string?", "description": "string?", "pending": "string?", "final": "string?", "submit": "string?", "cancel": "string?" }, "mode": "message" },
       "session.live": { "params": { "text": "string", "final": "string?", "submit": "string?", "cancel": "string?", "session": "string?" }, "mode": "message" },
       "session.new": {
         "params": {

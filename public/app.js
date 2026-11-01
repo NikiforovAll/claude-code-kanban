@@ -4672,7 +4672,7 @@ function renderKanban() {
   // away mid-typing -- leave the column alone until the input is gone.
   if (!addingTask) {
     const addTile = canAddTask()
-      ? `<button type="button" class="column-add${pending.length ? '' : ' empty'}" onclick="startAddTask(this)" title="You can also ask the agent to add tasks with its TaskCreate tool. Make sure CLAUDE_CODE_ENABLE_TASKS is set in its environment.">${plusIcon}<span>Add task</span></button>`
+      ? `<button type="button" class="column-add${pending.length ? '' : ' empty'}" onclick="startAddTask(this, event)" title="Ctrl+Click opens the dialog with a description. You can also ask the agent to add tasks with its TaskCreate tool. Make sure CLAUDE_CODE_ENABLE_TASKS is set in its environment.">${plusIcon}<span>Add task</span></button>`
       : '';
     writes.push([
       pendingTasks,
@@ -4732,8 +4732,7 @@ function canAddTask() {
   return viewMode === 'session' && !!currentSessionId;
 }
 
-async function postTask(subject, description = '') {
-  const sessionId = currentSessionId;
+async function postTask(subject, description = '', sessionId = currentSessionId) {
   const res = await api(apiPath`/api/tasks/${sessionId}`, { method: 'POST', body: { subject, description } });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   // The response carries the finished task, and the watcher will resend it within the
@@ -4742,14 +4741,11 @@ async function postTask(subject, description = '') {
   if (sessionId === currentSessionId) currentTasks.push({ ...task, sessionId });
 }
 
-// task.add from the hub: the subject goes on the board on screen; with none, the Add task input opens.
+// task.add from the hub: the subject goes on the board on screen; with none, the Add task dialog opens.
 async function addTaskFromHub({ subject, description }) {
   if (!canAddTask()) return showToast('Open a session to add a task', 'info');
   const text = subject?.trim();
-  if (!text) {
-    const tile = document.querySelector('.column-add');
-    return tile && startAddTask(tile);
-  }
+  if (!text) return openTaskDialog(true);
   try {
     await postTask(text, description?.trim());
     if (!addingTask) renderKanban();
@@ -4759,8 +4755,173 @@ async function addTaskFromHub({ subject, description }) {
   }
 }
 
-function startAddTask(tile) {
+// The Add task dialog: the hub opens it by voice and fills it as the user speaks. The task goes to
+// the session that was on screen when it opened.
+let taskDialogSession = null;
+const taskDialogOpen = () => document.getElementById('task-modal').classList.contains('visible');
+
+function openTaskDialog(focus = false) {
+  if (terminalPaneFocused()) leaveTerminalPane();
+  taskDialogSession = currentSessionId;
+  const session = sessions.find((s) => s.id === currentSessionId);
+  document.getElementById('task-modal-session').textContent = session ? sessionDisplayName(session) : '';
+  document.getElementById('task-subject').value = '';
+  document.getElementById('task-description').value = '';
+  setFormError('task-error', '');
+  renderTaskDialog();
+  document.getElementById('task-modal').classList.add('visible');
+  if (focus) document.getElementById('task-subject').focus();
+}
+
+function closeTaskDialog() {
+  hideModalOverlay('task-modal');
+  taskDialogSession = null;
+  taskDialogVoice = false;
+  setTaskVoiceState('');
+}
+
+function renderTaskDialog() {
+  const subject = document.getElementById('task-subject');
+  document.getElementById('task-save').disabled = subject.readOnly || !subject.value.trim();
+}
+
+function fillTaskDialog(subject, description) {
+  fillTaskField('task-subject', subject);
+  fillTaskField('task-description', description);
+  renderTaskDialog();
+}
+
+// Voice fills a field: it flashes, and a long text shows its newest words.
+function fillTaskField(id, value) {
+  const field = document.getElementById(id);
+  if (field.value === value) return;
+  field.value = value;
+  field.scrollTop = field.scrollHeight;
+  if (value) flashTaskField(field, 'task-filled');
+}
+
+function flashTaskField(field, cls) {
+  field.classList.remove('task-filled', 'task-moved');
+  void field.offsetWidth;
+  field.classList.add(cls);
+}
+
+async function saveTaskDialog() {
+  const subject = document.getElementById('task-subject').value.trim();
+  if (!subject || !taskDialogSession) return;
+  const save = document.getElementById('task-save');
+  save.disabled = true;
+  try {
+    await postTask(subject, document.getElementById('task-description').value.trim(), taskDialogSession);
+    closeTaskDialog();
+    if (!addingTask) renderKanban();
+  } catch (error) {
+    console.error('Failed to create task:', error);
+    setFormError('task-error', 'Failed to create task');
+    renderTaskDialog();
+  }
+}
+
+// The title can take a model call after the release; a quick answer shows no loading at all.
+const TASK_TITLING_DELAY_MS = 300;
+let taskTitlingTimer = null;
+
+// A hold fills a dialog: it glows, shows the badge, and its fields are read-only, so typing cannot
+// race the voice. A hold whose last call never comes (the hub page reloaded) runs `onStale` after
+// VOICE_STALE_MS, longer than a task title's model call.
+const VOICE_STALE_MS = 20_000;
+const voiceStale = new Map();
+
+function setModalVoice(modal, fields, state, onStale) {
+  clearTimeout(voiceStale.get(modal));
+  if (state) voiceStale.set(modal, setTimeout(onStale, VOICE_STALE_MS));
+  if ((modal.dataset.voice ?? '') === state) return;
+  if (state) modal.dataset.voice = state;
+  else delete modal.dataset.voice;
+  for (const field of fields) field.readOnly = !!state;
+  modal.querySelector('.voice-mic').hidden = !state;
+}
+
+// 'listening' while the user speaks, 'titling' while the title is on its way, '' when the dialog is
+// the user's.
+function setTaskVoiceState(state) {
+  clearTimeout(taskTitlingTimer);
+  if (state === 'titling') {
+    taskTitlingTimer = setTimeout(() => applyTaskVoiceState(state), TASK_TITLING_DELAY_MS);
+    return;
+  }
+  applyTaskVoiceState(state);
+}
+
+function applyTaskVoiceState(state) {
+  const subject = document.getElementById('task-subject');
+  const fields = [subject, document.getElementById('task-description')];
+  setModalVoice(document.querySelector('.task-modal'), fields, state, () => {
+    taskDialogVoice = false;
+    setTaskVoiceState('');
+  });
+  subject.classList.toggle('task-titling', state === 'titling');
+  subject.placeholder = state === 'titling' ? 'Writing a title…' : 'What to do';
+  document.getElementById('task-modal-mic-label').textContent = state === 'titling' ? 'Writing a title' : 'Listening';
+  renderTaskDialog();
+}
+
+// Set from a hold's first task.live until its last call or a close, so a final call that lands
+// after the user closed the dialog does not open it again.
+let taskDialogVoice = false;
+
+// task.live from the hub: while the user speaks, the words so far as the description; `pending` on
+// release; then `final` with the title and the description. A short task moves up into the title.
+function liveTaskFromHub(p) {
+  if (p.cancel === 'true') return taskDialogVoice && closeTaskDialog();
+  const last = p.final === 'true';
+  if (!taskDialogVoice && !last && p.pending !== 'true' && canAddTask()) {
+    if (!taskDialogOpen()) openTaskDialog();
+    taskDialogVoice = true;
+    setTaskVoiceState('listening');
+  }
+  if (!taskDialogVoice) return last && !canAddTask() && showToast('Open a session to add a task', 'info');
+  if (p.pending === 'true') return setTaskVoiceState('titling');
+  if (!last) {
+    setTaskVoiceState('listening');
+    return fillTaskField('task-description', p.description ?? '');
+  }
+  const subject = document.getElementById('task-subject');
+  taskDialogVoice = false;
+  setTaskVoiceState('');
+  if (p.subject !== undefined) {
+    const moved = !p.description && p.subject === document.getElementById('task-description').value.trim();
+    fillTaskDialog(p.subject, p.description ?? '');
+    if (moved) flashTaskField(subject, 'task-moved');
+  }
+  if (p.submit === 'true') return saveTaskDialog();
+  const save = document.getElementById('task-save');
+  (save.disabled ? subject : save).focus();
+}
+
+function initTaskDialog() {
+  const subject = document.getElementById('task-subject');
+  const description = document.getElementById('task-description');
+  subject.addEventListener('input', renderTaskDialog);
+  document.querySelector('.task-modal').addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      return closeTaskDialog();
+    }
+    if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return;
+    if (e.target !== subject && e.target !== description) return;
+    e.preventDefault();
+    e.stopPropagation();
+    saveTaskDialog();
+  });
+}
+initTaskDialog();
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+function startAddTask(tile, e) {
   if (addingTask) return;
+  if (e?.ctrlKey || e?.metaKey) return openTaskDialog(true);
   addingTask = true;
 
   const input = document.createElement('input');
@@ -7851,6 +8012,7 @@ const MODAL_CLOSERS = {
   'project-picker-modal': () => closeProjectPicker(),
   'terminal-manager-modal': () => closeTerminalManager(),
   'new-session-modal': () => closeNewSession(),
+  'task-modal': () => closeTaskDialog(),
   'confirm-modal': () => closeConfirmModal?.(false),
   'pane-pop': () => closePanePop(),
 };
@@ -18366,6 +18528,7 @@ function openNewSession(folder, resume = false) {
 
 function closeNewSession() {
   hideModalOverlay('new-session-modal');
+  setNewSessionVoice(false);
   closeFolderList();
   closeImagePreview();
   clearNewSessionImages();
@@ -18542,7 +18705,11 @@ function newSessionProblem(v) {
 }
 
 function setNewSessionError(text) {
-  const el = document.getElementById('ns-error');
+  setFormError('ns-error', text);
+}
+
+function setFormError(id, text) {
+  const el = document.getElementById(id);
   el.textContent = text;
   el.hidden = !text;
 }
@@ -19216,6 +19383,7 @@ hub.onSettings(applyHubSettings);
 hub.handle('session.open', (p) => p.session && openSessionFromOutside(p.session));
 hub.handle('session.paste', (p) => pasteFromHub(p));
 hub.handle('task.add', (p) => addTaskFromHub(p));
+hub.handle('task.live', (p) => liveTaskFromHub(p));
 // After pending session.live calls, so the hub's clear of words typed into the terminal lands there, not in the dialog.
 hub.handle('session.new', (p) => {
   hubNewSession = liveChain.then(() => newSessionFromHub(p)).catch(() => {});
@@ -19308,6 +19476,11 @@ let liveText = { insert: null, typed: '', at: 0 };
 // final call (the hub page reloaded) and its typed words are not this hold's to erase.
 const LIVE_GAP_MS = 10_000;
 
+function setNewSessionVoice(on) {
+  const modal = document.querySelector('.new-session-modal');
+  setModalVoice(modal, [document.getElementById('ns-prompt')], on ? 'listening' : '', () => setNewSessionVoice(false));
+}
+
 // `cancel` comes with an empty final text, which removes what the hold typed; "close" also closes
 // the New session dialog that the hold opened.
 async function liveFromHub({ session, text, final, submit, cancel }) {
@@ -19320,6 +19493,9 @@ async function liveFromHub({ session, text, final, submit, cancel }) {
   if (!session && newSessionOpen()) {
     hold.insert ??= promptInserter();
     hold.insert(text.trim());
+    const prompt = document.getElementById('ns-prompt');
+    prompt.scrollTop = prompt.scrollHeight;
+    setNewSessionVoice(!done);
     if (cancel === 'close') closeNewSession();
     else if (done && !cancel && ns.folder) document.getElementById('ns-start').focus();
     return;

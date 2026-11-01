@@ -8675,7 +8675,8 @@ body.light .msg-assistant .msg-text {
   color: var(--text-muted);
 }
 
-.confirm-hint kbd {
+.confirm-hint kbd,
+.task-modal-hint kbd {
   font-family: var(--mono);
   font-size: 10px;
   border: 1px solid var(--border);
@@ -9801,7 +9802,9 @@ select.form-input option:checked {
 }
 
 .ns-body textarea.form-input {
-  min-height: 0;
+  field-sizing: content;
+  min-height: 86px;
+  max-height: 50vh;
 }
 
 .ns-prompt-field {
@@ -9976,6 +9979,132 @@ select.form-input option:checked {
 
 @media (prefers-reduced-motion: reduce) {
   .session-waiting .pulse {
+    animation: none;
+  }
+}
+/* #endregion */
+
+/* #region TASK_DIALOG */
+.modal.task-modal {
+  width: 560px;
+  max-width: calc(100vw - 32px);
+}
+
+.task-modal-session {
+  margin-left: 6px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-tertiary);
+}
+
+.task-modal .ns-label {
+  white-space: nowrap;
+}
+
+.modal[data-voice] {
+  border-color: color-mix(in srgb, var(--accent) 60%, var(--border));
+  animation: voice-glow 1.6s ease-in-out infinite;
+}
+
+@keyframes voice-glow {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent),
+      0 0 18px color-mix(in srgb, var(--accent) 18%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--accent) 60%, transparent),
+      0 0 34px color-mix(in srgb, var(--accent) 35%, transparent);
+  }
+}
+
+.voice-mic {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  margin-right: 8px;
+  padding: 3px 10px 3px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.voice-mic[hidden] {
+  display: none;
+}
+
+.voice-mic svg {
+  width: 14px;
+  height: 14px;
+  animation: voice-mic 1.2s ease-in-out infinite;
+}
+
+@keyframes voice-mic {
+  50% {
+    opacity: 0.4;
+  }
+}
+
+.modal[data-voice] .form-input[readonly] {
+  cursor: default;
+}
+
+.task-modal-hint {
+  margin-right: auto;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.task-modal .form-input.task-filled {
+  animation: task-filled 0.6s ease-out;
+}
+
+@keyframes task-filled {
+  from {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
+  }
+}
+
+.task-modal .form-input.task-moved {
+  animation: task-moved 0.35s ease-out;
+}
+
+@keyframes task-moved {
+  from {
+    opacity: 0.2;
+    transform: translateY(48px);
+  }
+}
+
+.task-modal .form-input.task-titling {
+  background:
+    linear-gradient(90deg, transparent 0%, color-mix(in srgb, var(--accent) 14%, transparent) 50%, transparent 100%) 0 0
+    / 200% 100% var(--bg-elevated);
+  animation: task-titling 1.2s linear infinite;
+  cursor: progress;
+}
+
+@keyframes task-titling {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .task-modal .form-input.task-filled,
+  .task-modal .form-input.task-moved,
+  .task-modal .form-input.task-titling,
+  .modal[data-voice],
+  .voice-mic svg {
     animation: none;
   }
 }
