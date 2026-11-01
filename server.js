@@ -3393,14 +3393,15 @@ app.post('/api/terminal/launched/:id', (req, res) => {
 });
 
 // The hub's session.paste action: text into a session's input box, with Enter when `submit`.
-// claude queues a prompt sent while it works. Refused (409) only on a dialog screen, where Enter would answer it.
+// claude queues a prompt sent while it works. Refused (409) only on a dialog, where the keys would answer it:
+// the screen check misses a permission prompt with no "Enter to confirm", so the waiting marker is checked too.
 app.post('/api/terminal/paste/:id', terminalRoute(async (req, res) => {
   if (!terminal.authorized(req.get('x-terminal-token'))) return res.status(401).json({ error: 'invalid terminal token' });
   const { text, submit } = req.body || {};
   if (typeof text !== 'string' || !text.trim()) return res.status(400).json({ error: 'text is required' });
   const id = req.params.id;
   if (!terminal.isRunning(id)) return res.status(404).json({ error: 'no running terminal for this session' });
-  if (!(await terminal.paste(id, text, submit === true))) {
+  if (isWaitingOnUser(id) || !(await terminal.paste(id, text, submit === true))) {
     return res.status(409).json({ error: 'the session shows a dialog' });
   }
   res.status(204).end();
@@ -3414,7 +3415,7 @@ app.post('/api/terminal/type/:id', terminalRoute(async (req, res) => {
   if (typeof text !== 'string' || typeof from !== 'string') return res.status(400).json({ error: 'text is required' });
   const id = req.params.id;
   if (!terminal.isRunning(id)) return res.status(404).json({ error: 'no running terminal for this session' });
-  if (!(await terminal.type(id, from, text, submit === true))) {
+  if (isWaitingOnUser(id) || !(await terminal.type(id, from, text, submit === true))) {
     return res.status(409).json({ error: 'the session shows a dialog' });
   }
   res.status(204).end();

@@ -9623,6 +9623,10 @@ select.form-input option:checked {
   gap: 12px;
 }
 
+.ns-row[hidden] {
+  display: none;
+}
+
 .new-session-modal.ns-resume .ns-extra {
   display: none;
 }

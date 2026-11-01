@@ -18534,6 +18534,8 @@ function renderNewSessionForm() {
   hint.hidden = !wtOn;
   hint.textContent = `.claude/worktrees/${typeof v.worktree === 'string' ? v.worktree : '<name chosen by Claude>'}`;
   document.getElementById('ns-stay').disabled = v.edit;
+  document.getElementById('ns-args-row').hidden = !v.extraArgs.length;
+  document.getElementById('ns-args').textContent = v.extraArgs.join(' ');
   const problem = newSessionProblem(v);
   setNewSessionError(problem);
   const start = document.getElementById('ns-start');
