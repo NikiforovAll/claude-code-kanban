@@ -19424,10 +19424,10 @@ hub.handle('session.next', () => nextWaitingFromHub());
 hub.handle('task.live', (p) => liveTaskFromHub(p));
 // After pending session.live calls, so the hub's clear of words typed into the terminal lands there, not in the dialog.
 hub.handle('session.new', (p) => {
-  hubNewSession = liveChain.then(() => newSessionFromHub(p)).catch(() => {});
+  hubNewSession = liveChain.then(() => newSessionFromHub(p)).catch((e) => console.error('[hub] session.new', e));
 });
 hub.handle('session.live', (p) => {
-  liveChain = liveChain.then(() => liveFromHub(p)).catch(() => {});
+  liveChain = liveChain.then(() => liveFromHub(p)).catch((e) => console.error('[hub] session.live', e));
 });
 
 // Action params are strings, so flags come as "true" and `args` as claude args split on spaces
@@ -19581,7 +19581,7 @@ function publishVoiceContext() {
 
 // Voice while the New session dialog is open is dictation into its prompt; Enter on Start sends it.
 function voiceIntoNewSession(text) {
-  promptInserter()(text.trim());
+  fieldInserter(document.getElementById('ns-prompt'))(text.trim());
   if (ns.folder) document.getElementById('ns-start').focus();
 }
 
@@ -19640,9 +19640,9 @@ async function liveFromHub({ session, text, final, submit, cancel }) {
   const hold = liveText;
   if (done) liveText = { insert: null, typed: '', at: 0 };
   if (!session && newSessionOpen()) {
-    hold.insert ??= promptInserter();
-    hold.insert(text.trim());
     const prompt = document.getElementById('ns-prompt');
+    hold.insert ??= fieldInserter(prompt);
+    hold.insert(text.trim());
     prompt.scrollTop = prompt.scrollHeight;
     setNewSessionVoice(!done);
     if (cancel === 'close') closeNewSession();

@@ -43,6 +43,28 @@
   },
   "overrides": [
     {
+      "includes": ["public/app.js"],
+      "linter": {
+        "rules": {
+          "correctness": { "noUndeclaredVariables": "error" }
+        }
+      },
+      "javascript": {
+        "globals": [
+          "marked",
+          "DOMPurify",
+          "hljs",
+          "mermaid",
+          "ClaudeHub",
+          "projectMatch",
+          "treeHighlight",
+          "linkUrl",
+          "MAX_LINKED_DOCS",
+          "groupTree"
+        ]
+      }
+    },
+    {
       "includes": ["server.js", "cli.js", "install.js", "lib/**/*.js"],
       "formatter": {
         "enabled": false
