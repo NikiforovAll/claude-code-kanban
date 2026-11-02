@@ -5666,7 +5666,7 @@ function sgGroupDropZone(target) {
     return fromHost === path && fromGroupId === pathGroup.id ? null : { zone, groupId: pathGroup.id, under: path };
   }
   // Stacking a session onto its own project block would only fold it back where it sits today.
-  if (dragSession && sessionProjectKey(dragSession) === path) return releasable ? { zone } : null;
+  if (dragSession && sessionProjectKey(dragSession) === path) return null;
   return { zone, pairWith: path };
 }
 
