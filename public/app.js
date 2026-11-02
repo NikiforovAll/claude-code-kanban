@@ -19585,11 +19585,23 @@ function voiceIntoNewSession(text) {
   if (ns.folder) document.getElementById('ns-start').focus();
 }
 
-// The hub's voice control sends dictated text here; with no session named, it goes to the one on screen.
+// The hub's voice control sends dictated text here; with no session named, it goes to the one on screen,
+// else to the open session when its terminal runs behind the board or a pane.
 const newSessionOpen = () => document.getElementById('new-session-modal').classList.contains('visible');
-const hubTargetSession = (session) => session || (viewMode === 'session' && termState.shown && termState.sessionId);
+const hubTargetSession = (session) =>
+  session ||
+  (viewMode === 'session' &&
+    (termState.shown ? termState.sessionId : runningTerminals.has(currentSessionId) && currentSessionId));
 const noSessionToast = (text) =>
   showToast('No session on screen', 'info', { label: 'Copy', onClick: () => copyText(text, 'text') }, text);
+function typedInBackgroundToast(id) {
+  if (termState.shown && termState.sessionId === id) return;
+  const s = sessions.find((x) => x.id === id);
+  showToast(`Typed into ${s ? sessionDisplayName(s) : id.slice(0, 8)}`, 'success', {
+    label: 'Show',
+    onClick: () => showSessionTerminal(id),
+  });
+}
 
 async function pasteFromHub({ session, text, submit }) {
   if (!text) return;
@@ -19600,7 +19612,8 @@ async function pasteFromHub({ session, text, submit }) {
     text,
     submit: submit === 'true',
   });
-  if (!res.ok) showToast((await res.json().catch(() => ({}))).error || `Paste failed (${res.status})`, 'error');
+  if (res.ok) typedInBackgroundToast(id);
+  else showToast((await res.json().catch(() => ({}))).error || `Paste failed (${res.status})`, 'error');
 }
 
 // session.live: one key hold sends the words so far many times, then once with final. Calls run in
@@ -19646,8 +19659,10 @@ async function liveFromHub({ session, text, final, submit, cancel }) {
     text,
     submit: done && submit === 'true',
   });
-  if (res.ok) hold.typed = text;
-  else if (done) showToast((await res.json().catch(() => ({}))).error || `Typing failed (${res.status})`, 'error');
+  if (res.ok) {
+    hold.typed = text;
+    if (done && text) typedInBackgroundToast(id);
+  } else if (done) showToast((await res.json().catch(() => ({}))).error || `Typing failed (${res.status})`, 'error');
 }
 
 // session.changed goes out once the switch settles, so arrowing through the list sends one event.
