@@ -402,6 +402,7 @@ describe('board session list request', () => {
       sessionFilter: 'active',
       RECENT_PROJECT_HOURS: 24,
       zenGroup: null,
+      zenProject: null,
       sessionGroups: [],
       api: async (_url, opts) => {
         query = opts.query;
@@ -421,17 +422,33 @@ describe('board session list request', () => {
     assert.equal(query.project, '/p');
   });
 
-  it('group zen drops the filters and asks for the subtree session members', async () => {
-    const query = await listRequest({
-      zenGroup: 'g',
-      sessionGroups: [
-        { id: 'g', parent: null, members: [{ type: 'session', ref: 's1' }, { type: 'project', ref: '/x' }] },
-        { id: 'c', parent: 'g', members: [{ type: 'session', ref: 's2' }] },
-        { id: 'other', parent: null, members: [{ type: 'session', ref: 's3' }] },
-      ],
-    });
+  const groups = [
+    { id: 'g', parent: null, members: [{ type: 'session', ref: 's1' }, { type: 'project', ref: '/x' }] },
+    { id: 'c', parent: 'g', members: [{ type: 'session', ref: 's2' }] },
+    { id: 'other', parent: null, members: [{ type: 'session', ref: 's3' }] },
+  ];
+
+  it('group zen under All drops the filters and asks for the subtree session members', async () => {
+    const query = await listRequest({ zenGroup: 'g', sessionFilter: 'all', sessionGroups: groups });
     assert.equal(query.include, 'focus,opened,s1,s2');
     assert.equal(query.filter, null);
     assert.equal(query.project, null);
+  });
+
+  it('group zen under Active keeps the Active filter and asks for no members', async () => {
+    const query = await listRequest({ zenGroup: 'g', sessionGroups: groups });
+    assert.equal(query.include, 'focus,opened');
+    assert.equal(query.filter, 'active');
+    assert.equal(query.project, null);
+  });
+
+  it('project zen asks for that project in place of the project filter', async () => {
+    const active = await listRequest({ zenProject: 'C:/dev/app' });
+    assert.equal(active.project, 'C:/dev/app');
+    assert.equal(active.filter, 'active');
+    const all = await listRequest({ zenProject: 'C:/dev/app', sessionFilter: 'all', filterProject: '__recent__' });
+    assert.equal(all.project, 'C:/dev/app');
+    assert.equal(all.filter, null);
+    assert.equal(all.recentHours, null);
   });
 });

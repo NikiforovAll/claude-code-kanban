@@ -95,8 +95,10 @@ let sessionsHasMore = false;
 // URL, so a query string would not survive a hub reload.
 const ZEN_KEY = 'zenMode';
 let zenMode = store.getItem(ZEN_KEY) === 'true';
-// Group zen: the sidebar shows one group's subtree. A view of the moment, so it is not persisted.
+// Group and project zen: the sidebar shows one group's subtree or one project. A view of the
+// moment, so neither is persisted.
 let zenGroup = null;
+let zenProject = null;
 let filterProject = FILTER_DEFAULTS.project; // null = all, '__recent__' = last 24h, or project path
 let recentProjects = new Set();
 let projectsCacheDirty = true;
@@ -263,6 +265,8 @@ function resetState() {
   filterProject = FILTER_DEFAULTS.project;
   zenMode = false;
   zenGroup = null;
+  zenProject = null;
+  setZenPeek(null);
   store.removeItem(ZEN_KEY);
   renderZenState();
   searchQuery = '';
@@ -335,8 +339,10 @@ async function fetchSessions(includeTasks = true, focusId = currentSessionId) {
     // info modal both look it up in `sessions` and bail when it is absent, so a session
     // opened from outside the current filter would leave the view on the previous one.
     // The server adds the pinned sessions itself; the ones `session open` showed are this page's.
-    // Group zen ignores the filters, and its session members come back through `include`.
-    const zenIds = zenGroup ? sgSubtreeIds(zenGroup) : new Set();
+    // Group and project zen keep the Active/All filter and drop the others. Under All, a group's
+    // session members come back through `include`, as they may be past the page limit.
+    const zenScope = !!(zenGroup || zenProject);
+    const zenIds = zenGroup && sessionFilter !== 'active' ? sgSubtreeIds(zenGroup) : new Set();
     const zenMembers = sessionGroups
       .filter((g) => zenIds.has(g.id))
       .flatMap((g) => g.members.filter((m) => m.type === 'session').map((m) => m.ref));
@@ -347,19 +353,24 @@ async function fetchSessions(includeTasks = true, focusId = currentSessionId) {
       ...openedStickyIds,
       ...zenMembers,
     ].filter(Boolean);
-    const recent = !zenGroup && filterProject === '__recent__';
+    const recent = !zenScope && filterProject === '__recent__';
+    const project = zenProject || (!zenScope && !recent && filterProject) || null;
+    const listScope = `${project}|${recent}|${sessionFilter}|${sessionLimit}`;
     const res = await api('/api/sessions', {
       query: {
         limit: sessionLimit,
         include: include.length ? include.join(',') : null,
         recentHours: recent ? RECENT_PROJECT_HOURS : null,
-        project: !zenGroup && !recent && filterProject ? filterProject : null,
-        filter: !zenGroup && sessionFilter === 'active' ? 'active' : null,
+        project,
+        filter: sessionFilter === 'active' ? 'active' : null,
       },
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     sessionsHasMore = res.headers.get('X-Has-More') === 'true';
     const newSessions = await res.json();
+    // A list from another server scope would make every session it adds look newly active.
+    if (listScope !== lastListScope) prevActiveSessionIds = null;
+    lastListScope = listScope;
     const sessionsHash = JSON.stringify(newSessions);
     if (sessionsHash !== lastSessionsHash) {
       lastSessionsHash = sessionsHash;
@@ -3829,7 +3840,10 @@ function showNoSession() {
 // Filter pipeline: active filter → force-include revealed/current (non-pinned) sessions →
 // project filter → search filter → ensure pinned/sticky sessions are always included.
 // Pure over module state, so the session picker can ask for the same list without a render.
-function getFilteredSessions() {
+// Zen on a group or project drops the project filter and the search: its scope replaces both.
+function getFilteredSessions({ zen = false } = {}) {
+  const project = zen ? null : filterProject;
+  const search = zen ? '' : searchQuery;
   let filteredSessions = sessions;
   if (sessionFilter === 'active') {
     const activeSessionIds = new Set();
@@ -3859,7 +3873,7 @@ function getFilteredSessions() {
       }
     }
   }
-  if (filterProject) {
+  if (project) {
     // The open session keeps its row even when it belongs to another project, so that
     // revealing one by id has something to scroll to. Same exemption the active branch
     // above already makes, for the same reason. recentProjects lags behind the session list, so a
@@ -3869,7 +3883,7 @@ function getFilteredSessions() {
       (s) =>
         matchesProjectFilter(s.project, s.worktree?.repo) ||
         s.id === currentSessionId ||
-        (filterProject === '__recent__' && (isAnyPinned(s.id) || Date.parse(s.modifiedAt) >= recentCutoff)),
+        (project === '__recent__' && (isAnyPinned(s.id) || Date.parse(s.modifiedAt) >= recentCutoff)),
     );
   }
 
@@ -3880,22 +3894,22 @@ function getFilteredSessions() {
     }
   }
 
-  if (searchQuery) {
+  if (search) {
     const taskMatchIds = new Set();
     for (const t of allTasksCache) {
       if (
-        (t.subject && fuzzyMatch(t.subject, searchQuery)) ||
-        (t.description && fuzzyMatch(t.description, searchQuery)) ||
-        (t.activeForm && fuzzyMatch(t.activeForm, searchQuery))
+        (t.subject && fuzzyMatch(t.subject, search)) ||
+        (t.description && fuzzyMatch(t.description, search)) ||
+        (t.activeForm && fuzzyMatch(t.activeForm, search))
       )
         taskMatchIds.add(t.sessionId);
     }
-    const groupMatchIds = sgSearchMatchIds(searchQuery);
+    const groupMatchIds = sgSearchMatchIds(search);
     const matchesSearch = (s) =>
-      (s.name && fuzzyMatch(s.name, searchQuery)) ||
-      (s.id && fuzzyMatch(s.id, searchQuery)) ||
-      (s.project && fuzzyMatch(s.project, searchQuery)) ||
-      (s.description && fuzzyMatch(s.description, searchQuery)) ||
+      (s.name && fuzzyMatch(s.name, search)) ||
+      (s.id && fuzzyMatch(s.id, search)) ||
+      (s.project && fuzzyMatch(s.project, search)) ||
+      (s.description && fuzzyMatch(s.description, search)) ||
       taskMatchIds.has(s.id) ||
       groupMatchIds.has(s.id);
 
@@ -3918,7 +3932,7 @@ function getFilteredSessions() {
   if (
     sessionFilter === 'active' &&
     activityFilter.size === 0 &&
-    !searchQuery &&
+    !search &&
     (pinnedSessionIds.size > 0 || stickySessionIds.size > 0)
   ) {
     const filteredIds = new Set(filteredSessions.map((s) => s.id));
@@ -3977,20 +3991,25 @@ function renderSessions() {
 
   if (zenGroup && !sgGroupById(zenGroup)) {
     zenGroup = null;
+    zenPeekKey = null;
     renderZenState();
   }
   // Zen narrows the rendered list only — the session picker keeps calling getFilteredSessions()
   // and still offers everything, or there would be no way to switch sessions without leaving zen.
-  // Group zen renders only its subtree's buckets, so it takes every session unfiltered.
   const zenSession = zenMode && currentSessionId ? sessions.find((s) => s.id === currentSessionId) : null;
   sessionsList.classList.toggle('zen', !!zenSession);
   sessionsList.dataset.zenState = zenSession ? sessionState(zenSession) : '';
+  const zenScope = !!(zenGroup || zenProject);
   let filteredSessions;
-  if (zenGroup) filteredSessions = applyStableSessionOrder(sessions);
-  else if (zenMode) filteredSessions = zenSession ? [zenSession] : [];
+  if (zenScope) {
+    const scoped = getFilteredSessions({ zen: true });
+    filteredSessions = applyStableSessionOrder(
+      zenProject ? scoped.filter((s) => sessionProjectKey(s) === zenProject) : scoped,
+    );
+  } else if (zenMode) filteredSessions = zenSession ? [zenSession] : [];
   else filteredSessions = applyStableSessionOrder(getFilteredSessions());
 
-  const outside = sidebarSearch.rows(zenMode || zenGroup ? '' : searchQuery, filteredSessions);
+  const outside = sidebarSearch.rows(zenMode || zenScope ? '' : searchQuery, filteredSessions);
 
   const childDepth = new Map();
   const parentOf = new Map();
@@ -4119,7 +4138,7 @@ function renderSessions() {
       )
     : '';
 
-  if (filteredSessions.length === 0 && !zenGroup) {
+  if (filteredSessions.length === 0 && !zenScope) {
     let emptyMsg = 'No sessions found';
     let emptyHint = 'Tasks appear when you use Claude Code';
 
@@ -4228,7 +4247,7 @@ function renderSessions() {
       .join('');
 
     return `
-            <div class="project-group-header${isCollapsed ? ' collapsed' : ''}${nestedCls}" draggable="true" data-group-path="${escapedPath}" data-project-path="${escapedPath}">
+            <div class="project-group-header${isCollapsed ? ' collapsed' : ''}${nestedCls}${projectPath === zenProject ? ' sg-zen' : ''}" draggable="true" data-group-path="${escapedPath}" data-project-path="${escapedPath}">
               ${groupChevronSvg()}
               <span class="group-name">${escapeHtml(folderName)}</span>
               ${terminalAvailable() ? `<span class="project-new-btn" data-project-path="${escapedPath}" title="New session in ${escapeHtml(folderName)}">${PLUS_SVG}</span>` : ''}
@@ -4260,7 +4279,7 @@ function renderSessions() {
   }
   // A group emptied by a filter hides its header; a group the user just created (no filters)
   // shows its drop-here state instead of vanishing.
-  const sgFiltering = !zenGroup && sgListFiltered();
+  const sgFiltering = zenGroup ? activityFilter.size > 0 : sgListFiltered();
 
   // A group whose parent is gone renders at the top.
   const sgIds = new Set(sessionGroups.map((g) => g.id));
@@ -4349,7 +4368,16 @@ function renderSessions() {
   }
 
   if (zenGroup) {
-    sessionsList.innerHTML = sgGroupHtml(sgGroupById(zenGroup), sessionFilter !== 'active');
+    const group = sgGroupById(zenGroup);
+    sessionsList.innerHTML =
+      sgGroupHtml(group, sessionFilter !== 'active') ||
+      `${sgHeaderHtml(group, countHtml([]))}<div class="sg-empty">No sessions match the filters</div>`;
+  } else if (zenProject) {
+    sessionsList.innerHTML =
+      projectBlock(zenProject, filteredSessions, false) +
+      (filteredSessions.length || sessionFilter !== 'active'
+        ? ''
+        : '<div class="sg-empty">No active sessions. Select "All Sessions" to see all</div>');
   } else if (sessionFilter === 'active') {
     // Group active sessions by project
     // Auto-expand a collapsed section when newly-active work lands in it (live refresh).
@@ -5235,7 +5263,7 @@ function sgListFiltered() {
 // terminal or placeholder counts. Only the full Active list can tell, so other views keep them.
 function sgSweepTransient() {
   if (sgRev === null || !sessionGroups.some((g) => g.transient)) return;
-  if (zenGroup || zenMode || sessionFilter !== 'active' || sessionsHasMore || sgListFiltered()) return;
+  if (zenGroup || zenProject || zenMode || sessionFilter !== 'active' || sessionsHasMore || sgListFiltered()) return;
   const shown = new Set(getFilteredSessions().map((s) => s.id));
   const starting = (id) => !dismissedSessionIds.has(id) && (runningTerminals.has(id) || dispatchSpecs.has(id));
   const present = (m) => m.type !== 'session' || shown.has(m.ref) || starting(m.ref);
@@ -6113,6 +6141,7 @@ function setGroupCollapsed(header, collapsed) {
     pinPeekKey = null;
     pinPeekClosedFor = currentSessionId;
   }
+  if (projectPath === zenPeekKey) zenPeekKey = null;
   if (collapsed) collapsedProjectGroups.add(projectPath);
   else collapsedProjectGroups.delete(projectPath);
   header.classList.toggle('collapsed', collapsed);
@@ -6122,10 +6151,11 @@ function setGroupCollapsed(header, collapsed) {
 }
 
 function persistCollapsedGroups() {
-  store.writeJson(COLLAPSED_GROUPS_KEY, [...collapsedProjectGroups, ...(pinPeekKey ? [pinPeekKey] : [])]);
+  store.writeJson(COLLAPSED_GROUPS_KEY, [...collapsedProjectGroups, ...[pinPeekKey, zenPeekKey].filter(Boolean)]);
 }
 
 let prevActiveSessionIds = null; // null until primed by the first onlyNew pass
+let lastListScope = null;
 
 // Expand collapsed project sections that contain active sessions; leave the rest collapsed.
 // onlyNew: expand only for sessions that became active since the last call, so a section the
@@ -6182,6 +6212,14 @@ function pinnedCollapseKeys(session) {
 // A Pinned sub-section the user collapsed opens while the open session is in it and closes once
 // the user leaves that session. The peek is never saved: persistCollapsedGroups writes the key back.
 let pinPeekKey = null;
+// The collapsed group or project that zen opened; leaving zen collapses it again, unless the user
+// toggled it meanwhile.
+let zenPeekKey = null;
+
+function setZenPeek(key) {
+  if (zenPeekKey) collapsedProjectGroups.add(zenPeekKey);
+  zenPeekKey = key && collapsedProjectGroups.delete(key) ? key : null;
+}
 let pinPeekClosedFor = null;
 
 function syncPinPeek() {
@@ -6700,7 +6738,7 @@ const SHORTCUT_TABS = [
           {
             keys: ['Ctrl', 'Shift', 'Z'],
             combo: true,
-            label: 'Zen mode (current session, or the group under the cursor)',
+            label: 'Zen mode (current session, or the group or project under the cursor)',
           },
           { keys: ['Ctrl', 'Shift', 'K'], combo: true, label: 'Show / hide Kanbot' },
           { keys: ['Ctrl', '+'], combo: true, label: 'Larger modal text' },
@@ -11911,21 +11949,26 @@ function renderFilterState() {
   document.getElementById('filter-menu-btn')?.classList.toggle('has-filters', short.length > 0);
 }
 
-// With the sidebar cursor on a group header, zen shows that group instead of the open session.
+// With the sidebar cursor on a group or project header, zen shows that group or project instead
+// of the open session.
 function toggleZenMode() {
   const leavingSessionZen = zenMode;
   if (zenMode) zenMode = false;
-  else if (zenGroup) zenGroup = null;
+  else if (zenGroup || zenProject) zenGroup = zenProject = null;
   else {
-    zenGroup = kbSelectedGroup()?.id || null;
-    zenMode = !zenGroup;
+    const el = focusZone === 'sidebar' && sessionsList.querySelector('.kb-selected');
+    const sel = el && sgDragPayload(el);
+    zenGroup = sel?.kind === 'group' ? sgGroupById(sel.ref)?.id || null : null;
+    zenProject = sel?.kind === 'project' ? sel.ref : null;
+    zenMode = !zenGroup && !zenProject;
   }
+  setZenPeek(zenGroup ? sgKey(zenGroup) : zenProject);
   store.setItem(ZEN_KEY, String(zenMode));
   renderZenState();
-  if (zenMode || zenGroup) closeFilterMenu();
+  if (zenMode) closeFilterMenu();
   renderSessions();
-  // The open session or the group's members may be outside the current server page/filter,
-  // and leaving group zen needs the filtered page back.
+  // The open session or the scope's sessions may be outside the current server page/filter,
+  // and leaving a scope needs the filtered page back.
   if (!leavingSessionZen) fetchSessions(false);
 }
 
@@ -11938,7 +11981,7 @@ function applyHubSettings(s) {
 function renderZenState() {
   const btn = document.getElementById('zen-mode-btn');
   if (!btn) return;
-  const on = zenMode || !!zenGroup;
+  const on = zenMode || !!zenGroup || !!zenProject;
   btn.classList.toggle('active', on);
   btn.setAttribute('aria-pressed', String(on));
   btn.title = on ? 'Zen mode on — show all sessions (Ctrl+Shift+Z)' : 'Zen mode: current session only (Ctrl+Shift+Z)';

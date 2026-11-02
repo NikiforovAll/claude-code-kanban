@@ -66,6 +66,7 @@ describe('sgSweepTransient', () => {
       sgRev: 1,
       sessionGroups: groups,
       zenGroup: null,
+      zenProject: null,
       zenMode: false,
       sessionFilter: 'active',
       sessionsHasMore: false,
@@ -126,7 +127,7 @@ describe('sgSweepTransient', () => {
 
   it('does nothing on a list that cannot prove a session left', () => {
     const one = () => [{ id: 't1', parent: null, transient: true, members: [member('a')] }];
-    for (const state of [{ sessionsHasMore: true }, { searchQuery: 'x' }, { sessionFilter: 'all' }, { filterProject: '/p' }, { sgRev: null }, { zenMode: true }]) {
+    for (const state of [{ sessionsHasMore: true }, { searchQuery: 'x' }, { sessionFilter: 'all' }, { filterProject: '/p' }, { sgRev: null }, { zenMode: true }, { zenProject: '/p' }]) {
       const ctx = sweep(one(), state);
       assert.equal(ctx.sessionGroups.length, 1, JSON.stringify(state));
       assert.equal(ctx.persisted, 0);

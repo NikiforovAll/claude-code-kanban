@@ -11089,7 +11089,8 @@ pre.mermaid[data-mermaid-error]::before {
   outline-offset: -1px;
 }
 
-.session-group-header.sg-zen {
+.session-group-header.sg-zen,
+.project-group-header.sg-zen {
   color: var(--accent-text);
 }
 
