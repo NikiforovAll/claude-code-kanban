@@ -294,6 +294,8 @@ describe('session.next', () => {
       trustWaiting: new Set(['trust']),
       isWaitingSession: (s) => !!s.waiting || c.trustWaiting.has(s.id),
       revealSession: (id) => revealed.push(id),
+      terminalPaneFocused: () => false,
+      isShowCardFocused: () => false,
       showToast() {},
       currentSessionId: 's1',
       sessions: [
@@ -302,7 +304,7 @@ describe('session.next', () => {
         { id: 'trust', placeholder: true },
       ],
     });
-    vm.runInContext('nextWaitingFromHub()', c);
+    vm.runInContext('nextNeedsYou()', c);
     assert.deepEqual(revealed, ['trust']);
   });
 });

@@ -4608,50 +4608,6 @@ function renderTaskCard(task) {
 //#endregion
 
 //#region KANBAN
-// FLIP pass around renderKanban's innerHTML rebuild (#41): the rebuild lands cards at
-// their final spot instantly, so a status change reads as a full-board reload. Recording
-// where each card was and animating from there makes a move glide instead.
-const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
-
-function cardFlipKey(el) {
-  return `${el.dataset.sessionId}|${el.dataset.taskId}`;
-}
-
-function captureCardRects() {
-  const rects = new Map();
-  for (const el of document.querySelectorAll('.column-tasks .task-card')) {
-    rects.set(cardFlipKey(el), el.getBoundingClientRect());
-  }
-  return rects;
-}
-
-function playCardFlip(before) {
-  // An empty board before the render means a view switch, not a move — nothing to glide.
-  if (reducedMotion.matches || before.size === 0) return;
-  for (const el of document.querySelectorAll('.column-tasks .task-card')) {
-    const prev = before.get(cardFlipKey(el));
-    if (!prev) {
-      el.animate(
-        [
-          { opacity: 0, transform: 'scale(0.97)' },
-          { opacity: 1, transform: 'none' },
-        ],
-        { duration: 150, easing: 'ease-out' },
-      );
-      continue;
-    }
-    const now = el.getBoundingClientRect();
-    const dx = prev.left - now.left;
-    const dy = prev.top - now.top;
-    if (dx || dy) {
-      el.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], {
-        duration: 220,
-        easing: 'cubic-bezier(0.2, 0.7, 0.3, 1)',
-      });
-    }
-  }
-}
-
 // Rewrite a column only when its markup actually changed: SSE ticks fire on any task-file
 // write (updatedAt bumps, agent refreshes), and an unconditional innerHTML rebuild makes
 // the whole board blink for updates with nothing visible in them (#41).
@@ -4677,41 +4633,33 @@ function renderKanban() {
   const emptyIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>`;
   const plusIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 5v14M5 12h14"/></svg>`;
 
-  const writes = [];
   // Adding is a live text input inside the column, so a background refresh would blow it
   // away mid-typing -- leave the column alone until the input is gone.
   if (!addingTask) {
     const addTile = canAddTask()
       ? `<button type="button" class="column-add${pending.length ? '' : ' empty'}" onclick="startAddTask(this, event)" title="Ctrl+Click opens the dialog with a description. You can also ask the agent to add tasks with its TaskCreate tool. Make sure CLAUDE_CODE_ENABLE_TASKS is set in its environment.">${plusIcon}<span>Add task</span></button>`
       : '';
-    writes.push([
+    setColumnHtml(
       pendingTasks,
       pending.length > 0
         ? pending.map(renderTaskCard).join('') + addTile
         : addTile || `<div class="column-empty">${emptyIcon}<div>No pending tasks</div></div>`,
-    ]);
+    );
   }
 
-  writes.push([
+  setColumnHtml(
     inProgressTasks,
     inProgress.length > 0
       ? inProgress.map(renderTaskCard).join('')
       : `<div class="column-empty">${emptyIcon}<div>No active tasks</div></div>`,
-  ]);
+  );
 
-  writes.push([
+  setColumnHtml(
     completedTasks,
     completed.length > 0
       ? completed.map(renderTaskCard).join('')
       : `<div class="column-empty">${emptyIcon}<div>No completed tasks</div></div>`,
-  ]);
-
-  // Capture rects (a forced layout read per card) only when a column will
-  // actually be rewritten — most SSE ticks change nothing and skip the FLIP.
-  const willChange = writes.some(([el, html]) => el._lastHtml !== html);
-  const flipRects = willChange ? captureCardRects() : null;
-  for (const [el, html] of writes) setColumnHtml(el, html);
-  if (flipRects) playCardFlip(flipRects);
+  );
 
   if (selectedTaskId) {
     const card =
@@ -6790,6 +6738,7 @@ const SHORTCUT_TABS = [
           { keys: ['Ctrl', 'Alt', 'N'], combo: true, hubMod: true, label: 'New session' },
           { keys: ['Ctrl', 'Alt', 'R'], combo: true, hubMod: true, label: 'Resume session (claude -r)' },
           { keys: ['Ctrl', 'Alt', 'S'], combo: true, hubMod: true, label: 'Swap to previous session' },
+          { keys: ['Ctrl', 'Alt', 'Shift', 'S'], combo: true, hubMod: true, label: 'Next session that needs you' },
           { keys: ['Shift', 'C'], combo: true, label: 'Copy session id' },
           { keys: ['Ctrl', 'Shift', 'C'], combo: true, label: 'Copy session name (SendMessage address)' },
         ],
@@ -15607,6 +15556,7 @@ function inPageField(e) {
 function terminalShortcut(e, probe = false) {
   const ctrlAlt = hubModDown(e);
   const ctrlShift = e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey;
+  const ctrlAltShift = e.ctrlKey && e.altKey && e.shiftKey && !e.metaKey && !e.getModifierState?.('AltGraph');
   // Ctrl+_ is Claude Code's undo, so the zoom keys leave it to the terminal. An open ask card,
   // which sits in the terminal pane, takes them for its own text zoom.
   const zoom = e.key === '_' ? undefined : zoomDelta(e);
@@ -15614,6 +15564,7 @@ function terminalShortcut(e, probe = false) {
     return () => adjustTerminalFontSize(Math.sign(zoom));
   }
   if (ctrlAlt && e.code === 'KeyS') return swapToPreviousSession;
+  if (ctrlAltShift && e.code === 'KeyS') return nextNeedsYou;
   if (matchKey(e, 'KeyR') && terminalConnectSlow() && wantsTerminal() && !inPageField(e)) return reconnectTerminal;
   // Cancelling the default also stops Chrome's system print dialog, which this page has no use for.
   if (ctrlShift && e.code === 'KeyP') return toggleSessionPicker;
@@ -19424,7 +19375,7 @@ hub.handle('session.paste', (p) => pasteFromHub(p));
 hub.handle('task.add', (p) => addTaskFromHub(p));
 hub.handle('session.approve', () => answerWaitingFromHub('allow'));
 hub.handle('session.deny', (p) => answerWaitingFromHub('deny', p.message));
-hub.handle('session.next', () => nextWaitingFromHub());
+hub.handle('session.next', () => nextNeedsYou());
 hub.handle('task.live', (p) => liveTaskFromHub(p));
 // After pending session.live calls, so the hub's clear of words typed into the terminal lands there, not in the dialog.
 hub.handle('session.new', (p) => {
@@ -19540,10 +19491,11 @@ function needsYouQueue() {
   return [...live.filter(isWaitingSession), ...live.filter((s) => !isWaitingSession(s) && s.unread)];
 }
 
-function nextWaitingFromHub() {
+function nextNeedsYou() {
   const queue = needsYouQueue();
   const next = queue[(queue.findIndex((s) => s.id === currentSessionId) + 1) % queue.length];
   if (!next || next.id === currentSessionId) return showToast('No other session needs you', 'info');
+  if (terminalPaneFocused() || isShowCardFocused()) termState.focusNext = true;
   return revealSession(next.id);
 }
 

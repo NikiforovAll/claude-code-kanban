@@ -314,7 +314,11 @@ const toggleTerminalFocus = () => {};
 const toggleMessagePanel = () => {};
 const toggleLastMessage = () => {};
 const stickied = [];
+const swapToPreviousSession = () => {};
+const nextNeedsYou = () => {};
 const shortcut = appFunction('terminalShortcut', {
+  swapToPreviousSession,
+  nextNeedsYou,
   toggleShowFocus,
   toggleTerminalFocus,
   toggleMessagePanel,
@@ -336,6 +340,20 @@ describe('Ctrl+Alt+` focuses the show card', () => {
 
   it('leaves AltGr+` to the terminal', () => {
     assert.equal(shortcut(tick({ ctrlKey: true, altKey: true, getModifierState: (m) => m === 'AltGraph' })), null);
+  });
+});
+
+describe('Ctrl+Alt+S and Ctrl+Alt+Shift+S', () => {
+  const s = (mods) => press('s', { code: 'KeyS', getModifierState: () => false, ...mods });
+
+  it('swaps to the previous session, and with Shift goes to the next one that needs the user', () => {
+    assert.equal(shortcut(s({ ctrlKey: true, altKey: true })), swapToPreviousSession);
+    assert.equal(shortcut(s({ ctrlKey: true, altKey: true, shiftKey: true })), nextNeedsYou);
+  });
+
+  it('leaves AltGr+Shift+S, which types Ś on Polish, to the terminal', () => {
+    const altGr = { getModifierState: (m) => m === 'AltGraph' };
+    assert.equal(shortcut(s({ ctrlKey: true, altKey: true, shiftKey: true, ...altGr })), null);
   });
 });
 
