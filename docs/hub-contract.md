@@ -27,3 +27,24 @@ The reference page is the source of truth for params and payloads. Do not copy i
 - **`test/hub.test.js`** runs the region in a vm with stubbed helpers. It checks payloads and handler logic, but a stub can hide a helper that no longer exists, which is why the lint rule is needed.
 - **Hub `test/apps.test.js`** validates `hub-app.json`.
 - **A real page.** For voice, replay the hub's calls on a scratch hub (see the hub's `CLAUDE.md` for its ports and `CCK_TERMINALS_FILE`) and read the dialog or the terminal.
+
+## Mods
+
+A hub mod (`mod.json` in an extension) adds CSS and JS to the board. Its JS runs after `app.js`, in the board's origin, and changes the board through the SDK's `ClaudeHub.mod`: `wrap(name, fn)` on a global function, `on(event, fn)` for an event. `mod-surface.json` lists the names a mod may use. Any other name can change in any release.
+
+| Part | Where | What it holds |
+|---|---|---|
+| Surface | `mod-surface.json` | The functions, events and `data-hub-part` names, with what each one does, and the `states` of a part: the classes the board sets on it (`active` on a session card, the status on a task card) |
+| Emits | `public/app.js`, `MOD_SURFACE` region | Wraps each render the events name and emits after it |
+| Anchors | `data-hub-part="<name>"` in `public/index.html` and in render templates | The elements a mod's CSS and JS select |
+
+Rules:
+
+- **A surface name is a public API.** Rename or remove one only with a new `surface` number and a note in the release. Add names freely.
+- **Keep a surface function a top-level `function` declaration** and call it by name, never through a saved reference (`sessionSearch(() => renderSessions())`, not `sessionSearch(renderSessions)`). A mod's wrap replaces `window[name]` after `app.js` has run, so a saved reference skips the mod.
+- **`renderTaskCard` returns the same HTML for the same task.** The board rewrites a column only when its HTML changes, so a wrapper that adds a random or a time-based part rewrites the column on every tick.
+- **Wrap the renders only when `ClaudeHub.mod?.list.length`**: an older hub's SDK has no `mod`, and with no mod installed the wrapper is work for no one.
+- **A listed state is a public API too.** A mod's CSS may select a part's listed state class and no other board class. For light and dark it selects `:root[data-hub-mode="light"]`, which the SDK sets, not `body.light`. For colors it uses the SDK's theme vars (`--bg-*`, `--text-*`, `--accent` and the others in the hub's `lib/themes.js`), not the board's own.
+- **`progress` is the bar's track (`.progress-bar`), `progress-fill` the bar inside it.** A mod styles the fill through `[data-hub-part="progress-fill"]`.
+
+`test/mod-surface.test.js` checks that each function is a top-level declaration, that the region emits exactly the listed events, that each part is marked, and that each state is a class the board sets. The hub's `test/mods.test.js` checks its bundled mods against this file.

@@ -65,7 +65,7 @@
   <a href="#main-content" class="skip-link">Skip to main content</a>
   <div class="app">
     <!-- Sidebar -->
-    <aside class="sidebar">
+    <aside class="sidebar" data-hub-part="sidebar">
       <header class="sidebar-header">
         <div id="activity-chips" class="activity-chips"></div>
         <button id="new-session-btn" class="new-session-pill" onclick="openNewSession()" title="New session (Ctrl+Alt+N)" hidden>+ New</button>
@@ -185,7 +185,7 @@
             </button>
           </div>
         </div>
-        <div id="sessions-list" class="sessions-list" aria-busy="true">
+        <div id="sessions-list" class="sessions-list" data-hub-part="sessions" aria-busy="true">
           <div class="session-skeleton"><span></span><span></span></div>
           <div class="session-skeleton"><span></span><span></span></div>
           <div class="session-skeleton"><span></span><span></span></div>
@@ -193,7 +193,7 @@
         </div>
       </div>
 
-      <div class="sidebar-footer" id="sidebar-footer"></div>
+      <div class="sidebar-footer" id="sidebar-footer" data-hub-part="sidebar-footer"></div>
       <div class="sidebar-resize-handle" id="sidebar-resize"></div>
     </aside>
 
@@ -224,7 +224,7 @@
         </div>
         <div class="idle-glow" aria-hidden="true"><span></span><span></span></div>
         <div class="idle-content">
-          <div class="idle-clawd" aria-hidden="true">
+          <div class="idle-clawd" data-hub-part="idle-mascot" aria-hidden="true">
             <svg class="clawd" viewBox="1 0 16 10" shape-rendering="crispEdges"><use href="#clawd-shape"/></svg>
           </div>
           <p class="idle-title">Select a session to view tasks</p>
@@ -240,8 +240,8 @@
           </div>
           <div class="view-actions">
             <div class="view-progress">
-              <div class="progress-bar">
-                <div id="progress-bar" class="progress-fill" style="width: 0%"></div>
+              <div class="progress-bar" data-hub-part="progress">
+                <div id="progress-bar" class="progress-fill" data-hub-part="progress-fill" style="width: 0%"></div>
               </div>
               <span id="progress-percent" class="progress-text">0% done</span>
             </div>
@@ -314,7 +314,7 @@
 
         <div id="pane-split" class="pane-split">
         <div id="board-side" class="board-side">
-        <div class="kanban" id="main-content">
+        <div class="kanban" id="main-content" data-hub-part="board">
           <div id="owner-filter-bar" class="owner-filter-bar">
             <select id="owner-filter" class="filter-dropdown" onchange="filterByOwner(this.value)" aria-label="Filter by team member">
               <option value="">All Members</option>
@@ -341,7 +341,7 @@
           <div class="kanban-column" aria-label="Completed tasks">
             <div class="column-header">
               <span class="column-dot completed"></span>
-              <span class="column-title completed">Completed</span>
+              <span class="column-title completed" data-hub-part="done-title">Completed</span>
               <span id="completed-count" class="column-count completed">0</span>
             </div>
             <div id="completed-tasks" class="column-tasks" role="list" data-status="completed" ondragover="onColumnDragOver(event)" ondragleave="onColumnDragLeave(event)" ondrop="onColumnDrop(event)"></div>

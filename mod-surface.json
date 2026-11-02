@@ -1,0 +1,38 @@
+{
+  "surface": 1,
+  "functions": {
+    "renderTaskCard": "(task) -> the HTML string of one board card. Return the same string for the same task: the board rewrites a column only when its HTML changes.",
+    "renderSessions": "() -> rebuilds the session list in the sidebar. It returns early while the user drags or types in the list.",
+    "renderKanban": "() -> rebuilds the three board columns from currentTasks.",
+    "renderActivityChip": "() -> {waiting, active, terminal}: counts the sessions in each state and redraws the chips above the session list when the counts change. It runs on every session poll."
+  },
+  "events": {
+    "sessions.rendered": "After each renderSessions call, also one that returned early.",
+    "board.rendered": "After each renderKanban call.",
+    "activity.rendered": "After each renderActivityChip call, with its {waiting, active, terminal} counts as the detail. A waiting session also counts as active."
+  },
+  "parts": {
+    "sidebar": "The sidebar: header, session list, footer.",
+    "sessions": "The session list.",
+    "board": "The board with its three columns.",
+    "session-card": "One session in the session list, with data-session-id.",
+    "sidebar-footer": "The footer under the session list. Its children are rebuilt on each poll; the element stays.",
+    "progress": "The track of the progress bar in the session header.",
+    "progress-fill": "The fill inside progress, whose width is the share of the session's tasks done.",
+    "kanbot": "The Kanbot mascot, a 16x13 svg whose head is x 3-13 at the top row. It sits in the sidebar footer's button and in the Kanbot panel's head.",
+    "idle-mascot": "The mascot over the empty state, an svg.clawd that floats up and down.",
+    "task-card": "One card on the board, with data-task-id and data-session-id.",
+    "task-number": "The #id label at the top left of a task card.",
+    "done-title": "The title of the Completed column."
+  },
+  "states": {
+    "session-card": {
+      "active": "While it is the open session."
+    },
+    "task-card": {
+      "pending": "Not started.",
+      "in-progress": "Being worked on.",
+      "completed": "Done."
+    }
+  }
+}

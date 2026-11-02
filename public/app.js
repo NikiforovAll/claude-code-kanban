@@ -490,7 +490,8 @@ function sessionSearch(onFound) {
   };
 }
 
-const sidebarSearch = sessionSearch(renderSessions);
+// A lambda, not the function: a hub mod replaces window.renderSessions after this line runs.
+const sidebarSearch = sessionSearch(() => renderSessions());
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
 function handleSearch(query) {
@@ -681,9 +682,11 @@ function renderActivityChip() {
       `;
     })
     .join('');
-  if (html === lastChipHtml) return;
-  lastChipHtml = html;
-  container.innerHTML = html;
+  if (html !== lastChipHtml) {
+    lastChipHtml = html;
+    container.innerHTML = html;
+  }
+  return counts;
 }
 
 function toggleActivityKind(kind) {
@@ -4062,7 +4065,7 @@ function renderSessions() {
         : '';
     const metricsHtml = progressHtml + (showCtx ? renderContextBar(session) : '');
     return `
-          <button onclick="openSession('${sid}')" draggable="true" data-session-id="${escapeHtml(session.id)}" class="session-item ${isActive ? 'active' : ''} ${sessionBarClass(session)} ${tempClass} ${idleClass} ${justFinishedClass}${childDepthClass(childDepth.get(session.id))}">
+          <button onclick="openSession('${sid}')" draggable="true" data-hub-part="session-card" data-session-id="${escapeHtml(session.id)}" class="session-item ${isActive ? 'active' : ''} ${sessionBarClass(session)} ${tempClass} ${idleClass} ${justFinishedClass}${childDepthClass(childDepth.get(session.id))}">
             <span class="session-pin-btn${pinClass}" onclick="event.stopPropagation();toggleSessionPin('${sid}')" title="${pinTitle} session">${pinState === 'sticky' ? SESSION_STAR_SVG : SESSION_PIN_SVG}</span>
             <div class="session-name">${escapeHtml(sessionName)}</div>
             ${renderSessionIdentity(projectHtml, session.gitBranch)}
@@ -4580,6 +4583,7 @@ function renderTaskCard(task) {
         <div
           role="listitem"
           tabindex="0"
+          data-hub-part="task-card"
           data-task-id="${escapeHtml(task.id)}"
           data-session-id="${escapeHtml(actualSessionId)}"
           onclick="showTaskDetail('${escAttrJs(task.id)}', '${escAttrJs(actualSessionId)}')"
@@ -4589,7 +4593,7 @@ function renderTaskCard(task) {
           class="task-card ${statusClass} ${isBlocked ? 'blocked' : ''} ${isDim ? 'dim' : ''}"
           aria-label="${escapeHtml(task.subject)} — ${escapeHtml(state)}">
           <div class="task-id">
-            <span>#${taskId}</span>
+            <span data-hub-part="task-number">#${taskId}</span>
             ${renderTaskChips(chips)}
             ${isBlocked ? `<span class="task-blocked" title="Blocked">waiting on ${blockers.map((id) => `#${escapeHtml(id)}`).join(' ')}</span>` : ''}
             ${task.owner ? renderOwnerBadge(task) : ''}
@@ -16634,7 +16638,7 @@ async function endAllTerminals() {
 // The board's own assistant (docs/kanbot.md): a claude session the server keeps hidden from the list,
 // shown in a popover through a second terminal frame on the board terminal's frame origin.
 const KANBOT_SVG =
-  '<svg viewBox="0 0 16 13" width="16" height="13" shape-rendering="crispEdges" aria-hidden="true">' +
+  '<svg data-hub-part="kanbot" viewBox="0 0 16 13" width="16" height="13" shape-rendering="crispEdges" aria-hidden="true">' +
   '<path fill="#d97757" d="M3 0h10v4h3v3h-3v3H3V7H0V4h3z"/>' +
   '<path fill="#d97757" d="M4 10h1v3H4zM6 10h1v3H6zM9 10h1v3H9zM11 10h1v3h-1z"/>' +
   '<path fill="#1f1e1d" d="M5 2h1v2H5zM10 2h1v2h-1z"/></svg>';
@@ -19771,3 +19775,22 @@ hub.subscribe('project.changed', (p) => {
   filterByProject(dirPath);
 });
 // #endregion HUB_INTEGRATION
+
+// #region MOD_SURFACE
+// Hub mods change the board through the names in mod-surface.json (docs/hub-contract.md, Mods).
+// With no mod installed, or an older hub's SDK that has no ClaudeHub.mod, the renders stay unwrapped.
+if (ClaudeHub.mod?.list.length) {
+  for (const [name, event] of [
+    ['renderSessions', 'sessions.rendered'],
+    ['renderKanban', 'board.rendered'],
+    ['renderActivityChip', 'activity.rendered'],
+  ]) {
+    const render = window[name];
+    window[name] = function emitAfterRender(...args) {
+      const out = render.apply(this, args);
+      ClaudeHub.mod.emit(event, out);
+      return out;
+    };
+  }
+}
+// #endregion MOD_SURFACE

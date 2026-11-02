@@ -55,6 +55,7 @@
   "files": [
     "server.js",
     "hub-app.json",
+    "mod-surface.json",
     "cli.js",
     "install.js",
     "plugin/**/*",
