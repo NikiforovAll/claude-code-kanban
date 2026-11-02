@@ -236,7 +236,7 @@ function updateUrl() {
   history.replaceState(null, '', url);
   persistLastView();
   syncTerminal();
-  schedulePublishSession();
+  schedulePublish();
 }
 
 const LAST_VIEW_KEY = 'lastView';
@@ -368,7 +368,7 @@ async function fetchSessions(includeTasks = true, focusId = currentSessionId) {
       sgSweepTransient();
       renderSessions();
       renderActivityChip();
-      schedulePublishSession();
+      schedulePublish();
     }
     // A list too short to scroll gives no scroll event, so fill it until it can scroll.
     if (sessionsHasMore) setTimeout(() => loadMoreIfNearEnd());
@@ -3534,6 +3534,7 @@ function visibleAgents() {
 }
 
 function renderAgentFooter() {
+  schedulePublish();
   const footer = document.getElementById('agent-footer');
   const content = document.getElementById('agent-footer-content');
   const label = document.getElementById('agent-footer-label');
@@ -3965,6 +3966,7 @@ function zenPanelIsEditing() {
 function renderSessions() {
   // Rebuilding the list under the pointer cancels an in-flight drop and would swallow a
   // half-typed group name, and the SSE path can fire at any moment — defer instead.
+  schedulePublish();
   if (sgDrag || sgIsEditing() || zenPanelIsEditing()) return;
   scheduleJustFinishedExpiry();
   refreshProjectList();
@@ -19529,12 +19531,52 @@ function answerWaitingFromHub(behavior, message) {
   return respondWaiting({ behavior });
 }
 
-function nextWaitingFromHub() {
+function needsYouQueue() {
   const live = sessions.filter((s) => !s.placeholder && !dismissedSessionIds.has(s.id));
-  const queue = [...live.filter(isWaitingSession), ...live.filter((s) => !isWaitingSession(s) && s.unread)];
+  return [...live.filter(isWaitingSession), ...live.filter((s) => !isWaitingSession(s) && s.unread)];
+}
+
+function nextWaitingFromHub() {
+  const queue = needsYouQueue();
   const next = queue[(queue.findIndex((s) => s.id === currentSessionId) + 1) % queue.length];
   if (!next || next.id === currentSessionId) return showToast('No other session needs you', 'info');
   return revealSession(next.id);
+}
+
+// voice.context tells the hub's voice help what fits now: the open session's ask as the title, and per
+// action false to hide its row or a help text. The agent footer renders every second, so the ask is
+// parsed once per marker.
+let publishedVoiceContext = '';
+let askTitle = { id: null, title: null };
+
+function waitingTitle() {
+  if (!isWaitingAnswerable() || currentWaiting.kind === 'question') return null;
+  if (askTitle.id === currentWaiting.id) return askTitle.title;
+  const tool = currentWaiting.toolName || 'unknown';
+  const detail = deriveWaitingDetail(tool, parseWaitingInput());
+  const title = isPlanAsk(currentWaiting.kind, tool)
+    ? detail || getWaitingPill(currentWaiting.kind, tool)
+    : `${tool} ${detail}`.trim();
+  askTitle = { id: currentWaiting.id, title };
+  return title;
+}
+
+function publishVoiceContext() {
+  const title = waitingTitle();
+  const answerable = !!title;
+  const others = needsYouQueue().filter((s) => s.id !== currentSessionId).length;
+  const payload = {
+    title,
+    rows: {
+      'session.approve': answerable,
+      'session.deny': answerable,
+      'session.next': others > 0 && `${others} more ${others === 1 ? 'needs' : 'need'} you`,
+    },
+  };
+  const json = JSON.stringify(payload);
+  if (json === publishedVoiceContext) return;
+  publishedVoiceContext = json;
+  hub.publish('voice.context', payload);
 }
 
 // Voice while the New session dialog is open is dictation into its prompt; Enter on Start sends it.
@@ -19609,13 +19651,17 @@ async function liveFromHub({ session, text, final, submit, cancel }) {
 }
 
 // session.changed goes out once the switch settles, so arrowing through the list sends one event.
+// voice.context shares the timer; each publisher skips a payload it already sent.
 let publishTimer = 0;
 let publishedSessionId;
 let cliOpenedId = null;
 
-function schedulePublishSession() {
+function schedulePublish() {
   clearTimeout(publishTimer);
-  publishTimer = setTimeout(publishSession, 150);
+  publishTimer = setTimeout(() => {
+    publishSession();
+    publishVoiceContext();
+  }, 150);
 }
 
 function publishSession() {

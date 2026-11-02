@@ -200,7 +200,7 @@ describe('hub state', () => {
 describe('session.changed', () => {
   const show = (shim, id) => {
     shim.context.currentSessionId = id;
-    vm.runInContext('schedulePublishSession()', shim.context);
+    vm.runInContext('publishSession()', shim.context);
     shim.endWait();
   };
   const published = (shim) => JSON.parse(JSON.stringify(shim.sent().filter((m) => m.type === 'hub:publish')));
@@ -231,6 +231,54 @@ describe('session.changed', () => {
         payload: { sessionId: 's2', project: 'C:/q', name: null, gitBranch: null, live: false, source: 'cli' },
       },
       { type: 'hub:publish', topic: 'session.changed', payload: null },
+    ]);
+  });
+});
+
+describe('voice.context', () => {
+  it('publishes a permission or plan ask as the title, and no ask for a question', async () => {
+    const shim = await loadShim();
+    shim.receive(welcome([]));
+    const c = shim.context;
+    Object.assign(c, {
+      dismissedSessionIds: new Set(['gone']),
+      isWaitingSession: (s) => !!s.waiting,
+      isPlanAsk: (kind) => kind === 'plan',
+      getWaitingPill: (kind) => (kind === 'plan' ? 'Plan awaiting approval' : 'Question pending'),
+      isWaitingAnswerable: () => !!c.currentWaiting?.id,
+      parseWaitingInput: () => JSON.parse(c.currentWaiting?.toolInput || 'null'),
+      deriveWaitingDetail: (_tool, p) => p?.command || p?.questions?.[0]?.question || '',
+      currentWaiting: null,
+      currentSessionId: 's1',
+      sessions: [
+        { id: 's1', waiting: true },
+        { id: 's2', waiting: true },
+        { id: 's3', unread: true },
+        { id: 'gone', waiting: true },
+        { id: 'new', placeholder: true, waiting: true },
+      ],
+    });
+    const publish = (waiting) => {
+      c.currentWaiting = waiting;
+      vm.runInContext('publishVoiceContext()', c);
+    };
+    publish(null);
+    publish(null);
+    publish({ id: 'r1', kind: 'permission', toolName: 'Bash', toolInput: '{"command":"npm test"}' });
+    publish({ id: 'r2', kind: 'plan', toolName: 'ExitPlanMode' });
+    publish({ id: 'r3', kind: 'question', toolInput: JSON.stringify({ questions: [{ question: 'Which db?' }] }) });
+    c.sessions = c.sessions.filter((s) => s.id !== 's2');
+    publish(null);
+    const payloads = JSON.parse(JSON.stringify(shim.sent().filter((m) => m.topic === 'voice.context'))).map(
+      (m) => m.payload,
+    );
+    const rows = (answer, next) => ({ 'session.approve': answer, 'session.deny': answer, 'session.next': next });
+    assert.deepEqual(payloads, [
+      { title: null, rows: rows(false, '2 more need you') },
+      { title: 'Bash npm test', rows: rows(true, '2 more need you') },
+      { title: 'Plan awaiting approval', rows: rows(true, '2 more need you') },
+      { title: null, rows: rows(false, '2 more need you') },
+      { title: null, rows: rows(false, '1 more needs you') },
     ]);
   });
 });
