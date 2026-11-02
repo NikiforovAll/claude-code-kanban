@@ -18,18 +18,21 @@ function appFunctions(names, globals = {}) {
 const escapeHtml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 function panel(items, editing = null) {
-  const panelEl = { hidden: false, innerHTML: '', replaceChildren() { this.innerHTML = ''; } };
+  const panelEl = { hidden: false, innerHTML: '', replaceChildren() { this.innerHTML = ''; }, querySelector(s) { return this.innerHTML.includes(s.slice(1)) ? s : null; } };
+  const mics = [];
   const ctx = appFunctions(
     ['renderReviewPanel', 'endReviewEdit', 'saveReviewEdit', 'reviewEditorText', 'onReviewEditorKey'],
     {
       escapeHtml,
+      cancelDictationIn: () => {},
+      addMic: (field) => mics.push(field),
       DETAIL_EDIT_SVG: '<svg></svg>',
       syncReviewSendClaims: () => {},
       reviewItems: () => items,
       activeReview: { panelEl, hostEl: null, hot: null, editing },
     },
   );
-  return { ctx, panelEl };
+  return { ctx, panelEl, mics };
 }
 
 function ctrlEnter(value) {
@@ -41,11 +44,12 @@ describe('review comment edit', () => {
   it('shows an edit button on each card and a textarea with the draft on the one in edit', () => {
     const a = { quote: 'first', comment: 'keep <b>' };
     const b = { quote: 'second', comment: 'old' };
-    const { ctx, panelEl } = panel([a, b], { c: b, draft: 'new <i>' });
+    const { ctx, panelEl, mics } = panel([a, b], { c: b, draft: 'new <i>' });
     ctx.renderReviewPanel();
     assert.equal((panelEl.innerHTML.match(/class="review-edit"/g) || []).length, 2);
     assert.match(panelEl.innerHTML, /<div class="review-card-comment"[^>]*>keep &lt;b&gt;<\/div>/);
-    assert.match(panelEl.innerHTML, /<textarea class="review-card-edit"[^>]*>new &lt;i&gt;<\/textarea>/);
+    assert.match(panelEl.innerHTML, /<div class="mic-field"><textarea class="review-card-edit"[^>]*>new &lt;i&gt;<\/textarea><\/div>/);
+    assert.deepEqual(mics, ['.review-card-edit']);
     assert.match(panelEl.innerHTML, /review-card-quote">second</);
     assert.doesNotMatch(panelEl.innerHTML, />old</);
   });

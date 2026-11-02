@@ -9108,7 +9108,7 @@ select.form-input option:checked {
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
 }
 
-#review-pop textarea,
+.review-pop-input,
 .review-card-edit {
   width: 100%;
   box-sizing: border-box;
@@ -9183,8 +9183,9 @@ select.form-input option:checked {
   gap: 6px;
 }
 
-#review-pop button,
-.review-panel button {
+/* :where() keeps the specificity as it was, so the button.review-* rules above still win. */
+#review-pop button:not(:where(.mic-btn)),
+.review-panel button:not(:where(.mic-btn)) {
   padding: 3px 10px;
   font: inherit;
   color: var(--text-primary);
@@ -9807,15 +9808,15 @@ select.form-input option:checked {
   max-height: 50vh;
 }
 
-.ns-prompt-field {
+.mic-field {
   position: relative;
 }
 
-.ns-prompt-field:has(.ns-mic:not([hidden])) textarea {
+.mic-field:has(.mic-btn) textarea {
   padding-right: 36px;
 }
 
-.ns-mic {
+.mic-btn {
   position: absolute;
   top: 6px;
   right: 6px;
@@ -9832,33 +9833,29 @@ select.form-input option:checked {
   cursor: pointer;
 }
 
-.ns-mic[hidden] {
-  display: none;
-}
-
-.ns-mic svg {
+.mic-btn svg {
   width: 15px;
   height: 15px;
 }
 
-.ns-mic:hover {
+.mic-btn:hover {
   color: var(--text-primary);
   background: var(--bg-hover);
 }
 
-.ns-mic[aria-pressed='true'] {
+.mic-btn[aria-pressed='true'] {
   color: var(--danger);
-  animation: ns-mic-pulse 1.2s ease-in-out infinite;
+  animation: mic-pulse 1.2s ease-in-out infinite;
 }
 
-@keyframes ns-mic-pulse {
+@keyframes mic-pulse {
   50% {
     opacity: 0.45;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .ns-mic[aria-pressed='true'] {
+  .mic-btn[aria-pressed='true'] {
     animation: none;
   }
 }

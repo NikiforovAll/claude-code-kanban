@@ -8559,6 +8559,7 @@ function stopReview() {
   if (!activeReview) return;
   const { ctl, panelEl, hostEl } = activeReview;
   ctl.abort();
+  cancelDictationIn(panelEl);
   for (const c of reviewItems()) {
     c.range = null;
     c.frameId = 0;
@@ -9049,6 +9050,7 @@ function closeReviewPop() {
   }
   reviewPopMode = null;
   const el = reviewPopEl();
+  cancelDictationIn(el);
   el.className = '';
   el.replaceChildren();
 }
@@ -9102,10 +9104,11 @@ function openReviewEditor(picked, text = '') {
     reviewPendingHighlight?.add(picked.range);
   } else if (picked.inFrame) postToReviewFrame('pend');
   activeReview.picked = picked;
-  el.innerHTML = `<textarea rows="3" placeholder="Comment (Ctrl+Enter to add)"></textarea>
+  el.innerHTML = `<div class="mic-field"><textarea class="review-pop-input" rows="3" placeholder="Comment (Ctrl+Enter to add)"></textarea></div>
     <div class="review-pop-actions"><button type="button" data-act="cancel">Cancel</button><button type="button" data-act="add" class="primary">Add</button></div>`;
   const ta = el.querySelector('textarea');
   ta.value = text;
+  addMic(ta);
   const add = (comment) => addReviewComment(picked, comment);
   ta.addEventListener('keydown', (e) => onReviewEditorKey(e, add, closeReviewPop));
   el.querySelector('[data-act="cancel"]').addEventListener('click', closeReviewPop);
@@ -9261,6 +9264,7 @@ function renderReviewPanel() {
   syncReviewSendClaims();
   if (!activeReview) return;
   const { panelEl, hostEl } = activeReview;
+  cancelDictationIn(panelEl);
   const items = reviewItems();
   panelEl.hidden = !items.length;
   hostEl?.classList.toggle('has-review', items.length > 0);
@@ -9274,7 +9278,7 @@ function renderReviewPanel() {
       .map((c, i) => {
         const body =
           c === activeReview.editing?.c
-            ? `<textarea class="review-card-edit" rows="3" aria-label="Edit comment" placeholder="Ctrl+Enter to save, Esc to cancel">${escapeHtml(activeReview.editing.draft)}</textarea>`
+            ? `<div class="mic-field"><textarea class="review-card-edit" rows="3" aria-label="Edit comment" placeholder="Ctrl+Enter to save, Esc to cancel">${escapeHtml(activeReview.editing.draft)}</textarea></div>`
             : `<div class="review-card-comment" title="Double-click to edit">${escapeHtml(c.comment)}</div>`;
         return `<li class="review-card${c === activeReview.hot ? ' hot' : ''}" data-i="${i}" title="Show in the document">
         <button type="button" class="review-edit" title="Edit" aria-label="Edit">${DETAIL_EDIT_SVG}</button>
@@ -9283,6 +9287,8 @@ function renderReviewPanel() {
         ${body}</li>`;
       })
       .join('')}</ol>`;
+  const edit = panelEl.querySelector('.review-card-edit');
+  if (edit) addMic(edit);
 }
 
 async function toastDelivery({ delivered, markdown }, noun) {
@@ -18538,12 +18544,7 @@ function closeNewSession() {
   closeFolderList();
   closeImagePreview();
   clearNewSessionImages();
-  promptVoice.rec?.abort();
-  if (promptVoice.hub) {
-    promptVoice.hub = null;
-    document.getElementById('ns-mic').setAttribute('aria-pressed', 'false');
-    hub.invoke(HUB_DICTATE, { op: 'cancel' });
-  }
+  cancelDictationIn(document.getElementById('new-session-modal'));
 }
 
 function addNewSessionImages(files) {
@@ -18836,13 +18837,27 @@ async function startNewSessionInBackground(id, v) {
 }
 
 const SpeechRecognitionApi = window.SpeechRecognition || window.webkitSpeechRecognition;
-const promptVoice = { rec: null, hub: null };
+// One dictation at a time: { btn, rec } in the browser, { btn, insert } under the hub.
+let dictation = null;
 const HUB_DICTATE = 'voice.dictate';
+const MIC_HTML = `<button type="button" class="mic-btn" title="Dictate" aria-label="Dictate" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v5"/></svg></button>`;
+
+// Puts a mic after a textarea that sits in a `.mic-field`. No browser speech input, no mic.
+function addMic(field, onError = (msg) => showToast(msg, 'error')) {
+  if (!SpeechRecognitionApi) return;
+  field.insertAdjacentHTML('afterend', MIC_HTML);
+  const btn = field.nextElementSibling;
+  // mousedown would blur the textarea and lose the caret the dictation inserts at.
+  btn.addEventListener('mousedown', (e) => e.preventDefault());
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleDictation(field, btn, onError);
+  });
+}
 
 // Replaces the selection the field had when dictation began, so interim results rewrite
-// themselves in place instead of piling up.
-function promptInserter() {
-  const field = document.getElementById('ns-prompt');
+// themselves in place instead of piling up. Fires `input`, as typing would.
+function fieldInserter(field) {
   const before = field.value.slice(0, field.selectionStart);
   const after = field.value.slice(field.selectionEnd);
   const lead = before && !/\s$/.test(before) ? ' ' : '';
@@ -18850,50 +18865,63 @@ function promptInserter() {
     field.value = before + lead + text + after;
     const caret = before.length + lead.length + text.length;
     field.setSelectionRange(caret, caret);
-    renderNewSessionForm();
+    field.dispatchEvent(new Event('input', { bubbles: true }));
   };
 }
 
-function togglePromptVoice() {
-  if (hub.can(HUB_DICTATE)) return toggleHubDictation();
-  if (promptVoice.rec) return promptVoice.rec.stop();
-  const field = document.getElementById('ns-prompt');
-  const btn = document.getElementById('ns-mic');
-  const insert = promptInserter();
+function toggleDictation(field, btn, onError) {
+  if (dictation?.btn !== btn) cancelDictation();
+  if (hub.can(HUB_DICTATE)) return toggleHubDictation(field, btn, onError);
+  if (dictation) return dictation.rec.stop();
+  const insert = fieldInserter(field);
   const rec = new SpeechRecognitionApi();
   rec.lang = navigator.language;
   rec.interimResults = true;
   rec.onresult = (e) => insert(Array.from(e.results, (r) => r[0].transcript).join(''));
   rec.onerror = (e) => {
     if (e.error === 'not-allowed' || e.error === 'service-not-allowed')
-      setNewSessionError('Microphone access is blocked for this page.');
-    else if (e.error !== 'no-speech' && e.error !== 'aborted') setNewSessionError(`Dictation failed: ${e.error}`);
+      onError('Microphone access is blocked for this page.');
+    else if (e.error !== 'no-speech' && e.error !== 'aborted') onError(`Dictation failed: ${e.error}`);
   };
   rec.onend = () => {
-    promptVoice.rec = null;
     btn.setAttribute('aria-pressed', 'false');
+    if (dictation?.rec === rec) dictation = null;
   };
-  promptVoice.rec = rec;
+  dictation = { btn, rec };
   btn.setAttribute('aria-pressed', 'true');
   field.focus();
   rec.start();
 }
 
 // Under a hub with voice on, the mic uses the hub's speech provider: the text arrives once, on the second click.
-async function toggleHubDictation() {
-  const btn = document.getElementById('ns-mic');
-  const op = promptVoice.hub ? 'stop' : 'start';
-  const insert = promptVoice.hub ?? promptInserter();
-  promptVoice.hub = op === 'start' ? insert : null;
-  btn.setAttribute('aria-pressed', String(op === 'start'));
-  document.getElementById('ns-prompt').focus();
-  const r = await hub.invoke(HUB_DICTATE, { op });
+async function toggleHubDictation(field, btn, onError) {
+  const running = dictation?.insert;
+  const insert = running ?? fieldInserter(field);
+  dictation = running ? null : { btn, insert };
+  btn.setAttribute('aria-pressed', String(!running));
+  field.focus();
+  const r = await hub.invoke(HUB_DICTATE, { op: running ? 'stop' : 'start' });
   if (!r.ok) {
-    promptVoice.hub = null;
+    if (dictation?.insert === insert) dictation = null;
     btn.setAttribute('aria-pressed', 'false');
-    return setNewSessionError(`Dictation failed: ${r.reason}`);
+    return onError(`Dictation failed: ${r.reason}`);
   }
-  if (op === 'stop' && r.text) insert(r.text);
+  if (running && r.text && field.isConnected) insert(r.text);
+}
+
+// Drops the running dictation without inserting text.
+function cancelDictation() {
+  if (!dictation) return;
+  const { btn, rec } = dictation;
+  dictation = null;
+  btn.setAttribute('aria-pressed', 'false');
+  if (rec) rec.abort();
+  else hub.invoke(HUB_DICTATE, { op: 'cancel' });
+}
+
+// For a field about to close or render again.
+function cancelDictationIn(root) {
+  if (dictation && root.contains(dictation.btn)) cancelDictation();
 }
 
 function pickFolderOption(i) {
@@ -18945,14 +18973,8 @@ function initNewSession() {
   for (const id of ['ns-name', 'ns-wt-name', 'ns-prompt', 'ns-model', 'ns-effort']) {
     document.getElementById(id).addEventListener('input', renderNewSessionForm);
   }
-  if (SpeechRecognitionApi) {
-    const mic = document.getElementById('ns-mic');
-    mic.hidden = false;
-    // mousedown would blur the textarea and lose the caret the dictation inserts at.
-    mic.addEventListener('mousedown', (e) => e.preventDefault());
-    mic.addEventListener('click', togglePromptVoice);
-  }
   const prompt = document.getElementById('ns-prompt');
+  addMic(prompt, setNewSessionError);
   const promptField = prompt.closest('.ns-prompt-field');
   prompt.addEventListener('paste', (e) => {
     const files = [...(e.clipboardData?.files || [])].filter((f) => f.type.startsWith('image/'));
