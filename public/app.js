@@ -1799,8 +1799,12 @@ function planApprovalControlsHtml(inputId) {
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML onclick
 function rejectWaitingPlan(inputId) {
-  const feedback = document.getElementById(inputId)?.value?.trim();
-  respondWaiting({ behavior: 'deny', message: feedback || PLAN_REJECT_MSG });
+  denyWaiting(document.getElementById(inputId)?.value);
+}
+
+function denyWaiting(feedback) {
+  const message = feedback?.trim() || (currentWaiting?.kind === 'plan' ? PLAN_REJECT_MSG : '');
+  respondWaiting({ behavior: 'deny', ...(message && { message }) });
 }
 
 // UI-driven approvals: POST the decision the plugin's mod is polling for.
@@ -19412,6 +19416,9 @@ hub.handle('session.open', (p) => p.session && openSessionFromOutside(p.session)
 hub.handle('session.find', (p) => findSessionFromHub(p));
 hub.handle('session.paste', (p) => pasteFromHub(p));
 hub.handle('task.add', (p) => addTaskFromHub(p));
+hub.handle('session.approve', () => answerWaitingFromHub('allow'));
+hub.handle('session.deny', (p) => answerWaitingFromHub('deny', p.message));
+hub.handle('session.next', () => nextWaitingFromHub());
 hub.handle('task.live', (p) => liveTaskFromHub(p));
 // After pending session.live calls, so the hub's clear of words typed into the terminal lands there, not in the dialog.
 hub.handle('session.new', (p) => {
@@ -19510,6 +19517,24 @@ function findSessionFromHub({ name }) {
   }
   if (isSessionPickerOpen()) closeSessionPicker({ refocus: false });
   openSessionPicker({ query: name?.trim() ?? '', ranked: ranked.length ? ranked.map((r) => r.s) : null });
+}
+
+function answerWaitingFromHub(behavior, message) {
+  if (!isWaitingAnswerable()) return showToast('Nothing to answer on this session', 'info');
+  if (currentWaiting.kind === 'question') {
+    showWaitingDetail();
+    return showToast('Pick the answer on the card', 'info');
+  }
+  if (behavior === 'deny') return denyWaiting(message);
+  return respondWaiting({ behavior });
+}
+
+function nextWaitingFromHub() {
+  const live = sessions.filter((s) => !s.placeholder && !dismissedSessionIds.has(s.id));
+  const queue = [...live.filter(isWaitingSession), ...live.filter((s) => !isWaitingSession(s) && s.unread)];
+  const next = queue[(queue.findIndex((s) => s.id === currentSessionId) + 1) % queue.length];
+  if (!next || next.id === currentSessionId) return showToast('No other session needs you', 'info');
+  return revealSession(next.id);
 }
 
 // Voice while the New session dialog is open is dictation into its prompt; Enter on Start sends it.
