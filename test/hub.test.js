@@ -39,6 +39,7 @@ async function loadShim({ enabled = true, costUrl = null, marketplaceUrl = null,
     pushTerminalClaims() {},
     applyHubSettings: (s) => hubSettings.push({ ...s }),
     sessions: [],
+    trustWaiting: new Set(),
     currentSessionId: null,
     isSessionActive: (s) => !!s.live,
     filterProject: 'C:/p',
@@ -280,6 +281,29 @@ describe('voice.context', () => {
       { title: null, rows: rows(false, '2 more need you') },
       { title: null, rows: rows(false, '1 more needs you') },
     ]);
+  });
+});
+
+describe('session.next', () => {
+  it('goes to a placeholder that waits on the folder-trust prompt', async () => {
+    const shim = await loadShim();
+    const c = shim.context;
+    const revealed = [];
+    Object.assign(c, {
+      dismissedSessionIds: new Set(),
+      trustWaiting: new Set(['trust']),
+      isWaitingSession: (s) => !!s.waiting || c.trustWaiting.has(s.id),
+      revealSession: (id) => revealed.push(id),
+      showToast() {},
+      currentSessionId: 's1',
+      sessions: [
+        { id: 's1', waiting: true },
+        { id: 'new', placeholder: true },
+        { id: 'trust', placeholder: true },
+      ],
+    });
+    vm.runInContext('nextWaitingFromHub()', c);
+    assert.deepEqual(revealed, ['trust']);
   });
 });
 

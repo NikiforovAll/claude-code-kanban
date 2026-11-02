@@ -19532,7 +19532,7 @@ function answerWaitingFromHub(behavior, message) {
 }
 
 function needsYouQueue() {
-  const live = sessions.filter((s) => !s.placeholder && !dismissedSessionIds.has(s.id));
+  const live = sessions.filter((s) => (!s.placeholder || trustWaiting.has(s.id)) && !dismissedSessionIds.has(s.id));
   return [...live.filter(isWaitingSession), ...live.filter((s) => !isWaitingSession(s) && s.unread)];
 }
 
