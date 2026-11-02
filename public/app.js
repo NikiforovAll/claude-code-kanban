@@ -6897,6 +6897,12 @@ function buildHelpShortcuts(groups) {
     for (let i = 0; i < Math.max(...sides.map(([g]) => g.rows.length)); i++) {
       for (const [group, side] of sides) {
         const row = group.rows[i];
+        if (row?.say) {
+          cells.push(
+            `<dt class="${escapeHtml(side)}"><span class="sc-say">${escapeHtml(row.say)}</span></dt><dd class="${escapeHtml(side)}">${escapeHtml(row.label)}</dd>`,
+          );
+          continue;
+        }
         const parts = row && helpKeys(row);
         if (!parts?.length) continue;
         const sep = row.combo ? '<span class="sc-plus">+</span>' : '<span class="sc-or">/</span>';
@@ -6914,10 +6920,28 @@ const helpFilter = document.getElementById('help-filter');
 
 // Hub keys do nothing outside Claude Code Hub, except the app links that the --*-url flags set.
 const hubRowWorks = (r) => (r.opens ? hub.can(r.opens) : hub.inHub);
+// With voice on, the hub lists the commands this app handles. A hub before SDK 1.11 has no voiceCommands.
+function voiceHelpGroup() {
+  const commands = hub.voiceCommands?.() ?? [];
+  if (!commands.length) return [];
+  const hold = {
+    keys: ['Ctrl', 'Shift', 'Space'],
+    action: 'hub.voice',
+    combo: true,
+    label: 'Hold and say "hub", then a command',
+  };
+  return [{ title: 'Voice', rows: [hold, ...commands.map((c) => ({ say: `hub, ${c.say}`, label: c.help }))] }];
+}
+
 const helpTabs = () =>
   SHORTCUT_TABS.map((t) =>
     t.hub
-      ? { ...t, groups: t.groups.map((g) => ({ ...g, rows: g.rows.filter(hubRowWorks) })).filter((g) => g.rows.length) }
+      ? {
+          ...t,
+          groups: [...t.groups, ...voiceHelpGroup()]
+            .map((g) => ({ ...g, rows: g.rows.filter(hubRowWorks) }))
+            .filter((g) => g.rows.length),
+        }
       : t,
   ).filter((t) => t.groups.length);
 
@@ -6927,7 +6951,9 @@ function filteredShortcutGroups(query) {
     .flatMap((t) => t.groups)
     .map((g) => ({
       title: g.title,
-      rows: g.rows.filter((r) => fuzzyMatch(`${r.label} ${helpKeys(r).join(' ')}`.replaceAll('−', '-'), query)),
+      rows: g.rows.filter((r) =>
+        fuzzyMatch(`${r.label} ${r.say ?? helpKeys(r).join(' ')}`.replaceAll('−', '-'), query),
+      ),
     }))
     .filter((g) => g.rows.length);
 }

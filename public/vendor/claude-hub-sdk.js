@@ -1,4 +1,4 @@
-// claude-hub-sdk 1.10.0 (sha256 f7dd56941f77). Copied by npm run sdk:sync in claude-code-hub. Do not edit.
+// claude-hub-sdk 1.11.0 (sha256 841f6c771631). Copied by npm run sdk:sync in claude-code-hub. Do not edit.
 // Claude Code Hub SDK: the one rule that names a key press, shared by the hub page, client.js and
 // stub.js. The hub serves it to its page as /sdk/keys.js; mount() and sdk:sync put it in front of
 // client.js and stub.js, so an app still loads one file.
@@ -94,6 +94,7 @@ if (typeof module === 'object' && module.exports) module.exports = ClaudeHubKeys
         forwards: () => false,
         forwardCombos: () => [],
         keyLabel: () => null,
+        voiceCommands: () => [],
         closeGuard() {},
         openExternal(url) {
           win.open(url, '_blank', 'noopener');

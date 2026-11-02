@@ -1,4 +1,4 @@
-// claude-hub-sdk 1.10.0 (sha256 f7dd56941f77). Copied by npm run sdk:sync in claude-code-hub. Do not edit.
+// claude-hub-sdk 1.11.0 (sha256 841f6c771631). Copied by npm run sdk:sync in claude-code-hub. Do not edit.
 // Claude Code Hub SDK: the one rule that names a key press, shared by the hub page, client.js and
 // stub.js. The hub serves it to its page as /sdk/keys.js; mount() and sdk:sync put it in front of
 // client.js and stub.js, so an app still loads one file.
@@ -67,7 +67,10 @@ var ClaudeHubModKit = (() => {
   function createMods(win) {
     const doc = win.document;
     const off = /[?&]nomods(?:[=&]|$)/.test(win.location?.search ?? '');
-    const assets = off ? null : win.ClaudeHubMods;
+    // Only an app's own tab, or the page on its own. A page nested in an app's page (cck's terminal,
+    // a pane) is not what the mod was written for, and ?nomods reaches only the tabs.
+    const nested = win.parent !== win.top;
+    const assets = off || nested ? null : win.ClaudeHubMods;
     const list = assets?.mods ?? [];
     const ids = new Set(list.map((m) => m.id));
     const listeners = new Map();
@@ -79,7 +82,10 @@ var ClaudeHubModKit = (() => {
     function load() {
       if (!assets || !doc) return;
       const js = assets.js ?? [];
-      // Mod code runs with the page's rights; this keeps it from sending what it reads to another host.
+      // Mod code runs with the page's rights. connect-src stops fetch, XHR, WebSocket and beacons to
+      // other hosts; it does not stop image or script loads or navigation, so it guards against a
+      // careless mod, not a hostile one. Consent at install is the real boundary. A wider policy
+      // (script-src, img-src) would break the apps' own inline scripts and remote images.
       if (js.length) {
         doc.head.appendChild(
           Object.assign(doc.createElement('meta'), {
@@ -383,6 +389,11 @@ if (typeof module === 'object' && module.exports) module.exports = ClaudeHubModK
           actions: strings(m.actions),
           keys: comboMap(m.keys),
           themes: Array.isArray(m.themes) ? m.themes : [],
+          voice: Array.isArray(m.voice)
+            ? m.voice
+                .filter((c) => typeof c?.say === 'string' && typeof c?.help === 'string')
+                .map(({ say, help }) => ({ say, help }))
+            : [],
         };
         forward = strings(m.forward);
         appOrigins = strings(m.origins);
@@ -659,6 +670,8 @@ if (typeof module === 'object' && module.exports) module.exports = ClaudeHubModK
           while (n < all[0].length - 1 && all.every((p) => p.length - 1 > n && p[n] === all[0][n])) n++;
           return [...all[0].slice(0, n), all.map((p) => p.slice(n).join('+')).join('/')];
         },
+        // The voice commands this app handles, [{say, help}], for its help. [] with voice off, before welcome, or standalone.
+        voiceCommands: () => (welcome ? welcome.voice.map((c) => ({ ...c })) : []),
         closeGuard(on) {
           post({ type: 'hub:closeGuard', on: !!on });
         },

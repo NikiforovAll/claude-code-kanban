@@ -8829,6 +8829,12 @@ body.light .msg-assistant .msg-text {
   border-radius: 5px;
 }
 
+.shortcuts .sc-say {
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
 .shortcuts .sc-plus,
 .shortcuts .sc-or {
   color: var(--text-muted);
