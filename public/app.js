@@ -832,6 +832,8 @@ async function fetchTasks(sessionId) {
 //#region TIMINGS
 const WAITING_TTL_MS = 30 * 60 * 1000;
 const AGENT_LOG_MAX = 8;
+const AGENT_LOG_PAGE = 24;
+let agentLogLimit = AGENT_LOG_PAGE;
 const ZEN_AGENTS_MAX = 5;
 const LIVE_INDICATOR_MS = 10 * 1000;
 const JUST_NOW_MS = 60 * 1000;
@@ -3555,7 +3557,9 @@ function renderAgentFooter() {
   const now = Date.now();
   const agents = visibleAgents();
   renderZenAgents(agents);
-  const visible = agents.slice(0, AGENT_LOG_MAX);
+  const expanded = footer.classList.contains('expanded');
+  const visible = agents.slice(0, expanded ? agentLogLimit : AGENT_LOG_MAX);
+  const hidden = agents.length - visible.length;
 
   const permFresh = isWaitingFresh();
 
@@ -3569,8 +3573,8 @@ function renderAgentFooter() {
   }
 
   footer.classList.add('visible');
-  const running = visible.filter((a) => a.status === 'active').length;
-  label.innerHTML = `Agents log <span class="agent-footer-count">${visible.length}</span>${running ? `<span class="agent-footer-running">· ${running} running</span>` : ''}`;
+  const running = agents.filter((a) => a.status === 'active').length;
+  label.innerHTML = `Agents log <span class="agent-footer-count">${agents.length}</span>${running ? `<span class="agent-footer-running">· ${running} running</span>` : ''}`;
 
   const permHtml = permFresh
     ? `<button type="button" class="permission-badge" onclick="showWaitingDetail()">${currentWaiting.kind === 'question' ? '❓ Question pending' : currentWaiting.kind === 'plan' ? '📋 Plan pending' : `⏳ Awaiting: ${escapeHtml(currentWaiting.toolName || 'unknown')}`}</button>`
@@ -3597,7 +3601,10 @@ function renderAgentFooter() {
           <div class="agent-status-row"><span class="agent-status"><span class="agent-dot ${status}"></span>${status}</span><span class="agent-duration">${formatDuration(elapsed)}</span></div>
         </div>`;
       })
-      .join('');
+      .join('') +
+    (expanded && hidden > 0
+      ? `<button type="button" class="agent-footer-more" onclick="showMoreAgents()">Show ${Math.min(hidden, AGENT_LOG_PAGE)} more${hidden > AGENT_LOG_PAGE ? ` <span>of ${hidden}</span>` : ''}</button>`
+      : '');
   updateScrollFades(content);
 
   clearInterval(agentDurationInterval);
@@ -3625,6 +3632,25 @@ function toggleAgentFooter() {
   const footer = document.getElementById('agent-footer');
   store.setItem(agentFooterCollapseKey(), !footer.classList.contains('collapsed'));
   applyAgentFooterCollapsed();
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+function toggleAgentFooterExpanded() {
+  const footer = document.getElementById('agent-footer');
+  const expanded = footer.classList.toggle('expanded');
+  agentLogLimit = AGENT_LOG_PAGE;
+  if (expanded && footer.classList.contains('collapsed')) {
+    store.setItem(agentFooterCollapseKey(), false);
+    applyAgentFooterCollapsed();
+  }
+  document.getElementById('agent-footer-expand').title = expanded ? 'Show fewer agents' : 'Show all agents';
+  renderAgentFooter();
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+function showMoreAgents() {
+  agentLogLimit += AGENT_LOG_PAGE;
+  renderAgentFooter();
 }
 
 function boardInSplit() {

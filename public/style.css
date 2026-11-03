@@ -7239,8 +7239,10 @@ body.show-resizing iframe {
   cursor: pointer;
   user-select: none;
   color: var(--text-tertiary);
-  font-size: 12px;
-  font-weight: 600;
+  font-size: 10.5px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
 #agent-footer-label {
   display: flex;
@@ -7254,12 +7256,68 @@ body.show-resizing iframe {
   color: var(--success);
   font-weight: 500;
 }
-.agent-footer-toggle {
+.agent-footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.agent-footer-toggle,
+.agent-footer-expand {
   display: flex;
   background: none;
   border: none;
   cursor: pointer;
   padding: 2px;
+}
+.agent-footer-expand svg {
+  width: 13px;
+  height: 13px;
+  stroke: var(--text-muted);
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.agent-footer-expand:hover svg,
+.agent-footer.expanded .agent-footer-expand svg {
+  stroke: var(--accent);
+}
+.agent-footer-expand .icon-shrink,
+.agent-footer.expanded .agent-footer-expand .icon-expand {
+  display: none;
+}
+.agent-footer.expanded .agent-footer-expand .icon-shrink {
+  display: block;
+}
+.agent-footer.expanded .agent-footer-content {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  max-height: 50vh;
+  overflow: hidden auto;
+}
+.agent-footer.expanded.collapsed .agent-footer-content {
+  display: none;
+}
+.agent-footer.expanded .agent-card {
+  min-width: 0;
+}
+.agent-footer-more {
+  grid-column: 1 / -1;
+  justify-self: center;
+  padding: 4px 12px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--accent);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.agent-footer-more span {
+  color: var(--text-muted);
+}
+.agent-footer-more:hover {
+  border-color: var(--accent);
 }
 .agent-footer.collapsed .agent-footer-toggle .collapse-chevron {
   transform: rotate(180deg);
@@ -7280,7 +7338,7 @@ body.show-resizing iframe {
   display: flex;
   flex-direction: column;
   gap: 3px;
-  padding: 9px 12px;
+  padding: 7px 10px;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -7341,11 +7399,14 @@ body.show-resizing iframe {
 .agent-task {
   max-width: 240px;
   padding-right: 14px;
-  font-size: 12.5px;
+  font-size: 11px;
   font-weight: 600;
   color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.agent-card .agent-ident-row {
+  font-size: 10px;
 }
 .agent-ident-row {
   display: flex;

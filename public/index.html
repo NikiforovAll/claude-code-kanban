@@ -350,7 +350,10 @@
         <div id="agent-footer" class="agent-footer">
           <div class="agent-footer-header" onclick="toggleAgentFooter()">
             <span id="agent-footer-label">Agents</span>
+            <span class="agent-footer-actions">
+            <button class="agent-footer-expand" id="agent-footer-expand" onclick="event.stopPropagation(); toggleAgentFooterExpanded()" aria-label="Show all agents" title="Show all agents"><svg class="icon-expand" viewBox="0 0 24 24"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg><svg class="icon-shrink" viewBox="0 0 24 24"><path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/></svg></button>
             <button class="agent-footer-toggle" id="agent-footer-toggle" aria-label="Toggle agent panel"><svg class="collapse-chevron" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>
+            </span>
           </div>
           <div class="agent-footer-content" id="agent-footer-content"></div>
         </div>
