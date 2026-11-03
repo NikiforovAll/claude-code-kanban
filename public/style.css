@@ -1422,7 +1422,8 @@ body.booting .boot-splash {
 .detail-context-stats .stat-value {
   color: var(--text-primary);
 }
-.detail-context-stats .stat-divider {
+.detail-context-stats .stat-divider,
+.info-grid .stat-divider {
   grid-column: 1 / -1;
   border-top: 1px solid var(--border);
   margin: 2px 0;

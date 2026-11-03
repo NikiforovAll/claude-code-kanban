@@ -9782,6 +9782,7 @@ async function sendPreviewAction(frame, msg) {
 //#region MARKDOWN_PREVIEW
 const PREVIEW_STORAGE_PREFIX = 'preview-paths-';
 let currentPreviewPath = null;
+let currentPreviewContent = null;
 // The session a CLI preview was sent for, which need not be the one on screen.
 let previewSessionId = null;
 let previewFromTerminal = false;
@@ -10007,6 +10008,8 @@ function localImageUrl(src, base) {
 
 function openPreviewModal(filePath, content, kind, sessionId) {
   currentPreviewPath = filePath;
+  currentPreviewContent = kind === 'image' ? null : content;
+  document.getElementById('preview-copy-content-btn').style.display = currentPreviewContent == null ? 'none' : '';
   previewSessionId = sessionId;
   const fileName = filePath.split(/[\\/]/).pop();
   document.getElementById('preview-modal-title').textContent = fileName;
@@ -10106,6 +10109,7 @@ function closePreviewModal() {
   // Empty the body so an iframe preview is destroyed and its scripts/timers stop.
   document.getElementById('preview-modal-body').innerHTML = '';
   currentPreviewPath = null;
+  currentPreviewContent = null;
   previewSessionId = null;
   if (previewFromTerminal) focusTerminalPane();
   previewFromTerminal = false;
@@ -12946,20 +12950,6 @@ function showInfoModal(session, teamConfig, tasks, planContent, parentInfo) {
   if (session.slug && session.hasPlan) {
     infoRows.push(['Slug', session.slug, { openClaudeDir: true, openFile: session.planPath }]);
   }
-  if (session.project) {
-    const projectName = session.project.split(/[/\\]/).pop();
-    infoRows.push(['Project', projectName, { openPath: session.projectDir }]);
-    infoRows.push(['Path', session.project, { openPath: session.project }]);
-    if (session.cwd) {
-      infoRows.push(['CWD', session.cwd, { openPath: session.cwd }]);
-    }
-    if (session.gitBranch) {
-      infoRows.push(['Branch', session.gitBranch]);
-    }
-    if (session.description) {
-      infoRows.push(['Description', session.description]);
-    }
-  }
   if (session.tasksDir) {
     infoRows.push(['Tasks Dir', session.tasksDir, { openPath: session.tasksDir }]);
   }
@@ -12977,12 +12967,25 @@ function showInfoModal(session, teamConfig, tasks, planContent, parentInfo) {
     const configDir = teamConfig.configPath.replace(/[/\\][^/\\]+$/, '');
     infoRows.push(['Team Config', teamConfig.configPath, { openPath: configDir, openFile: teamConfig.configPath }]);
   }
+  const projectRows = [];
+  if (session.project) {
+    projectRows.push(['Project', session.project, { openPath: session.project }]);
+    if (session.cwd) {
+      projectRows.push(['Working directory', session.cwd, { openPath: session.cwd }]);
+    }
+    if (session.gitBranch) {
+      projectRows.push(['Branch', session.gitBranch]);
+    }
+    if (session.description) {
+      projectRows.push(['Description', session.description]);
+    }
+  }
   const clickableStyle =
     'font-family: var(--mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; color: var(--accent-text); text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 3px;';
   const plainStyle =
     'font-family: var(--mono); font-size: 12px; color: var(--text-primary); user-select: all; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;';
   html += `<div class="team-modal-meta info-grid">`;
-  infoRows.forEach(([label, value, opts]) => {
+  const renderRow = ([label, value, opts]) => {
     html += `<span style="font-weight: 500; color: var(--text-secondary); font-size: 12px; white-space: nowrap;">${label}</span>`;
     if (opts?.openSession) {
       html += `<span onclick="openSessionFromInfo('${escAttrJs(opts.openSession)}')" style="${clickableStyle}" title="Open session in app">${escapeHtml(value)}</span>`;
@@ -12997,7 +13000,12 @@ function showInfoModal(session, teamConfig, tasks, planContent, parentInfo) {
       openBtn = `<button data-folder="${folder}" data-file="${file}" data-claude-dir="${opts.openClaudeDir ? '1' : ''}" onclick="openFolderInEditor(this.dataset.claudeDir ? undefined : this.dataset.folder, this.dataset.file || undefined)" title="Open in editor">${ICON_OPEN_EXTERNAL}</button>`;
     }
     html += `<span class="row-actions">${copyBtn}${openBtn}</span>`;
-  });
+  };
+  infoRows.forEach(renderRow);
+  if (projectRows.length) {
+    html += `<div class="stat-divider"></div>`;
+    projectRows.forEach(renderRow);
+  }
   html += `</div>`;
 
   const contextHtml = renderContextDetail(session);
