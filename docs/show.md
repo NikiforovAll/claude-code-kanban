@@ -56,16 +56,20 @@ board     the pane opens in the background; the pane file watch refreshes it on 
 
 ## Storage
 
-Each session's posts are in `<session scratchpad>/.cck/show/`:
+The index and the claim files live in different folders:
 
-- `index.json`: `{sessionId, posts: [{id, title, key, kind, file, base, updatedAt}]}`
-- `<post id>.md` or `<post id>.html`: the file of a claim post
+- `<config dir>/.cck/show/<session id>/index.json`: `{sessionId, posts: [{id, title, key, kind, file, base, claim, updatedAt}]}`. cck owns this folder and keys it by session id only, so the writer and the reader always agree on it. It expires with the session (`docs/retention.md`).
+- `<session scratchpad>/.cck/show/<post id>.md|html`: the file of a claim post. `claim` on the entry is its absolute path, set when the claim is made, so a read never resolves the scratchpad again. The model writes this file, and its scratchpad is the one folder it writes without a permission prompt.
 
-The scratchpad is under the OS temp dir, so the folder goes with it and cck does not sweep it (`docs/retention.md`). `terminals.json` keeps the map of terminal id to its current session as `showSessions`, so the card comes back after a board restart. The map drops terminals that no longer exist. A session resumed from the board in a new terminal gets a new terminal id; a terminal with no entry takes the session it was started with when that session has posts (`startedSession`, from the host's terminal list), so its card comes back too. The board drops a PTY's terminal id when the PTY leaves the running list (`forgetEndedTerminals`), because a session resumed after its terminal ended runs under the same PTY id with a new terminal id.
+The scratchpad of a new claim is the session list's `scratchpadDir`: the last `environment` record in the transcript, else the convention path (`docs/session-scanning.md`). Claude Code writes one at each process start, and an update can move the scratchpad: 2.1.317 keys the root by a hash, where 2.1.316 used the project's dir name. A new claim under a key that exists moves the old file to the current scratchpad, so the model can write it there. Older claims stay where they are, and the watch covers each folder that holds a claim.
+
+An older cck kept the index beside the claims in the scratchpad. A session with no index in `.cck/show/` adopts the posts of those folders, checked once per session per board run (`scratchpadDirs`: the session list's `scratchpadDir`, then the convention path; a new claim goes in the first). When two folders hold the same post id, the first folder wins. Clear deletes those old index files too, so that cleared posts are not adopted again.
+
+`terminals.json` keeps the map of terminal id to its current session as `showSessions`, so the card comes back after a board restart. The map drops terminals that no longer exist. A session resumed from the board in a new terminal gets a new terminal id; a terminal with no entry takes the session it was started with when that session has posts (`startedSession`, from the host's terminal list), so its card comes back too. The board drops a PTY's terminal id when the PTY leaves the running list (`forgetEndedTerminals`), because a session resumed after its terminal ended runs under the same PTY id with a new terminal id.
 
 ## Refresh
 
-cck watches the show folder of each session that a terminal maps to (`watch` in `lib/show.js`):
+cck watches each folder that holds a claim of a session that a terminal maps to (`watch` in `lib/show.js`). It syncs the set of folders on each post and each list:
 
 - A change to `<post id>.md|html` waits 200 ms (`SETTLE_MS`) for the writes to settle, then compares the file's mtime with the one cck last saw (`seen`, in memory), so a second watch event for one save, or a rename for a new `kind`, is not a change.
 - A change updates `updatedAt`, writes the index and sends `show:posted` with `replaced: true`. The store sends every `show:posted`, for a post and for a refresh, to each terminal that maps to the session (`notify`), so the board uses the same path for both.
@@ -99,7 +103,8 @@ Any HTML preview (the card, a pane, the preview modal) can send the user's answe
 - Per post: one index read and write.
 - Per removed post: one `stat` of the pane store (a read only when it changed), and one write when the post had a show pane.
 - Per save of a claim file: one `stat`, one index write and one SSE event, at most once per 200 ms per post.
-- Watches: one `fs.watch` per session that has posts and a terminal, unref'd.
+- Watches: one `fs.watch` per folder with a claim of a session that has a terminal, unref'd. Usually one; two after Claude Code moved the scratchpad.
+- Once per session per board run, when it has no index yet: a read of up to two old `index.json` files.
 - Board: one list GET and one post GET per event for the terminal on screen.
 - Per action: nothing until a click; then one file write and one doorbell line.
 - Dock: nothing until used. A dock, undock or drag release refits the terminal once, which resizes the PTY, and Claude Code redraws. The card's existing host observer sets the width, and writes it only when it changed.

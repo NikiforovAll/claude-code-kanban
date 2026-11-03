@@ -19,7 +19,7 @@ function board(root, saved = {}) {
   const store = createShowStore({
     load: () => state.map,
     onChange: () => { state.saves++; state.map = store.prune(() => true); },
-    resolveDir: (id) => ([A, B].includes(id) ? path.join(root, id, 'scratchpad') : null),
+    resolveDir: (id) => ([A, B].includes(id) ? path.join(root, id, 'scratchpad', '.cck', 'show') : null),
     onPosted: (e) => events.push({ type: 'show:posted', ...e }),
   });
   const app = express();
@@ -350,6 +350,81 @@ describe('show claims', () => {
     assert.equal((await api.call('GET', showUrl())).body.posts[0].file, null);
     await api.call('POST', showUrl(), { sessionId: A, title: 'Plan', key: 'plan', kind: 'html' });
     assert.equal(fs.readFileSync(claim.path, 'utf8'), '# v2');
+  });
+});
+
+describe('show claims after the scratchpad moves', () => {
+  it('keeps every card, and refreshes claims in the old and the new folder', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cck-show-move-'));
+    const store = path.join(root, 'store', A);
+    let scratch = path.join(root, 'old', A);
+    const events = [];
+    const s = createShowStore({
+      onChange: () => {},
+      resolveDir: (id) => (id === A ? store : null),
+      scratchpadDirs: () => [scratch],
+      onPosted: (e) => events.push(e),
+    });
+    const refreshed = async (post, text) => {
+      const since = events.length;
+      fs.writeFileSync(post.path, text);
+      assert.ok(await until(() => events.slice(since).some((e) => e.id === post.id && e.replaced)));
+    };
+    try {
+      const first = s.post(TERMINAL, { sessionId: A, title: 'One', key: 'one', kind: 'markdown' });
+      assert.equal(path.dirname(first.path), scratch);
+      await refreshed(first, '# one');
+
+      scratch = path.join(root, 'new', A);
+      const second = s.post(TERMINAL, { sessionId: A, title: 'Two', key: 'two', kind: 'markdown' });
+      assert.equal(path.dirname(second.path), scratch);
+      assert.deepEqual(s.list(TERMINAL).posts.map((p) => p.key), ['one', 'two']);
+      assert.equal(s.get(TERMINAL, first.id).content, '# one');
+      await refreshed(second, '# two');
+      await refreshed(first, '# one again');
+
+      const again = s.post(TERMINAL, { sessionId: A, title: 'One', key: 'one', kind: 'markdown' });
+      assert.equal(again.path, path.join(scratch, `${first.id}.md`), 'a new claim of the same key moves its file to the current folder');
+      assert.equal(fs.readFileSync(again.path, 'utf8'), '# one again');
+      assert.equal(fs.existsSync(first.path), false);
+    } finally {
+      s.prune(() => false);
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('adopts the posts an older cck kept in scratchpad folders, once', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cck-show-adopt-'));
+    const store = path.join(root, 'store', A);
+    const hash = path.join(root, 'hash', A);
+    const slug = path.join(root, 'slug', A);
+    const P1 = 'bbbbbbbb-0000-0000-0000-000000000001';
+    const P2 = 'bbbbbbbb-0000-0000-0000-000000000002';
+    const legacy = (dir, posts) => {
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'index.json'), JSON.stringify({ sessionId: A, posts }));
+      for (const p of posts) fs.writeFileSync(path.join(dir, `${p.id}.md`), `# ${dir}`);
+    };
+    const entry = (id, key) => ({ id, title: key, key, kind: 'markdown', file: null, base: null, updatedAt: '2026-11-03T00:00:00.000Z' });
+    legacy(hash, [entry(P1, 'one')]);
+    legacy(slug, [entry(P1, 'one'), entry(P2, 'two')]);
+    const s = createShowStore({
+      load: () => ({ [TERMINAL]: A }),
+      onChange: () => {},
+      resolveDir: (id) => (id === A ? store : null),
+      scratchpadDirs: () => [hash, slug],
+    });
+    try {
+      assert.deepEqual(s.list(TERMINAL).posts.map((p) => p.key), ['one', 'two']);
+      assert.equal(s.get(TERMINAL, P1).content, `# ${hash}`, 'the first folder wins a post both hold');
+      assert.equal(s.get(TERMINAL, P2).content, `# ${slug}`);
+
+      s.clear(TERMINAL);
+      assert.deepEqual(s.list(TERMINAL).posts, [], 'cleared posts are not adopted again');
+      assert.equal(fs.existsSync(path.join(slug, `${P2}.md`)), false);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

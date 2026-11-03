@@ -121,6 +121,7 @@ const CCK_DIR = path.join(CLAUDE_DIR, '.cck');
 const AGENT_ACTIVITY_DIR = path.join(CCK_DIR, 'agent-activity');
 const CONTEXT_STATUS_DIR = path.join(CCK_DIR, 'context-status');
 const ATTACHMENTS_DIR = path.join(CCK_DIR, 'attachments');
+const SHOW_DIR = path.join(CCK_DIR, 'show');
 const PINS_FILE = path.join(CCK_DIR, 'pins.json');
 const USER_GROUPS_FILE = path.join(CCK_DIR, 'groups.json');
 const DISPATCHED_FILE = path.join(CCK_DIR, 'dispatched.json');
@@ -3502,9 +3503,16 @@ const show = createShowStore({
   onChange: saveTerminals,
   onPosted: (e) => broadcast({ type: 'show:posted', ...e }),
   startedSession: terminal.sessionOfTerminal,
-  resolveDir: (id) => {
+  resolveDir: (id) => (sessionMetaFor(id) ? path.join(SHOW_DIR, id) : null),
+  // Claims go where the session can write without a prompt: its scratchpad as of its last process start.
+  // The convention dir follows it, for claims made before Claude Code 2.1.317 moved the root.
+  scratchpadDirs: (id) => {
     const meta = sessionMetaFor(id);
-    return meta ? getScratchpadDir(id, meta) : null;
+    if (!meta?.jsonlPath) return [];
+    const recorded = getScratchpadDir(id, meta);
+    const convention = getScratchpadDir(id, { ...meta, scratchpadDir: null });
+    const dirs = [recorded, convention].filter(Boolean).map((dir) => path.join(dir, '.cck', 'show'));
+    return [...new Set(dirs)];
   },
 });
 mountShowRoutes(app, {
@@ -4985,7 +4993,7 @@ async function cleanupAgentActivity() {
   } catch { /* agent-activity dir may not exist */ }
 }
 
-// Dispatch markers, pane layouts, add-on sessions, reviews, attachments, context status and worktrees: see docs/retention.md.
+// Dispatch markers, pane layouts, add-on sessions, reviews, attachments, show indexes, context status and worktrees: see docs/retention.md.
 async function runRetention() {
   try {
     const scan = await scanTranscripts(PROJECTS_DIR);
@@ -4996,12 +5004,13 @@ async function runRetention() {
     const addonSessions = addons.prune(opts);
     const reviews = await pruneSessionDirs(REVIEW_DIR, opts);
     const attachments = await pruneSessionDirs(ATTACHMENTS_DIR, opts);
+    const shows = await pruneSessionDirs(SHOW_DIR, opts);
     const contexts = await pruneContextStatus(CONTEXT_STATUS_DIR, opts);
     const wts = worktrees.prune(scan?.dirs);
     const taskMaps = await pruneTaskMaps(TASK_MAPS_DIR, opts);
     const grouped = expireGroupMembers(scan?.ids);
-    if (markers || layouts || addonSessions || reviews || attachments || contexts || wts || taskMaps || grouped.members) {
-      console.log(`[retention] removed ${markers} dispatch markers, ${layouts} pane layouts, ${addonSessions} add-on sessions, ${reviews} reviews, ${attachments} attachments, ${contexts} context status files, ${wts} worktrees, ${taskMaps} task-list mappings, ${grouped.members} group members, ${grouped.groups} groups`);
+    if (markers || layouts || addonSessions || reviews || attachments || shows || contexts || wts || taskMaps || grouped.members) {
+      console.log(`[retention] removed ${markers} dispatch markers, ${layouts} pane layouts, ${addonSessions} add-on sessions, ${reviews} reviews, ${attachments} attachments, ${shows} show files, ${contexts} context status files, ${wts} worktrees, ${taskMaps} task-list mappings, ${grouped.members} group members, ${grouped.groups} groups`);
     }
   } catch (e) {
     console.warn('[retention] failed:', e.message);

@@ -645,7 +645,7 @@ describe('Parser: readSessionInfoFromJsonl', () => {
     }
   });
 
-  it('drops the head scratchpad dir when a cold scan skips the middle of a large transcript', () => {
+  it('finds the scratchpad dir in the middle a cold scan skips of a large transcript', () => {
     const dir = mkdtempSync(path.join(os.tmpdir(), 'cck-scratch-'));
     const line = (o) => `${JSON.stringify({ ...o, sessionId: 's' })}\n`;
     const env = (scratchpadDirectory) => line({ type: 'attachment', attachment: { type: 'environment', snapshot: { scratchpadDirectory } } });
@@ -654,7 +654,7 @@ describe('Parser: readSessionInfoFromJsonl', () => {
     try {
       const gap = path.join(dir, 'gap.jsonl');
       writeFileSync(gap, env('/tmp/claude-501/-p/s/scratchpad') + filler + env('/tmp/claude-501/-q/s/scratchpad') + filler + turn);
-      assert.equal(readSessionInfoFromJsonl(gap).scratchpadDir, null);
+      assert.equal(readSessionInfoFromJsonl(gap).scratchpadDir, '/tmp/claude-501/-q/s/scratchpad');
       const tail = path.join(dir, 'tail.jsonl');
       writeFileSync(tail, env('/tmp/claude-501/-p/s/scratchpad') + filler + filler + env('/tmp/claude-501/-q/s/scratchpad') + turn);
       assert.equal(readSessionInfoFromJsonl(tail).scratchpadDir, '/tmp/claude-501/-q/s/scratchpad');
