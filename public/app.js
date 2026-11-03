@@ -5254,6 +5254,24 @@ function computeChildAnchors(list) {
   return out;
 }
 
+function setDispatchChild(id, child) {
+  const s = sessions.find((x) => x.id === id);
+  if (!s?.dispatched || !!s.dispatched.child === child) return;
+  s.dispatched = { ...s.dispatched, child };
+  if (child && sgGroupOf('session', id)) {
+    sgDetach('session', id);
+    persistSessionGroups();
+  }
+  api(`/api/dispatch/${encodeURIComponent(id)}/child`, { method: 'POST', body: { child } })
+    .then(async (res) => {
+      if (res.ok) return;
+      const data = await res.json().catch(() => null);
+      showToast(`Not saved (${data?.error || res.status})`, 'error');
+      fetchSessions(false).catch(() => {});
+    })
+    .catch(() => showToast('Not saved: the server is unreachable', 'error'));
+}
+
 function sgListFiltered() {
   return !!searchQuery || activityFilter.size > 0 || (!!filterProject && filterProject !== '__recent__');
 }
@@ -5598,7 +5616,9 @@ function sgGroupDropZone(target) {
       : null;
   }
   const dragSession = sgDrag.kind === 'session' ? sessions.find((x) => x.id === sgDrag.ref) : null;
-  if (zone.classList.contains('sg-ungroup-zone')) return dragGroup ? { zone } : null;
+  const anchored = !!dragSession && childAnchors.has(dragSession.id);
+  if (zone.classList.contains('sg-ungroup-zone'))
+    return dragGroup ? { zone } : anchored ? { zone, unnest: true } : null;
   const fromGroup = dragSession ? sgGroupForSession(dragSession) : dragGroup;
   const fromGroupId = fromGroup?.id || null;
   // A drop that lands on the host the session already has changes nothing, and highlighting it
@@ -5615,6 +5635,7 @@ function sgGroupDropZone(target) {
   const targetSessionId = zone.dataset.sessionId;
   if (targetSessionId) {
     if (targetSessionId === sgDrag.ref) return null;
+    if (dragSession?.dispatched?.parent === targetSessionId) return anchored ? null : { zone, nest: true };
     const targetSession = sessions.find((s) => s.id === targetSessionId);
     const targetGroup = targetSession ? sgGroupForSession(targetSession) : null;
     const targetGroupId = targetGroup?.id || null;
@@ -5635,6 +5656,7 @@ function sgGroupDropZone(target) {
   }
   const path = zone.dataset.projectPath;
   if (!path || path === sgDrag.ref) return null;
+  if (anchored && sessionProjectKey(dragSession) === path) return { zone, unnest: true };
   // Dropping onto a project that already sits in a group means "join that group".
   const pathGroup = sgGroupOf('project', path);
   if (pathGroup) {
@@ -5692,6 +5714,18 @@ function sgOnDrop(e) {
   const drag = sgDrag;
   if (hit.insert) {
     sgInsertSession(drag.ref, hit.insert);
+    sgFinishDrag();
+    return;
+  }
+  if (hit.nest) {
+    setDispatchChild(drag.ref, true);
+    sgFinishDrag();
+    return;
+  }
+  // Any other move takes a `--child` session out of its starter's place for good, so it stays
+  // where it was put after it leaves a group.
+  if (drag.kind === 'session') setDispatchChild(drag.ref, false);
+  if (hit.unnest) {
     sgFinishDrag();
     return;
   }
@@ -5870,7 +5904,12 @@ function sgOpenMenu(x, y, kind, ref) {
   menu.setAttribute('role', 'menu');
   const canFork = kind === 'session' && !!forkableSession(ref);
   const canEnd = kind === 'session' && runningTerminals.has(ref);
+  const marker = kind === 'session' ? sessions.find((s) => s.id === ref)?.dispatched : null;
+  const nestItem = marker?.child
+    ? '<button class="sg-menu-item" role="menuitem" data-sg-action="unnest">Unnest</button>'
+    : '';
   const actions =
+    nestItem +
     (canFork
       ? '<button class="sg-menu-item" role="menuitem" data-sg-action="fork" title="claude --resume --fork-session">Fork</button>'
       : '') +
@@ -5931,6 +5970,11 @@ document.addEventListener('click', (e) => {
   sgCloseMenu();
   if (item.dataset.sgAction === 'fork') return forkSession(sgRef);
   if (item.dataset.sgAction === 'end') return closeTerminalSession(sgRef);
+  if (item.dataset.sgAction === 'unnest') {
+    setDispatchChild(sgRef, false);
+    return renderSessions();
+  }
+  if (sgKind === 'session') setDispatchChild(sgRef, false);
   if (move === '__none__') {
     sgDetach(sgKind, sgRef);
     persistSessionGroups();

@@ -3599,6 +3599,16 @@ app.post('/api/dispatch', terminalRoute(async (req, res) => {
   });
 }));
 
+app.post('/api/dispatch/:id/child', (req, res) => {
+  const { child } = req.body || {};
+  if (typeof child !== 'boolean') return res.status(400).json({ error: 'child must be true or false' });
+  const marker = dispatched.get(req.params.id);
+  if (!marker) return res.status(404).json({ error: 'not a dispatched session' });
+  if (child && !marker.parent) return res.status(400).json({ error: 'child needs a parent session' });
+  if (dispatched.setChild(req.params.id, child)) broadcast({ type: 'dispatch-update' });
+  res.json({ session: req.params.id, child });
+});
+
 app.get('/api/dispatch', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   const parent = typeof req.query.parent === 'string' && req.query.parent ? req.query.parent : null;

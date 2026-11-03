@@ -114,6 +114,19 @@ describe('createDispatchedStore', () => {
     assert.equal(writes.length, 3);
   });
 
+  it('turns the child flag off and on, writing only on a change', () => {
+    const { s, writes } = store();
+    s.record('a', { parent: 'p', child: true });
+    assert.equal(s.setChild('a', false), true);
+    assert.equal(s.get('a').child, false);
+    assert.equal(s.get('a').parent, 'p');
+    assert.equal(s.setChild('a', false), false);
+    assert.equal(s.setChild('a', true), true);
+    assert.equal(s.get('a').child, true);
+    assert.equal(s.setChild('none', true), false);
+    assert.equal(writes.length, 3);
+  });
+
   it('lists a dispatch again after a restart resumes its terminal', () => {
     const before = store();
     before.s.record('s-1', { parent: 'p-1', name: 'one', worktree: 'wt' });
