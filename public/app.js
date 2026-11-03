@@ -3469,7 +3469,7 @@ function agentTaskText(a) {
 function agentElapsed(a, now) {
   return a.status === 'stopped' && a.stoppedAt
     ? new Date(a.stoppedAt).getTime() - new Date(a.startedAt || a.stoppedAt).getTime()
-    : now - new Date(a.startedAt || a.updatedAt).getTime();
+    : now - agentStart(a);
 }
 
 function agentIdentHtml(a) {
@@ -3557,6 +3557,7 @@ function renderAgentFooter() {
   const now = Date.now();
   const agents = visibleAgents();
   renderZenAgents(agents);
+  renderAgentViews(agents);
   const expanded = footer.classList.contains('expanded');
   const visible = agents.slice(0, expanded ? agentLogLimit : AGENT_LOG_MAX);
   const hidden = agents.length - visible.length;
@@ -3585,7 +3586,7 @@ function renderAgentFooter() {
     visible
       .map((a) => {
         const elapsed = agentElapsed(a, now);
-        const status = a.status === 'stopped' || a.status === 'idle' ? a.status : 'active';
+        const status = agentStatus(a);
         const displayText = agentTaskText(a);
         const taskHtml = `<div class="agent-task" title="${escapeHtml(displayText)}">${escapeHtml(displayText)}</div>`;
         const agentNameVal = a.agentName || null;
@@ -3651,6 +3652,329 @@ function toggleAgentFooterExpanded() {
 function showMoreAgents() {
   agentLogLimit += AGENT_LOG_PAGE;
   renderAgentFooter();
+}
+
+const AGENT_MAP_COL = 260;
+const AGENT_MAP_ROW = 44;
+const AGENT_MAP_NODE_W = 220;
+const AGENT_MAP_NODE_H = 36;
+const AGENT_VIEW_KEY = 'agentView';
+const AGENT_COLOR_KEY = 'agentColor';
+let agentView = 'timeline';
+let agentViewsShape = '';
+let agentViewsAt = 0;
+
+function agentStatus(a) {
+  return a.status === 'stopped' || a.status === 'idle' ? a.status : 'active';
+}
+
+// An agent whose parent is not in the list (a ghost, or the main session) hangs off its session's root.
+function agentTree(agents) {
+  const byId = new Map(agents.map((a) => [a.agentId, { agent: a, children: [] }]));
+  const roots = new Map();
+  for (const node of byId.values()) {
+    const parent = node.agent.parent && byId.get(node.agent.parent);
+    if (parent) {
+      parent.children.push(node);
+      continue;
+    }
+    const sid = node.agent._sourceSessionId || currentSessionId || '';
+    if (!roots.has(sid)) roots.set(sid, { agent: null, sid, children: [] });
+    roots.get(sid).children.push(node);
+  }
+  const byStart = (x, y) => new Date(x.agent.startedAt || 0) - new Date(y.agent.startedAt || 0);
+  const sortDeep = (n) => {
+    n.children.sort(byStart);
+    n.children.forEach(sortDeep);
+  };
+  const list = [...roots.values()];
+  list.forEach(sortDeep);
+  return list;
+}
+
+function agentRootLabel(root, many) {
+  const s = many && sessions.find((x) => x.id === root.sid);
+  return s ? sessionDisplayName(s) : 'main';
+}
+
+function agentMapHtml(roots, now) {
+  let row = 0;
+  let maxDepth = 0;
+  const nodes = [];
+  const edges = [];
+  agentWaves(roots);
+  const place = (n, depth, parentWave) => {
+    const wave = n.wave || parentWave;
+    maxDepth = Math.max(maxDepth, depth);
+    let y;
+    if (n.children.length) {
+      const ys = n.children.map((c) => place(c, depth + 1, wave));
+      y = (ys[0] + ys[ys.length - 1]) / 2;
+      for (const cy of ys) edges.push([depth, y, cy]);
+    } else {
+      y = row++ * AGENT_MAP_ROW;
+    }
+    nodes.push({ n, depth, y, wave });
+    return y;
+  };
+  for (const r of roots) {
+    place(r, 0);
+    row += 0.5;
+  }
+  const width = maxDepth * AGENT_MAP_COL + AGENT_MAP_NODE_W;
+  const height = (row - 0.5) * AGENT_MAP_ROW;
+  const mid = AGENT_MAP_NODE_H / 2;
+  const paths = edges.map(([depth, y1, y2]) => {
+    const x1 = depth * AGENT_MAP_COL + AGENT_MAP_NODE_W;
+    const x2 = (depth + 1) * AGENT_MAP_COL;
+    const xm = (x1 + x2) / 2;
+    return `<path d="M${x1} ${y1 + mid}C${xm} ${y1 + mid} ${xm} ${y2 + mid} ${x2} ${y2 + mid}"/>`;
+  });
+  const colors = new Map();
+  const many = roots.length > 1;
+  const html = nodes.map(({ n, depth, y, wave }) => {
+    const pos = `left:${depth * AGENT_MAP_COL}px;top:${y}px`;
+    if (!n.agent) return `<div class="agent-map-node root" style="${pos}">${escapeHtml(agentRootLabel(n, many))}</div>`;
+    const a = n.agent;
+    const status = agentStatus(a);
+    const task = agentTaskText(a);
+    const kind = agentKind(a);
+    const fill = agentColor(a, status, wave, colors);
+    return `<button type="button" class="agent-map-node ${escapeHtml(status)}" style="${pos};border-color:${fill}" title="${escapeHtml(`${kind}\n${task}`)}" onclick="showAgentModal('${escAttrJs(a.agentId)}')"><span class="agent-map-text"><span class="agent-map-kind">${escapeHtml(kind)}</span>${escapeHtml(task)}</span><span class="agent-views-time">${formatDuration(agentElapsed(a, now))}</span></button>`;
+  });
+  return {
+    html: `<div class="agent-map" style="width:${width}px;height:${height}px;--node-w:${AGENT_MAP_NODE_W}px;--node-h:${AGENT_MAP_NODE_H}px"><svg class="agent-map-edges" width="${width}" height="${height}">${paths.join('')}</svg>${html.join('')}</div>`,
+    legend: agentLegendHtml(colors),
+  };
+}
+
+// Agents come in bursts with long idle gaps between them. A linear axis would draw each burst as a
+// dot, so a gap longer than AGENT_SPINE_GAP_SHARE of the busy time is drawn at that width.
+const AGENT_SPINE_GAP_SHARE = 0.05;
+
+function agentTimeScale(spans) {
+  const sorted = [...spans].sort((x, y) => x[0] - y[0]);
+  const merged = [];
+  for (const [s, e] of sorted) {
+    const last = merged[merged.length - 1];
+    if (last && s <= last[1]) last[1] = Math.max(last[1], e);
+    else merged.push([s, e]);
+  }
+  const busy = merged.reduce((sum, [s, e]) => sum + (e - s), 0);
+  const maxGap = Math.max(busy * AGENT_SPINE_GAP_SHARE, 1000);
+  const offsets = [];
+  const cutAt = [];
+  let x = 0;
+  merged.forEach(([s, e], i) => {
+    if (i) {
+      const gap = s - merged[i - 1][1];
+      if (gap > maxGap) cutAt.push(x + maxGap / 2);
+      x += Math.min(gap, maxGap);
+    }
+    offsets.push(x);
+    x += e - s;
+  });
+  const total = Math.max(x, 1000);
+  const pct = (t) => {
+    let i = merged.length - 1;
+    while (i > 0 && t < merged[i][0]) i--;
+    return ((offsets[i] + Math.max(0, t - merged[i][0])) / total) * 100;
+  };
+  return { pct, cuts: cutAt.map((c) => (c / total) * 100) };
+}
+
+// Agents that the main session starts within this window of each other came from one turn.
+const AGENT_WAVE_MS = 10000;
+const AGENT_SPINE_TOP = 26;
+const AGENT_SPINE_ROW = 22;
+const AGENT_SPINE_BAR_H = 16;
+const AGENT_SPINE_LABEL_MAX = 260;
+const AGENT_SPINE_NEST_PX = 14;
+
+const AGENT_COLOR_MODES = ['type', 'model', 'status', 'wave'];
+let agentColorBy = 'wave';
+const AGENT_STATUS_FILL = { active: 'var(--success)', idle: 'var(--warning)', stopped: 'var(--text-muted)' };
+const AGENT_CLOCK = new Intl.DateTimeFormat([], { hour: '2-digit', minute: '2-digit' });
+
+function agentKind(a) {
+  return `${agentTypeParts(a).raw} · ${shortModelName(agentModel(a)) || '?'}`;
+}
+
+// Returns the fill for one agent and records it in the legend's colors map.
+function agentColor(a, status, wave, colors) {
+  let key;
+  let fill;
+  if (agentColorBy === 'status') [key, fill] = [status, AGENT_STATUS_FILL[status]];
+  else if (agentColorBy === 'wave') [key, fill] = [wave.time, ownerColors[wave.index % ownerColors.length].color];
+  else {
+    key = agentColorBy === 'model' ? shortModelName(agentModel(a)) || '?' : agentTypeParts(a).raw;
+    fill = getOwnerColor(key).color;
+  }
+  colors.set(key, fill);
+  return fill;
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+function setAgentColor(mode) {
+  agentColorBy = mode;
+  store.setItem(AGENT_COLOR_KEY, mode);
+  renderAgentViews(visibleAgents());
+}
+
+function agentStart(a) {
+  return new Date(a.startedAt || a.updatedAt).getTime();
+}
+
+// A wave is the top-level agents started within AGENT_WAVE_MS of the previous one.
+// Each top-level node gets its wave as `wave`.
+function agentWaves(roots) {
+  const top = roots.flatMap((r) => r.children);
+  for (const n of top) n.start = agentStart(n.agent);
+  top.sort((x, y) => x.start - y.start);
+  const waves = [];
+  for (const n of top) {
+    const w = waves[waves.length - 1];
+    if (w && n.start - w.last <= AGENT_WAVE_MS) w.nodes.push(n);
+    else waves.push({ t: n.start, nodes: [n], index: waves.length, time: AGENT_CLOCK.format(n.start) });
+    n.wave = waves[waves.length - 1];
+    n.wave.last = n.start;
+  }
+  return waves;
+}
+
+function agentLegendHtml(colors) {
+  const legend = [...colors]
+    .map(([key, c]) => `<span><i style="background:${c}"></i>${escapeHtml(key)}</span>`)
+    .join('');
+  const live = agentColorBy === 'status' ? '' : '<span><i class="agent-views-live"></i>running</span>';
+  return legend + live;
+}
+
+// The main session is a line along time. Each wave of agents branches off it where it started,
+// and a nested agent branches off its parent's bar. A wave takes the first rows free at its start,
+// counting the label after each bar, so labels of neighbouring waves never overlap.
+function agentSpineHtml(roots, now, width) {
+  const plot = Math.max(width - AGENT_SPINE_LABEL_MAX, 200);
+  const px = (p) => (p / 100) * plot;
+  const end = (a) => agentStart(a) + agentElapsed(a, now);
+  const waves = agentWaves(roots);
+  const spans = [];
+  const collect = (n) => {
+    spans.push([agentStart(n.agent), end(n.agent)]);
+    n.children.forEach(collect);
+  };
+  for (const w of waves) w.nodes.forEach(collect);
+  const { pct, cuts } = agentTimeScale(spans);
+
+  const rowEnd = [];
+  const bars = [];
+  const links = [];
+  const dots = [];
+  const ticks = [];
+  const colors = new Map();
+  let lastTick = -Infinity;
+  const rowY = (row) => AGENT_SPINE_TOP + row * AGENT_SPINE_ROW;
+  for (const w of waves) {
+    const list = [];
+    const walk = (n, parent) => {
+      const item = { n, parent };
+      list.push(item);
+      for (const c of n.children) walk(c, item);
+    };
+    for (const n of w.nodes) walk(n, null);
+    const x0 = px(pct(w.t));
+    let base = 0;
+    while (list.some((_, k) => (rowEnd[base + k] ?? -1) > x0)) base++;
+    list.forEach((item, k) => {
+      const a = item.n.agent;
+      const row = base + k;
+      const xs = Math.max(px(pct(agentStart(a))), item.parent ? item.parent.x + AGENT_SPINE_NEST_PX : x0 + 6);
+      const barW = Math.max(px(pct(end(a))) - xs, 4);
+      const task = agentTaskText(a);
+      const dur = formatDuration(agentElapsed(a, now));
+      const labelW = Math.min(task.length * 6.4 + 48, AGENT_SPINE_LABEL_MAX);
+      rowEnd[row] = xs + barW + labelW + 12;
+      item.x = xs;
+      item.y = rowY(row);
+      const mid = item.y + AGENT_SPINE_BAR_H / 2;
+      links.push(
+        item.parent
+          ? `<path d="M${item.parent.x + 4} ${item.parent.y + AGENT_SPINE_BAR_H - 3}V${mid}H${xs}"/>`
+          : `<path d="M${x0} 8V${mid}H${xs}"/>`,
+      );
+      const status = agentStatus(a);
+      const fill = agentColor(a, status, w, colors);
+      const tip = `${agentKind(a)} · ${dur}\n${task}`;
+      bars.push(
+        `<button type="button" class="agent-spine-row ${escapeHtml(status)}" style="left:${xs}px;top:${item.y}px" title="${escapeHtml(tip)}" onclick="showAgentModal('${escAttrJs(a.agentId)}')"><span class="agent-spine-bar" style="width:${barW}px;background:${fill}"></span><span class="agent-spine-label">${escapeHtml(task)}</span><span class="agent-views-time">${dur}</span></button>`,
+      );
+    });
+    dots.push(`<span class="agent-spine-dot" style="left:${x0}px"></span>`);
+    if (x0 - lastTick >= 70) {
+      lastTick = x0;
+      ticks.push(`<span style="left:${x0}px">${w.time}</span>`);
+    }
+  }
+  const height = rowY(rowEnd.length);
+  const lineEnd = Math.max(plot, ...rowEnd);
+  const cutHtml = cuts.map((c) => `<span class="agent-spine-cut" style="left:${px(c)}px">⫽</span>`).join('');
+  return {
+    html: `<div class="agent-spine" style="height:${height + 18}px;width:${lineEnd}px;--row-h:${AGENT_SPINE_BAR_H}px"><svg class="agent-spine-links" width="${lineEnd}" height="${height}"><path class="agent-spine-main" d="M0 8H${lineEnd}"/>${links.join('')}</svg>${cutHtml}${dots.join('')}${bars.join('')}<div class="agent-spine-axis" style="top:${height}px">${ticks.join('')}</div></div>`,
+    legend: agentLegendHtml(colors),
+  };
+}
+
+// Live agents change durations and bar widths every second. When only time moved, the view is
+// rebuilt at most every AGENT_VIEWS_TICK_MS and never under the pointer, so hover and tooltips hold.
+const AGENT_VIEWS_TICK_MS = 5000;
+
+function renderAgentViews(agents) {
+  const modal = document.getElementById('agent-views-modal');
+  if (!modal.classList.contains('visible')) return;
+  const body = document.getElementById('agent-views-body');
+  const shape = `${agentView}|${agentColorBy}|${body.clientWidth}|${agents.map((a) => `${a.agentId}:${a.status}:${a.parent || ''}`).join(',')}`;
+  const now = Date.now();
+  if (shape === agentViewsShape) {
+    const live = agents.some((a) => agentStatus(a) !== 'stopped');
+    if (!live || now - agentViewsAt < AGENT_VIEWS_TICK_MS || body.matches(':hover')) return;
+  }
+  agentViewsShape = shape;
+  agentViewsAt = now;
+  for (const b of modal.querySelectorAll('.agent-views-tabs [data-view]')) {
+    b.setAttribute('aria-selected', String(b.dataset.view === agentView));
+  }
+  for (const b of modal.querySelectorAll('.agent-views-colors [data-color]')) {
+    b.setAttribute('aria-pressed', String(b.dataset.color === agentColorBy));
+  }
+  const roots = agentTree(agents);
+  const view = !roots.length
+    ? { html: '<div class="modal-status">No agents in this view.</div>', legend: '' }
+    : agentView === 'map'
+      ? agentMapHtml(roots, now)
+      : agentSpineHtml(roots, now, body.clientWidth - 18);
+  body.innerHTML = view.html;
+  document.getElementById('agent-views-legend').innerHTML = view.legend;
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+function showAgentViews() {
+  agentView = store.getItem(AGENT_VIEW_KEY) === 'map' ? 'map' : 'timeline';
+  const colorBy = store.getItem(AGENT_COLOR_KEY);
+  agentColorBy = AGENT_COLOR_MODES.includes(colorBy) ? colorBy : 'wave';
+  agentViewsShape = '';
+  document.getElementById('agent-views-modal').classList.add('visible');
+  renderAgentViews(visibleAgents());
+}
+
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+function setAgentView(view) {
+  agentView = view;
+  store.setItem(AGENT_VIEW_KEY, view);
+  renderAgentViews(visibleAgents());
+}
+
+function closeAgentViews() {
+  hideModalOverlay('agent-views-modal');
 }
 
 function boardInSplit() {
@@ -8094,6 +8418,7 @@ const MODAL_CLOSERS = {
   'workflow-modal': () => closeWorkflowModal(),
   'team-modal': () => closeTeamModal(),
   'agent-modal': () => closeAgentModal(),
+  'agent-views-modal': () => closeAgentViews(),
   'help-modal': () => closeHelpModal(),
   'session-picker-modal': () => closeSessionPicker(),
   'project-picker-modal': () => closeProjectPicker(),

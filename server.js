@@ -2582,6 +2582,12 @@ app.get('/api/sessions/:sessionId/agents', async (req, res) => {
       }
     }
 
+    const subMetas = new Map();
+    const subMeta = (jsonl) => {
+      if (!subMetas.has(jsonl)) subMetas.set(jsonl, readSubagentMeta(jsonl));
+      return subMetas.get(jsonl);
+    };
+
     // The plugin's start record carries the model; this covers sessions without it.
     const agentsNeedingModel = agents.filter(a => !a.model && a.modelUnavailable !== MODEL_SCAN);
     if (agentsNeedingModel.length && meta.jsonlPath) {
@@ -2599,7 +2605,7 @@ app.get('/api/sessions/:sessionId/agents', async (req, res) => {
         // Until the transcript has an assistant line, show the requested alias.
         // agent.model stays empty so the exact id is still looked up.
         if (!agent.modelAlias) {
-          let alias = readSubagentMeta(jsonl)?.model || null;
+          let alias = subMeta(jsonl)?.model || null;
           if (alias === 'inherit') {
             try { alias = extractModelFromTranscript(meta.jsonlPath); } catch (_) { alias = null; }
           }
@@ -2612,6 +2618,16 @@ app.get('/api/sessions/:sessionId/agents', async (req, res) => {
           agent.modelUnavailable = MODEL_SCAN;
           dirty.add(agent);
         }
+      }
+    }
+
+    if (meta.jsonlPath) {
+      for (const agent of agents) {
+        if (agent.parent !== undefined) continue;
+        const sub = subMeta(subagentJsonlForExtraction(meta, agent.agentId));
+        if (!sub && isAgentLive(agent)) continue;
+        agent.parent = sub?.parentAgentId || null;
+        dirty.add(agent);
       }
     }
 

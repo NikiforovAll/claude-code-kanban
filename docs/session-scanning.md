@@ -43,6 +43,7 @@ These run only when an API request is served (no background timer).
 | `updateLoopInfo()` (ScheduleWakeup / Cron* scan) | `loopInfoStateByPath` (per-path incremental state) | warmed by `projectsWatcher` events; request path is O(1) on hit | `lib/parsers.js` + `server.js` |
 | `extractAgentResultFromTranscript()` (subagent response) | saved on the agent record; a miss latches `resultUnavailable = RESULT_SCAN` | once per stopped agent and `RESULT_SCAN` value; workflow subagents retry until found | `lib/parsers.js` + `server.js` |
 | `extractModelFromTranscript()` + `readSubagentMeta()` (subagent model, when the plugin's start record has none) | `model` (exact id) or `modelAlias` saved on the agent record; a stopped agent with no id latches `modelUnavailable = MODEL_SCAN` | live agents retry each poll; once per stopped agent and `MODEL_SCAN` value | `lib/parsers.js` + `server.js` |
+| `readSubagentMeta()` (`parentAgentId` of a nested subagent, for the agents map and timeline) | `parent` saved on the agent record (`null` at the top level) | live agents retry each poll until the meta file exists; once per agent after that | `lib/parsers.js` + `server.js` |
 | `getWorkflowInfoSummary()` (Workflow-tool script badge) | `workflowIndexCache` (`Map<sessionId, scripts[]>`) | `WORKFLOW_INDEX_TTL_MS = 5000` ms | `server.js` |
 | `readWorkflowJournal()` / `getWorkflowMeta()` (workflow run + live views) | `workflowJournalCache` / `workflowMetaCache` | `cachedByMtime`, keyed by file path | `server.js` |
 

@@ -352,6 +352,7 @@
             <span id="agent-footer-label">Agents</span>
             <span class="agent-footer-actions">
             <button class="agent-footer-expand" id="agent-footer-expand" onclick="event.stopPropagation(); toggleAgentFooterExpanded()" aria-label="Show all agents" title="Show all agents"><svg class="icon-expand" viewBox="0 0 24 24"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg><svg class="icon-shrink" viewBox="0 0 24 24"><path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/></svg></button>
+            <button class="agent-footer-views" onclick="event.stopPropagation(); showAgentViews()" aria-label="Agents timeline and map" title="Agents timeline and map"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="2.5"/><circle cx="19" cy="5" r="2.5"/><circle cx="19" cy="19" r="2.5"/><path d="M7.5 12h4M11.5 12V5h5M11.5 12v7h5"/></svg></button>
             <button class="agent-footer-toggle" id="agent-footer-toggle" aria-label="Toggle agent panel"><svg class="collapse-chevron" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></button>
             </span>
           </div>
@@ -706,6 +707,34 @@
       <div class="modal-footer">
         <button class="btn btn-secondary" onclick="closeWorkflowModal()">Close</button>
       </div>
+    </div>
+  </div>
+
+  <div id="agent-views-modal" class="modal-overlay plan-modal-overlay" onclick="closeAgentViews()">
+    <div class="modal agent-views-modal" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <div class="agent-views-head">
+          <h3 class="modal-title">Agents</h3>
+          <div class="agent-views-tabs" role="tablist">
+            <button type="button" role="tab" data-view="timeline" onclick="setAgentView('timeline')">Timeline</button>
+            <button type="button" role="tab" data-view="map" onclick="setAgentView('map')">Map</button>
+          </div>
+          <div class="agent-views-tabs agent-views-colors" role="group" aria-label="Color by">
+            <span>color</span>
+            <button type="button" data-color="type" onclick="setAgentColor('type')">type</button>
+            <button type="button" data-color="model" onclick="setAgentColor('model')">model</button>
+            <button type="button" data-color="status" onclick="setAgentColor('status')">status</button>
+            <button type="button" data-color="wave" onclick="setAgentColor('wave')">wave</button>
+          </div>
+        </div>
+        <button class="modal-close" aria-label="Close dialog" onclick="closeAgentViews()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M18 6L6 18M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+      <div id="agent-views-body" class="modal-body agent-views-body"></div>
+      <div id="agent-views-legend" class="agent-views-legend"></div>
     </div>
   </div>
 
