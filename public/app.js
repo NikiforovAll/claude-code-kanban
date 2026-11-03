@@ -3569,7 +3569,8 @@ function renderAgentFooter() {
   }
 
   footer.classList.add('visible');
-  label.textContent = `Agents Log (${visible.length})`;
+  const running = visible.filter((a) => a.status === 'active').length;
+  label.innerHTML = `Agents log <span class="agent-footer-count">${visible.length}</span>${running ? `<span class="agent-footer-running">· ${running} running</span>` : ''}`;
 
   const permHtml = permFresh
     ? `<button type="button" class="permission-badge" onclick="showWaitingDetail()">${currentWaiting.kind === 'question' ? '❓ Question pending' : currentWaiting.kind === 'plan' ? '📋 Plan pending' : `⏳ Awaiting: ${escapeHtml(currentWaiting.toolName || 'unknown')}`}</button>`
@@ -3580,30 +3581,24 @@ function renderAgentFooter() {
     visible
       .map((a) => {
         const elapsed = agentElapsed(a, now);
-        const statusText =
-          a.status === 'stopped'
-            ? `stopped · ${formatDuration(elapsed)}`
-            : a.status === 'idle'
-              ? `idle · ${formatDuration(elapsed)}`
-              : `active · ${formatDuration(elapsed)}`;
+        const status = a.status === 'stopped' || a.status === 'idle' ? a.status : 'active';
         const displayText = agentTaskText(a);
         const taskHtml = `<div class="agent-task" title="${escapeHtml(displayText)}">${escapeHtml(displayText)}</div>`;
         const agentNameVal = a.agentName || null;
-        const nameColor = agentNameVal ? getOwnerColor(agentNameVal) : null;
+        const nameColor = agentNameVal ? resolveNamedColor(a.color) || getOwnerColor(agentNameVal) : null;
         const nameBadgeHtml = nameColor
           ? `<span class="task-owner-badge task-owner-badge--compact" style="background:${nameColor.bg};color:${nameColor.color}">${escapeHtml(agentNameVal)}</span>`
           : '';
-        const agentColor = resolveNamedColor(a.color);
-        const colorStyle = agentColor ? ` style="border-left:3px solid ${agentColor.color}"` : '';
         const selectedClass = a.agentId === currentAgentModalId ? ' selected' : '';
-        return `<div class="agent-card${selectedClass}" data-agent-id="${escapeHtml(a.agentId)}"${colorStyle} onclick="showAgentModal('${escAttrJs(a.agentId)}')">
+        return `<div class="agent-card ${status}${selectedClass}" data-agent-id="${escapeHtml(a.agentId)}" onclick="showAgentModal('${escAttrJs(a.agentId)}')">
           ${agentLogButton(a.agentId, 'agent-card-log-btn')}
           ${taskHtml}
           <div class="agent-ident-row">${agentIdentHtml(a)}${nameBadgeHtml}</div>
-          <div class="agent-status-row"><span class="agent-dot ${a.status}"></span><span class="agent-status">${statusText}</span></div>
+          <div class="agent-status-row"><span class="agent-status"><span class="agent-dot ${status}"></span>${status}</span><span class="agent-duration">${formatDuration(elapsed)}</span></div>
         </div>`;
       })
       .join('');
+  updateScrollFades(content);
 
   clearInterval(agentDurationInterval);
   if (visible.some((a) => a.status === 'active' || a.status === 'idle')) {
@@ -3646,7 +3641,6 @@ function applyAgentFooterCollapsed() {
   const saved = store.getItem(agentFooterCollapseKey());
   const collapsed = saved === null ? boardInSplit() : saved === 'true';
   document.getElementById('agent-footer').classList.toggle('collapsed', collapsed);
-  document.getElementById('agent-footer-toggle').innerHTML = collapsed ? '&#x25B4;' : '&#x25BE;';
 }
 
 let _agentModalPromptText = null;
@@ -14242,13 +14236,19 @@ function renderPaneTabs(sid, layout, split) {
   panePin.innerHTML = pin;
   paneTabs.innerHTML = html;
   paneTabs.querySelector('.pane-tab.on')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-  updatePaneFades();
+  updateScrollFades(paneTabs);
 }
 
-function updatePaneFades() {
-  const { scrollLeft, scrollWidth, clientWidth } = paneTabs;
-  paneTabs.classList.toggle('fade-l', scrollLeft > 1);
-  paneTabs.classList.toggle('fade-r', scrollLeft + clientWidth < scrollWidth - 1);
+function updateScrollFades(el) {
+  const { scrollLeft, scrollWidth, clientWidth } = el;
+  el.classList.toggle('fade-l', scrollLeft > 1);
+  el.classList.toggle('fade-r', scrollLeft + clientWidth < scrollWidth - 1);
+}
+
+function watchScrollFades(el) {
+  const update = () => updateScrollFades(el);
+  el.addEventListener('scroll', update, { passive: true });
+  new ResizeObserver(update).observe(el);
 }
 
 // A URL pane's page is on another origin, so its key presses never reach the board: the zoom
@@ -15483,7 +15483,8 @@ paneViews.addEventListener('click', (e) => {
   if (zoom) adjustModalZoom(Number(zoom.dataset.paneZoom));
 });
 bindPreviewRelativeLinks(paneViews, (a) => a.closest('.pane-doc')?.dataset.path);
-paneTabs.addEventListener('scroll', updatePaneFades, { passive: true });
+watchScrollFades(paneTabs);
+watchScrollFades(document.getElementById('agent-footer-content'));
 paneTabs.addEventListener(
   'wheel',
   (e) => {
@@ -15494,7 +15495,6 @@ paneTabs.addEventListener(
   },
   { passive: false },
 );
-new ResizeObserver(updatePaneFades).observe(paneTabs);
 document.getElementById('pane-add').addEventListener('click', openPanePop);
 paneSplitBtn.addEventListener('click', togglePaneSplit);
 document.getElementById('pane-reload').addEventListener('click', () => reloadPane());

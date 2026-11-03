@@ -127,15 +127,18 @@ body::before {
   background: var(--text-muted);
 }
 .column-tasks::-webkit-scrollbar-thumb,
-.sessions-list::-webkit-scrollbar-thumb {
+.sessions-list::-webkit-scrollbar-thumb,
+.agent-footer-content::-webkit-scrollbar-thumb {
   background: transparent;
 }
 .column-tasks:hover::-webkit-scrollbar-thumb,
-.sessions-list:hover::-webkit-scrollbar-thumb {
+.sessions-list:hover::-webkit-scrollbar-thumb,
+.agent-footer-content:hover::-webkit-scrollbar-thumb {
   background: var(--border);
 }
 .column-tasks::-webkit-scrollbar-thumb:hover,
-.sessions-list::-webkit-scrollbar-thumb:hover {
+.sessions-list::-webkit-scrollbar-thumb:hover,
+.agent-footer-content::-webkit-scrollbar-thumb:hover {
   background: var(--text-muted);
 }
 
@@ -4926,7 +4929,9 @@ body.show-resizing iframe {
 }
 
 .pane-tabs.fade-l,
-.pane-tabs.fade-r {
+.pane-tabs.fade-r,
+.agent-footer-content.fade-l,
+.agent-footer-content.fade-r {
   mask-image: linear-gradient(
     to right,
     transparent,
@@ -4936,11 +4941,13 @@ body.show-resizing iframe {
   );
 }
 
-.pane-tabs.fade-l {
+.pane-tabs.fade-l,
+.agent-footer-content.fade-l {
   --fade-l: 28px;
 }
 
-.pane-tabs.fade-r {
+.pane-tabs.fade-r,
+.agent-footer-content.fade-r {
   --fade-r: 28px;
 }
 
@@ -7233,26 +7240,38 @@ body.show-resizing iframe {
   user-select: none;
   color: var(--text-tertiary);
   font-size: 12px;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
+  font-weight: 600;
 }
-.agent-footer-header:hover {
-  background: var(--bg-hover);
+#agent-footer-label {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.agent-footer-count {
+  font-weight: 500;
+}
+.agent-footer-running {
+  color: var(--success);
+  font-weight: 500;
 }
 .agent-footer-toggle {
+  display: flex;
   background: none;
   border: none;
-  color: var(--text-tertiary);
   cursor: pointer;
-  font-size: 14px;
-  padding: 2px 4px;
+  padding: 2px;
+}
+.agent-footer.collapsed .agent-footer-toggle .collapse-chevron {
+  transform: rotate(180deg);
+}
+.agent-footer-header:hover .collapse-chevron {
+  stroke: var(--text-secondary);
 }
 .agent-footer-content {
   display: flex;
   gap: 10px;
   padding: 0 24px 12px;
   overflow-x: auto;
-  scrollbar-width: thin;
 }
 .agent-footer.collapsed .agent-footer-content {
   display: none;
@@ -7261,10 +7280,11 @@ body.show-resizing iframe {
   display: flex;
   flex-direction: column;
   gap: 3px;
-  padding: 8px 12px;
-  background: var(--bg-deep);
-  border: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  padding: 9px 12px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
   border-radius: 8px;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.06);
   white-space: nowrap;
   flex-shrink: 0;
   min-width: 180px;
@@ -7274,6 +7294,14 @@ body.show-resizing iframe {
     border-color 0.15s ease;
   cursor: pointer;
   position: relative;
+}
+.agent-card.stopped {
+  background: transparent;
+  box-shadow: none;
+}
+.agent-card.stopped .agent-task,
+.agent-card.stopped .agent-card-model {
+  color: var(--text-secondary);
 }
 .agent-card:hover {
   border-color: color-mix(in srgb, var(--accent) 60%, var(--border));
@@ -7288,10 +7316,14 @@ body.show-resizing iframe {
   border: none;
   color: var(--text-muted);
   cursor: pointer;
-  opacity: 0.45;
+  opacity: 0;
   transition:
     opacity 0.15s,
     color 0.15s;
+}
+.agent-card:hover .agent-card-log-btn,
+.agent-card-log-btn:focus-visible {
+  opacity: 0.6;
 }
 .agent-card-log-btn:hover {
   opacity: 1;
@@ -7346,7 +7378,16 @@ body.show-resizing iframe {
 .agent-status-row {
   display: flex;
   align-items: center;
-  gap: 5px;
+  justify-content: space-between;
+  gap: 8px;
+}
+.agent-duration {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.agent-card.active .agent-duration {
+  color: var(--success);
 }
 .agent-dot {
   width: 5px;
@@ -7357,6 +7398,21 @@ body.show-resizing iframe {
 .agent-dot.active {
   background: var(--success);
   box-shadow: 0 0 4px color-mix(in srgb, var(--success) 50%, transparent);
+}
+.agent-status-row .agent-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.agent-status-row .agent-dot {
+  width: 6px;
+  height: 6px;
+}
+.agent-status-row .agent-dot.active {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 18%, transparent);
+}
+.agent-status-row .agent-dot.idle {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warning) 18%, transparent);
 }
 .agent-dot.idle {
   background: var(--warning);
