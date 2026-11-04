@@ -77,6 +77,7 @@ const { createDispatchedStore, scanTranscripts, pruneSessionDirs, pruneContextSt
 const { freshRateLimits } = require('./lib/rate-limits');
 const { createWorktreeStore } = require('./lib/worktrees');
 const { createScratchpadDirResolver, scratchpadRoot } = require('./lib/scratchpad-dir');
+const { createScratchServers } = require('./lib/scratch-servers');
 const { readSettings } = require('./lib/claude-settings');
 const { readGitBranch, sessionGitBranch } = require('./lib/git-branch');
 const { createLinkedDocStore, linkUrl } = require('./lib/linked-docs');
@@ -2384,21 +2385,43 @@ function resolveScratchpad(value) {
   const target = assertOpenTarget(value, 'path');
   const dir = path.basename(target).toLowerCase() === SCRATCHPAD_MANIFEST ? path.dirname(target) : target;
   if (!existsSync(path.join(dir, SCRATCHPAD_MANIFEST))) throw previewError(400, 'Not a scratchpad');
-  return { name: path.basename(dir), parent: path.dirname(dir) };
+  return { dir, name: path.basename(dir), parent: path.dirname(dir) };
 }
+
+// .cmd/.bat cannot be spawned without a shell since the CVE-2024-27980 fix;
+// scratch ships a real .exe, so resolve it rather than reintroducing one.
+function scratchExecutable() {
+  const bin = whichSync('scratch');
+  if (!bin) return { error: 'scratch CLI not found on PATH' };
+  const ext = path.extname(bin).toLowerCase();
+  const file = ext === '.cmd' || ext === '.bat' ? exeBehindShim(bin) : bin;
+  return file ? { file } : { error: 'scratch CLI cannot be launched without a shell' };
+}
+
+const scratchServers = createScratchServers({
+  resolveBin: () => scratchExecutable().file || null,
+  spawn,
+  onExit: (pad) => broadcast({ type: 'scratchpad:exited', manifest: `${pad}/${SCRATCHPAD_MANIFEST}` }),
+});
+
+// API: The URL of a pad's browser viewer for a scratchpad pane, started on first use.
+app.post('/api/scratchpad/serve', async (req, res) => {
+  try {
+    res.json({ url: await scratchServers.serve(resolveScratchpad(req.body?.path).dir) });
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    console.error('Error serving scratchpad:', error.message);
+    res.status(502).json({ error: error.message });
+  }
+});
 
 // API: Open a scratchpad in the external `scratch` viewer — the window outlives
 // this request and cck never waits on it.
 app.post('/api/scratchpad/open', (req, res) => {
   try {
-    const bin = whichSync('scratch');
-    if (!bin) return res.status(501).json({ error: 'scratch CLI not found on PATH' });
+    const { file, error } = scratchExecutable();
+    if (!file) return res.status(501).json({ error });
     const { name, parent } = resolveScratchpad(req.body?.path);
-    // .cmd/.bat cannot be spawned without a shell since the CVE-2024-27980 fix;
-    // scratch ships a real .exe, so resolve it rather than reintroducing one.
-    const ext = path.extname(bin).toLowerCase();
-    const file = ext === '.cmd' || ext === '.bat' ? exeBehindShim(bin) : bin;
-    if (!file) return res.status(501).json({ error: 'scratch CLI cannot be launched without a shell' });
     // `scratch ui` is a foreground supervisor: it reloads the window on edits and
     // quits on stdin EOF. So stdin must be an open pipe we never write to —
     // 'ignore' is /dev/null, which reads as EOF and closes the viewer at once.
@@ -4407,6 +4430,17 @@ async function resolvePaneTarget(target, base) {
   return { kind, target: await fs.realpath(abs) };
 }
 
+// The pad's manifest, so the pane's Open and Copy act on the same path as its linked-doc row.
+async function resolveScratchpadPane(target) {
+  return { kind: 'scratchpad', target: await fs.realpath(path.join(resolveScratchpad(target).dir, SCRATCHPAD_MANIFEST)) };
+}
+
+// A message target is a session log message id, which the board resolves when it shows the pane.
+const PANE_RESOLVERS = new Map([
+  ['message', async (target) => ({ kind: 'message', target })],
+  ['scratchpad', resolveScratchpadPane],
+]);
+
 app.get('/api/panes/:sessionId', (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   res.json(panes.get(req.params.sessionId));
@@ -4416,8 +4450,7 @@ app.post('/api/panes/:sessionId', async (req, res) => {
   try {
     const { target, base, title, kind, show } = req.body || {};
     if (typeof target !== 'string' || !target) throw previewError(400, 'target is required', 'bad_target');
-    // A message target is a session log message id, which the board resolves when it shows the pane.
-    const resolved = kind === 'message' ? { kind, target } : await resolvePaneTarget(target, base);
+    const resolved = await (PANE_RESOLVERS.get(kind) ?? resolvePaneTarget)(target, base);
     res.json(panes.add(req.params.sessionId, { ...resolved, title, show: show === true }));
   } catch (error) {
     paneRouteError(res, error, 'POST /api/panes');

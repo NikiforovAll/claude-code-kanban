@@ -10303,7 +10303,7 @@ const LINKED_DOC_OPENERS = {
   url: { tag: '', hint: ' — opens in a new tab', cls: ' is-url', noun: 'URL' },
   scratch: {
     tag: '(scratchpad)',
-    hint: ' — opens in the scratch viewer',
+    hint: ' — opens in the scratch viewer; Ctrl+click opens it in a pane',
     cls: ' is-editor',
     noun: 'path',
     url: '/api/scratchpad/open',
@@ -10766,6 +10766,9 @@ function bindLinkedDocsHandlers(container, sessionId) {
       removeSessionPreviewPath(sessionId, hit.dataset.path);
       forgetServerLinkedDoc(sessionId, hit.dataset.path);
       afterLinkedDocsChanged(sessionId);
+    } else if ((e.ctrlKey || e.metaKey) && linkedDocOpener(hit.dataset.path) === 'scratch') {
+      if (container.closest('#team-modal')) closeTeamModal();
+      openScratchpadPane(sessionId, hit.dataset.path);
     } else {
       openLinkedDoc(hit.dataset.path, getSessionBaseDir(sessionId));
     }
@@ -10886,6 +10889,8 @@ function setupEventSource() {
         fetchSessions().catch(() => {});
         if (currentSessionId) fetchTasks(currentSessionId);
         refetchPaneLayout();
+        // A restarted board started none of the viewers the frames still point at.
+        onScratchpadExited(null);
         if (sgRev === null) syncSessionGroups();
         else if (sgUnsent) persistSessionGroups();
         else sgRefresh();
@@ -11023,6 +11028,10 @@ function setupEventSource() {
 
       if (data.type === 'pane:changed') {
         applyPaneLayout(data.sessionId, data.layout);
+      }
+
+      if (data.type === 'scratchpad:exited') {
+        onScratchpadExited(data.manifest);
       }
 
       if (data.type === 'addon:changed' && dockSid) {
@@ -14428,6 +14437,8 @@ const PANE_ICONS = {
   file: '<svg class="kind" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>',
   message:
     '<svg class="kind" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
+  scratchpad:
+    '<svg class="kind" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>',
   warning:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12" y2="17"/></svg>',
 };
@@ -14679,6 +14690,18 @@ function paneUrlFrame(pane, className) {
   return frame;
 }
 
+function mountPaneUrlFrame(pane, view) {
+  const frame = paneUrlFrame(pane, 'pane-frame pane-url-frame modal-zoomable');
+  frame.addEventListener('load', () => {
+    view.classList.remove('keys-bridged');
+    frame.hostKeysSig = null;
+    pushTerminalClaims();
+  });
+  view.appendChild(frame);
+  view.insertAdjacentHTML('beforeend', paneUrlBarHtml());
+  return frame;
+}
+
 async function loadPaneView(sid, pane, view, scroll) {
   const blocked = paneBlockedHtml(pane);
   if (blocked) {
@@ -14686,14 +14709,7 @@ async function loadPaneView(sid, pane, view, scroll) {
     return;
   }
   if (pane.kind === 'url') {
-    const frame = paneUrlFrame(pane, 'pane-frame pane-url-frame modal-zoomable');
-    frame.addEventListener('load', () => {
-      view.classList.remove('keys-bridged');
-      frame.hostKeysSig = null;
-      pushTerminalClaims();
-    });
-    view.appendChild(frame);
-    view.insertAdjacentHTML('beforeend', paneUrlBarHtml());
+    const frame = mountPaneUrlFrame(pane, view);
     // Framed at once; a refusal found by the probe swaps the frame for the card.
     if ((await probePaneFraming(sid, pane)) === false) {
       frame.remove();
@@ -14704,6 +14720,10 @@ async function loadPaneView(sid, pane, view, scroll) {
   }
   if (pane.kind === 'message') {
     await loadMessagePaneView(sid, pane, view);
+    return;
+  }
+  if (pane.kind === 'scratchpad') {
+    await loadScratchpadPaneView(pane, view);
     return;
   }
   const data = await getJson('/api/preview', null, { query: { path: pane.target } });
@@ -14738,6 +14758,40 @@ async function loadPaneView(sid, pane, view, scroll) {
       : ['Nothing to preview', 'cck cannot render this file.'];
   const button = data && data.exists !== false ? 'Open in editor' : 'Try in preview';
   view.insertAdjacentHTML('beforeend', paneCardHtml(title, text, button));
+}
+
+// The viewer runs on its own loopback port, a different origin from the board and the hub, so the
+// URL pane sandbox holds. The board asks for the URL each time it mounts the view, because the
+// viewer dies with cck and is started again on demand.
+async function loadScratchpadPaneView(pane, view) {
+  view.insertAdjacentHTML(
+    'beforeend',
+    '<div class="pane-card pane-starting"><div class="pane-card-box"><p>Starting the scratch viewer…</p></div></div>',
+  );
+  const res = await paneRequest('POST', '/api/scratchpad/serve', { path: pane.target });
+  view.querySelector('.pane-starting')?.remove();
+  if (!res.url) {
+    view.insertAdjacentHTML(
+      'beforeend',
+      paneCardHtml('Scratch viewer unavailable', res.error || pane.target, 'Open in scratch viewer'),
+    );
+    return;
+  }
+  mountPaneUrlFrame({ ...pane, target: res.url }, view);
+}
+
+// A viewer that exited leaves its frames on a dead port; the views on screen mount again now,
+// the others when shown.
+function onScratchpadExited(manifest) {
+  const dead = [];
+  for (const key of paneFrames.keys()) {
+    const [sid, paneId] = key.split('/');
+    const pane = paneLayout(sid).panes.find((p) => p.id === paneId);
+    if (pane?.kind === 'scratchpad' && (!manifest || canonicalPath(pane.target) === manifest)) dead.push([sid, paneId]);
+  }
+  if (!dead.length) return;
+  for (const [sid, paneId] of dead) unmountPane(sid, paneId);
+  syncPanes();
 }
 
 // The target is the message's pin id, `type|timestamp|text`. The log holds only the latest pages,
@@ -15116,7 +15170,7 @@ async function reloadPane(id) {
   if (!pane) return;
   const sid = paneSessionId();
   const view = paneFrames.get(`${sid}/${pane.id}`);
-  if (pane.kind !== 'url' && view) {
+  if (pane.kind !== 'url' && pane.kind !== 'scratchpad' && view) {
     await reloadPaneView(sid, pane, view);
   } else {
     unmountPane(sid, pane.id);
@@ -15327,7 +15381,16 @@ function openPaneMenu(x, y, id) {
     'Pane actions',
     paneMenuLabel(pane, label) +
       (message ? '' : paneMenuItem('copy', url ? 'Copy URL' : 'Copy path')) +
-      paneMenuItem('open', url ? 'Open in new tab' : message ? 'Open in message dialog' : 'Open in preview') +
+      paneMenuItem(
+        'open',
+        url
+          ? 'Open in new tab'
+          : message
+            ? 'Open in message dialog'
+            : pane.kind === 'scratchpad'
+              ? 'Open in scratch viewer'
+              : 'Open in preview',
+      ) +
       (message
         ? ''
         : paneMenuItem('link', paneIsLinked(pane) ? 'Remove from linked documents' : 'Add to linked documents')) +
@@ -15446,6 +15509,13 @@ function applyPaneLine(view) {
   if (!line || !body || !view.offsetParent) return;
   paneLineWanted.delete(view.dataset.key);
   markSourceLine(body, line);
+}
+
+// The same pad again returns its pane, so a second Ctrl+click only shows it.
+async function openScratchpadPane(sid, manifest) {
+  const onScreen = await postPane(sid, { kind: 'scratchpad', target: manifest });
+  if (onScreen) syncPanes();
+  toastPaneAdded(sid, onScreen, linkedDocLabel(manifest));
 }
 
 async function openPaneAtLine(sid, { path, line }, base) {

@@ -29,6 +29,15 @@ const url = (n) => ({ kind: 'url', target: `http://localhost:${8000 + n}/` });
 const ids = (layout) => layout.panes.map((p) => p.id);
 
 describe('pane store', () => {
+  it('names a scratchpad pane after its pad and returns it again for the same manifest in another spelling', () => {
+    const panes = memoryStore().open();
+    const a = panes.add('s1', { kind: 'scratchpad', target: 'C:\\pads\\notes\\scratchpad.json' });
+    assert.equal(a.pane.title, 'notes');
+    const b = panes.add('s1', { kind: 'scratchpad', target: 'c:/pads/notes/scratchpad.json' });
+    assert.equal(b.added, false);
+    assert.equal(b.pane.id, a.pane.id);
+  });
+
   it('adds panes in tab order with ids, titles, a time and a rising rev, and keeps them on disk', () => {
     const { open, clock } = memoryStore();
     const panes = open();

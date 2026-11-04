@@ -18,6 +18,12 @@ A pane is a live page or a file that shows as a tab next to Board. Use it for so
 
 Claude adds panes with `pane add <url|file>`. The board does not switch to the new pane, so your view stays put. Any local server with a page works. `scratch ui <pad> --browser`, for example, prints a URL for the scratch viewer, which reloads itself when the pad changes.
 
+## Scratchpad panes
+
+<kbd>Ctrl</kbd>+click a linked `scratchpad.json` in the session info dialog to open the pad in a pane. A plain click still opens the native scratch viewer window. Ctrl+click the same pad again to go to its tab.
+
+The board runs one scratch browser viewer per pad on a loopback port, and the pane frames it. The viewer reloads itself when the pad changes. It stops when the board stops, and the pane starts it again when it is next shown. If the viewer stops for another reason, the pane on screen starts a new one at once. The board keeps up to 4 viewers and stops the one used least recently. This needs a `scratch` CLI on `PATH` that has `scratch ui --json`.
+
 ## Work with tabs
 
 - Press <kbd>[</kbd> or <kbd>]</kbd> to go to the previous or next tab, or <kbd>Ctrl+Alt+1</kbd> to <kbd>Ctrl+Alt+9</kbd> to go to tab 1 to 9. The board is tab 1, and a [tab group](#tab-groups) counts as one tab.
