@@ -212,9 +212,10 @@ describe('new session options', () => {
 describe('edit before run', { concurrency: true }, () => {
   const A = 'aaaaaaaa-0000-0000-0000-000000000001';
 
-  function service(live = [], shell = 'bash', resolveCwd = () => null) {
+  function service(live = [], shell = 'bash', resolveCwd = () => null, onFork) {
     const pty = fakePty();
     const t = createTerminalService({
+      onFork,
       config: { enabled: true, restore: false, shell, maxSessions: 30, scrollback: 100 },
       net: { EXPOSED: false },
       pty,
@@ -322,13 +323,16 @@ describe('edit before run', { concurrency: true }, () => {
 
   it('starts a fork in its parent session folder, not the folder the caller names', async () => {
     const PARENT = 'bbbbbbbb-0000-0000-0000-000000000002';
-    const { t, pty } = service([], 'bash', (id) => (id === PARENT ? os.tmpdir() : null));
+    const forks = [];
+    const { t, pty } = service([], 'bash', (id) => (id === PARENT ? os.tmpdir() : null), (id, parent) => forks.push([id, parent]));
     const r = await t.startNew({ id: A, forkOf: PARENT, cwd: '/elsewhere' });
     assert.equal(r.cwd, os.tmpdir());
     assert.ok(pty.spawned[0].args.join(' ').includes(`--resume ${PARENT} --fork-session --session-id ${A}`));
     assert.equal(t.list()[0].forkOf, PARENT);
+    assert.deepEqual(forks, [[A, PARENT]]);
     const missing = await t.startNew({ id: SESSION, forkOf: 'cccccccc-0000-0000-0000-000000000003' });
     assert.equal(missing.status, 404);
+    assert.equal(forks.length, 1);
     t.shutdown();
   });
 

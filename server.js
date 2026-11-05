@@ -126,6 +126,7 @@ const SHOW_DIR = path.join(CCK_DIR, 'show');
 const PINS_FILE = path.join(CCK_DIR, 'pins.json');
 const USER_GROUPS_FILE = path.join(CCK_DIR, 'groups.json');
 const DISPATCHED_FILE = path.join(CCK_DIR, 'dispatched.json');
+const FORKS_FILE = path.join(CCK_DIR, 'forks.json');
 const WORKTREES_FILE = path.join(CCK_DIR, 'worktrees.json');
 const LINKED_DOCS_FILE = path.join(CCK_DIR, 'linked-docs.json');
 const PANES_FILE = path.join(CCK_DIR, 'panes.json');
@@ -1556,6 +1557,11 @@ app.get('/api/sessions', async (req, res) => {
     // comes from lookupParentSession, not from the anchor's presence.
     const compactSuppressed = new Set();
     for (const [sid] of sessionsMap) {
+      const fork = forks.get(sid);
+      if (fork) {
+        sessionsMap.get(sid).forkedFromSessionId = fork.parent;
+        continue;
+      }
       // Cheap pre-gate: only a session with a boundary anchor can be a continuation,
       // and lookupParentSession reads JSONLs on a cold cache. A fork with no boundary
       // gets its badge only once a verdict exists (the info modal computes one).
@@ -3387,7 +3393,13 @@ const terminal = createTerminalClient({
     if (dispatched.get(id)) broadcast({ type: 'dispatch-update' });
   },
   onRekey: (from, to) => {
-    if (dispatched.move(from, to)) broadcast({ type: 'dispatch-update' });
+    const moved = dispatched.move(from, to);
+    if (forks.move(from, to) || moved) broadcast({ type: 'dispatch-update' });
+  },
+  onFork: (id, parent) => {
+    if (!isUUID(id) || !isUUID(parent) || forks.get(id)) return;
+    forks.record(id, { parent, child: true });
+    broadcast({ type: 'dispatch-update' });
   },
 });
 
@@ -3592,13 +3604,23 @@ app.get('/vendor/xterm/:file', (req, res) => {
 
 // #region DISPATCH
 const dispatched = createDispatchedStore(jsonFile(DISPATCHED_FILE));
+// Forks started from the board's Fork menu: same shape, no dispatch semantics.
+const forks = createDispatchedStore(jsonFile(FORKS_FILE));
 
 const linkedDocs = createLinkedDocStore(jsonFile(LINKED_DOCS_FILE));
+
+const nestStoreOf = (id) => (dispatched.get(id) ? dispatched : forks.get(id) ? forks : null);
 
 function withDispatchMarker(sessions) {
   return sessions.map((s) => {
     const marker = dispatched.get(s.id);
-    return marker ? { ...s, dispatched: { parent: marker.parent, child: marker.child } } : s;
+    const nest = marker || forks.get(s.id);
+    if (!nest) return s;
+    return {
+      ...s,
+      ...(marker ? { dispatched: { parent: marker.parent, child: marker.child } } : {}),
+      nest: { parent: nest.parent, child: nest.child },
+    };
   });
 }
 
@@ -3641,10 +3663,10 @@ app.post('/api/dispatch', terminalRoute(async (req, res) => {
 app.post('/api/dispatch/:id/child', (req, res) => {
   const { child } = req.body || {};
   if (typeof child !== 'boolean') return res.status(400).json({ error: 'child must be true or false' });
-  const marker = dispatched.get(req.params.id);
-  if (!marker) return res.status(404).json({ error: 'not a dispatched session' });
-  if (child && !marker.parent) return res.status(400).json({ error: 'child needs a parent session' });
-  if (dispatched.setChild(req.params.id, child)) broadcast({ type: 'dispatch-update' });
+  const store = nestStoreOf(req.params.id);
+  if (!store) return res.status(404).json({ error: 'not a dispatched session or a fork started from the board' });
+  if (child && !store.get(req.params.id).parent) return res.status(400).json({ error: 'child needs a parent session' });
+  if (store.setChild(req.params.id, child)) broadcast({ type: 'dispatch-update' });
   res.json({ session: req.params.id, child });
 });
 
@@ -5058,6 +5080,7 @@ async function runRetention() {
     const scan = await scanTranscripts(PROJECTS_DIR);
     const opts = { known: scan?.ids, maxAgeMs: retentionMs(CLAUDE_DIR) };
     const markers = dispatched.prune(opts);
+    const forkMarkers = forks.prune(opts);
     const layouts = panes.prune(opts);
     if (layouts) queuePaneFileWatch();
     const addonSessions = addons.prune(opts);
@@ -5068,8 +5091,8 @@ async function runRetention() {
     const wts = worktrees.prune(scan?.dirs);
     const taskMaps = await pruneTaskMaps(TASK_MAPS_DIR, opts);
     const grouped = expireGroupMembers(scan?.ids);
-    if (markers || layouts || addonSessions || reviews || attachments || shows || contexts || wts || taskMaps || grouped.members) {
-      console.log(`[retention] removed ${markers} dispatch markers, ${layouts} pane layouts, ${addonSessions} add-on sessions, ${reviews} reviews, ${attachments} attachments, ${shows} show files, ${contexts} context status files, ${wts} worktrees, ${taskMaps} task-list mappings, ${grouped.members} group members, ${grouped.groups} groups`);
+    if (markers || forkMarkers || layouts || addonSessions || reviews || attachments || shows || contexts || wts || taskMaps || grouped.members) {
+      console.log(`[retention] removed ${markers} dispatch markers, ${forkMarkers} fork markers, ${layouts} pane layouts, ${addonSessions} add-on sessions, ${reviews} reviews, ${attachments} attachments, ${shows} show files, ${contexts} context status files, ${wts} worktrees, ${taskMaps} task-list mappings, ${grouped.members} group members, ${grouped.groups} groups`);
     }
   } catch (e) {
     console.warn('[retention] failed:', e.message);

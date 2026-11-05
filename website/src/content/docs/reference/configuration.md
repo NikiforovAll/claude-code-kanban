@@ -172,6 +172,7 @@ The server, the plugin and the installer keep their state in `<config-dir>/.cck/
 | `pins.json` | Server | Session pins (`{sessionId: "pinned" \| "sticky"}`, at most 1000). Every board on the config dir reads it. |
 | `linked-docs.json` | Server | Docs linked with `doc link`, so a link sent while no board is open is not lost |
 | `dispatched.json` | Server | Sessions started with `dispatch start` |
+| `forks.json` | Server | Forks started from a card's Fork menu, and whether each nests under its parent |
 | `groups.json` | Server | Session groups, with the temporary groups that `dispatch start --group` makes |
 | `panes.json` | Server | Pane layout of each session |
 | `reviews/<sessionId>/<time>.md` | Server | Review comments sent to a session |

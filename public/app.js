@@ -4360,7 +4360,7 @@ function renderSessions() {
   for (const g of sessionGroups) for (const m of g.members) if (m.parent) parentOf.set(m.ref, m.parent);
   childAnchors = computeChildAnchors(filteredSessions);
   for (const s of filteredSessions) {
-    if (childAnchors.has(s.id) && !parentOf.has(s.id)) parentOf.set(s.id, s.dispatched.parent);
+    if (childAnchors.has(s.id) && !parentOf.has(s.id)) parentOf.set(s.id, s.nest.parent);
   }
   const nestChildren = (list) => {
     if (parentOf.size === 0) return list;
@@ -5572,19 +5572,20 @@ function sgGroupForSession(session) {
   return sgGroupOf('session', s.id) || (project ? sgGroupOf('project', project) : null);
 }
 
-// A `dispatch start --child` session renders in its starter's place, unless the user placed it or
-// the starter is not in the rendered list. Set by renderSessions, so every other placement lookup
-// (drag, pins, search, reveal) agrees with what the sidebar shows.
+// A `dispatch start --child` session, or a fork from the Fork menu, renders in its parent's place,
+// unless the user placed or unnested it or the parent is not in the rendered list. Set by
+// renderSessions, so every other placement lookup (drag, pins, search, reveal) agrees with what
+// the sidebar shows.
 let childAnchors = new Map();
 const placementOf = (session) => childAnchors.get(session.id) ?? session;
 
 function computeChildAnchors(list) {
   const out = new Map();
-  if (!list.some((s) => s.dispatched?.child)) return out;
+  if (!list.some((s) => s.nest?.child)) return out;
   const byId = new Map(list.map((s) => [s.id, s]));
   const placed = new Set();
   for (const g of sessionGroups) for (const m of g.members) if (m.type === 'session') placed.add(m.ref);
-  const up = (s) => (s.dispatched?.child && !placed.has(s.id) ? byId.get(s.dispatched.parent) : null);
+  const up = (s) => (s.nest?.child && !placed.has(s.id) ? byId.get(s.nest.parent) : null);
   for (const s of list) {
     let anchor = up(s);
     if (!anchor) continue;
@@ -5598,10 +5599,10 @@ function computeChildAnchors(list) {
   return out;
 }
 
-function setDispatchChild(id, child) {
+function setNestChild(id, child) {
   const s = sessions.find((x) => x.id === id);
-  if (!s?.dispatched || !!s.dispatched.child === child) return;
-  s.dispatched = { ...s.dispatched, child };
+  if (!s?.nest || !!s.nest.child === child || (child && !s.nest.parent)) return;
+  s.nest = { ...s.nest, child };
   if (child && sgGroupOf('session', id)) {
     sgDetach('session', id);
     persistSessionGroups();
@@ -5979,7 +5980,7 @@ function sgGroupDropZone(target) {
   const targetSessionId = zone.dataset.sessionId;
   if (targetSessionId) {
     if (targetSessionId === sgDrag.ref) return null;
-    if (dragSession?.dispatched?.parent === targetSessionId) return anchored ? null : { zone, nest: true };
+    if (dragSession?.nest?.parent === targetSessionId) return anchored ? null : { zone, nest: true };
     const targetSession = sessions.find((s) => s.id === targetSessionId);
     const targetGroup = targetSession ? sgGroupForSession(targetSession) : null;
     const targetGroupId = targetGroup?.id || null;
@@ -6062,13 +6063,13 @@ function sgOnDrop(e) {
     return;
   }
   if (hit.nest) {
-    setDispatchChild(drag.ref, true);
+    setNestChild(drag.ref, true);
     sgFinishDrag();
     return;
   }
   // Any other move takes a `--child` session out of its starter's place for good, so it stays
   // where it was put after it leaves a group.
-  if (drag.kind === 'session') setDispatchChild(drag.ref, false);
+  if (drag.kind === 'session') setNestChild(drag.ref, false);
   if (hit.unnest) {
     sgFinishDrag();
     return;
@@ -6248,10 +6249,12 @@ function sgOpenMenu(x, y, kind, ref) {
   menu.setAttribute('role', 'menu');
   const canFork = kind === 'session' && !!forkableSession(ref);
   const canEnd = kind === 'session' && runningTerminals.has(ref);
-  const marker = kind === 'session' ? sessions.find((s) => s.id === ref)?.dispatched : null;
+  const marker = kind === 'session' ? sessions.find((s) => s.id === ref)?.nest : null;
   const nestItem = marker?.child
     ? '<button class="sg-menu-item" role="menuitem" data-sg-action="unnest">Unnest</button>'
-    : '';
+    : marker?.parent && sessions.some((s) => s.id === marker.parent)
+      ? '<button class="sg-menu-item" role="menuitem" data-sg-action="nest">Nest under parent</button>'
+      : '';
   const actions =
     nestItem +
     (canFork
@@ -6314,11 +6317,11 @@ document.addEventListener('click', (e) => {
   sgCloseMenu();
   if (item.dataset.sgAction === 'fork') return forkSession(sgRef);
   if (item.dataset.sgAction === 'end') return closeTerminalSession(sgRef);
-  if (item.dataset.sgAction === 'unnest') {
-    setDispatchChild(sgRef, false);
+  if (item.dataset.sgAction === 'unnest' || item.dataset.sgAction === 'nest') {
+    setNestChild(sgRef, item.dataset.sgAction === 'nest');
     return renderSessions();
   }
-  if (sgKind === 'session') setDispatchChild(sgRef, false);
+  if (sgKind === 'session') setNestChild(sgRef, false);
   if (move === '__none__') {
     sgDetach(sgKind, sgRef);
     persistSessionGroups();
@@ -18835,6 +18838,12 @@ function placeholderSession(id, spec) {
     prompted: !!(spec.prompted || spec.prompt),
     name: spec.name || (spec.forkOf && forkLabel(spec.forkOf)) || PLACEHOLDER_NAMES[spec.mode] || PLACEHOLDER_NAMES.new,
     dispatched: spec.mode === 'dispatch' ? { parent: spec.parent || null, child: !!spec.child } : undefined,
+    nest:
+      spec.mode === 'dispatch'
+        ? { parent: spec.parent || null, child: !!spec.child }
+        : spec.forkOf
+          ? { parent: spec.forkOf, child: true }
+          : undefined,
     project: spec.cwd,
     worktree: spec.worktree ? { repo: spec.cwd, name: spec.worktree === true ? 'new' : spec.worktree } : null,
     modifiedAt: new Date(spec.startedAt).toISOString(),
