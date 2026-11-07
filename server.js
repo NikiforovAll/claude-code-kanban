@@ -3430,6 +3430,14 @@ app.post('/api/terminal/pick-folder', async (req, res) => {
   }
 });
 
+// The hub's terminalHost setting reaches only the board page, which relays it here.
+app.post('/api/terminal/options', (req, res) => {
+  if (!terminal.authorized(req.get('x-terminal-token'))) return res.status(401).json({ error: 'invalid terminal token' });
+  if (typeof req.body?.conptyDll !== 'boolean') return res.status(400).json({ error: 'conptyDll must be a boolean' });
+  terminal.setConptyDll(req.body.conptyDll);
+  res.status(204).end();
+});
+
 // A tab whose terminal is off, or whose token died with an earlier server, ignores
 // `session:launched`, so only a tab that claims the session counts as showing it.
 const LAUNCH_CLAIM_MS = 3000;

@@ -12412,10 +12412,27 @@ function leaveZenScopeFor(sessionId) {
   if (!session || !inZenScope(session)) toggleZenMode();
 }
 
+let terminalHost = null;
+let sentTerminalHost = null;
+
 function applyHubSettings(s) {
   sessionsList.classList.toggle('zen-centered', s.zenCentered === true);
   if (s.zenPattern) sessionsList.dataset.zenPattern = s.zenPattern;
   else delete sessionsList.dataset.zenPattern;
+  terminalHost = s.terminalHost || null;
+  syncTerminalHost();
+}
+
+// The settings can land before /api/config says whether this board has a terminal.
+function syncTerminalHost() {
+  if (!terminalHost || terminalHost === sentTerminalHost || !terminalAvailable()) return;
+  const host = terminalHost;
+  sentTerminalHost = host;
+  terminalFetch('/api/terminal/options', 'POST', { conptyDll: host === 'bundled' })
+    .then((res) => res.ok || Promise.reject())
+    .catch(() => {
+      if (sentTerminalHost === host) sentTerminalHost = null;
+    });
 }
 
 function renderZenState() {
@@ -20029,6 +20046,7 @@ if (urlState.search) {
 getJson('/api/config')
   .then((c) => {
     if (c) appConfig = c;
+    syncTerminalHost();
     if (appConfig.kanbot && footerState.version) renderSidebarFooter(footerState.rl);
   })
   .then(restorePendingSessions)

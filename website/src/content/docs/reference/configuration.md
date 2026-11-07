@@ -63,6 +63,7 @@ CCK_TERMINAL='{"enabled":true,"fontSize":14}' claude-code-kanban
 | `fontSize` | `13` | Font size in pixels. |
 | `scrollback` | `5000` | Lines kept in the scrollback buffer. |
 | `noFlicker` | `true` | Sets `CLAUDE_CODE_NO_FLICKER=1` for each `claude` the terminal starts. Set `false` to turn it off. |
+| `conptyDll` | `false` | Windows only. Runs each terminal on the ConPTY that `@lydell/node-pty` ships in place of the system one. It passes color queries through, so apps such as hunk follow the board's theme. In Claude Code Hub, the Kanban setting "Terminal host" sets it for terminals started after the change. |
 | `restore` | `true` | Resumes the terminals that were open when the server last stopped. Set `false` to turn it off. See [Restore terminals on start](/claude-code-kanban/guides/embedded-terminal/#restore-terminals-on-start). |
 
 For shell values and the default shell, see [Choose the shell](/claude-code-kanban/guides/embedded-terminal/#choose-the-shell). The terminal needs the optional dependency `@lydell/node-pty`. If it does not load, the terminal is not available and the server logs the reason.

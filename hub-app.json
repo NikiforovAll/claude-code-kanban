@@ -53,6 +53,17 @@
         { "value": "grid", "label": "Grid" }
       ],
       "default": "dots"
+    },
+    {
+      "key": "terminalHost",
+      "type": "choice",
+      "label": "Terminal host (Windows)",
+      "help": "Bundled passes color queries through, so apps such as hunk and vim follow the board's theme. Applies to terminals started after the change.",
+      "options": [
+        { "value": "system", "label": "System" },
+        { "value": "bundled", "label": "Bundled" }
+      ],
+      "default": "system"
     }
   ],
   "keys": { "keeps": ["ctrl+alt+1", "ctrl+alt+2", "ctrl+alt+3", "ctrl+alt+4", "ctrl+alt+5", "ctrl+alt+6", "ctrl+alt+7", "ctrl+alt+8", "ctrl+alt+9", "ctrl+alt+n", "ctrl+alt+r", "ctrl+alt+s", "ctrl+alt+shift+s","ctrl+shift+d", "ctrl+shift+k", "ctrl+shift+l", "ctrl+shift+m", "ctrl+shift+p", "ctrl+shift+z"] },

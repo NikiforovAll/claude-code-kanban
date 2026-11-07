@@ -623,6 +623,10 @@ describe('readTerminalConfig', () => {
     assert.equal(c.maxSessions, 2);
     assert.equal(c.noFlicker, false);
   });
+  it('keeps the system ConPTY unless the block asks for the bundled one', () => {
+    assert.equal(readTerminalConfig({ argv: [], env: {} }).conptyDll, false);
+    assert.equal(readTerminalConfig({ argv: [], env: { CCK_TERMINAL: '{"conptyDll":true}' } }).conptyDll, true);
+  });
   it('restores terminals unless the block turns it off', () => {
     assert.equal(readTerminalConfig({ argv: [], env: {} }).restore, true);
     assert.equal(readTerminalConfig({ argv: [], env: { CCK_TERMINAL: '{"restore":false}' } }).restore, false);
@@ -829,7 +833,7 @@ function fakePty({ holdExit = false } = {}) {
     spawn(_file, args, opts) {
       let onExit = () => {};
       const p = {
-        pid: 100000 + spawned.length, args, env: opts?.env, written: [], emit: () => {},
+        pid: 100000 + spawned.length, args, opts, env: opts?.env, written: [], emit: () => {},
         onData(cb) { p.emit = cb; }, onExit(cb) { onExit = cb; }, write(d) { p.written.push(d); }, resize() {}, pause() {}, resume() {},
         exit() { onExit({ exitCode: 0 }); },
         kill() { if (!holdExit) setImmediate(() => onExit({ exitCode: 0 })); },
@@ -879,6 +883,29 @@ describe('terminal restore', { concurrency: true }, () => {
     });
     return { t, pty, store };
   }
+
+  it('spawns on the bundled ConPTY when asked, and falls back when it fails', { skip: process.platform !== 'win32' }, async () => {
+    const pty = fakePty();
+    const plain = pty.spawn;
+    let fail = false;
+    pty.spawn = (file, args, opts) => {
+      if (fail && opts.useConptyDll) throw new Error('no conpty.dll');
+      return plain(file, args, opts);
+    };
+    const config = { enabled: true, restore: true, shell: SHELL, maxSessions: 30, scrollback: 100, conptyDll: true };
+    const t = createTerminalService({
+      config, net: { EXPOSED: false }, pty, token: TOKEN, load: () => ({ sessions: [A, B] }), save: () => {},
+      restoreGapMs: GAP_MS, saveDelayMs: SAVE_MS, claudeDir: os.tmpdir(), which: (n) => n, isLiveElsewhere: () => false,
+      resolveCwd: () => os.tmpdir(), isAllowedFolder: () => true, liveSessions: () => [], exitPollMs: SAVE_MS,
+    });
+    t.restore();
+    await until(() => t.list().length === 1);
+    assert.equal(pty.spawned[0].opts.useConptyDll, true);
+    fail = true;
+    await until(() => t.list().length === 2);
+    assert.equal(pty.spawned[1].opts.useConptyDll, undefined);
+    t.shutdown();
+  });
 
   it('resumes the saved terminals one at a time and keeps the list in step', async () => {
     const { t, pty, store } = service(true, { sessions: [A, ELSEWHERE, UNKNOWN, 'not-a-uuid', B] });
