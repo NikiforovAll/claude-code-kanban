@@ -7095,6 +7095,7 @@ const SHORTCUT_TABS = [
             label: 'Change the tab in the focused side of a split, else previous / next tab',
           },
           { keys: ['|'], label: 'Split with the tab before it / unsplit (or drag a tab onto a side)' },
+          { keys: ['Alt', '|'], combo: true, label: 'Split / unsplit, from a shell too' },
           { keys: ['{', '}'], label: 'Focus left / right side of a split' },
           { keys: ['Alt', '{ / }'], combo: true, label: 'Focus left / right side of a split, from a shell too' },
           { keys: ['Alt', 'W'], combo: true, label: 'Close the focused pane' },
@@ -8591,11 +8592,11 @@ document.addEventListener('keydown', (e) => {
     return;
   }
   const plainShift = !e.ctrlKey && !e.altKey && !e.metaKey;
-  if (plainShift && e.key === '|' && togglePaneSplit()) {
+  const altShift = e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey;
+  if (((plainShift && e.key === '|') || (altShift && e.code === 'Backslash')) && togglePaneSplit()) {
     e.preventDefault();
     return;
   }
-  const altShift = e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey;
   const toSide = plainShift && e.key === '{' ? -1 : plainShift && e.key === '}' ? 1 : altShift ? bracket : 0;
   if (toSide && focusPaneSide(toSide < 0 ? 'l' : 'r')) {
     e.preventDefault();
@@ -9392,7 +9393,12 @@ const PANE_CLAIMS = [
   { key: 'Unidentified', code: 'KeyM' },
   { ctrlKey: true, key: 'm', code: '' },
   ...['BracketLeft', 'BracketRight', 'KeyW'].map((code) => ({ altKey: true, key: 'Unidentified', code })),
-  ...['BracketLeft', 'BracketRight'].map((code) => ({ altKey: true, shiftKey: true, key: 'Unidentified', code })),
+  ...['BracketLeft', 'BracketRight', 'Backslash'].map((code) => ({
+    altKey: true,
+    shiftKey: true,
+    key: 'Unidentified',
+    code,
+  })),
   ...['KeyL', 'KeyM', 'KeyP', 'KeyS', 'KeyZ'].map((code) => ({ shiftKey: true, key: 'Unidentified', code })),
   ...'123456789'.split('').map((n) => ({ ctrlKey: true, altKey: true, key: 'Unidentified', code: `Digit${n}` })),
 ];
@@ -15049,7 +15055,7 @@ function selectPane(id) {
 }
 
 // Flips the focused side of the split through the free tabs. Returns false with no split on
-// screen, so the key keeps its other meaning.
+// screen or no other free tab, so the key keeps its other meaning.
 function cyclePane(step) {
   const sid = paneSessionId();
   const split = sid && !wantsTerminal() && getPaneSplit(sid);
@@ -15057,7 +15063,7 @@ function cyclePane(step) {
   const active = getActivePaneId(sid);
   const pairs = getPanePairs(sid);
   const ids = freePaneTabs(sid, active, pairs);
-  if (ids.length < 2) return true;
+  if (ids.length < 2) return false;
   const next = ids[(ids.indexOf(active) + step + ids.length) % ids.length];
   const side = splitSideOf(split, active);
   setPanePairs(
@@ -17429,7 +17435,12 @@ window.addEventListener('message', (e) => {
 // Only keys a shell does not type: the pane switch and close keys and the session tab keys.
 const SHELL_PANE_CLAIMS = [
   ...['BracketLeft', 'BracketRight', 'KeyW'].map((code) => ({ altKey: true, key: 'Unidentified', code })),
-  ...['BracketLeft', 'BracketRight'].map((code) => ({ altKey: true, shiftKey: true, key: 'Unidentified', code })),
+  ...['BracketLeft', 'BracketRight', 'Backslash'].map((code) => ({
+    altKey: true,
+    shiftKey: true,
+    key: 'Unidentified',
+    code,
+  })),
   ...'123456789'.split('').map((n) => ({ ctrlKey: true, altKey: true, key: 'Unidentified', code: `Digit${n}` })),
 ];
 const SHELL_RETRY_MS = 1000;
