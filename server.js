@@ -3338,6 +3338,8 @@ function isAllowedFolder(dir) {
 // Restore runs before the first full metadata scan, so until that scan has run a session's
 // folder is read from its own JSONL, by the same rules the scan uses.
 function resolveSessionFolder(id) {
+  const shell = panes.shellPane(id);
+  if (shell) return shell.cwd || null;
   if (lastMetadataRefresh || !isSafeId(id)) {
     const meta = loadSessionMetadata()[id];
     return meta ? meta.project || meta.cwd || null : null;
@@ -3387,6 +3389,7 @@ const terminal = createTerminalClient({
   // The project, not the last cwd: `claude --resume` finds a session under the
   // project dir it started in, and cwd drifts into subdirectories.
   resolveCwd: resolveSessionFolder,
+  shellRun: (id) => panes.shellPane(id)?.run || null,
   isAllowedFolder,
   onChange: () => broadcast({ type: 'terminals-update', ids: terminal.ids(), awaitingTrust: terminal.awaitingTrust() }),
   onExit: (id) => {
@@ -3525,6 +3528,7 @@ app.get('/api/terminals', terminalRoute(async (_req, res) => {
   res.json({
     sessions: sessions.map((t) => {
       if (t.id === kanbot.ptyId) return { ...t, kanbot: true };
+      if (t.mode === 'shell' && panes.shellPane(t.id)) return { ...t, pane: true };
       const marker = dispatched.get(t.id);
       return marker ? { ...t, dispatched: { parent: marker.parent || null } } : t;
     }),
@@ -4457,10 +4461,28 @@ async function resolveScratchpadPane(target) {
   return { kind: 'scratchpad', target: await fs.realpath(path.join(resolveScratchpad(target).dir, SCRATCHPAD_MANIFEST)) };
 }
 
+const MAX_SHELL_RUN = 1000;
+
+// The target names the folder; the pane's target becomes a fresh PTY id, which the board's frame
+// starts in shell mode on first attach. `resolveSessionFolder` gives that id the folder, and
+// `shellRun` the command each start of the shell types and runs.
+async function resolveShellPane(target, _base, run) {
+  const reason = terminal.unavailableReason();
+  if (reason) throw previewError(409, `The terminal is off: ${reason}`, 'terminal_off');
+  if (!path.isAbsolute(target) || !isAllowedFolder(target)) {
+    throw previewError(400, 'A shell pane needs an absolute path to an existing folder', 'bad_target');
+  }
+  if (run !== undefined && (typeof run !== 'string' || /[\r\n]/.test(run) || run.length > MAX_SHELL_RUN)) {
+    throw previewError(400, `run must be one line of at most ${MAX_SHELL_RUN} characters`, 'bad_run');
+  }
+  return { kind: 'shell', target: crypto.randomUUID(), cwd: await fs.realpath(target), run: run?.trim() || undefined };
+}
+
 // A message target is a session log message id, which the board resolves when it shows the pane.
 const PANE_RESOLVERS = new Map([
   ['message', async (target) => ({ kind: 'message', target })],
   ['scratchpad', resolveScratchpadPane],
+  ['shell', resolveShellPane],
 ]);
 
 app.get('/api/panes/:sessionId', (req, res) => {
@@ -4470,9 +4492,9 @@ app.get('/api/panes/:sessionId', (req, res) => {
 
 app.post('/api/panes/:sessionId', async (req, res) => {
   try {
-    const { target, base, title, kind, show } = req.body || {};
+    const { target, base, title, kind, show, run } = req.body || {};
     if (typeof target !== 'string' || !target) throw previewError(400, 'target is required', 'bad_target');
-    const resolved = await (PANE_RESOLVERS.get(kind) ?? resolvePaneTarget)(target, base);
+    const resolved = await (PANE_RESOLVERS.get(kind) ?? resolvePaneTarget)(target, base, run);
     res.json(panes.add(req.params.sessionId, { ...resolved, title, show: show === true }));
   } catch (error) {
     paneRouteError(res, error, 'POST /api/panes');
@@ -4525,8 +4547,10 @@ app.patch('/api/panes/:sessionId/:paneId', (req, res) => {
 
 app.delete('/api/panes/:sessionId/:paneId', (req, res) => {
   const { sessionId, paneId } = req.params;
+  const pane = panes.get(sessionId).panes.find((p) => p.id === paneId);
   const layout = panes.remove(sessionId, paneId);
   if (!layout) return res.status(404).json({ error: `No pane ${paneId} in session ${sessionId}`, code: 'no_pane' });
+  if (pane?.kind === 'shell') terminal.end(pane.target, terminal.token).catch(() => {});
   res.json({ layout });
 });
 // #endregion

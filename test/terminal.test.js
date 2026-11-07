@@ -67,11 +67,13 @@ async function retryConnect(attempt) {
 }
 
 // A fresh connection per call: a pooled keep-alive socket can be closed by the server just as it is reused.
-function api(port, method, pathname, headers = {}) {
-  return retryConnect(() => apiOnce(port, method, pathname, headers));
+function api(port, method, pathname, headers = {}, body) {
+  return retryConnect(() => apiOnce(port, method, pathname, headers, body));
 }
 
-function apiOnce(port, method, pathname, headers) {
+function apiOnce(port, method, pathname, headers, body) {
+  const data = body === undefined ? undefined : JSON.stringify(body);
+  if (data !== undefined) headers = { ...headers, 'content-type': 'application/json', 'content-length': Buffer.byteLength(data) };
   return new Promise((resolve, reject) => {
     const req = http.request({ host: '127.0.0.1', port, method, path: pathname, headers, agent: false }, (res) => {
       let body = '';
@@ -80,7 +82,7 @@ function apiOnce(port, method, pathname, headers) {
     });
     req.setTimeout(15000, () => req.destroy(new Error(`timeout: ${method} ${pathname}`)));
     req.on('error', reject);
-    req.end();
+    req.end(data);
   });
 }
 
@@ -731,6 +733,56 @@ describe('terminal endpoint', { skip: !ptyAvailable }, () => {
     const after = (await api(port, 'GET', '/api/terminals')).json;
     assert.equal(after.sessions.length, 0);
     assert.equal((await exited).ended, true);
+  });
+
+  it('runs a shell pane in its folder and ends it with the pane', async () => {
+    const origin = `http://localhost:${port}`;
+    const folder = realpathSync.native(mkdtempSync(path.join(os.tmpdir(), 'cck-shell-pane-')));
+    const added = await api(port, 'POST', `/api/panes/${SESSION}`, { origin }, { kind: 'shell', target: folder });
+    assert.equal(added.status, 200);
+    const { pane } = added.json;
+    assert.equal(pane.kind, 'shell');
+    assert.equal(pane.cwd, folder);
+    assert.notEqual(pane.target, folder);
+
+    const got = await session(port, { id: pane.target, mode: 'shell' }, (g) => g.control.some((m) => m.t === 'ready'));
+    got.ws.send(JSON.stringify({ t: 'in', d: `${process.platform === 'win32' ? 'cd' : 'pwd'}\r` }));
+    await waitFor(got.ws, (d, bin) => bin && (got.out += d.toString()).includes(path.basename(folder)), 'cwd');
+    const [row] = (await api(port, 'GET', '/api/terminals')).json.sessions;
+    assert.equal(row.pane, true);
+    assert.equal(row.cwd, folder);
+
+    const exited = waitFor(got.ws, (d, bin) => !bin && JSON.parse(d.toString()).t === 'exit', 'exit');
+    const del = await api(port, 'DELETE', `/api/panes/${SESSION}/${pane.id}`, { origin });
+    assert.equal(del.status, 200);
+    await exited;
+    assert.equal((await api(port, 'GET', '/api/terminals')).json.sessions.length, 0);
+    rmSync(folder, { recursive: true, force: true });
+  });
+
+  it('runs the shell pane\'s command when the shell starts', async () => {
+    const origin = `http://localhost:${port}`;
+    const added = await api(port, 'POST', `/api/panes/${SESSION}`, { origin }, { kind: 'shell', target: os.tmpdir(), run: 'echo cck-run-ok' });
+    assert.equal(added.status, 200);
+    const { pane } = added.json;
+    assert.equal(pane.run, 'echo cck-run-ok');
+    const got = await session(port, { id: pane.target, mode: 'shell' }, (g) => g.control.some((m) => m.t === 'ready'));
+    // The typed line echoes the command too; only its output has the marker without `echo ` before it.
+    await waitFor(got.ws, (d, bin) => bin && /(?<!echo )cck-run-ok/.test((got.out += d.toString())), 'run output');
+    const del = await api(port, 'DELETE', `/api/panes/${SESSION}/${pane.id}`, { origin });
+    assert.equal(del.status, 200);
+  });
+
+  it('refuses a shell pane command of more than one line', async () => {
+    const res = await api(port, 'POST', `/api/panes/${SESSION}`, { origin: `http://localhost:${port}` }, { kind: 'shell', target: os.tmpdir(), run: 'echo a\necho b' });
+    assert.equal(res.status, 400);
+    assert.equal(res.json.code, 'bad_run');
+  });
+
+  it('refuses a shell pane in a folder that does not exist', async () => {
+    const res = await api(port, 'POST', `/api/panes/${SESSION}`, { origin: `http://localhost:${port}` }, { kind: 'shell', target: missingDir });
+    assert.equal(res.status, 400);
+    assert.equal(res.json.code, 'bad_target');
   });
 
   it('raises the terminal host, its console host and an attached shell, and restores the shell on detach', { skip: process.platform !== 'win32' }, async () => {

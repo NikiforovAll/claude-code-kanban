@@ -980,9 +980,12 @@
       </div>
       <input id="pane-pop-input" class="form-input" placeholder="Search linked docs, or paste a URL or a file path" autocomplete="off" data-bwignore data-1p-ignore data-lpignore="true" spellcheck="false">
       <div id="pane-pop-detect" class="pane-pop-detect"></div>
+      <button id="pane-pop-shell" class="pane-pop-row pane-pop-shell" type="button" onclick="addShellPane()" title="A plain shell, no claude, in the session's folder or the folder typed above (Ctrl+Enter)">
+        <svg class="kind" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg><span>New shell</span><span class="pane-pop-shell-dir"></span>
+      </button>
       <div class="pane-pop-label">Linked docs</div>
       <div id="pane-pop-docs" class="pane-pop-docs"></div>
-      <div class="sp-hint"><kbd>Enter</kbd> add &middot; <kbd>&uarr;</kbd><kbd>&darr;</kbd> select &middot; <kbd>Esc</kbd> close</div>
+      <div class="sp-hint"><kbd>Enter</kbd> add &middot; <kbd>Ctrl</kbd><kbd>Enter</kbd> new shell &middot; <kbd>&uarr;</kbd><kbd>&darr;</kbd> select &middot; <kbd>Esc</kbd> close</div>
     </div>
   </div>
 

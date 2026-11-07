@@ -62,13 +62,15 @@ const COMMANDS = {
     },
   },
   pane: {
-    summary: 'Add live panes (a URL or a local file) to a session\'s view, without switching to them',
+    summary: 'Add live panes (a URL, a local file or a shell) to a session\'s view, without switching to them',
     verbs: {
       add: {
         summary: 'Add a pane to a session; it opens as a tab next to Board, in the background',
-        usage: 'claude-code-kanban pane add <url|file> [--title <text>] [--session <id>] [--json]',
+        usage: 'claude-code-kanban pane add <url|file> | --shell [<folder>] [--run <cmd>] [--title <text>] [--session <id>] [--json]',
         flags: {
           '<url|file>': 'An http(s) URL, or a local HTML, markdown, text or image file (relative paths resolve against the current dir)',
+          '--shell [<folder>]': 'A plain shell (the terminal shell, no claude) in <folder> (default: the current dir). Needs the board\'s terminal. Each add opens a new shell; closing the pane ends it',
+          '--run <cmd>': 'With --shell: a one-line command the shell runs when it starts, and again on each restart',
           '--title <text>': 'Tab title (default: the host or file name)',
           [SESSION_FLAG]: SESSION_FLAG_HELP,
           '--json': 'Output JSON (the new pane, with frameable: true, false, or null when unknown)',
@@ -77,6 +79,7 @@ const COMMANDS = {
         examples: [
           'claude-code-kanban pane add http://localhost:5173',
           'claude-code-kanban pane add ./report.html --title Report',
+          'claude-code-kanban pane add --shell . --run "npm test -- --watch" --title Tests',
         ],
         run: runPaneAddCli,
       },
@@ -807,15 +810,21 @@ const panesPath = (sessionId, paneId) =>
   `/api/panes/${encodeURIComponent(sessionId)}${paneId ? `/${encodeURIComponent(paneId)}` : ''}`;
 
 async function runPaneAddCli(args, entry) {
-  const [target] = positionals(args, ['--session', '--title']);
-  if (!target) {
+  const [target] = positionals(args, ['--session', '--title', '--run']);
+  const shell = args.includes('--shell');
+  if (!target && !shell) {
     printLeafHelp(entry);
     return 1;
   }
+  const run = getArgValue(args, 'run');
+  if (run && !shell) return usageError(entry, '--run needs --shell');
   const resolved = await resolveSessionArg(entry, args, PANES_WHY);
   if (!resolved) return 1;
   try {
-    const body = { target: cliTarget(target), title: getArgValue(args, 'title') || '' };
+    const title = getArgValue(args, 'title') || '';
+    const body = shell
+      ? { kind: 'shell', target: canonicalDir(target || '.'), title, ...(run && { run }) }
+      : { target: cliTarget(target), title };
     const out = await cliPostJson(panesPath(resolved.id), body, 'Pane add');
     if (!out) return 1;
     const { pane } = out;

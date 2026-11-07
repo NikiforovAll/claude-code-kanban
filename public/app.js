@@ -6247,6 +6247,7 @@ function sgOpenMenu(x, y, kind, ref) {
   menu.setAttribute('role', 'menu');
   const canFork = kind === 'session' && !!forkableSession(ref);
   const canEnd = kind === 'session' && runningTerminals.has(ref);
+  const canShell = kind === 'session' && terminalAvailable() && !!getSessionBaseDir(ref);
   const marker = kind === 'session' ? sessions.find((s) => s.id === ref)?.nest : null;
   const nestItem = marker?.child
     ? '<button class="sg-menu-item" role="menuitem" data-sg-action="unnest">Unnest</button>'
@@ -6257,6 +6258,9 @@ function sgOpenMenu(x, y, kind, ref) {
     nestItem +
     (canFork
       ? '<button class="sg-menu-item" role="menuitem" data-sg-action="fork" title="claude --resume --fork-session">Fork</button>'
+      : '') +
+    (canShell
+      ? '<button class="sg-menu-item" role="menuitem" data-sg-action="shell" title="A plain shell in the session\'s folder, in a pane">New shell</button>'
       : '') +
     (canEnd
       ? '<button class="sg-menu-item" role="menuitem" data-sg-action="end" title="Alt+Shift+`">End terminal</button>'
@@ -6315,6 +6319,7 @@ document.addEventListener('click', (e) => {
   sgCloseMenu();
   if (item.dataset.sgAction === 'fork') return forkSession(sgRef);
   if (item.dataset.sgAction === 'end') return closeTerminalSession(sgRef);
+  if (item.dataset.sgAction === 'shell') return openShellForSession(sgRef);
   if (item.dataset.sgAction === 'unnest' || item.dataset.sgAction === 'nest') {
     setNestChild(sgRef, item.dataset.sgAction === 'nest');
     return renderSessions();
@@ -14462,12 +14467,16 @@ const PANE_ICONS = {
     '<svg class="kind" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
   scratchpad:
     '<svg class="kind" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>',
+  shell:
+    '<svg class="kind" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>',
   warning:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12" y2="17"/></svg>',
 };
 // Map order is recency: the first entry is the one evicted. Keys are `${sessionId}/${paneId}`,
 // and the limit spans sessions, so a session switch cannot pile up frames.
 const paneFrames = new Map();
+// Entries go with their view, in mountPane's eviction and unmountPane.
+const shellFrames = new Map();
 const paneReviews = new WeakMap();
 // Off-screen views whose file changed; they reload when shown.
 const stalePaneViews = new WeakSet();
@@ -14570,7 +14579,7 @@ function markPaneSide(el, side, focused) {
   el.classList.toggle('pane-focus', focused);
 }
 
-const paneLabel = (p) => (p.kind === 'message' ? p.title : p.target);
+const paneLabel = (p) => (p.kind === 'message' ? p.title : p.kind === 'shell' ? p.cwd || 'Shell' : p.target);
 
 function paneMenuLabel(pane, label) {
   const cut =
@@ -14685,6 +14694,7 @@ function mountPane(sid, pane) {
   while (paneFrames.size > PANE_FRAME_LIMIT) {
     const [oldKey, oldView] = paneFrames.entries().next().value;
     paneFrames.delete(oldKey);
+    shellFrames.delete(oldView.querySelector('.pane-shell-frame'));
     oldView.remove();
   }
   return key;
@@ -14747,6 +14757,10 @@ async function loadPaneView(sid, pane, view, scroll) {
   }
   if (pane.kind === 'scratchpad') {
     await loadScratchpadPaneView(pane, view);
+    return;
+  }
+  if (pane.kind === 'shell') {
+    loadShellPaneView(pane, view);
     return;
   }
   const data = await getJson('/api/preview', null, { query: { path: pane.target } });
@@ -14990,6 +15004,7 @@ function focusActivePane() {
 function focusPaneTarget(target) {
   target.focus({ preventScroll: true });
   target.contentWindow?.focus();
+  shellFrames.get(target)?.post('focus');
 }
 
 function isPaneDocOnScreen() {
@@ -15017,6 +15032,7 @@ function unmountPane(sid, paneId) {
   const hadFocus = view?.contains(document.activeElement);
   view?.remove();
   paneFrames.delete(key);
+  shellFrames.delete(view?.querySelector('.pane-shell-frame'));
   // Chrome leaves the window without focus when a focused frame is removed, so no key reaches
   // the board until a click. Only when it had focus: under the hub, cck may be off screen.
   if (hadFocus) window.focus();
@@ -15193,6 +15209,10 @@ async function reloadPane(id) {
   if (!pane) return;
   const sid = paneSessionId();
   const view = paneFrames.get(`${sid}/${pane.id}`);
+  if (pane.kind === 'shell') {
+    await restartShellPane(sid, pane);
+    return;
+  }
   if (pane.kind !== 'url' && pane.kind !== 'scratchpad' && view) {
     await reloadPaneView(sid, pane, view);
   } else {
@@ -15205,7 +15225,7 @@ async function reloadPane(id) {
 
 function openPaneExternally(id) {
   const pane = paneById(id);
-  if (!pane) return;
+  if (!pane || pane.kind === 'shell') return;
   if (pane.kind === 'message') {
     openPaneMessageDetail(pane);
     return;
@@ -15229,7 +15249,8 @@ async function openPaneMessageDetail(pane) {
 function copyPaneTarget(id) {
   const pane = paneById(id);
   if (!pane) return;
-  copyText(pane.target, pane.kind === 'url' ? 'URL' : 'path');
+  if (pane.kind === 'shell') copyText(pane.cwd || '', 'path');
+  else copyText(pane.target, pane.kind === 'url' ? 'URL' : 'path');
 }
 
 function closePaneMenu(restore) {
@@ -15396,29 +15417,31 @@ function openPaneMenu(x, y, id) {
   if (!pane) return false;
   const url = pane.kind === 'url';
   const message = pane.kind === 'message';
-  const label = paneLabel(pane);
+  const shell = pane.kind === 'shell';
   showPaneMenu(
     x,
     y,
     pane.id,
     'Pane actions',
-    paneMenuLabel(pane, label) +
-      (message ? '' : paneMenuItem('copy', url ? 'Copy URL' : 'Copy path')) +
-      paneMenuItem(
-        'open',
-        url
-          ? 'Open in new tab'
-          : message
-            ? 'Open in message dialog'
-            : pane.kind === 'scratchpad'
-              ? 'Open in scratch viewer'
-              : 'Open in preview',
-      ) +
-      (message
+    paneMenuLabel(pane, paneLabel(pane)) +
+      (message ? '' : paneMenuItem('copy', url ? 'Copy URL' : shell ? 'Copy folder path' : 'Copy path')) +
+      (shell
+        ? ''
+        : paneMenuItem(
+            'open',
+            url
+              ? 'Open in new tab'
+              : message
+                ? 'Open in message dialog'
+                : pane.kind === 'scratchpad'
+                  ? 'Open in scratch viewer'
+                  : 'Open in preview',
+          )) +
+      (message || shell
         ? ''
         : paneMenuItem('link', paneIsLinked(pane) ? 'Remove from linked documents' : 'Add to linked documents')) +
       paneMenuItem('rename', 'Rename') +
-      paneMenuItem('reload', 'Reload') +
+      paneMenuItem('reload', shell ? 'Restart shell' : 'Reload') +
       (url ? paneMenuItem('dock', pane.dock ? 'Remove from the dock' : 'Dock beside the terminal') : '') +
       paneGroupMenuItems(pane.id) +
       paneMenuItem('close', 'Close pane'),
@@ -15667,8 +15690,13 @@ function movePanePopHighlight(step) {
 }
 
 function openPanePop() {
-  if (!paneSessionId()) return;
+  const sid = paneSessionId();
+  if (!sid) return;
   panePopInput.value = '';
+  const shellBtn = document.getElementById('pane-pop-shell');
+  const folder = getSessionBaseDir(sid);
+  shellBtn.hidden = !terminalAvailable() || !folder;
+  shellBtn.querySelector('.pane-pop-shell-dir').textContent = folder ? pathBasename(folder) : '';
   renderPanePopDocs();
   panePop.classList.add('visible');
   panePopInput.focus();
@@ -15964,7 +15992,10 @@ panePop.addEventListener('keydown', (e) => {
     return;
   }
   if (e.target !== panePopInput) return;
-  if (e.key === 'Enter') {
+  if (e.key === 'Enter' && e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey) {
+    e.preventDefault();
+    if (!document.getElementById('pane-pop-shell').hidden) addShellPane();
+  } else if (e.key === 'Enter') {
     e.preventDefault();
     addPane(panePopMatches[panePopIdx] ?? panePopInput.value);
   } else if (matchKey(e, 'ArrowDown', 'ArrowUp')) {
@@ -16353,13 +16384,31 @@ function ensureTerminalFrame() {
   return ready;
 }
 
-function loadTerminalFrame(origin, timeoutMs) {
-  termFrame.el?.remove();
+function createTerminalFrame(
+  className,
+  title,
+  origin = termFrame.sameOrigin ? location.origin : terminalFrameOrigin(),
+) {
   const el = document.createElement('iframe');
-  el.className = 'terminal-frame';
-  el.title = 'Terminal';
+  el.className = className;
+  el.title = title;
   el.allow = 'clipboard-read; clipboard-write';
   el.src = `${origin}/terminal.html#p=${encodeURIComponent(location.origin)}`;
+  return { el, origin };
+}
+
+// The answer to a frame's `loaded`: the frame is new, so it gets everything again.
+function initTerminalFrame(frameState, post) {
+  const themeOptions = terminalThemeOptions();
+  frameState.inited = false;
+  frameState.claims = null;
+  frameState.theme = JSON.stringify(themeOptions);
+  post('init', terminalInitOptions(themeOptions));
+}
+
+function loadTerminalFrame(origin, timeoutMs) {
+  termFrame.el?.remove();
+  const { el } = createTerminalFrame('terminal-frame', 'Terminal', origin);
   resetTerminalFrame({ el, origin });
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -16382,6 +16431,7 @@ function sendTerminalTheme() {
   for (const [frame, post] of [
     [termFrame, postToTerminalFrame],
     [kanbotState, postToKanbotFrame],
+    ...[...shellFrames.values()].map((s) => [s, s.post]),
   ]) {
     if (!frame.inited || key === frame.theme) continue;
     frame.theme = key;
@@ -16574,7 +16624,15 @@ function pushTerminalClaims() {
     const bridged = bridgedFrameEls();
     const urlFrames = urlPaneFrames();
     const dockEls = dockFrameEls();
-    if (!termFrame.inited && !kanbotState.inited && !bridged.length && !urlFrames.length && !dockEls.length) return;
+    if (
+      !termFrame.inited &&
+      !kanbotState.inited &&
+      !bridged.length &&
+      !urlFrames.length &&
+      !dockEls.length &&
+      !shellFrames.size
+    )
+      return;
     const claims = keyClaims();
     const base = bridgeClaims(claims);
     sendBridgeClaimsAll(bridged, base);
@@ -16583,6 +16641,10 @@ function pushTerminalClaims() {
     const sig = JSON.stringify(claims);
     sendFrameClaims(kanbotState, claims, sig, postToKanbotFrame);
     sendFrameClaims(termFrame, claims, sig, terminalFrameSend);
+    if (!shellFrames.size) return;
+    const shellClaims = { ...claims, keys: [...claims.keys, ...SHELL_PANE_CLAIMS] };
+    const shellSig = JSON.stringify(shellClaims);
+    for (const s of shellFrames.values()) sendFrameClaims(s, shellClaims, shellSig, s.post);
   });
 }
 
@@ -16640,6 +16702,7 @@ function adjustTerminalFontSize(step) {
     else store.setItem(TERMINAL_FONT_KEY, String(size));
     termState.fontSize = size;
     terminalFrameSend('font', { size });
+    for (const s of shellFrames.values()) if (s.inited) s.post('font', { size });
     layoutShow();
   }
   showToast(`Terminal ${size}px`);
@@ -17069,7 +17132,13 @@ async function renderTerminalManager() {
   body.innerHTML = list
     .map((t) => {
       const session = sessions.find((s) => s.id === t.id);
-      const name = t.kanbot ? 'Kanbot' : session ? sessionDisplayName(session) : t.id.slice(0, 8);
+      const name = t.kanbot
+        ? 'Kanbot'
+        : t.pane
+          ? `Shell pane · ${pathBasename(t.cwd)}`
+          : session
+            ? sessionDisplayName(session)
+            : t.id.slice(0, 8);
       const here = t.id === termState.sessionId ? '<span class="terminal-manager-here">this tab</span>' : '';
       const attached = t.clients ? `${t.clients} attached` : 'detached';
       return `<div class="terminal-manager-row${t.clients ? ' attached' : ''}">
@@ -17085,7 +17154,7 @@ async function renderTerminalManager() {
           </div>
         </div>
         <div class="terminal-manager-actions">
-          <button type="button" class="btn btn-secondary" data-open="${escapeHtml(t.id)}"${t.kanbot ? ' data-kanbot' : ''}>Open</button>
+          ${t.pane ? '' : `<button type="button" class="btn btn-secondary" data-open="${escapeHtml(t.id)}"${t.kanbot ? ' data-kanbot' : ''}>Open</button>`}
           <button type="button" class="btn btn-secondary terminal-manager-end" data-end="${escapeHtml(t.id)}" data-started="${escapeHtml(String(Number(t.startedAt) || 0))}">End</button>
         </div>
       </div>`;
@@ -17278,12 +17347,8 @@ function toggleKanbot(force) {
   }
   kanbotState.frame?.focus();
   if (!kanbotState.frame) {
-    const frame = document.createElement('iframe');
-    frame.className = 'kanbot-frame';
-    frame.title = 'Kanbot';
-    frame.allow = 'clipboard-read; clipboard-write';
-    kanbotState.origin = termFrame.sameOrigin ? location.origin : terminalFrameOrigin();
-    frame.src = `${kanbotState.origin}/terminal.html#p=${encodeURIComponent(location.origin)}`;
+    const { el: frame, origin } = createTerminalFrame('kanbot-frame', 'Kanbot');
+    kanbotState.origin = origin;
     kanbotState.frame = frame;
     el.querySelector('.kanbot-body').appendChild(frame);
     return;
@@ -17326,11 +17391,7 @@ window.addEventListener('message', (e) => {
   if (typeof m?.type !== 'string' || !m.type.startsWith(TERMINAL_MSG)) return;
   const t = m.type.slice(TERMINAL_MSG.length);
   if (t === 'loaded') {
-    const themeOptions = terminalThemeOptions();
-    kanbotState.inited = false;
-    kanbotState.claims = null;
-    kanbotState.theme = JSON.stringify(themeOptions);
-    postToKanbotFrame('init', terminalInitOptions(themeOptions));
+    initTerminalFrame(kanbotState, postToKanbotFrame);
     return;
   }
   if (t === 'term') {
@@ -17358,6 +17419,149 @@ window.addEventListener('message', (e) => {
     setKanbotAttached(false);
     if (!kanbotState.ended && kanbotState.el.classList.contains('visible')) setTimeout(openKanbot, 1000);
   }
+});
+
+//#endregion
+
+//#region SHELL_PANES
+// A plain shell in a pane (kind `shell`): its own terminal frame, like Kanbot's, on a PTY in shell mode
+// that belongs to no session. The PTY outlives the frame, so an evicted view attaches again and gets
+// its screen back; closing the pane ends it on the server.
+// Only keys a shell does not type: the pane switch and close keys and the session tab keys.
+const SHELL_PANE_CLAIMS = [
+  ...['BracketLeft', 'BracketRight', 'KeyW'].map((code) => ({ altKey: true, key: 'Unidentified', code })),
+  ...'123456789'.split('').map((n) => ({ ctrlKey: true, altKey: true, key: 'Unidentified', code: `Digit${n}` })),
+];
+const SHELL_RETRY_MS = 1000;
+const SHELL_RETRIES = 5;
+
+function loadShellPaneView(pane, view) {
+  if (!terminalAvailable()) {
+    view.insertAdjacentHTML(
+      'beforeend',
+      paneCardHtml(
+        'The terminal is off',
+        'A shell pane runs in the embedded terminal, which this board does not have.',
+      ),
+    );
+    return;
+  }
+  const { el, origin } = createTerminalFrame('pane-frame pane-shell-frame', pane.title);
+  const post = (t, data) => el.contentWindow?.postMessage({ ...data, type: TERMINAL_MSG + t }, origin);
+  shellFrames.set(el, { el, origin, post, ptyId: pane.target, inited: false, socketId: 0, ended: false, retries: 0 });
+  view.appendChild(el);
+}
+
+function openShellFrame(s) {
+  s.ended = false;
+  setShellCard(s.el);
+  s.post('open', { socketId: ++s.socketId, reset: true, hello: { token: terminalToken, id: s.ptyId, mode: 'shell' } });
+}
+
+// No title takes the card away.
+function setShellCard(el, title, text, button) {
+  const view = el.parentElement;
+  view?.querySelector('.pane-shell-card')?.remove();
+  el.hidden = !!title;
+  if (!title || !view) return;
+  view.insertAdjacentHTML('beforeend', paneCardHtml(title, text, button, { attr: 'data-shell-restart' }));
+  view.lastElementChild.classList.add('pane-shell-card');
+}
+
+async function restartShellPane(sid, pane) {
+  await terminalFetch(apiPath`/api/terminals/${pane.target}`, 'DELETE').catch(() => {});
+  unmountPane(sid, pane.id);
+  syncPanes();
+  focusActivePane();
+}
+
+function addShellPane() {
+  const sid = paneSessionId();
+  if (!sid) return;
+  const typed = panePopInput.value.trim();
+  closePanePop();
+  openShellForSession(sid, typed && !linkUrl(typed) ? typed : undefined);
+}
+
+// Panes hide behind the Claude terminal, so the session leaves terminal mode to show the shell.
+// The server checks `folder`, so a typed path that is no folder ends in its error toast.
+async function openShellForSession(sid, folder = getSessionBaseDir(sid)) {
+  if (!folder) {
+    showToast('This session has no folder to start a shell in', 'error');
+    return;
+  }
+  if (sid !== paneSessionId()) await openSession(sid);
+  if (wantsTerminalFor(sid)) exitTerminalMode(sid);
+  if (!(await postPane(sid, { kind: 'shell', target: folder }))) return;
+  syncPanes();
+  focusActivePane();
+}
+
+window.addEventListener('message', (e) => {
+  const m = e.data;
+  if (!shellFrames.size || typeof m?.type !== 'string' || !m.type.startsWith(TERMINAL_MSG)) return;
+  let s = null;
+  for (const f of shellFrames.values()) if (f.el.contentWindow === e.source) s = f;
+  if (!s || e.origin !== s.origin) return;
+  const el = s.el;
+  const t = m.type.slice(TERMINAL_MSG.length);
+  if (t === 'loaded') {
+    initTerminalFrame(s, s.post);
+    return;
+  }
+  if (t === 'term') {
+    s.inited = true;
+    pushTerminalClaims();
+    openShellFrame(s);
+    if (document.activeElement === el) s.post('focus');
+    return;
+  }
+  if (t === 'key') {
+    replayKey(m, el);
+    return;
+  }
+  if (t === 'link') {
+    openTerminalLink(m.href);
+    return;
+  }
+  if (t === 'focused') {
+    focusSideOf(el.closest('.pane-view'));
+    return;
+  }
+  if (m.socketId !== s.socketId) return;
+  if (t === 'ws') {
+    if (m.msg?.t === 'ready') s.retries = 0;
+    else if (m.msg?.t === 'exit') {
+      s.ended = true;
+      const clean = m.msg.code === 0 || m.msg.ended;
+      setShellCard(
+        el,
+        'The shell exited',
+        clean ? 'Start a new shell in this pane.' : `Exit code ${m.msg.code}.`,
+        'Restart',
+      );
+    } else if (m.msg?.t === 'error') {
+      s.ended = true;
+      if (m.msg.msg === STALE_TOKEN_MSG) {
+        refreshTerminalToken().then((ok) => ok && el.isConnected && openShellFrame(s));
+        return;
+      }
+      setShellCard(el, 'The shell did not start', m.msg.msg || 'Terminal error', 'Try again');
+    }
+  } else if (t === 'close' && !s.ended && el.isConnected) {
+    if (s.retries++ < SHELL_RETRIES) setTimeout(() => el.isConnected && !s.ended && openShellFrame(s), SHELL_RETRY_MS);
+    else setShellCard(el, 'Lost the connection to the shell', 'The shell may still run on the board.', 'Reconnect');
+  }
+});
+
+paneViews.addEventListener('click', (e) => {
+  const view = e.target.closest('[data-shell-restart]')?.closest('.pane-view');
+  const el = view?.querySelector('.pane-shell-frame');
+  const s = el && shellFrames.get(el);
+  if (!s?.inited) return;
+  s.retries = 0;
+  openShellFrame(s);
+  focusPaneTarget(el);
 });
 
 //#endregion
