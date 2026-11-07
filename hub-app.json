@@ -37,7 +37,7 @@
       "key": "zenCentered",
       "type": "boolean",
       "label": "Center zen mode",
-      "help": "In zen mode, centers the session card and its panel in the sidebar's height.",
+      "help": "In zen mode, centers the session card and its panel, or the group or project, in the sidebar's height.",
       "default": false
     },
     {

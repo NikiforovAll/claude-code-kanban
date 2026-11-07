@@ -95,10 +95,11 @@ let sessionsHasMore = false;
 // URL, so a query string would not survive a hub reload.
 const ZEN_KEY = 'zenMode';
 let zenMode = store.getItem(ZEN_KEY) === 'true';
-// Group and project zen: the sidebar shows one group's subtree or one project. A view of the
-// moment, so neither is persisted.
-let zenGroup = null;
-let zenProject = null;
+// Group and project zen: the sidebar shows one group's subtree or one project.
+const ZEN_SCOPE_KEY = 'zenScope';
+const savedZenScope = store.readJson(ZEN_SCOPE_KEY);
+let zenGroup = typeof savedZenScope?.group === 'string' ? savedZenScope.group : null;
+let zenProject = typeof savedZenScope?.project === 'string' ? savedZenScope.project : null;
 let filterProject = FILTER_DEFAULTS.project; // null = all, '__recent__' = last 24h, or project path
 let recentProjects = new Set();
 let projectsCacheDirty = true;
@@ -264,9 +265,7 @@ function resetState() {
   sessionLimit = SESSION_PAGE;
   filterProject = FILTER_DEFAULTS.project;
   zenMode = false;
-  zenGroup = null;
-  zenProject = null;
-  setZenPeek(null);
+  setZenScope(null, null);
   store.removeItem(ZEN_KEY);
   renderZenState();
   searchQuery = '';
@@ -803,6 +802,7 @@ async function fetchTasks(sessionId) {
   if (currentSessionId && currentSessionId !== sessionId) deferredPinPlacement.delete(currentSessionId);
   pushSwapHistory(sessionId);
   const switched = sessionId !== currentSessionId;
+  if (switched) leaveZenScopeFor(sessionId);
   currentSessionId = sessionId;
   markOpenSessionRead();
   if (switched) autoRevealLog(sessionId);
@@ -4333,23 +4333,21 @@ function renderSessions() {
   refreshProjectList();
   syncPinPeek();
 
-  if (zenGroup && !sgGroupById(zenGroup)) {
-    zenGroup = null;
+  if (zenGroup && sgRev !== null && !sgGroupById(zenGroup)) {
     zenPeekKey = null;
+    setZenScope(null, null);
     renderZenState();
   }
   // Zen narrows the rendered list only — the session picker keeps calling getFilteredSessions()
   // and still offers everything, or there would be no way to switch sessions without leaving zen.
   const zenSession = zenMode && currentSessionId ? sessions.find((s) => s.id === currentSessionId) : null;
-  sessionsList.classList.toggle('zen', !!zenSession);
-  sessionsList.dataset.zenState = zenSession ? sessionState(zenSession) : '';
   const zenScope = !!(zenGroup || zenProject);
+  sessionsList.classList.toggle('zen', !!zenSession || zenScope);
+  sessionsList.dataset.zenState = zenSession ? sessionState(zenSession) : '';
   let filteredSessions;
   if (zenScope) {
     const scoped = getFilteredSessions({ zen: true });
-    filteredSessions = applyStableSessionOrder(
-      zenProject ? scoped.filter((s) => sessionProjectKey(s) === zenProject) : scoped,
-    );
+    filteredSessions = applyStableSessionOrder(zenProject ? scoped.filter(inZenScope) : scoped);
   } else if (zenMode) filteredSessions = zenSession ? [zenSession] : [];
   else filteredSessions = applyStableSessionOrder(getFilteredSessions());
 
@@ -12385,15 +12383,16 @@ function renderFilterState() {
 function toggleZenMode() {
   const leavingSessionZen = zenMode;
   if (zenMode) zenMode = false;
-  else if (zenGroup || zenProject) zenGroup = zenProject = null;
+  else if (zenGroup || zenProject) setZenScope(null, null);
   else {
     const el = focusZone === 'sidebar' && sessionsList.querySelector('.kb-selected');
     const sel = el && sgDragPayload(el);
-    zenGroup = sel?.kind === 'group' ? sgGroupById(sel.ref)?.id || null : null;
-    zenProject = sel?.kind === 'project' ? sel.ref : null;
+    setZenScope(
+      sel?.kind === 'group' ? sgGroupById(sel.ref)?.id || null : null,
+      sel?.kind === 'project' ? sel.ref : null,
+    );
     zenMode = !zenGroup && !zenProject;
   }
-  setZenPeek(zenGroup ? sgKey(zenGroup) : zenProject);
   store.setItem(ZEN_KEY, String(zenMode));
   renderZenState();
   if (zenMode) closeFilterMenu();
@@ -12401,6 +12400,27 @@ function toggleZenMode() {
   // The open session or the scope's sessions may be outside the current server page/filter,
   // and leaving a scope needs the filtered page back.
   if (!leavingSessionZen) fetchSessions(false);
+}
+
+function setZenScope(group, project) {
+  zenGroup = group;
+  zenProject = group ? null : project;
+  setZenPeek(zenGroup ? sgKey(zenGroup) : zenProject);
+  if (zenGroup || zenProject) store.writeJson(ZEN_SCOPE_KEY, { group: zenGroup, project: zenProject });
+  else store.removeItem(ZEN_SCOPE_KEY);
+}
+
+function inZenScope(session) {
+  if (zenGroup) return sgSubtreeIds(zenGroup).has(sgGroupForSession(session)?.id);
+  return sessionProjectKey(session) === zenProject;
+}
+
+// Opening a session the scope hides would leave it off screen, so the scope gives way.
+// Not while booting: the restored session may sit outside the restored scope.
+function leaveZenScopeFor(sessionId) {
+  if ((!zenGroup && !zenProject) || document.body.classList.contains('booting')) return;
+  const session = sessions.find((s) => s.id === sessionId);
+  if (!session || !inZenScope(session)) toggleZenMode();
 }
 
 function applyHubSettings(s) {
@@ -19618,6 +19638,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 loadSidebarState();
 for (const p of readStoredList(COLLAPSED_GROUPS_KEY)) collapsedProjectGroups.add(p);
+setZenScope(zenGroup, zenProject);
 syncSessionGroups();
 initSessionGroupsDnd();
 initSessionPicker();
