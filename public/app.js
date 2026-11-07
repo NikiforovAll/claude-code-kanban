@@ -124,8 +124,6 @@ let currentWaiting = null;
 let lastWaitingHash = '';
 let lastAgentsHash = '';
 let messagePanelOpen = false;
-let logAutoOpened = false;
-const logDismissed = new Set();
 let lastMessagesHash = '';
 let currentMessages = [];
 let agentDurationInterval = null;
@@ -233,7 +231,7 @@ function updateUrl() {
   if (filterProject && filterProject !== FILTER_DEFAULTS.project) params.set('project', filterProject);
   if (ownerFilter) params.set('owner', ownerFilter);
   if (searchQuery) params.set('search', searchQuery);
-  if (messagePanelOpen && !logAutoOpened) params.set('messages', '1');
+  if (messagePanelOpen) params.set('messages', '1');
   const qs = params.toString();
   const url = qs ? `?${qs}` : window.location.pathname;
   history.replaceState(null, '', url);
@@ -805,7 +803,6 @@ async function fetchTasks(sessionId) {
   if (switched) leaveZenScopeFor(sessionId);
   currentSessionId = sessionId;
   markOpenSessionRead();
-  if (switched) autoRevealLog(sessionId);
   // A task change in the open session must not reset the messages, the agents or the owner
   // filter: that reset rebuilds the panels and reads as a reload after each card move.
   if (!refresh) {
@@ -962,30 +959,7 @@ async function refreshProjectAgents() {
 //#endregion
 
 //#region MESSAGE_PANEL
-function setMessagePanelVisible(open) {
-  messagePanelOpen = open;
-  document.getElementById('message-panel').classList.toggle('visible', open);
-  document.getElementById('message-toggle')?.classList.toggle('active', open);
-}
-
-// An empty board has nothing to show, so the log opens in its place. It is not the user's choice,
-// so it is not stored, it closes again on a session with tasks or panes, and a manual close sticks for that session.
-// The pane layout loads after the switch, and applyPaneLayout asks again once it is in.
-function autoRevealLog(sessionId) {
-  if (!paneLayouts.has(sessionId)) return;
-  const empty = !currentTasks.length && !paneLayout(sessionId).panes.length;
-  if (empty && !messagePanelOpen && !logDismissed.has(sessionId) && !wantsTerminal()) {
-    setMessagePanelVisible(true);
-    logAutoOpened = true;
-  } else if (!empty && logAutoOpened) {
-    setMessagePanelVisible(false);
-    logAutoOpened = false;
-  }
-}
-
 function toggleMessagePanel() {
-  if (logAutoOpened && messagePanelOpen && currentSessionId) logDismissed.add(currentSessionId);
-  logAutoOpened = false;
   const panel = document.getElementById('message-panel');
   messagePanelOpen = !messagePanelOpen;
   termState.panelHidden = false;
@@ -7115,9 +7089,14 @@ const SHORTCUT_TABS = [
             yields: 'ctrl+alt+1',
             label: 'Go to tab or group N (the board is 1)',
           },
-          { keys: ['Alt', '[ / ]'], combo: true, label: 'Change the tab in the focused side of a split' },
+          {
+            keys: ['Alt', '[ / ]'],
+            combo: true,
+            label: 'Change the tab in the focused side of a split, else previous / next tab',
+          },
           { keys: ['|'], label: 'Split with the tab before it / unsplit (or drag a tab onto a side)' },
           { keys: ['{', '}'], label: 'Focus left / right side of a split' },
+          { keys: ['Alt', '{ / }'], combo: true, label: 'Focus left / right side of a split, from a shell too' },
           { keys: ['Alt', 'W'], combo: true, label: 'Close the focused pane' },
           { keys: ['Shift', 'F10'], combo: true, label: 'Focused tab menu (or Menu key)' },
         ],
@@ -8588,8 +8567,10 @@ document.addEventListener('keydown', (e) => {
     return;
   }
   const altOnly = e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey;
-  if (altOnly && (e.code === 'BracketLeft' || e.code === 'BracketRight')) {
-    if (cyclePane(e.code === 'BracketRight' ? 1 : -1)) {
+  // The Alt forms work from a shell pane, which types the plain [ ] { }.
+  const bracket = e.code === 'BracketLeft' ? -1 : e.code === 'BracketRight' ? 1 : 0;
+  if (altOnly && bracket) {
+    if (cyclePane(bracket) || cyclePaneStrip(bracket)) {
       e.preventDefault();
       focusActivePane();
     }
@@ -8614,7 +8595,9 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
     return;
   }
-  if (plainShift && (e.key === '{' || e.key === '}') && focusPaneSide(e.key === '{' ? 'l' : 'r')) {
+  const altShift = e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey;
+  const toSide = plainShift && e.key === '{' ? -1 : plainShift && e.key === '}' ? 1 : altShift ? bracket : 0;
+  if (toSide && focusPaneSide(toSide < 0 ? 'l' : 'r')) {
     e.preventDefault();
     focusActivePane();
     return;
@@ -9409,6 +9392,7 @@ const PANE_CLAIMS = [
   { key: 'Unidentified', code: 'KeyM' },
   { ctrlKey: true, key: 'm', code: '' },
   ...['BracketLeft', 'BracketRight', 'KeyW'].map((code) => ({ altKey: true, key: 'Unidentified', code })),
+  ...['BracketLeft', 'BracketRight'].map((code) => ({ altKey: true, shiftKey: true, key: 'Unidentified', code })),
   ...['KeyL', 'KeyM', 'KeyP', 'KeyS', 'KeyZ'].map((code) => ({ shiftKey: true, key: 'Unidentified', code })),
   ...'123456789'.split('').map((n) => ({ ctrlKey: true, altKey: true, key: 'Unidentified', code: `Digit${n}` })),
 ];
@@ -14209,7 +14193,6 @@ function applyPaneLayout(sid, layout) {
   if (sid === dockSid) renderDockRail();
   if (sid !== paneSessionId()) return;
   syncPanes();
-  autoRevealLog(sid);
 }
 
 async function fetchPaneLayout(sid) {
@@ -14720,16 +14703,18 @@ function paneUrlFrame(pane, className) {
   frame.setAttribute('referrerpolicy', 'no-referrer');
   frame.title = pane.title;
   frame.src = pane.target;
+  // Each load is a new page: it needs the theme and the host keys again.
+  frame.addEventListener('load', () => {
+    postToShowFrames(() => ({ type: `${SHOW_MSG}tokens`, tokens: showTokens() }), [frame]);
+    frame.hostKeysSig = null;
+    pushTerminalClaims();
+  });
   return frame;
 }
 
 function mountPaneUrlFrame(pane, view) {
   const frame = paneUrlFrame(pane, 'pane-frame pane-url-frame modal-zoomable');
-  frame.addEventListener('load', () => {
-    view.classList.remove('keys-bridged');
-    frame.hostKeysSig = null;
-    pushTerminalClaims();
-  });
+  frame.addEventListener('load', () => view.classList.remove('keys-bridged'));
   view.appendChild(frame);
   view.insertAdjacentHTML('beforeend', paneUrlBarHtml());
   return frame;
@@ -16262,10 +16247,7 @@ function syncTerminal() {
   if (view !== termState.syncedView) {
     termState.syncedView = view;
     // The terminal shows the same conversation, so the log panel only takes width; it comes back when the terminal goes.
-    if (on && logAutoOpened) {
-      setMessagePanelVisible(false);
-      logAutoOpened = false;
-    } else if (on && messagePanelOpen) {
+    if (on && messagePanelOpen) {
       toggleMessagePanel();
       termState.panelHidden = true;
     } else if (!on && arrived && termState.panelHidden) toggleMessagePanel();
@@ -17430,6 +17412,7 @@ window.addEventListener('message', (e) => {
 // Only keys a shell does not type: the pane switch and close keys and the session tab keys.
 const SHELL_PANE_CLAIMS = [
   ...['BracketLeft', 'BracketRight', 'KeyW'].map((code) => ({ altKey: true, key: 'Unidentified', code })),
+  ...['BracketLeft', 'BracketRight'].map((code) => ({ altKey: true, shiftKey: true, key: 'Unidentified', code })),
   ...'123456789'.split('').map((n) => ({ ctrlKey: true, altKey: true, key: 'Unidentified', code: `Digit${n}` })),
 ];
 const SHELL_RETRY_MS = 1000;
@@ -18361,7 +18344,7 @@ new MutationObserver(() => {
   });
 }).observe(document.body, { attributes: true, attributeFilter: ['class', 'data-color-theme', 'style'] });
 
-const PANE_SHOW_FRAMES = '.show-pane-frame, .themed-frame, .ask-frame, .dock-addon-frame';
+const PANE_SHOW_FRAMES = '.show-pane-frame, .themed-frame, .ask-frame, .dock-addon-frame, .pane-url-frame';
 
 // Builds the message only when a frame is there, because showTokens forces a style recalc.
 function postToShowFrames(makeMsg, frames = [showState.frame, ...document.querySelectorAll(PANE_SHOW_FRAMES)]) {
@@ -18592,7 +18575,8 @@ function renderDockAddon(pane) {
   if (pane) {
     if (!panel.firstChild) {
       panel.innerHTML = `<header class="show-head dock-addon-head" tabindex="-1"><span class="show-nav"><span class="show-title"></span></span>
-      <span class="show-actions">${showBtnHtml('dock', 'open', 'external', 'Open in a new tab')}
+      <span class="show-actions">${showBtnHtml('dock', 'pane', 'pane', 'Open as a pane of the session')}
+      ${showBtnHtml('dock', 'open', 'external', 'Open in a new tab')}
       ${showBtnHtml('dock', 'expand', 'expand', 'Fill the terminal · Alt+Enter')}
       ${showBtnHtml('dock', 'reload', 'reload', 'Reload')}
       ${showBtnHtml('dock', 'remove', 'clear', 'Remove from the rail')}
@@ -18605,6 +18589,7 @@ function renderDockAddon(pane) {
     const open = panel.querySelector('[data-dock="open"]');
     open.title = `Open ${pane.target} in a new tab`;
     open.setAttribute('aria-label', open.title);
+    panel.querySelector('[data-dock="pane"]').hidden = !pane.addon;
     panel.classList.toggle('expanded', dockExpanded);
     panel.style.setProperty('--show-term-font', `${currentTerminalFontSize()}px`);
     const expand = panel.querySelector('[data-dock="expand"]');
@@ -18648,11 +18633,6 @@ function createDockView(pane) {
   if (pane.run && !dockAddonUp.has(pane.id)) return startDockAddon(pane);
   const frame = paneUrlFrame(pane, 'dock-addon-frame');
   frame.dataset.target = pane.target;
-  frame.addEventListener('load', () => {
-    postToShowFrames(() => ({ type: `${SHOW_MSG}tokens`, tokens: showTokens() }), [frame]);
-    frame.hostKeysSig = null;
-    pushTerminalClaims();
-  });
   if (pane.addon || paneFraming.get(pane.target)) return frame;
   const sid = dockSid;
   probePaneFraming(sid, pane).then((frameable) => {
@@ -18855,6 +18835,7 @@ function initDockRail() {
     if (e.target.closest('[data-dock="close"]')) dockRailCommand(pane.id);
     else if (e.target.closest('[data-dock="expand"]')) setDockExpanded(!dockExpanded);
     else if (e.target.closest('[data-dock="remove"]')) removeDockItem(pane);
+    else if (e.target.closest('[data-dock="pane"]')) addPaneToSession(dockSid, pane.target, pane.title);
     else if (e.target.closest('[data-dock="reload"]')) {
       dockAddonUp.delete(pane.id);
       dropDockView(pane.id);
@@ -20085,7 +20066,6 @@ getJson('/api/config')
     }
     if (focusZoneBeforeReload === 'sidebar') setFocusZone('sidebar');
     if (urlState.messages && currentSessionId) {
-      if (logAutoOpened) setMessagePanelVisible(false);
       toggleMessagePanel();
       // Re-render after panel layout settles so scroll dimensions are correct
       requestAnimationFrame(() => {

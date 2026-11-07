@@ -1,6 +1,6 @@
 # Build an add-on
 
-An add-on is one HTML page and a small server that serves it. The board frames the page by its URL, so any stack works; this guide uses Node with no dependencies. The build is done when the server answers 200 and `addon add` printed an id.
+An add-on is one HTML page and a small server that serves it. The board frames the page by its URL, so any stack works; this guide uses Node with no dependencies. The build is done when the theme check passes, the server answers 200 and `addon add` printed an id.
 
 ## 1. Write the server and the page
 
@@ -28,7 +28,7 @@ The URL is the page's only input from the board. The page reads the values the b
 
 ## 3. Take the board's theme
 
-Style the page with the variables of the HTML contract in [the show skill](../../show/SKILL.md#html-contract), in its flat style. Set fallback values for them in `:where(:root)`, and apply the board's values from its message, which it sends on each load and each theme change:
+Style the page with the variables of the HTML contract in [the show skill](../../show/SKILL.md#html-contract), in its flat style. Set fallback values for them in `:where(:root)`, and set `:root { color-scheme: var(--color-scheme, light dark); }` so scrollbars and form controls follow the board, not the OS. Apply the board's values from its message, which it sends on each load and each theme change:
 
 ```js
 addEventListener('message', (e) => {
@@ -69,7 +69,19 @@ When the content follows files, the server watches them (`fs.watch`) and pushes 
 
 The dock is 360 to 900 px wide and the full height of the terminal. Lay the page out in normal flow that wraps at 360 px, and let the body scroll.
 
-## 7. Run and register
+## 7. Verify the theme
+
+Run the static check, `scripts/theme-check.mjs` in this skill's base directory, on the page, and fix every error before you register it:
+
+```bash
+node <skill base dir>/scripts/theme-check.mjs <folder>/index.html
+```
+
+It fails on a literal color (hex, `rgb()`, `hsl()`, `oklch()`, a named color) in CSS, a `style` attribute, an SVG `fill` or `stroke`, or a JS string, and on a page with no `cck-show:tokens` listener. It warns on a variable that is not a board token, a token with no fallback, a literal font, and a missing `color-scheme`. A literal color is allowed only as a token's fallback in `:where(:root)`. For a shade, mix a token: `color-mix(in srgb, var(--color-accent) 14%, transparent)`.
+
+A pass does not prove the page follows the theme. The check reads one file, so it does not see colors built at runtime (`'#' + hex`, colors from the server), linked stylesheets, library CSS, canvas or images. Keep those on tokens too, and when the page has any of them, open it on the rail and switch the board between light and dark.
+
+## 8. Run and register
 
 1. Start the server where the user can see and stop it, such as a tmux window, or ask the user to start it.
 2. Check that it answers 200: `curl -s -o /dev/null -w '%{http_code}' http://localhost:4100/`.
