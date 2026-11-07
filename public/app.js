@@ -7164,7 +7164,7 @@ const SHORTCUT_TABS = [
         title: 'Terminal',
         rows: [
           { keys: ['Ctrl', '`'], combo: true, label: 'Show / hide terminal' },
-          { keys: ['Alt', '`'], combo: true, label: 'Focus terminal / page' },
+          { keys: ['Alt', '`'], combo: true, label: 'Focus terminal / page; from a shell pane, sidebar and back' },
           { keys: ['Ctrl', 'Alt', '`'], combo: true, hubMod: true, label: 'Focus terminal / show card' },
           { keys: ['Alt', 'Shift', '`'], combo: true, label: 'End terminal' },
           { keys: ['Ctrl', 'Shift', '`'], combo: true, label: 'All terminals' },
@@ -16219,8 +16219,23 @@ async function swapToPreviousSession() {
   await revealSession(target);
 }
 
+// A shell types the keys that reach the sidebar, so Alt+` takes a shell pane there and back.
+let shellLeftForSidebar = null;
+
 // Esc belongs to Claude, so leaving the terminal without hiding it needs its own key.
 function toggleTerminalFocus() {
+  const active = document.activeElement;
+  if (shellFrames.has(active)) {
+    leaveTerminalPane();
+    shellLeftForSidebar = active;
+    return;
+  }
+  const shell = shellLeftForSidebar;
+  shellLeftForSidebar = null;
+  if (shell && focusZone === 'sidebar' && paneFocusTarget(activePaneView()) === shell) {
+    focusActivePane();
+    return;
+  }
   if (!wantsTerminal()) {
     toggleTerminal();
     return;
@@ -16862,11 +16877,13 @@ function restoreTerminalFocus(zone, sessionId) {
 
 // The terminal stands in for the board, so it takes the board zone however focus arrives
 // (Tab, Alt+`, a click); leaveTerminalPane hands it back to the sidebar.
-document.getElementById('terminal-pane').addEventListener('focusin', () => {
+function takeBoardZone() {
   if (focusZone !== 'sidebar') return;
   clearKbSelection();
   focusZone = 'board';
-});
+}
+document.getElementById('terminal-pane').addEventListener('focusin', takeBoardZone);
+paneViews.addEventListener('focusin', takeBoardZone);
 
 function detachTerminal() {
   const had = termState.socket;
