@@ -5008,7 +5008,7 @@ body.show-resizing iframe {
   border: 1px solid var(--border);
   border-bottom: 0;
   border-radius: 7px 7px 0 0;
-  background: var(--bg-elevated);
+  background: none;
 }
 
 .pane-pair.on {
