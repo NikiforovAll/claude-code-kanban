@@ -4157,76 +4157,50 @@ function showNoSession() {
 }
 
 // The home view: no session open. Each row runs its action on a click too.
-const HOME_SECTIONS = [
+const HOME_ROWS = [
   {
-    title: 'Sessions',
-    rows: [
-      {
-        keys: ['Ctrl', 'Alt', 'N'],
-        combo: true,
-        hubMod: true,
-        label: 'New session',
-        run: openNewSession,
-        when: terminalAvailable,
-      },
-      {
-        keys: ['Ctrl', 'Shift', 'K'],
-        combo: true,
-        label: 'Ask Kanbot',
-        run: () => toggleKanbot(true),
-        when: kanbotAvailable,
-      },
-      { keys: ['Ctrl', 'Shift', 'P'], combo: true, label: 'Find a session', run: openSessionPicker },
-      {
-        keys: ['Ctrl', 'Alt', 'Shift', 'S'],
-        combo: true,
-        hubMod: true,
-        label: 'Next session that needs you',
-        run: nextNeedsYou,
-      },
-      {
-        keys: ['Ctrl', 'Alt', 'S'],
-        combo: true,
-        hubMod: true,
-        label: 'Back to the last session',
-        run: swapToPreviousSession,
-      },
-      { keys: ['Shift', 'P'], combo: true, label: 'Open a project', run: openProjectPicker },
-    ],
+    keys: ['Ctrl', 'Alt', 'N'],
+    combo: true,
+    hubMod: true,
+    label: 'New session',
+    run: openNewSession,
+    when: terminalAvailable,
   },
   {
-    title: 'Navigate',
-    rows: [
-      { keys: ['Alt', '`'], combo: true, label: 'Sidebar ↔ main area', run: toggleTerminalFocus },
-      {
-        keys: ['Ctrl', 'Alt', '`'],
-        combo: true,
-        hubMod: true,
-        label: 'Main area ↔ side area',
-        run: toggleShowFocus,
-        when: terminalAvailable,
-      },
-      { keys: ['Ctrl', '`'], combo: true, label: 'Show / hide terminal', run: toggleTerminal, when: terminalAvailable },
-      { keys: ['?'], label: 'All shortcuts', run: showHelpModal },
-    ],
+    keys: ['Ctrl', 'Shift', 'K'],
+    combo: true,
+    label: 'Ask Kanbot',
+    run: () => toggleKanbot(true, 'docked'),
+    when: kanbotAvailable,
   },
+  { keys: ['Ctrl', '`'], combo: true, label: 'Show / hide terminal', run: toggleTerminal, when: terminalAvailable },
+  { keys: ['Ctrl', 'Shift', 'P'], combo: true, label: 'Find a session', run: openSessionPicker },
+  {
+    keys: ['Ctrl', 'Alt', 'Shift', 'S'],
+    combo: true,
+    hubMod: true,
+    label: 'Next session that needs you',
+    run: nextNeedsYou,
+  },
+  {
+    keys: ['Ctrl', 'Alt', 'S'],
+    combo: true,
+    hubMod: true,
+    label: 'Back to the last session',
+    run: swapToPreviousSession,
+  },
+  { keys: ['?'], label: 'All shortcuts', run: showHelpModal },
 ];
 
 function renderHomeKeys() {
   const list = document.getElementById('home-keys');
-  const rows = [];
-  list.innerHTML = HOME_SECTIONS.map((section) => {
-    const shown = section.rows.filter((r) => (!r.when || r.when()) && helpKeys(r).length);
-    if (!shown.length) return '';
-    rows.push(...shown);
-    const buttons = shown
-      .map(
-        (row) =>
-          `<button type="button" class="home-key"><span>${escapeHtml(row.label)}</span><span class="home-key-kbd">${keyChipsHtml(row)}</span></button>`,
-      )
-      .join('');
-    return `<div class="home-keys-title">${escapeHtml(section.title)}</div>${buttons}`;
-  }).join('');
+  const rows = HOME_ROWS.filter((r) => (!r.when || r.when()) && helpKeys(r).length);
+  list.innerHTML = rows
+    .map(
+      (row) =>
+        `<button type="button" class="home-key"><span>${escapeHtml(row.label)}</span><span class="home-key-kbd">${keyChipsHtml(row)}</span></button>`,
+    )
+    .join('');
   list.querySelectorAll('.home-key').forEach((btn, i) => {
     btn.addEventListener('click', () => rows[i].run());
   });
@@ -13331,6 +13305,12 @@ const SP_COMMANDS = [
     run: (s) => openMemory(s.id),
   },
   { id: 'session.new', title: 'New session', when: terminalAvailable, run: (s) => openNewSession(s?.project ?? null) },
+  {
+    id: 'session.shell',
+    title: 'New terminal shell',
+    when: (s) => !!s && terminalAvailable() && !!getSessionBaseDir(s.id),
+    run: (s) => openShellForSession(s.id),
+  },
   { id: 'terminal.manager', title: 'Open terminal manager', when: terminalAvailable, run: openTerminalManager },
 ];
 const SP_COMMAND_KEYS = new Map(
@@ -17491,7 +17471,7 @@ function ensureKanbotPopover() {
   return el;
 }
 
-function setKanbotLayout(layout) {
+function setKanbotLayout(layout, save = true) {
   const el = kanbotState.el;
   const docked = layout === 'docked';
   const expanded = layout === 'expanded';
@@ -17506,7 +17486,7 @@ function setKanbotLayout(layout) {
   expand.innerHTML = showIcon(expanded ? 'restore' : 'expand');
   expand.title = expanded ? 'Restore' : 'Expand';
   expand.setAttribute('aria-label', expand.title);
-  store.setItem(KANBOT_LAYOUT_KEY, layout);
+  if (save) store.setItem(KANBOT_LAYOUT_KEY, layout);
   postToKanbotFrame('focus');
 }
 
@@ -17534,8 +17514,10 @@ function setKanbotAttached(on) {
   syncCloseGuard();
 }
 
-function toggleKanbot(force) {
+// `layout` applies for this page only; the saved layout comes back on reload.
+function toggleKanbot(force, layout) {
   const el = ensureKanbotPopover();
+  if (layout) setKanbotLayout(layout, false);
   const show = typeof force === 'boolean' ? force : !el.classList.contains('visible');
   const wasShown = el.classList.contains('visible');
   el.classList.toggle('visible', show);
@@ -18020,6 +18002,8 @@ const SHOW_ICONS = {
   dock: '<path d="M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM15 3v18"/>',
   clear: '<path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>',
   close: '<path d="M18 6L6 18M6 6l12 12"/>',
+  alert: '<circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/>',
+  upgrade: '<circle cx="12" cy="12" r="9"/><path d="M12 16V8M8.5 11.5 12 8l3.5 3.5"/>',
   pane: '<use href="#icon-pane"/>',
   card: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M13 4v7h8"/>',
   external: '<path d="M15 3h6v6M10 14L21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
@@ -19602,15 +19586,14 @@ function renderFolderList() {
   const query = input.value.trim();
   const all = knownFolders();
   ns.matches = (query && query !== ns.folder ? rankFolders(all, query) : all).slice(0, NS_MAX_MATCHES);
+  if (!ns.matches.length) return closeFolderList();
   if (ns.idx >= ns.matches.length) ns.idx = ns.matches.length - 1;
-  list.innerHTML = ns.matches.length
-    ? ns.matches
-        .map(
-          (p, i) =>
-            `<div class="ns-option${i === ns.idx ? ' active' : ''}" role="option" data-idx="${i}" aria-selected="${i === ns.idx}"><span class="ns-option-name">${escapeHtml(pathBasename(p))}</span><span class="ns-option-path">${escapeHtml(p)}</span></div>`,
-        )
-        .join('')
-    : '<div class="ns-empty"><span>No project matches</span><button type="button" class="btn btn-secondary ns-browse" data-browse>Browse…</button></div>';
+  list.innerHTML = ns.matches
+    .map(
+      (p, i) =>
+        `<div class="ns-option${i === ns.idx ? ' active' : ''}" role="option" data-idx="${i}" aria-selected="${i === ns.idx}"><span class="ns-option-name">${escapeHtml(pathBasename(p))}</span><span class="ns-option-path">${escapeHtml(p)}</span></div>`,
+    )
+    .join('');
   list.hidden = false;
   input.setAttribute('aria-expanded', 'true');
 }
@@ -19707,6 +19690,7 @@ function setNewSessionBusy(on) {
   renderNewSessionForm();
 }
 
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
 async function browseNewSessionFolder() {
   if (ns.busy) return;
   closeFolderList();
@@ -19905,7 +19889,6 @@ function initNewSession() {
   // mousedown, not click: the input's blur would close the list before a click lands.
   list.addEventListener('mousedown', (e) => {
     e.preventDefault();
-    if (e.target.closest('[data-browse]')) return browseNewSessionFolder();
     const row = e.target.closest('.ns-option');
     if (row) pickFolderOption(Number(row.dataset.idx));
   });
@@ -20191,7 +20174,11 @@ function pluginWarning(plugin) {
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'footer-plugin-warning';
-  btn.textContent = '⚠';
+  btn.dataset.state = plugin.state;
+  const [icon, word] = { missing: ['upgrade', 'install'], disabled: ['alert', 'off'], mismatch: ['upgrade', 'update'] }[
+    plugin.state
+  ];
+  btn.innerHTML = showIcon(icon) + word;
   btn.title = `${problem} (${plugin.configDir}).\n${fix}`;
   btn.setAttribute('aria-label', problem);
   if (plugin.state !== 'disabled') {

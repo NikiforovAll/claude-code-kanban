@@ -1689,19 +1689,33 @@ body.booting .boot-splash {
 /* #endregion */
 
 .sidebar-footer .footer-plugin-warning {
-  padding: 0;
-  border: none;
-  background: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 7px 2px 5px;
+  border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent);
+  border-radius: 999px;
+  background: var(--warning-dim);
   font: inherit;
-  font-size: 11px;
+  font-size: 10.5px;
   line-height: 1;
   color: var(--warning);
   cursor: pointer;
 }
 
-.sidebar-footer .footer-plugin-warning:hover,
+.sidebar-footer .footer-plugin-warning svg {
+  width: 11px;
+  height: 11px;
+  flex-shrink: 0;
+}
+
+.sidebar-footer .footer-plugin-warning[data-state='disabled'] {
+  cursor: default;
+}
+
+.sidebar-footer .footer-plugin-warning:not([data-state='disabled']):hover,
 .sidebar-footer .footer-plugin-warning:focus-visible {
-  filter: brightness(1.2);
+  background: color-mix(in srgb, var(--warning) 28%, transparent);
 }
 
 .sidebar.collapsed {
@@ -1879,14 +1893,6 @@ body.booting .boot-splash {
   gap: 2px;
   width: min(420px, 90%);
   margin: 6px 0 4px;
-}
-
-.home-keys-title {
-  padding: 10px 10px 2px;
-  color: var(--text-muted);
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
 }
 
 .home-key {
@@ -10197,16 +10203,6 @@ select.form-input option:checked {
   white-space: nowrap;
   font-family: var(--mono);
   font-size: 11px;
-  color: var(--text-muted);
-}
-
-.ns-empty {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 6px 8px;
-  font-size: 12px;
   color: var(--text-muted);
 }
 
