@@ -4151,8 +4151,89 @@ function showNoSession() {
   updateUrl();
   sessionView.classList.remove('visible');
   noSession.style.display = '';
+  renderHomeKeys();
   renderSessions();
   renderActivityChip();
+}
+
+// The home view: no session open. Each row runs its action on a click too.
+const HOME_SECTIONS = [
+  {
+    title: 'Sessions',
+    rows: [
+      {
+        keys: ['Ctrl', 'Alt', 'N'],
+        combo: true,
+        hubMod: true,
+        label: 'New session',
+        run: openNewSession,
+        when: terminalAvailable,
+      },
+      {
+        keys: ['Ctrl', 'Shift', 'K'],
+        combo: true,
+        label: 'Ask Kanbot',
+        run: () => toggleKanbot(true),
+        when: kanbotAvailable,
+      },
+      { keys: ['Ctrl', 'Shift', 'P'], combo: true, label: 'Find a session', run: openSessionPicker },
+      {
+        keys: ['Ctrl', 'Alt', 'Shift', 'S'],
+        combo: true,
+        hubMod: true,
+        label: 'Next session that needs you',
+        run: nextNeedsYou,
+      },
+      {
+        keys: ['Ctrl', 'Alt', 'S'],
+        combo: true,
+        hubMod: true,
+        label: 'Back to the last session',
+        run: swapToPreviousSession,
+      },
+      { keys: ['Shift', 'P'], combo: true, label: 'Open a project', run: openProjectPicker },
+    ],
+  },
+  {
+    title: 'Navigate',
+    rows: [
+      { keys: ['Alt', '`'], combo: true, label: 'Sidebar ↔ main area', run: toggleTerminalFocus },
+      {
+        keys: ['Ctrl', 'Alt', '`'],
+        combo: true,
+        hubMod: true,
+        label: 'Main area ↔ side area',
+        run: toggleShowFocus,
+        when: terminalAvailable,
+      },
+      { keys: ['Ctrl', '`'], combo: true, label: 'Show / hide terminal', run: toggleTerminal, when: terminalAvailable },
+      { keys: ['?'], label: 'All shortcuts', run: showHelpModal },
+    ],
+  },
+];
+
+function renderHomeKeys() {
+  const list = document.getElementById('home-keys');
+  const rows = [];
+  list.innerHTML = HOME_SECTIONS.map((section) => {
+    const shown = section.rows.filter((r) => (!r.when || r.when()) && helpKeys(r).length);
+    if (!shown.length) return '';
+    rows.push(...shown);
+    const buttons = shown
+      .map(
+        (row) =>
+          `<button type="button" class="home-key"><span>${escapeHtml(row.label)}</span><span class="home-key-kbd">${keyChipsHtml(row)}</span></button>`,
+      )
+      .join('');
+    return `<div class="home-keys-title">${escapeHtml(section.title)}</div>${buttons}`;
+  }).join('');
+  list.querySelectorAll('.home-key').forEach((btn, i) => {
+    btn.addEventListener('click', () => rows[i].run());
+  });
+}
+
+function goHome() {
+  if (viewMode !== 'none') showNoSession();
 }
 
 // Filter pipeline: active filter → force-include revealed/current (non-pinned) sessions →
@@ -7105,6 +7186,7 @@ const SHORTCUT_TABS = [
       {
         title: 'View',
         rows: [
+          { keys: ['H'], label: 'Home: close the session' },
           { keys: ['\\'], label: 'Toggle sidebar' },
           { keys: ['T'], label: 'Toggle theme' },
           { keys: ['Shift', 'S'], combo: true, label: 'Storage manager' },
@@ -7147,11 +7229,11 @@ const SHORTCUT_TABS = [
       {
         title: 'Sessions',
         rows: [
-          { keys: ['Ctrl', 'Alt', 'N'], combo: true, hubMod: true, label: 'New session' },
+          { keys: ['Ctrl', 'Alt', 'N'], combo: true, hubMod: true, label: 'New session', cmd: 'session.new' },
           { keys: ['Ctrl', 'Alt', 'R'], combo: true, hubMod: true, label: 'Resume session (claude -r)' },
           { keys: ['Ctrl', 'Alt', 'S'], combo: true, hubMod: true, label: 'Swap to previous session' },
           { keys: ['Ctrl', 'Alt', 'Shift', 'S'], combo: true, hubMod: true, label: 'Next session that needs you' },
-          { keys: ['Shift', 'C'], combo: true, label: 'Copy session id' },
+          { keys: ['Shift', 'C'], combo: true, label: 'Copy session id', cmd: 'session.copyId' },
           { keys: ['Ctrl', 'Shift', 'C'], combo: true, label: 'Copy session name (SendMessage address)' },
         ],
       },
@@ -7167,7 +7249,7 @@ const SHORTCUT_TABS = [
           { keys: ['Alt', '`'], combo: true, label: 'Focus terminal / page; from a shell pane, sidebar and back' },
           { keys: ['Ctrl', 'Alt', '`'], combo: true, hubMod: true, label: 'Focus terminal / show card' },
           { keys: ['Alt', 'Shift', '`'], combo: true, label: 'End terminal' },
-          { keys: ['Ctrl', 'Shift', '`'], combo: true, label: 'All terminals' },
+          { keys: ['Ctrl', 'Shift', '`'], combo: true, label: 'All terminals', cmd: 'terminal.manager' },
           { keys: ['Ctrl', '+/−/0'], combo: true, label: 'Terminal text size' },
         ],
       },
@@ -7246,6 +7328,12 @@ function termKbd() {
 // The keys of a help row as they read on this system. The hub's modifier is Ctrl+Alt, and on
 // macOS Control+Option for the tab numbers too (Windows and Linux use bare Alt for those). A hub
 // row shows the keys the hub reports, which the user can change; row.keys until it answers.
+function keyChipsHtml(row, parts) {
+  parts ??= helpKeys(row);
+  const sep = row.combo ? '<span class="sc-plus">+</span>' : '<span class="sc-or">/</span>';
+  return parts.map((k) => `<kbd>${escapeHtml(k)}</kbd>`).join(sep);
+}
+
 function helpKeys(row, mac = IS_MAC, keyLabel = hub.keyLabel) {
   const live = row.action && keyLabel(row.action);
   if (live) return live;
@@ -7279,8 +7367,7 @@ function buildHelpShortcuts(groups) {
         }
         const parts = row && helpKeys(row);
         if (!parts?.length) continue;
-        const sep = row.combo ? '<span class="sc-plus">+</span>' : '<span class="sc-or">/</span>';
-        const keys = parts.map((k) => `<kbd>${escapeHtml(k)}</kbd>`).join(sep);
+        const keys = keyChipsHtml(row, parts);
         const label = escapeHtml(row.label);
         cells.push(`<dt class="${escapeHtml(side)}">${keys}</dt><dd class="${escapeHtml(side)}">${label}</dd>`);
       }
@@ -8827,6 +8914,11 @@ document.addEventListener('keydown', (e) => {
       .finally(() => {
         _manualRefreshing = false;
       });
+    return;
+  }
+  if (matchKey(e, 'KeyH')) {
+    e.preventDefault();
+    goHome();
     return;
   }
   if (matchKey(e, 'KeyT')) {
@@ -13202,6 +13294,50 @@ const spPeekCache = new Map();
 let spScope = 'board';
 let spRecent = { rows: [], limit: 0, hasMore: true, loading: false };
 let spRowEls = [];
+// A query that starts with '>' lists commands in place of sessions. A command runs on the session
+// that was current when the picker opened; `when` hides it when that session cannot run it.
+// A command's key comes from the shortcut help row whose `opens` or `cmd` is the command's id.
+let spCommandMode = false;
+let spTarget = null;
+const SP_COMMANDS = [
+  {
+    id: 'session.openInEditor',
+    title: 'Open project in editor',
+    when: (s) => !!s?.project,
+    run: (s) => openFolderInEditor(s.project),
+  },
+  {
+    id: 'session.copyId',
+    title: 'Copy session ID',
+    when: (s) => !!s,
+    run: (s) => copyText(s.id, 'session id', `Copied session id: ${s.id.slice(0, 8)}`),
+  },
+  {
+    id: 'session.cost',
+    title: 'Show session cost',
+    when: (s) => !!s && hub.can('session.cost'),
+    run: (s) => openCost(s.id),
+  },
+  {
+    id: 'project.plugins',
+    title: 'Show project plugins',
+    when: (s) => !!s?.project && hub.can('project.plugins'),
+    run: (s) => openMarketplace(s.id),
+  },
+  {
+    id: 'project.memory',
+    title: 'Show project memory',
+    when: (s) => !!s?.project && hub.can('project.memory'),
+    run: (s) => openMemory(s.id),
+  },
+  { id: 'session.new', title: 'New session', when: terminalAvailable, run: (s) => openNewSession(s?.project ?? null) },
+  { id: 'terminal.manager', title: 'Open terminal manager', when: terminalAvailable, run: openTerminalManager },
+];
+const SP_COMMAND_KEYS = new Map(
+  SHORTCUT_TABS.flatMap((t) => t.groups.flatMap((g) => g.rows))
+    .filter((r) => r.opens || r.cmd)
+    .map((r) => [r.opens || r.cmd, r]),
+);
 const SP_RECENT_PAGE = 50;
 const SP_RECENT_TAIL = 5;
 
@@ -13241,7 +13377,8 @@ function spSetScope(scope) {
 
 // Also run after each load: a page too short to scroll gives no scroll event.
 function spLoadMoreNearEnd() {
-  if (spScope === 'all') loadMoreIfNearEnd(document.getElementById('session-picker-list'), spLoadRecent);
+  if (!spCommandMode && spScope === 'all')
+    loadMoreIfNearEnd(document.getElementById('session-picker-list'), spLoadRecent);
 }
 
 const spSearch = sessionSearch(() => {
@@ -13254,6 +13391,7 @@ function openSessionPicker({ query = '', ranked = null } = {}) {
   input.value = query;
   spRanked = ranked;
   spSource = getFilteredSessions().sort((a, b) => Date.parse(b.modifiedAt) - Date.parse(a.modifiedAt));
+  spTarget = sessions.find((s) => s.id === currentSessionId) ?? null;
   spPeekCache.clear();
   spRenderedQuery = null;
   spRecent = { rows: [], limit: 0, hasMore: true, loading: false };
@@ -13373,9 +13511,45 @@ function spPinHtml(session) {
   return '<span class="sp-pin"></span>';
 }
 
+function renderPickerCommands(list, query) {
+  const selectedId = spRows[spIdx]?.id;
+  spRows = SP_COMMANDS.filter((c) => c.when(spTarget) && fuzzyMatch(c.title, query));
+  const target = spTarget
+    ? `<div class="sp-target">Session: <b>${escapeHtml(sessionDisplayName(spTarget))}</b>${spTarget.project ? ` · ${escapeHtml(pathBasename(spTarget.project))}` : ''}</div>`
+    : '<div class="sp-target">No current session</div>';
+  const rows = spRows
+    .map((c, i) => {
+      const keyRow = SP_COMMAND_KEYS.get(c.id);
+      const keys = keyRow ? `<span class="sp-keys">${keyChipsHtml(keyRow)}</span>` : '';
+      return `<button class="sp-row" data-idx="${i}"><span class="sp-name">${escapeHtml(c.title)}</span>${keys}</button>`;
+    })
+    .join('');
+  list.innerHTML = target + (rows || '<div class="sp-empty">No command matches</div>');
+  spRowEls = list.querySelectorAll('.sp-row');
+  spIdx = -1;
+  spSelect(
+    Math.max(
+      0,
+      spRows.findIndex((c) => c.id === selectedId),
+    ),
+  );
+}
+
 function renderSessionPicker() {
   const list = document.getElementById('session-picker-list');
-  const query = document.getElementById('session-picker-input').value.trim();
+  const raw = document.getElementById('session-picker-input').value.trimStart();
+  const commandMode = raw.startsWith('>');
+  if (commandMode !== spCommandMode) {
+    spCommandMode = commandMode;
+    if (commandMode) spSetPeeking(false);
+    _modalEl('session-picker-modal').classList.toggle('commands', commandMode);
+  }
+  if (commandMode) {
+    spRenderedQuery = null;
+    renderPickerCommands(list, raw.slice(1).trim());
+    return;
+  }
+  const query = raw.trim();
   // Rows that arrive for the same query and scope append below, so the cursor stays on its row.
   const renderKey = `${spScope}\n${query}`;
   const selectedId = renderKey === spRenderedQuery ? spRows[spIdx]?.id : null;
@@ -13433,10 +13607,17 @@ function spSelect(idx) {
   row?.classList.add('selected');
   row?.scrollIntoView({ block: 'nearest' });
   spSchedulePeek();
-  if (spScope === 'all' && spIdx >= spRows.length - 5) spLoadRecent();
+  if (!spCommandMode && spScope === 'all' && spIdx >= spRows.length - 5) spLoadRecent();
 }
 
 async function spOpen(idx) {
+  if (spCommandMode) {
+    const command = spRows[idx];
+    if (!command) return;
+    closeSessionPicker();
+    command.run(spTarget);
+    return;
+  }
   const session = spRows[idx];
   if (!session) return;
   closeSessionPicker({ refocus: false });
@@ -13456,9 +13637,11 @@ function initSessionPicker() {
     else if (matchKey(e, 'ArrowDown') || comboIs(e, 'ctrl+n', 'ctrl+shift+n')) spSelect(spIdx + 1);
     else if (matchKey(e, 'ArrowUp') || comboIs(e, 'ctrl+p')) spSelect(spIdx - 1);
     else if (e.key === 'Enter') spOpen(spIdx);
-    else if (e.ctrlKey && e.code === 'Space') spSetPeeking(!spIsPeeking());
-    else if (e.key === 'Tab' && !e.ctrlKey && !e.altKey && !e.metaKey) spSetScope(spScope === 'all' ? 'board' : 'all');
-    else return;
+    else if (e.ctrlKey && e.code === 'Space') {
+      if (!spCommandMode) spSetPeeking(!spIsPeeking());
+    } else if (e.key === 'Tab' && !e.ctrlKey && !e.altKey && !e.metaKey) {
+      if (!spCommandMode) spSetScope(spScope === 'all' ? 'board' : 'all');
+    } else return;
     e.preventDefault();
     e.stopPropagation();
   });
@@ -13975,7 +14158,6 @@ function openPlanInEditor() {
   postAndToast(apiPath`/api/sessions/${_planSessionId}/plan/open`, {}, 'in editor');
 }
 
-// biome-ignore lint/correctness/noUnusedVariables: used in HTML
 function openFolderInEditor(folder, file) {
   const body = {};
   if (folder) body.folder = folder;
@@ -20084,6 +20266,7 @@ getJson('/api/config')
   .then((c) => {
     if (c) appConfig = c;
     syncTerminalHost();
+    renderHomeKeys();
     if (appConfig.kanbot && footerState.version) renderSidebarFooter(footerState.rl);
   })
   .then(restorePendingSessions)

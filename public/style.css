@@ -1874,6 +1874,52 @@ body.booting .boot-splash {
   opacity: 0.5;
 }
 
+.home-keys {
+  display: grid;
+  gap: 2px;
+  width: min(420px, 90%);
+  margin: 6px 0 4px;
+}
+
+.home-keys-title {
+  padding: 10px 10px 2px;
+  color: var(--text-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.home-key {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.home-key:hover,
+.home-key:focus-visible {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.home-key-kbd {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .idle-glow span,
   .idle-clawd .clawd,
@@ -9161,6 +9207,8 @@ body.light .msg-assistant .msg-text {
 
 /* keycap chips: elevated fill + thicker bottom border reads as a key */
 .sp-hint kbd,
+.sp-keys kbd,
+.home-keys kbd,
 .shortcuts kbd,
 .terminal-boot-slow kbd,
 .review-offer-btn kbd {
@@ -9187,7 +9235,11 @@ body.light .msg-assistant .msg-text {
 }
 
 .shortcuts .sc-plus,
-.shortcuts .sc-or {
+.shortcuts .sc-or,
+.home-keys .sc-plus,
+.home-keys .sc-or,
+.sp-keys .sc-plus,
+.sp-keys .sc-or {
   color: var(--text-muted);
   font-size: 11px;
 }
@@ -9946,6 +9998,32 @@ select.form-input option:checked {
   gap: 5px;
   color: var(--text-muted);
   font-size: 11px;
+}
+
+.modal.session-picker.commands .sp-scope,
+.modal.session-picker.commands .sp-peek,
+.modal.session-picker.commands .sp-hint-sessions,
+.modal.session-picker:not(.commands) .sp-hint-commands {
+  display: none;
+}
+
+.sp-target {
+  padding: 2px 8px 4px;
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+
+.sp-keys {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.sp-target b {
+  color: var(--text-primary);
+  font-weight: 500;
 }
 
 .pp-chips {

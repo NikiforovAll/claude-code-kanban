@@ -83,6 +83,19 @@
           <span id="filter-summary" class="filter-summary" title=""></span>
           <span class="section-header-actions">
             <button
+              id="home-btn"
+              class="icon-btn section-btn"
+              onclick="event.stopPropagation(); goHome()"
+              title="Home: close the session (H)"
+              aria-label="Home: close the session"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 11l9-8 9 8"/>
+                <path d="M5 10v10h14V10"/>
+                <path d="M10 20v-6h4v6"/>
+              </svg>
+            </button>
+            <button
               id="zen-mode-btn"
               class="icon-btn section-btn"
               onclick="event.stopPropagation(); toggleZenMode()"
@@ -227,8 +240,9 @@
           <div class="idle-clawd" data-hub-part="idle-mascot" aria-hidden="true">
             <svg class="clawd" viewBox="1 0 16 10" shape-rendering="crispEdges"><use href="#clawd-shape"/></svg>
           </div>
-          <p class="idle-title">Select a session to view tasks</p>
-          <div class="idle-hint sp-hint"><kbd>↑</kbd><kbd>↓</kbd> move <span>·</span> <kbd>Enter</kbd> open <span>·</span> <kbd>?</kbd> shortcuts</div>
+          <p class="idle-title">No session open</p>
+          <div id="home-keys" class="home-keys"></div>
+          <div class="idle-hint sp-hint"><kbd>↑</kbd><kbd>↓</kbd> move <span>·</span> <kbd>Enter</kbd> open</div>
         </div>
       </div>
 
@@ -1002,7 +1016,8 @@
         <div id="session-picker-list" class="sp-list"></div>
         <div id="session-picker-peek" class="sp-peek"></div>
       </div>
-      <div class="sp-hint"><kbd>&uarr;</kbd><kbd>&darr;</kbd> move &middot; <kbd>Enter</kbd> open &middot; <kbd>Tab</kbd> board / all &middot; <kbd>Ctrl</kbd><kbd>Space</kbd> peek &middot; <kbd>Esc</kbd> close</div>
+      <div class="sp-hint sp-hint-sessions"><kbd>&uarr;</kbd><kbd>&darr;</kbd> move &middot; <kbd>Enter</kbd> open &middot; <kbd>Tab</kbd> board / all &middot; <kbd>Ctrl</kbd><kbd>Space</kbd> peek &middot; <kbd>&gt;</kbd> commands &middot; <kbd>Esc</kbd> close</div>
+      <div class="sp-hint sp-hint-commands"><kbd>&uarr;</kbd><kbd>&darr;</kbd> move &middot; <kbd>Enter</kbd> run &middot; <kbd>Backspace</kbd> on <kbd>&gt;</kbd> back to sessions &middot; <kbd>Esc</kbd> close</div>
     </div>
   </div>
 

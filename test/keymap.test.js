@@ -14,7 +14,7 @@ let hubLabels = {};
 let hubForward = [];
 // The page's own helpers, with the platform passed in the way the page's IS_MAC default does.
 const page = vm.runInNewContext(
-  `${MAC_KEYS}\n${fn('hubModDown')}\n${fn('helpKeys')}\n${fn('buildHelpShortcuts')}\n${tabs}\n({ hubModDown, helpKeys, buildHelpShortcuts, SHORTCUT_TABS })`,
+  `${MAC_KEYS}\n${fn('hubModDown')}\n${fn('helpKeys')}\n${fn('keyChipsHtml')}\n${fn('buildHelpShortcuts')}\n${tabs}\n({ hubModDown, helpKeys, buildHelpShortcuts, SHORTCUT_TABS })`,
   { IS_MAC: false, escapeHtml: String, hub: { keyLabel: (a) => hubLabels[[a].flat().join()] ?? null, forwardCombos: () => hubForward } },
 );
 const { hubModDown, SHORTCUT_TABS } = page;
