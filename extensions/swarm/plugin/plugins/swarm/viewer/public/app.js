@@ -380,13 +380,6 @@ hub.onActive((active) => {
 });
 
 document.addEventListener('visibilitychange', showIfSeen);
-
-document.addEventListener('click', (e) => {
-  const link = e.target.closest('a[target="_blank"]');
-  if (!link || !hub.inHub) return;
-  e.preventDefault();
-  hub.openExternal(link.href);
-});
 // #endregion HUB_INTEGRATION
 
 // #region RENDER
@@ -1449,8 +1442,19 @@ const SHORTCUTS = [
   [['?'], 'Show this help'],
 ];
 
+const HUB_SHORTCUTS = [
+  [['hub.prevApp', 'hub.nextApp'], 'Previous / next hub app'],
+  ['hub.appByNumber', 'Jump to hub app by number'],
+  ['hub.projectPicker', 'Project picker'],
+  ['hub.configDirPicker', 'Config dir picker'],
+  ['hub.appLauncher', 'App launcher'],
+];
+
+const hubRows = () =>
+  HUB_SHORTCUTS.map(([action, label]) => [hub.keyLabel(action), `Hub: ${label}`]).filter(([keys]) => keys?.length);
+
 function showHelp() {
-  $('helpShortcuts').innerHTML = SHORTCUTS.map(
+  $('helpShortcuts').innerHTML = [...SHORTCUTS, ...hubRows()].map(
     ([keys, label]) =>
       `<dt>${keys.map((k) => (k === '…' ? k : `<kbd>${esc(k)}</kbd>`)).join('')}</dt><dd>${esc(label)}</dd>`,
   ).join('');
