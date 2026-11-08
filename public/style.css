@@ -1918,6 +1918,12 @@ body.booting .boot-splash {
   color: var(--text-primary);
 }
 
+/* keycaps share --bg-hover with the active row; lift them so they stay visible */
+.home-key:hover kbd,
+.home-key:focus-visible kbd {
+  background: var(--bg-elevated);
+}
+
 .home-key-kbd {
   display: inline-flex;
   align-items: center;
