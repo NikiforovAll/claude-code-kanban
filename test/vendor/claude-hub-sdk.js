@@ -1,4 +1,4 @@
-// claude-hub-sdk 1.11.0 (sha256 841f6c771631). Copied by npm run sdk:sync in claude-code-hub. Do not edit.
+// claude-hub-sdk 1.12.0 (sha256 6fb679e4d801). Copied by npm run sdk:sync in claude-code-hub. Do not edit.
 // Claude Code Hub SDK: the one rule that names a key press, shared by the hub page, client.js and
 // stub.js. The hub serves it to its page as /sdk/keys.js; mount() and sdk:sync put it in front of
 // client.js and stub.js, so an app still loads one file.
@@ -10,17 +10,60 @@ var ClaudeHubKeys = (() => {
   // Modifiers in ctrl, alt, shift, meta order, joined by '+' to the key. macOS composes
   // Option+<key> into a character (Option+1 is '¡', Option+P is 'π') and holding Control does not
   // undo it, so e.key alone cannot name these presses there. e.code is the physical key, which is
-  // wrong for non-US layouts, hence only as a fallback. No fallback under AltGraph: Chromium sets it
-  // when AltGr types a character, and that press is text. Takes a real KeyboardEvent or a forwarded
-  // {key, code} payload; a payload without code degrades to key. A payload needs no AltGraph: the
-  // SDK forwards only a press whose key already names a bound combo.
-  // Self-contained on purpose: cck puts its source text into a sandboxed frame.
+  // wrong for non-US layouts, hence only as a fallback. A letter or punctuation key falls back to its
+  // US character only when e.key is not ASCII (a non-Latin layout, or Option on macOS), so AZERTY's
+  // ',' on the M key stays ','. The digit row always falls back, so AZERTY's '&' key is 1, as Windows
+  // and VS Code treat it. No fallback under AltGraph: Chromium sets it when AltGr types a character, and that
+  // press is text. Takes a real KeyboardEvent or a forwarded {key, code} payload; a payload without
+  // code degrades to key. A payload needs no AltGraph: the SDK forwards only a press whose key
+  // already names a bound combo.
+  // Self-contained on purpose, the table too: cck puts its source text into a sandboxed frame.
+  // codeOf() lists the same keys the other way round.
   function comboOf(e) {
-    const lower = typeof e.key === 'string' ? e.key.toLowerCase() : '';
-    const m = !e.getModifierState?.('AltGraph') && /^(?:Key|Digit)([A-Z1-9])$/.exec(e.code || '');
-    const key = /^[a-z1-9]$/.test(lower) ? lower : m ? m[1].toLowerCase() : e.key === ' ' ? 'Space' : e.key;
+    const raw = typeof e.key === 'string' ? e.key : '';
+    const lower = raw.toLowerCase();
+    const code = e.getModifierState?.('AltGraph') ? '' : e.code || '';
+    const latin = !/[^\x20-\x7e]/.test(raw);
+    const digit = /^Digit([0-9])$/.exec(code)?.[1];
+    const us =
+      !latin &&
+      (/^Key([A-Z])$/.exec(code)?.[1].toLowerCase() ||
+        {
+          Minus: '-',
+          Equal: '=',
+          BracketLeft: '[',
+          BracketRight: ']',
+          Backslash: '\\',
+          Semicolon: ';',
+          Quote: "'",
+          Backquote: '`',
+          Comma: ',',
+          Period: '.',
+          Slash: '/',
+        }[code]);
+    const key = /^[a-z0-9]$/.test(lower) ? lower : digit || us || (e.key === ' ' ? 'Space' : e.key);
     const mods = [e.ctrlKey && 'ctrl', e.altKey && 'alt', e.shiftKey && 'shift', e.metaKey && 'meta'];
     return [...mods, key].filter(Boolean).join('+');
+  }
+
+  // The physical key (e.code) that types a combo's key on a US layout, or null for a named key.
+  function codeOf(key) {
+    if (/^[a-z]$/.test(key)) return `Key${key.toUpperCase()}`;
+    if (/^[0-9]$/.test(key)) return `Digit${key}`;
+    const codes = {
+      '-': 'Minus',
+      '=': 'Equal',
+      '[': 'BracketLeft',
+      ']': 'BracketRight',
+      '\\': 'Backslash',
+      ';': 'Semicolon',
+      "'": 'Quote',
+      '`': 'Backquote',
+      ',': 'Comma',
+      '.': 'Period',
+      '/': 'Slash',
+    };
+    return codes[key] ?? null;
   }
 
   // The keys of a combo as a help row shows them: ['Ctrl', 'Alt', 'P'], or ['⌃', '⌥', 'P'] on macOS.
@@ -47,7 +90,7 @@ var ClaudeHubKeys = (() => {
     ].filter(Boolean);
   }
 
-  return { comboOf, keyParts, keySigs };
+  return { comboOf, codeOf, keyParts, keySigs };
 })();
 
 if (typeof module === 'object' && module.exports) module.exports = ClaudeHubKeys;
@@ -294,6 +337,7 @@ if (typeof module === 'object' && module.exports) module.exports = ClaudeHubModK
       const tokenWaiters = new Set();
       const themesFns = new Set();
       const settingsFns = new Set();
+      const keysFns = new Set();
       const queued = [];
       // Topic → payload: the latest publish before welcome.
       const outbox = new Map();
@@ -435,6 +479,12 @@ if (typeof module === 'object' && module.exports) module.exports = ClaudeHubModK
             return;
           case 'hub:settings':
             if (welcome) setSettings(m.settings);
+            return;
+          case 'hub:keys':
+            if (!welcome) return;
+            welcome.keys = comboMap(m.keys);
+            forward = strings(m.forward);
+            for (const fn of keysFns) fn();
             return;
         }
       }
@@ -655,6 +705,12 @@ if (typeof module === 'object' && module.exports) module.exports = ClaudeHubModK
         forwards,
         // The combos forwards() matches, for a frame that tests keys with ClaudeHub.comboOf on its own.
         forwardCombos: () => (forward ? [...forward] : []),
+        // Calls fn after the user changes the hub's keys, so a page that copied forwardCombos() or
+        // shows keyLabel() can read them again.
+        onKeys(fn) {
+          keysFns.add(fn);
+          return () => keysFns.delete(fn);
+        },
         // The keys of a hub action for a help row, in this system's names. A list of actions shares one
         // row: ['Ctrl', 'Alt', '←/→']. [] when no key runs them; null before welcome, standalone, or
         // for an action the hub did not list.

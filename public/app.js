@@ -8289,6 +8289,12 @@ function shiftOnly(e, code) {
   return e.code === code && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey;
 }
 
+// The combo of a press as the hub names it: the character on a Latin layout, the US key in the same
+// place on any other, so a letter key works whatever the input language.
+function comboIs(e, ...combos) {
+  return combos.includes(ClaudeHub.comboOf(e));
+}
+
 // xterm runs in another process, so blur() in the board leaves it focused and the modal's arrow keys go
 // to it. Focusing a board element takes the focus.
 function toggleLastMessage() {
@@ -9489,7 +9495,7 @@ function onReviewOfferKey(e) {
     sendReview();
     return;
   }
-  if (reviewPopMode !== 'offer' || !matchKey(e, 'c', 'C')) return;
+  if (reviewPopMode !== 'offer' || !comboIs(e, 'c')) return;
   e.preventDefault();
   e.stopImmediatePropagation();
   reviewPopEl().querySelector('.review-offer-btn').click();
@@ -13447,8 +13453,8 @@ function initSessionPicker() {
   // Bound on the input: the global handler returns early on INPUT targets.
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') closeSessionPicker();
-    else if (matchKey(e, 'ArrowDown') || (e.ctrlKey && e.key === 'n')) spSelect(spIdx + 1);
-    else if (matchKey(e, 'ArrowUp') || (e.ctrlKey && !e.shiftKey && e.key === 'p')) spSelect(spIdx - 1);
+    else if (matchKey(e, 'ArrowDown') || comboIs(e, 'ctrl+n', 'ctrl+shift+n')) spSelect(spIdx + 1);
+    else if (matchKey(e, 'ArrowUp') || comboIs(e, 'ctrl+p')) spSelect(spIdx - 1);
     else if (e.key === 'Enter') spOpen(spIdx);
     else if (e.ctrlKey && e.code === 'Space') spSetPeeking(!spIsPeeking());
     else if (e.key === 'Tab' && !e.ctrlKey && !e.altKey && !e.metaKey) spSetScope(spScope === 'all' ? 'board' : 'all');
@@ -13569,8 +13575,8 @@ function initProjectPicker() {
   input.addEventListener('input', renderProjectPicker);
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') closeProjectPicker();
-    else if (matchKey(e, 'ArrowDown') || (e.ctrlKey && e.key === 'n')) ppSelect(ppIdx + 1);
-    else if (matchKey(e, 'ArrowUp') || (e.ctrlKey && !e.shiftKey && e.key === 'p')) ppSelect(ppIdx - 1);
+    else if (matchKey(e, 'ArrowDown') || comboIs(e, 'ctrl+n', 'ctrl+shift+n')) ppSelect(ppIdx + 1);
+    else if (matchKey(e, 'ArrowUp') || comboIs(e, 'ctrl+p')) ppSelect(ppIdx - 1);
     else if (e.key === 'Enter') ppApply(ppIdx);
     else if (e.altKey && !e.ctrlKey && !e.metaKey && e.code === 'KeyR') {
       if (!e.repeat) ppToggleRecentOnly();
@@ -19995,9 +20001,10 @@ function pluginWarning(plugin) {
       mismatch: `Plugin ${plugin.installed} is installed, this board ships ${plugin.bundled}`,
     }[plugin.state];
   if (!problem) return null;
-  const fix =
-    plugin.state === 'disabled'
-      ? 'Enable it with /plugin in Claude Code.'
+  let fix = 'Enable it with /plugin in Claude Code.';
+  if (plugin.state !== 'disabled')
+    fix = hub.can('hub.updates')
+      ? 'Click to update the plugins.'
       : `Click to copy: ${plugin.installCommand}\nThen restart open sessions, they keep the old hooks.`;
   const btn = document.createElement('button');
   btn.type = 'button';
@@ -20006,7 +20013,9 @@ function pluginWarning(plugin) {
   btn.title = `${problem} (${plugin.configDir}).\n${fix}`;
   btn.setAttribute('aria-label', problem);
   if (plugin.state !== 'disabled') {
-    btn.addEventListener('click', () => copyText(plugin.installCommand, 'install command'));
+    btn.addEventListener('click', () =>
+      hub.can('hub.updates') ? hub.invoke('hub.updates') : copyText(plugin.installCommand, 'install command'),
+    );
   }
   return btn;
 }
@@ -20170,6 +20179,8 @@ hub.onActive((active) => {
   pushTerminalClaims();
 });
 hub.onStatus(pushTerminalClaims);
+// A hub before SDK 1.12 has no onKeys.
+hub.onKeys?.(pushTerminalClaims);
 hub.onSettings(applyHubSettings);
 hub.handle('session.open', (p) => p.session && openSessionFromOutside(p.session));
 hub.handle('session.find', (p) => findSessionFromHub(p));
