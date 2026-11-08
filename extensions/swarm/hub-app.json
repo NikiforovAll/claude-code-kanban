@@ -9,7 +9,7 @@
   "listing": {
     "tagline": "A DeLM implementation built on Claude Code Kanban",
     "description": "A DeLM implementation built on Claude Code Kanban. A supervisor and its workers run as Claude Code sessions on the Kanban board, share a task queue and a log of findings, and the app shows each swarm's tasks, claims and published changes. /swarm start refuses when the Kanban CLI does not run.",
-    "tags": ["delm", "agents", "kanban"],
+    "tags": ["delm", "agents", "kanban", "experimental"],
     "homepage": "https://nikiforovall.blog/claude-code-hub/swarm/",
     "screenshots": [
       {
