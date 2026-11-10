@@ -12,6 +12,7 @@ const { createHistory } = require('./lib/history');
 const { scratchBin } = require('./lib/scratch-bin');
 const { bridgeScript } = require('./lib/bridge');
 const { canonicalPath } = require('./lib/paths');
+const { createManifests } = require('./lib/manifest');
 
 const DEFAULT_PORT = 3547;
 const HOST = '127.0.0.1';
@@ -41,6 +42,7 @@ const viewers = createViewers({
 // The hub runs one set of apps per Claude config dir, so each dir keeps its own pad list.
 const configDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
 const history = createHistory(path.join(configDir, '.cck', 'scratchpads', 'history.json'));
+const manifests = createManifests();
 
 const routes = new Map();
 const posts = new Map();
@@ -116,7 +118,7 @@ const optional = (v) => (typeof v === 'string' && v ? v : null);
 routes.set('/api/pads', (_req, res) => {
   const groups = history.groups().map((g) => ({
     ...g,
-    pads: g.pads.map((p) => ({ ...p, key: canonicalPath(p.dir), name: path.basename(p.dir) })),
+    pads: g.pads.map((p) => ({ ...p, key: canonicalPath(p.dir), name: path.basename(p.dir), info: manifests.read(p.dir) })),
   }));
   res.json({ groups, viewers: viewers.list(), scratch: !!resolveBin() });
 });

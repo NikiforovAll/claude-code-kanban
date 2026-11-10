@@ -232,13 +232,50 @@ function viewerState(v) {
 
 const whenEl = (p) => el('span', 'when', p.openedAt ? ago(p.openedAt) : '');
 
+const TYPE_ORDER = ['note', 'reference', 'snippet', 'artifact', 'output'];
+
+function padInfo(info) {
+  if (!info) return [];
+  if (info.missing) return [el('span', 'pad-meta warn', 'scratchpad.json is missing')];
+  if (info.broken) return [el('span', 'pad-meta warn', 'scratchpad.json cannot be read')];
+  const out = [];
+  if (info.description) out.push(el('span', 'pad-desc', info.description));
+  const types = Object.entries(info.types).sort(([a], [b]) => {
+    const i = (t) => (TYPE_ORDER.includes(t) ? TYPE_ORDER.indexOf(t) : TYPE_ORDER.length);
+    return i(a) - i(b);
+  });
+  if (types.length) {
+    const bar = el('span', 'type-bar');
+    bar.title = types.map(([t, n]) => `${n} ${t}`).join(', ');
+    for (const [t, n] of types) {
+      const seg = el('i', `t-${TYPE_ORDER.includes(t) ? t : 'other'}`);
+      seg.style.flexGrow = String(n);
+      bar.append(seg);
+    }
+    out.push(bar);
+  }
+  const meta = el('span', 'pad-meta');
+  const parts = [`${info.files} ${info.files === 1 ? 'file' : 'files'}`];
+  if (info.groups > 1) parts.push(`${info.groups} groups`);
+  if (info.updated) {
+    const a = ago(info.updated);
+    parts.push(a === 'now' ? 'edited just now' : `edited ${a} ago`);
+  }
+  meta.append(el('span', '', parts.join(' · ')));
+  if (info.internal) meta.append(el('span', 'chip', 'internal'));
+  out.push(meta);
+  return out;
+}
+
 function padRow(p, v, inHistory = true) {
   const li = el('li', `pad${p.key === current ? ' current' : ''}`);
   const [state, stateText] = viewerState(v);
   const open = el('button', 'open');
   open.type = 'button';
   open.title = `${p.dir}\n${stateText}`;
-  open.append(el('span', `dot ${state}`), el('span', 'name', p.name), whenEl(p));
+  const top = el('span', 'pad-top');
+  top.append(el('span', `dot ${state}`), el('span', 'name', p.name), whenEl(p));
+  open.append(top, ...padInfo(p.info));
   open.addEventListener('click', () => {
     if (p.key === current && !frame.hidden) return document.body.classList.add('has-pad');
     openListed(p);
