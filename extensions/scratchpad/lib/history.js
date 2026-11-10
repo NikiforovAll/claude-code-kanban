@@ -41,6 +41,15 @@ function createHistory(file, max = 50) {
     write();
   }
 
+  function remove(dir) {
+    const key = canonicalPath(dir);
+    const kept = items.filter((p) => canonicalPath(p.dir) !== key);
+    if (kept.length === items.length) return false;
+    items = kept;
+    write();
+    return true;
+  }
+
   /** The history grouped by project, the project with the newest pad first and "Other" last. */
   function groups() {
     const byProject = new Map();
@@ -52,7 +61,7 @@ function createHistory(file, max = 50) {
     return [...byProject.values()].sort((a, b) => (a.project ? 0 : 1) - (b.project ? 0 : 1));
   }
 
-  return { add, groups, all: () => items };
+  return { add, remove, groups, all: () => items };
 }
 
 module.exports = { createHistory };

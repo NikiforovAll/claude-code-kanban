@@ -203,6 +203,7 @@ const ICONS = {
   stop: 'M5 5h6v6H5z',
   sidebar: 'M2.5 3.5h11v9h-11zM6.5 3.5v9',
   home: 'M2.5 7.5 8 3l5.5 4.5M4 6.5V13h8V6.5',
+  forget: 'M4.5 4.5l7 7M11.5 4.5l-7 7',
   resume: 'M8 4.5V8l2.5 1.5M14 8A6 6 0 1 1 2 8a6 6 0 0 1 12 0',
 };
 
@@ -232,7 +233,7 @@ function viewerState(v) {
   return ['idle', `Viewer idle for ${ago(v.idleSince)}`];
 }
 
-function padRow(p, v) {
+function padRow(p, v, inHistory = true) {
   const li = el('li', `pad${p.key === current ? ' current' : ''}`);
   const [state, stateText] = viewerState(v);
   const open = el('button', 'open');
@@ -244,8 +245,8 @@ function padRow(p, v) {
     openListed(p);
   });
   li.append(open);
+  const actions = el('span', 'actions');
   if (v) {
-    const actions = el('span', 'actions');
     actions.append(
       iconButton('restart', 'Restart viewer', async () => {
         await api('/api/viewers/restart', { path: v.dir }).catch((err) => showError(err.message));
@@ -257,8 +258,16 @@ function padRow(p, v) {
         refresh();
       }),
     );
-    li.append(actions);
   }
+  if (inHistory) {
+    actions.append(
+      iconButton('forget', 'Forget (remove from the list; the files stay)', async () => {
+        await api('/api/forget', { path: p.dir }).catch(() => {});
+        refresh();
+      }),
+    );
+  }
+  if (actions.childElementCount) li.append(actions);
   return li;
 }
 
@@ -289,7 +298,7 @@ function render({ groups, viewers, scratch }) {
     nav.append(groupEl(g.label, g.project, rows));
   }
   const others = viewers.filter((v) => !listed.has(v.key));
-  if (others.length) nav.append(groupEl('Other running', null, others.map((v) => padRow(v, v))));
+  if (others.length) nav.append(groupEl('Other running', null, others.map((v) => padRow(v, v, false))));
   document.getElementById('count').textContent = viewers.length ? `${viewers.length} running` : '';
   renderHome({ groups, viewers, scratch }, byKey);
 }

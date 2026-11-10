@@ -129,6 +129,12 @@ posts.set('/api/open', async (req, res) => {
   res.json({ url, dir, key: canonicalPath(dir), name: path.basename(dir) });
 });
 
+posts.set('/api/forget', async (req, res) => {
+  const { path: dir } = await readBody(req);
+  if (typeof dir !== 'string' || !dir) throw badRequest('path is required');
+  res.json({ forgotten: history.remove(dir) });
+});
+
 posts.set('/api/viewers/stop', async (req, res) => {
   const { path: dir } = await readBody(req);
   res.json({ stopped: viewers.stop(String(dir)) });
