@@ -323,7 +323,14 @@ function padCard(p, v, scratch) {
   top.append(el('span', `dot ${state}`), el('span', 'name', p.name));
   const meta = el('span', 'card-meta');
   meta.append(el('span', 'label', p.label), whenEl(p));
-  b.append(top, meta);
+  const lines = el('span', 'card-lines');
+  let h = [...p.name].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7);
+  for (let i = 0; i < 3; i++, h >>>= 5) {
+    const line = el('i');
+    line.style.width = `${55 + (h % 40)}%`;
+    lines.append(line);
+  }
+  b.append(top, lines, meta);
   b.addEventListener('click', () => openListed(p));
   const li = el('li');
   li.append(b);
@@ -344,7 +351,11 @@ function renderHome({ groups, viewers, scratch }, byKey) {
     .flatMap((g) => g.pads.map((p) => ({ ...p, label: g.label })))
     .sort((a, b) => (b.openedAt || 0) - (a.openedAt || 0));
   const has = pads.length > 0;
-  document.getElementById('home-title').textContent = has ? 'No pad open' : 'Welcome to Scratchpads';
+  document.getElementById('home-title').textContent = has ? 'Welcome back' : 'Welcome to Scratchpads';
+  const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+  document.getElementById('home-stat').textContent = has
+    ? `${plural(pads.length, 'pad')} · ${plural(groups.length, 'project')}`
+    : 'No pads yet';
   document.getElementById('home-sub').textContent = has
     ? 'Pick up where you left off, or open a pad by its path.'
     : 'A scratchpad is a folder of notes with a scratchpad.json. Pads you open show up here and in the list.';

@@ -392,19 +392,94 @@ kbd {
 
 /* #region HOME */
 #empty {
+  position: relative;
   display: flex;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
 }
 
+#empty::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle, var(--border) 1px, transparent 1.3px) 0 0 / 18px 18px;
+  mask-image: radial-gradient(ellipse at 65% 45%, #000 10%, transparent 75%);
+  pointer-events: none;
+}
+
 /* Sizes below are in em off this base, so the page grows with a big screen. */
 .home {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 12em;
+  column-gap: 3.5em;
   width: 100%;
-  max-width: clamp(640px, 52vw, 1100px);
+  max-width: clamp(720px, 62vw, 1280px);
   margin: auto;
   padding: 6vh 24px 8vh;
   font-size: clamp(13px, calc(7px + 0.45vw), 17px);
+}
+
+.home > * {
+  grid-column: 1;
+}
+
+.home > .home-hero {
+  grid-column: 2;
+  grid-row: 1 / span 6;
+  align-self: center;
+  text-align: center;
+}
+
+.home-hero svg {
+  width: 100%;
+  overflow: visible;
+}
+
+.home-hero .sheet {
+  fill: var(--bg-elevated);
+  stroke: var(--border);
+}
+
+.home-hero .ink {
+  fill: var(--border);
+}
+
+.home-hero .accent {
+  fill: var(--accent);
+  opacity: 0.75;
+}
+
+.home-hero .figure {
+  fill: var(--bg-surface);
+  stroke: var(--border);
+}
+
+.home-hero .ink-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.6;
+}
+
+#home-stat {
+  margin: 0.6em 0 0;
+  color: var(--text-muted);
+  font: 0.85em ui-monospace, 'Cascadia Code', monospace;
+}
+
+@media (max-width: 1000px) {
+  .home {
+    grid-template-columns: minmax(0, 1fr);
+    max-width: 720px;
+  }
+
+  .home > .home-hero {
+    display: none;
+  }
 }
 
 .home-head h2 {
@@ -511,6 +586,20 @@ kbd {
   font-weight: 500;
 }
 
+.card-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3em;
+  margin: 0.35em 0 0.2em 15px;
+}
+
+.card-lines i {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--border);
+  opacity: 0.7;
+}
+
 .card-meta {
   padding-left: 15px;
   color: var(--text-muted);
@@ -522,11 +611,26 @@ kbd {
   font-variant-numeric: tabular-nums;
 }
 
+#actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.65em;
+}
+
+#actions h3 {
+  flex-basis: 100%;
+  margin-bottom: 0.1em;
+}
+
 #action-buttons {
   display: flex;
   flex-wrap: wrap;
   gap: 0.65em;
-  margin-bottom: 1em;
+}
+
+#open-form {
+  flex: 1 1 20em;
 }
 
 .action {
