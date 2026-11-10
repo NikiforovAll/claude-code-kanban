@@ -12871,7 +12871,6 @@ function initSidebarResize() {
     onStart() {
       if (sidebar.classList.contains('collapsed')) return false;
       startWidth = sidebar.offsetWidth;
-      sidebar.classList.add('resizing');
     },
     onMove(dx) {
       const w = Math.min(600, Math.max(200, startWidth + dx));
@@ -12879,7 +12878,6 @@ function initSidebarResize() {
       sidebar.style.width = `${w}px`;
     },
     onEnd() {
-      sidebar.classList.remove('resizing');
       store.setItem(SIDEBAR_WIDTH_KEY, sidebar.style.getPropertyValue('--sidebar-width'));
     },
   });

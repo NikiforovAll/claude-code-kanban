@@ -163,11 +163,6 @@ body::before {
   flex-shrink: 0;
   position: relative;
   overflow: hidden;
-  transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.sidebar.resizing {
-  transition: none;
 }
 
 .sidebar-header {
@@ -345,7 +340,6 @@ body::before {
 .sidebar-toggle-btn svg {
   width: 16px;
   height: 16px;
-  transition: transform 0.25s ease;
 }
 
 .sidebar.collapsed .sidebar-toggle-btn svg {
