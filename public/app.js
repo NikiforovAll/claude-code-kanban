@@ -10340,7 +10340,7 @@ const LINKED_DOC_OPENERS = {
     tag: '(scratchpad)',
     get hint() {
       return hub.can(SCRATCHPAD_OPEN)
-        ? ' — opens in a pane; Ctrl+click opens the scratch viewer'
+        ? ' — opens in a pane; Shift+click opens the Scratchpads tab; Ctrl+click opens the scratch viewer'
         : ' — opens in the scratch viewer';
     },
     cls: ' is-editor',
@@ -10811,7 +10811,8 @@ function bindLinkedDocsHandlers(container, sessionId) {
       hub.can(SCRATCHPAD_OPEN)
     ) {
       if (container.closest('#team-modal')) closeTeamModal();
-      openScratchpadPane(sessionId, hit.dataset.path);
+      if (e.shiftKey) openScratchpadTab(sessionId, hit.dataset.path);
+      else openScratchpadPane(sessionId, hit.dataset.path);
     } else {
       openLinkedDoc(hit.dataset.path, getSessionBaseDir(sessionId));
     }
@@ -14941,10 +14942,13 @@ async function loadPaneView(sid, pane, view, scroll) {
 
 // The pad's viewer belongs to the hub's Scratchpads app; the board asks it for the URL each time it
 // mounts the view, because the app stops a viewer that no page has open.
+function scratchpadOpenArgs(sid, path) {
+  return { path, project: sessions.find((s) => s.id === sid)?.project || '', session: sid };
+}
+
 async function loadScratchpadPaneView(sid, pane, view) {
-  const project = sessions.find((s) => s.id === sid)?.project || '';
   const { url } = hub.can(SCRATCHPAD_OPEN)
-    ? await hub.invoke(SCRATCHPAD_OPEN, { path: pane.target, project, session: sid }, { open: 'pane' })
+    ? await hub.invoke(SCRATCHPAD_OPEN, scratchpadOpenArgs(sid, pane.target), { open: 'pane' })
     : {};
   if (!url) {
     view.insertAdjacentHTML(
@@ -15566,6 +15570,9 @@ function openPaneMenu(x, y, id) {
                   ? 'Open in scratch viewer'
                   : 'Open in preview',
           )) +
+      (pane.kind === 'scratchpad' && hub.can(SCRATCHPAD_OPEN)
+        ? paneMenuItem('openTab', 'Open in Scratchpads tab')
+        : '') +
       (message || shell
         ? ''
         : paneMenuItem('link', paneIsLinked(pane) ? 'Remove from linked documents' : 'Add to linked documents')) +
@@ -15625,6 +15632,10 @@ function showPaneMenu(x, y, id, ariaLabel, html) {
 const PANE_MENU_ACTIONS = {
   copy: copyPaneTarget,
   open: openPaneExternally,
+  openTab: (id) => {
+    const pane = paneById(id);
+    if (pane) openScratchpadTab(paneSessionId(), pane.target);
+  },
   link: togglePaneLink,
   rename: beginPaneRename,
   reload: reloadPane,
@@ -15690,6 +15701,10 @@ function applyPaneLine(view) {
 async function openScratchpadPane(sid, manifest) {
   const onScreen = await postPane(sid, { kind: 'scratchpad', target: manifest });
   if (onScreen !== null) revealPane(sid, onScreen);
+}
+
+function openScratchpadTab(sid, manifest) {
+  hub.invoke(SCRATCHPAD_OPEN, scratchpadOpenArgs(sid, manifest));
 }
 
 async function openPaneAtLine(sid, { path, line }, base) {
