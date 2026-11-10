@@ -68,7 +68,7 @@ const COMMANDS = {
         summary: 'Add a pane to a session; it opens as a tab next to Board, in the background',
         usage: 'claude-code-kanban pane add <url|file> | --shell [<folder>] [--run <cmd>] [--title <text>] [--session <id>] [--json]',
         flags: {
-          '<url|file>': 'An http(s) URL, or a local HTML, markdown, text or image file (relative paths resolve against the current dir)',
+          '<url|file>': 'An http(s) URL, a local HTML, markdown, text or image file, or a scratchpad (its folder or scratchpad.json; needs the scratch CLI). Relative paths resolve against the current dir',
           '--shell [<folder>]': 'A plain shell (the terminal shell, no claude) in <folder> (default: the current dir). Needs the board\'s terminal. Each add opens a new shell; closing the pane ends it',
           '--run <cmd>': 'With --shell: a one-line command the shell runs when it starts, and again on each restart',
           '--title <text>': 'Tab title (default: the host or file name)',
@@ -806,6 +806,13 @@ const cliTarget = (arg) => linkUrl(arg) || cliPath(arg);
 
 const PANES_WHY = 'panes are stored per session.';
 
+function scratchpadTarget(arg) {
+  if (linkUrl(arg)) return null;
+  const abs = cliPath(arg);
+  if (path.basename(abs).toLowerCase() === 'scratchpad.json') return abs;
+  return fs.existsSync(path.join(abs, 'scratchpad.json')) ? abs : null;
+}
+
 const panesPath = (sessionId, paneId) =>
   `/api/panes/${encodeURIComponent(sessionId)}${paneId ? `/${encodeURIComponent(paneId)}` : ''}`;
 
@@ -822,9 +829,12 @@ async function runPaneAddCli(args, entry) {
   if (!resolved) return 1;
   try {
     const title = getArgValue(args, 'title') || '';
+    const pad = shell ? null : scratchpadTarget(target);
     const body = shell
       ? { kind: 'shell', target: canonicalDir(target || '.'), title, ...(run && { run }) }
-      : { target: cliTarget(target), title };
+      : pad
+        ? { kind: 'scratchpad', target: pad, title }
+        : { target: cliTarget(target), title };
     const out = await cliPostJson(panesPath(resolved.id), body, 'Pane add');
     if (!out) return 1;
     const { pane } = out;

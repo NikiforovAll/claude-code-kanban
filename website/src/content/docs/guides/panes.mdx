@@ -20,9 +20,9 @@ Claude adds panes with `pane add <url|file>`. The board does not switch to the n
 
 ## Scratchpad panes
 
-<kbd>Ctrl</kbd>+click a linked `scratchpad.json` in the session info dialog to open the pad in a pane. A plain click still opens the native scratch viewer window. Ctrl+click the same pad again to go to its tab.
+In Claude Code Hub with the Scratchpads app installed, click a linked `scratchpad.json` in the session info dialog to open the pad in a pane and go to it. Click the same pad again to go to its tab. <kbd>Ctrl</kbd>+click opens the native scratch viewer window instead. Without the app, a click opens the native viewer.
 
-The board runs one scratch browser viewer per pad on a loopback port, and the pane frames it. The viewer reloads itself when the pad changes. It stops when the board stops, and the pane starts it again when it is next shown. If the viewer stops for another reason, the pane on screen starts a new one at once. The board keeps up to 4 viewers and stops the one used least recently. This needs a `scratch` CLI on `PATH` that has `scratch ui --json`.
+The Scratchpads app runs one scratch browser viewer per pad, and the pane frames it. The viewer reloads itself when the pad changes. A viewer that no page shows for 10 minutes stops, and the pane starts it again when it is next shown. The app's tab lists the pads you opened, grouped by project, and the running viewers. This needs a `scratch` CLI on `PATH` that has `scratch ui --json`.
 
 ## Work with tabs
 

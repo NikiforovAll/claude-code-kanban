@@ -43,7 +43,6 @@ const {
   readCompactSummaries,
   fillCompactSummaries,
   readArtifactLinks,
-  readScratchpadCreations,
   extractPromptFromTranscript,
   extractModelFromTranscript,
   readSubagentMeta,
@@ -77,7 +76,6 @@ const { createDispatchedStore, scanTranscripts, pruneSessionDirs, pruneContextSt
 const { freshRateLimits } = require('./lib/rate-limits');
 const { createWorktreeStore } = require('./lib/worktrees');
 const { createScratchpadDirResolver, scratchpadRoot } = require('./lib/scratchpad-dir');
-const { createScratchServers } = require('./lib/scratch-servers');
 const { readSettings } = require('./lib/claude-settings');
 const { readGitBranch, sessionGitBranch } = require('./lib/git-branch');
 const { createLinkedDocStore, linkUrl } = require('./lib/linked-docs');
@@ -1901,107 +1899,8 @@ app.get('/api/sessions/:sessionId/artifacts', async (req, res) => {
 
 // A scratchpad is a folder plus a `scratchpad.json` manifest, rendered by the
 // external `scratch` CLI. cck only recognizes the shape and launches the viewer —
-// it reads nothing from the manifest but `name`, `created` and `id`, so the two stay
-// independently versioned.
+// it reads nothing from the manifest, so the two stay independently versioned.
 const SCRATCHPAD_MANIFEST = 'scratchpad.json';
-
-// Fallback only, for a `scratch new` whose output the transcript never captured. A pad
-// has no central registry — the CLI treats the folder path as the pad's identity and
-// finds pads by scanning — and `_scratchpads/` is one user's habit, not a convention it
-// knows, so there is no layout to guess. Depth 3 rather than a deeper walk for the
-// reason docs/session-scanning.md records: pruned, it measures 0-3 ms on the worst-case
-// project dirs, while an unpruned walk of the same dirs costs ~800 ms.
-const PAD_SCAN_IGNORE = new Set(['node_modules', '.git', '.hg', '.svn', 'dist', 'build']);
-const PAD_SCAN_MAX_DEPTH = 3;
-// A pad manifest's `created` is written after the tool call starts, so the match is
-// a window, not an instant. Measured lag on a real `scratch new` was 4.1 s; the
-// window is wide enough to survive a slow disk and far too narrow to reach a pad
-// made in an earlier session.
-const PAD_CREATE_WINDOW_MS = 120000;
-
-async function findPads(root, depth = 0) {
-  let entries;
-  try { entries = await fs.readdir(root, { withFileTypes: true }); } catch (_) { return []; }
-  // A pad is never nested inside another pad, so a manifest ends the descent.
-  if (entries.some((e) => e.isFile() && e.name === SCRATCHPAD_MANIFEST)) return [root];
-  if (depth >= PAD_SCAN_MAX_DEPTH) return [];
-  const nested = await Promise.all(
-    entries
-      .filter((e) => e.isDirectory() && !PAD_SCAN_IGNORE.has(e.name))
-      .map((e) => findPads(path.join(root, e.name), depth + 1)),
-  );
-  return nested.flat();
-}
-
-// The pads a session made, as linked-doc rows. Derived on every read rather than
-// stored, so re-reading a transcript cannot drift; the client links each pad once
-// and records that it did, which is what stops a re-read undoing an unlink.
-async function readCreatedPads(meta) {
-  const creations = await readScratchpadCreations(meta.jsonlPath);
-  // No `scratch new` in the transcript means no disk work at all, so sessions that
-  // never touch the CLI pay a substring pass over the transcript and nothing more.
-  if (!creations.length) return [];
-  const reported = new Set(creations.filter((c) => c.path).map((c) => c.path));
-  const unresolved = creations.filter((c) => !c.path);
-  const askedFor = new Set(unresolved.map((c) => c.name).filter(Boolean));
-  // Only a call whose name could not be read falls back to the clock, and it compares
-  // against the call's second, not the call: the manifest records `created` to the
-  // second while the transcript timestamps to the millisecond, so a pad written during
-  // the same second as its own command otherwise reads as older than it.
-  const byClock = unresolved.filter((c) => !c.name).map((c) => Math.floor(c.ts / 1000) * 1000);
-  const sessionId = path.basename(meta.jsonlPath, '.jsonl');
-  // The project, not `meta.cwd`: cwd is wherever the session last stood, which drifts
-  // into subdirectories — a session that made a pad and then worked inside it reports
-  // a cwd below the pad, and a scan from there finds nothing above it.
-  // The session's own scratchpad dir too: a pad made there sits outside the project.
-  const roots = unresolved.length ? [meta.project || meta.cwd, getScratchpadDir(sessionId, meta)] : [];
-  const scanned = (await Promise.all(roots.filter(Boolean).map((r) => findPads(r)))).flat();
-  const candidates = [...new Set([...reported, ...scanned.map((dir) => path.join(dir, SCRATCHPAD_MANIFEST))])];
-  const rows = await Promise.all(
-    candidates.map(async (file) => {
-      let manifest;
-      try { manifest = JSON.parse(await fs.readFile(file, 'utf8')); } catch (_) { return null; }
-      const created = Date.parse(manifest?.created);
-      if (!Number.isFinite(created)) return null;
-      const name = manifest.name || path.basename(path.dirname(file));
-      // A path the CLI printed names its pad outright. Otherwise `scratch new --id`
-      // settles it: the flag stamps the session that asked for the pad into the
-      // manifest, so an id decides ownership both ways — one naming another session
-      // disowns the pad whatever the name or the clock say. Only a pad with no id is
-      // guessed at, by the name the command asked for and then by the clock.
-      const claimed =
-        reported.has(file) ||
-        (manifest.id
-          ? manifest.id === sessionId
-          : askedFor.has(name) || byClock.some((from) => created >= from && created - from <= PAD_CREATE_WINDOW_MS));
-      if (!claimed) return null;
-      return { path: file, name, created: manifest.created, ts: created };
-    }),
-  );
-  return rows
-    .filter(Boolean)
-    .sort((a, b) => a.ts - b.ts)
-    .map(({ ts: _ts, ...row }) => row);
-}
-
-// Cold path — a full transcript scan, and a directory walk when the transcript did not
-// carry the pad paths, so the result is held until the transcript grows.
-const padsByPath = new Map();
-
-function getCreatedPads(meta) {
-  return cachedByFileStat(padsByPath, meta.jsonlPath, () => readCreatedPads(meta)) || [];
-}
-
-app.get('/api/sessions/:sessionId/pads', async (req, res) => {
-  try {
-    const meta = sessionMetaFor(req.params.sessionId);
-    if (!meta?.jsonlPath) return res.json({ pads: [] });
-    res.json({ pads: await getCreatedPads(meta) });
-  } catch (error) {
-    console.error('Error reading created pads:', error);
-    res.status(500).json({ error: 'Failed to read created pads' });
-  }
-});
 
 // API: List one level of a session's scratchpad dir — the root, or the folder named by
 // `?path=`, which is the absolute path a previous listing handed out and must still sit
@@ -2403,24 +2302,6 @@ function scratchExecutable() {
   const file = ext === '.cmd' || ext === '.bat' ? exeBehindShim(bin) : bin;
   return file ? { file } : { error: 'scratch CLI cannot be launched without a shell' };
 }
-
-const scratchServers = createScratchServers({
-  resolveBin: () => scratchExecutable().file || null,
-  spawn,
-  onExit: (pad) => broadcast({ type: 'scratchpad:exited', manifest: `${pad}/${SCRATCHPAD_MANIFEST}` }),
-});
-
-// API: The URL of a pad's browser viewer for a scratchpad pane, started on first use.
-app.post('/api/scratchpad/serve', async (req, res) => {
-  try {
-    const { dir } = resolveScratchpad(req.body?.path);
-    res.json({ url: await (req.body?.restart ? scratchServers.restart(dir) : scratchServers.serve(dir)) });
-  } catch (error) {
-    if (error.status) return res.status(error.status).json({ error: error.message });
-    console.error('Error serving scratchpad:', error.message);
-    res.status(502).json({ error: error.message });
-  }
-});
 
 // API: Open a scratchpad in the external `scratch` viewer — the window outlives
 // this request and cck never waits on it.

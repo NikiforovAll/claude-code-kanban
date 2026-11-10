@@ -39,6 +39,10 @@ The user works in other windows while you run, so pick the quiet command. `doc l
 
 To show the user a page, a prototype or a collage of screenshots, write it as HTML and link or preview that file. The preview renders HTML as authored in a sandboxed iframe and inlines its local stylesheets, scripts and images, so the file alone is enough.
 
+## Scratchpads
+
+A scratchpad (a folder with `scratchpad.json`) is one document: `doc link` or `pane add` its `scratchpad.json`, never its files one by one.
+
 ## Another session
 
 Read its transcript. `session view <id>` and `session search <text> --json` print the path.

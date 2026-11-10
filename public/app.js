@@ -4867,11 +4867,6 @@ function renderSession() {
   const session = sessions.find((s) => s.id === currentSessionId);
   if (!session) return;
 
-  // Opening the session, not opening a linked-docs surface: the card badge is the
-  // first place a pad shows up, and it would otherwise stay at zero until the user
-  // happened to open the info modal or zen panel.
-  loadSessionPads(currentSessionId);
-
   const displayName = session.name || session.description || currentSessionId;
 
   sessionTitle.textContent = displayName;
@@ -10326,37 +10321,8 @@ async function loadPreviewKinds(sessionId, paths) {
   afterLinkedDocsChanged(sessionId);
 }
 
-// A pad the session made with `scratch new` becomes an ordinary linked document.
-// The server derives the pads on every read, so this record of the ones already
-// linked is what stops the next read undoing an unlink.
+// Nothing writes these keys now; the orphan sweep still clears the ones older boards left.
 const PAD_LINKED_PREFIX = 'autolinked-pads-';
-const padsFetched = new Set();
-
-function getOfferedPadPaths(sessionId) {
-  return readStoredList(PAD_LINKED_PREFIX + sessionId);
-}
-
-function setOfferedPadPaths(sessionId, paths) {
-  store.writeJson(PAD_LINKED_PREFIX + sessionId, paths);
-}
-
-async function loadSessionPads(sessionId) {
-  if (!sessionId || padsFetched.has(sessionId)) return;
-  padsFetched.add(sessionId);
-  const data = await getJson(apiPath`/api/sessions/${sessionId}/pads`);
-  if (!data) {
-    padsFetched.delete(sessionId);
-    return;
-  }
-  const pads = data.pads || [];
-  const offered = new Set(getOfferedPadPaths(sessionId).map(canonicalPath));
-  const fresh = pads.map((p) => p.path).filter((p) => !offered.has(canonicalPath(p)));
-  if (!fresh.length) return;
-  // Recorded before the link, so a render triggered by the link already sees a pad
-  // that will not be offered again.
-  setOfferedPadPaths(sessionId, [...offered, ...fresh]);
-  for (const p of fresh) setSessionDocLink(sessionId, p, false);
-}
 
 // A scratchpad manifest opens in the external `scratch` viewer, not the editor —
 // the raw JSON is a manifest, not the document the user linked.
@@ -10366,12 +10332,17 @@ function isScratchpadPath(p) {
 
 // `linkedDocOpener` is the only place a linked path is classified; the row's tag,
 // tooltip and action are all read from here, so a new destination is one entry.
+const SCRATCHPAD_OPEN = 'scratchpad.open';
 const LINKED_DOC_OPENERS = {
   preview: { tag: '', hint: '', cls: '', noun: 'path' },
   url: { tag: '', hint: ' — opens in a new tab', cls: ' is-url', noun: 'URL' },
   scratch: {
     tag: '(scratchpad)',
-    hint: ' — opens in the scratch viewer; Ctrl+click opens it in a pane',
+    get hint() {
+      return hub.can(SCRATCHPAD_OPEN)
+        ? ' — opens in a pane; Ctrl+click opens the scratch viewer'
+        : ' — opens in the scratch viewer';
+    },
     cls: ' is-editor',
     noun: 'path',
     url: '/api/scratchpad/open',
@@ -10834,7 +10805,11 @@ function bindLinkedDocsHandlers(container, sessionId) {
       removeSessionPreviewPath(sessionId, hit.dataset.path);
       forgetServerLinkedDoc(sessionId, hit.dataset.path);
       afterLinkedDocsChanged(sessionId);
-    } else if ((e.ctrlKey || e.metaKey) && linkedDocOpener(hit.dataset.path) === 'scratch') {
+    } else if (
+      !(e.ctrlKey || e.metaKey) &&
+      linkedDocOpener(hit.dataset.path) === 'scratch' &&
+      hub.can(SCRATCHPAD_OPEN)
+    ) {
       if (container.closest('#team-modal')) closeTeamModal();
       openScratchpadPane(sessionId, hit.dataset.path);
     } else {
@@ -10957,8 +10932,6 @@ function setupEventSource() {
         fetchSessions().catch(() => {});
         if (currentSessionId) fetchTasks(currentSessionId);
         refetchPaneLayout();
-        // A restarted board started none of the viewers the frames still point at.
-        onScratchpadExited(null);
         if (sgRev === null) syncSessionGroups();
         else if (sgUnsent) persistSessionGroups();
         else sgRefresh();
@@ -11096,10 +11069,6 @@ function setupEventSource() {
 
       if (data.type === 'pane:changed') {
         applyPaneLayout(data.sessionId, data.layout);
-      }
-
-      if (data.type === 'scratchpad:exited') {
-        onScratchpadExited(data.manifest);
       }
 
       if (data.type === 'addon:changed' && dockSid) {
@@ -12960,10 +12929,6 @@ async function showSessionInfoModal(sessionId) {
   const cachedTasks = currentSessionId === sessionId ? currentTasks : [];
   showInfoModal(session, null, cachedTasks, null, null);
   artifactsSection.load(sessionId);
-  // The modal reaches any card's session, not just the open one, so this is the second
-  // place a pad can first be seen. Linking belongs on the two open events rather than
-  // in renderLinkedDocsHtml, which only builds a string and runs on every repaint.
-  loadSessionPads(sessionId);
 
   const rerender = (teamConfig, tasks, planContent, parentInfo) => {
     if (_planSessionId !== sessionId) return; // user opened a different modal
@@ -14898,6 +14863,7 @@ function paneUrlFrame(pane, className) {
   frame.addEventListener('load', () => {
     postToShowFrames(() => ({ type: `${SHOW_MSG}tokens`, tokens: showTokens() }), [frame]);
     frame.hostKeysSig = null;
+    frame.hostPlainKeys = null;
     pushTerminalClaims();
   });
   return frame;
@@ -14932,7 +14898,7 @@ async function loadPaneView(sid, pane, view, scroll) {
     return;
   }
   if (pane.kind === 'scratchpad') {
-    await loadScratchpadPaneView(pane, view);
+    await loadScratchpadPaneView(sid, pane, view);
     return;
   }
   if (pane.kind === 'shell') {
@@ -14973,94 +14939,25 @@ async function loadPaneView(sid, pane, view, scroll) {
   view.insertAdjacentHTML('beforeend', paneCardHtml(title, text, button));
 }
 
-// The viewer runs on its own loopback port, a different origin from the board and the hub, so the
-// URL pane sandbox holds. The board asks for the URL each time it mounts the view, because the
-// viewer dies with cck and is started again on demand.
-async function loadScratchpadPaneView(pane, view) {
-  view.insertAdjacentHTML(
-    'beforeend',
-    '<div class="pane-card pane-starting"><div class="pane-card-box"><p>Starting the scratch viewer…</p></div></div>',
-  );
-  const res = await paneRequest('POST', '/api/scratchpad/serve', { path: pane.target });
-  view.querySelector('.pane-starting')?.remove();
-  if (!res.url) {
+// The pad's viewer belongs to the hub's Scratchpads app; the board asks it for the URL each time it
+// mounts the view, because the app stops a viewer that no page has open.
+async function loadScratchpadPaneView(sid, pane, view) {
+  const project = sessions.find((s) => s.id === sid)?.project || '';
+  const { url } = hub.can(SCRATCHPAD_OPEN)
+    ? await hub.invoke(SCRATCHPAD_OPEN, { path: pane.target, project, session: sid }, { open: 'pane' })
+    : {};
+  if (!url) {
     view.insertAdjacentHTML(
       'beforeend',
-      paneCardHtml('Scratch viewer unavailable', res.error || pane.target, 'Open in scratch viewer'),
+      paneCardHtml(
+        'Scratchpads app unavailable',
+        'Install the Scratchpads hub app to view pads in a pane.',
+        'Open in scratch viewer',
+      ),
     );
     return;
   }
-  const theme = scratchHostTheme();
-  const url = new URL(res.url);
-  url.searchParams.set('hostMode', theme.mode);
-  url.searchParams.set('hostTheme', theme.colorTheme);
-  const frame = mountPaneUrlFrame({ ...pane, target: url.href }, view);
-  frame.dataset.scratchHost = '';
-  frame.addEventListener('load', () => postToShowFrames(scratchHostMessage, [frame]));
-}
-
-// The viewer follows the board's theme, custom hub themes too, so the board sends the colors and
-// not only the theme id. The roles are scratchpad's names for the hub's palette roles; the hub maps
-// them to these vars in its lib/themes.js `coreVars`.
-const SCRATCH_THEME_VARS = {
-  ember: '--accent',
-  emberGlow: '--accent-text',
-  emberDim: '--accent-dim',
-  field: '--bg-deep',
-  surface: '--bg-surface',
-  elevated: '--bg-elevated',
-  hover: '--bg-hover',
-  border: '--border',
-  ink1: '--text-primary',
-  ink2: '--text-secondary',
-  ink3: '--text-tertiary',
-  inkMuted: '--text-muted',
-};
-
-function scratchHostTheme() {
-  const style = getComputedStyle(document.body);
-  const palette = {};
-  for (const [role, cssVar] of Object.entries(SCRATCH_THEME_VARS))
-    palette[role] = style.getPropertyValue(cssVar).trim();
-  return { mode: isLightTheme() ? 'light' : 'dark', colorTheme: document.body.dataset.colorTheme || 'ember', palette };
-}
-
-function scratchHostMessage() {
-  return { __scratchHostTheme: 1, ...scratchHostTheme() };
-}
-
-let sentScratchTheme = '';
-function postScratchHostThemes() {
-  postToShowFrames(() => {
-    const msg = scratchHostMessage();
-    const key = JSON.stringify(msg);
-    if (key === sentScratchTheme) return null;
-    sentScratchTheme = key;
-    return msg;
-  }, document.querySelectorAll('iframe[data-scratch-host]'));
-}
-
-// Reload keeps the running viewer; a restart starts a new one, so the pane gets a `scratch` updated
-// since. The old viewer's exit remounts its panes in every client.
-async function restartScratchViewer(id) {
-  const pane = paneById(id);
-  if (!pane) return;
-  const res = await paneRequest('POST', '/api/scratchpad/serve', { path: pane.target, restart: true });
-  if (res.error) showToast(res.error, 'error');
-}
-
-// A viewer that exited leaves its frames on a dead port; the views on screen mount again now,
-// the others when shown.
-function onScratchpadExited(manifest) {
-  const dead = [];
-  for (const key of paneFrames.keys()) {
-    const [sid, paneId] = key.split('/');
-    const pane = paneLayout(sid).panes.find((p) => p.id === paneId);
-    if (pane?.kind === 'scratchpad' && (!manifest || canonicalPath(pane.target) === manifest)) dead.push([sid, paneId]);
-  }
-  if (!dead.length) return;
-  for (const [sid, paneId] of dead) unmountPane(sid, paneId);
-  syncPanes();
+  mountPaneUrlFrame({ ...pane, target: url }, view);
 }
 
 // The target is the message's pin id, `type|timestamp|text`. The log holds only the latest pages,
@@ -15674,7 +15571,6 @@ function openPaneMenu(x, y, id) {
         : paneMenuItem('link', paneIsLinked(pane) ? 'Remove from linked documents' : 'Add to linked documents')) +
       paneMenuItem('rename', 'Rename') +
       paneMenuItem('reload', shell ? 'Restart shell' : 'Reload') +
-      (pane.kind === 'scratchpad' ? paneMenuItem('restartViewer', 'Restart viewer') : '') +
       (url ? paneMenuItem('dock', pane.dock ? 'Remove from the dock' : 'Dock beside the terminal') : '') +
       paneGroupMenuItems(pane.id) +
       paneMenuItem('close', 'Close pane'),
@@ -15732,7 +15628,6 @@ const PANE_MENU_ACTIONS = {
   link: togglePaneLink,
   rename: beginPaneRename,
   reload: reloadPane,
-  restartViewer: restartScratchViewer,
   dock: togglePaneDock,
   close: closePane,
   group: (id, to) => groupPaneTab(id, to || null),
@@ -15791,11 +15686,10 @@ function applyPaneLine(view) {
   markSourceLine(body, line);
 }
 
-// The same pad again returns its pane, so a second Ctrl+click only shows it.
+// The same pad again returns its pane, so a second click only shows it.
 async function openScratchpadPane(sid, manifest) {
   const onScreen = await postPane(sid, { kind: 'scratchpad', target: manifest });
-  if (onScreen) syncPanes();
-  toastPaneAdded(sid, onScreen, linkedDocLabel(manifest));
+  if (onScreen !== null) revealPane(sid, onScreen);
 }
 
 async function openPaneAtLine(sid, { path, line }, base) {
@@ -16833,11 +16727,14 @@ function sendBridgeClaimsAll(frames, base) {
 }
 
 // A hub app in a URL pane runs the SDK, which hands back these keys (hub protocol §5.2). Only keys with
-// Ctrl, Alt or Meta: the page keeps Escape, brackets and its own letter keys.
+// Ctrl, Alt or Meta, so the page keeps Escape, brackets and its own letter keys, plus the plain keys
+// its hub:hostReady named.
 function sendHostKeys(frames, bridged) {
-  const keys = bridged.keys.filter((k) => k.ctrlKey || k.altKey || k.metaKey);
-  const sig = JSON.stringify(keys);
+  const modified = (k) => k.ctrlKey || k.altKey || k.metaKey;
   for (const f of frames) {
+    const plain = f.hostPlainKeys || [];
+    const keys = bridged.keys.filter((k) => modified(k) || plain.includes(k.key));
+    const sig = JSON.stringify(keys);
     const origin = URL.parse(f.src)?.origin;
     if (!origin || origin === 'null' || f.hostKeysSig === sig) continue;
     f.hostKeysSig = sig;
@@ -16855,6 +16752,11 @@ window.addEventListener('message', (e) => {
   if (!frame || URL.parse(frame.src)?.origin !== e.origin) return;
   if (type === 'hub:hostReady') {
     if (!dock) frame.parentElement.classList.add('keys-bridged');
+    const plain = Array.isArray(e.data.plainKeys) ? e.data.plainKeys.filter((k) => typeof k === 'string') : [];
+    if (plain.length) {
+      frame.hostPlainKeys = plain;
+      pushTerminalClaims();
+    }
     return;
   }
   // A page has focus when it gets a keydown, even one that never posts its focus.
@@ -18622,7 +18524,6 @@ new MutationObserver(() => {
       sentTokens = key;
       return { type: `${SHOW_MSG}tokens`, tokens };
     });
-    postScratchHostThemes();
   });
 }).observe(document.body, { attributes: true, attributeFilter: ['class', 'data-color-theme', 'style'] });
 

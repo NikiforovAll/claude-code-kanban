@@ -1,0 +1,26 @@
+{
+  "manifest": 1,
+  "id": "scratchpads",
+  "name": "Scratchpads",
+  "icon": "notebook-pen",
+  "run": { "entry": "server.js", "defaultPort": 3547 },
+  "requires": { "node": "22.13.0", "tools": [{ "name": "scratch" }] },
+  "listing": {
+    "tagline": "Read scratchpads in the hub and in Kanban panes",
+    "description": "Opens a scratchpad (a folder with scratchpad.json, made by the scratch CLI) in a Kanban pane or in its own tab, grouped by project. Each pad runs the scratch browser viewer, which stops when no page has shown it for 10 minutes. Needs the scratch CLI on PATH.",
+    "tags": ["scratchpad", "notes", "kanban"],
+    "author": "NikiforovAll",
+    "license": "MIT"
+  },
+  "loading": {
+    "verbs": ["Opening the pad…", "Starting the viewer…"]
+  },
+  "actions": {
+    "handles": {
+      "scratchpad.open": {
+        "params": { "path": "string", "project": "string", "session": "string" },
+        "url": "?pad={path}&project={project}&session={session}"
+      }
+    }
+  }
+}
