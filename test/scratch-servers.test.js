@@ -74,6 +74,19 @@ describe('scratch servers', () => {
     assert.equal(await s.serve(PAD), 'http://127.0.0.1:5001/?t=tok101');
   });
 
+  it('restarts a viewer and reports the old one exited', async () => {
+    const f = fakeScratch();
+    const exited = [];
+    const s = createScratchServers({ resolveBin: () => 'scratch.exe', spawn: f.spawn, fetch: f.fetch, onExit: (p) => exited.push(p) });
+    await s.serve(PAD);
+    assert.equal(await s.restart('c:\\pads\\notes'), 'http://127.0.0.1:5001/?t=tok101');
+    await new Promise((r) => setImmediate(r));
+    assert.equal(f.procs[0].alive, false);
+    assert.deepEqual(exited, ['c:/pads/notes']);
+    assert.equal(s.size(), 1);
+    assert.equal(await s.serve(PAD), 'http://127.0.0.1:5001/?t=tok101');
+  });
+
   it('replaces a viewer that stops answering for its pad', async () => {
     const f = fakeScratch();
     const s = createScratchServers({ resolveBin: () => 'scratch.exe', spawn: f.spawn, fetch: f.fetch });

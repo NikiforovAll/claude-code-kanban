@@ -2413,7 +2413,8 @@ const scratchServers = createScratchServers({
 // API: The URL of a pad's browser viewer for a scratchpad pane, started on first use.
 app.post('/api/scratchpad/serve', async (req, res) => {
   try {
-    res.json({ url: await scratchServers.serve(resolveScratchpad(req.body?.path).dir) });
+    const { dir } = resolveScratchpad(req.body?.path);
+    res.json({ url: await (req.body?.restart ? scratchServers.restart(dir) : scratchServers.serve(dir)) });
   } catch (error) {
     if (error.status) return res.status(error.status).json({ error: error.message });
     console.error('Error serving scratchpad:', error.message);

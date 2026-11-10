@@ -14990,7 +14990,63 @@ async function loadScratchpadPaneView(pane, view) {
     );
     return;
   }
-  mountPaneUrlFrame({ ...pane, target: res.url }, view);
+  const theme = scratchHostTheme();
+  const url = new URL(res.url);
+  url.searchParams.set('hostMode', theme.mode);
+  url.searchParams.set('hostTheme', theme.colorTheme);
+  const frame = mountPaneUrlFrame({ ...pane, target: url.href }, view);
+  frame.dataset.scratchHost = '';
+  frame.addEventListener('load', () => postToShowFrames(scratchHostMessage, [frame]));
+}
+
+// The viewer follows the board's theme, custom hub themes too, so the board sends the colors and
+// not only the theme id. The roles are scratchpad's names for the hub's palette roles; the hub maps
+// them to these vars in its lib/themes.js `coreVars`.
+const SCRATCH_THEME_VARS = {
+  ember: '--accent',
+  emberGlow: '--accent-text',
+  emberDim: '--accent-dim',
+  field: '--bg-deep',
+  surface: '--bg-surface',
+  elevated: '--bg-elevated',
+  hover: '--bg-hover',
+  border: '--border',
+  ink1: '--text-primary',
+  ink2: '--text-secondary',
+  ink3: '--text-tertiary',
+  inkMuted: '--text-muted',
+};
+
+function scratchHostTheme() {
+  const style = getComputedStyle(document.body);
+  const palette = {};
+  for (const [role, cssVar] of Object.entries(SCRATCH_THEME_VARS))
+    palette[role] = style.getPropertyValue(cssVar).trim();
+  return { mode: isLightTheme() ? 'light' : 'dark', colorTheme: document.body.dataset.colorTheme || 'ember', palette };
+}
+
+function scratchHostMessage() {
+  return { __scratchHostTheme: 1, ...scratchHostTheme() };
+}
+
+let sentScratchTheme = '';
+function postScratchHostThemes() {
+  postToShowFrames(() => {
+    const msg = scratchHostMessage();
+    const key = JSON.stringify(msg);
+    if (key === sentScratchTheme) return null;
+    sentScratchTheme = key;
+    return msg;
+  }, document.querySelectorAll('iframe[data-scratch-host]'));
+}
+
+// Reload keeps the running viewer; a restart starts a new one, so the pane gets a `scratch` updated
+// since. The old viewer's exit remounts its panes in every client.
+async function restartScratchViewer(id) {
+  const pane = paneById(id);
+  if (!pane) return;
+  const res = await paneRequest('POST', '/api/scratchpad/serve', { path: pane.target, restart: true });
+  if (res.error) showToast(res.error, 'error');
 }
 
 // A viewer that exited leaves its frames on a dead port; the views on screen mount again now,
@@ -15618,6 +15674,7 @@ function openPaneMenu(x, y, id) {
         : paneMenuItem('link', paneIsLinked(pane) ? 'Remove from linked documents' : 'Add to linked documents')) +
       paneMenuItem('rename', 'Rename') +
       paneMenuItem('reload', shell ? 'Restart shell' : 'Reload') +
+      (pane.kind === 'scratchpad' ? paneMenuItem('restartViewer', 'Restart viewer') : '') +
       (url ? paneMenuItem('dock', pane.dock ? 'Remove from the dock' : 'Dock beside the terminal') : '') +
       paneGroupMenuItems(pane.id) +
       paneMenuItem('close', 'Close pane'),
@@ -15675,6 +15732,7 @@ const PANE_MENU_ACTIONS = {
   link: togglePaneLink,
   rename: beginPaneRename,
   reload: reloadPane,
+  restartViewer: restartScratchViewer,
   dock: togglePaneDock,
   close: closePane,
   group: (id, to) => groupPaneTab(id, to || null),
@@ -18550,14 +18608,21 @@ window.addEventListener('message', (e) => {
 
 // The same body attributes the terminal theme watches; a markdown card follows the board's CSS.
 // The body's style also changes on every drag, so a push with the same tokens is dropped.
+// A theme switch changes the class and the style in separate steps, so one frame collects them.
 let sentTokens = '';
+let tokensRaf = 0;
 new MutationObserver(() => {
-  postToShowFrames(() => {
-    const tokens = showTokens();
-    const key = JSON.stringify(tokens);
-    if (key === sentTokens) return null;
-    sentTokens = key;
-    return { type: `${SHOW_MSG}tokens`, tokens };
+  if (tokensRaf) return;
+  tokensRaf = requestAnimationFrame(() => {
+    tokensRaf = 0;
+    postToShowFrames(() => {
+      const tokens = showTokens();
+      const key = JSON.stringify(tokens);
+      if (key === sentTokens) return null;
+      sentTokens = key;
+      return { type: `${SHOW_MSG}tokens`, tokens };
+    });
+    postScratchHostThemes();
   });
 }).observe(document.body, { attributes: true, attributeFilter: ['class', 'data-color-theme', 'style'] });
 
