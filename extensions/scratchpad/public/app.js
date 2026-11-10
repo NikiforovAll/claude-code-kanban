@@ -165,13 +165,12 @@ function showError(message) {
   box.hidden = false;
   document.getElementById('empty').hidden = true;
   frame.hidden = true;
+  document.body.classList.add('has-pad');
 }
 
-async function openPad(dir, { project = '', session = '', remember = true, onError = null } = {}) {
+async function openPad(dir, { project = '', session = '', remember = true, onError = showError } = {}) {
   document.getElementById('error').hidden = true;
-  let ok = false;
   try {
-    document.body.classList.add('has-pad');
     const { url, key } = await api('/api/open', { path: dir, project, session, remember });
     current = key;
     const src = new URL(url);
@@ -181,22 +180,20 @@ async function openPad(dir, { project = '', session = '', remember = true, onErr
     frame.src = src.href;
     frame.hidden = false;
     document.getElementById('empty').hidden = true;
-    ok = true;
+    document.body.classList.add('has-pad');
+    setPadUrl(dir);
+    return true;
   } catch (err) {
-    if (!onError) showError(err.message);
-    else {
-      document.body.classList.toggle('has-pad', !frame.hidden);
-      onError(err.message);
-    }
+    onError(err.message);
+    return false;
+  } finally {
+    refresh();
   }
-  refresh();
-  return ok;
 }
 
-function openListed(p) {
-  history.replaceState(null, '', `?pad=${encodeURIComponent(p.dir)}`);
-  openPad(p.dir, { remember: false });
-}
+const setPadUrl = (dir) => history.replaceState(null, '', dir ? `?pad=${encodeURIComponent(dir)}` : location.pathname);
+
+const openListed = (p) => openPad(p.dir, { remember: false });
 
 const ICONS = {
   restart: 'M13 8a5 5 0 1 1-1.46-3.54M13 2.5v2.5h-2.5',
@@ -233,13 +230,15 @@ function viewerState(v) {
   return ['idle', `Viewer idle for ${ago(v.idleSince)}`];
 }
 
+const whenEl = (p) => el('span', 'when', p.openedAt ? ago(p.openedAt) : '');
+
 function padRow(p, v, inHistory = true) {
   const li = el('li', `pad${p.key === current ? ' current' : ''}`);
   const [state, stateText] = viewerState(v);
   const open = el('button', 'open');
   open.type = 'button';
   open.title = `${p.dir}\n${stateText}`;
-  open.append(el('span', `dot ${state}`), el('span', 'name', p.name), el('span', 'when', p.openedAt ? ago(p.openedAt) : ''));
+  open.append(el('span', `dot ${state}`), el('span', 'name', p.name), whenEl(p));
   open.addEventListener('click', () => {
     if (p.key === current && !frame.hidden) return document.body.classList.add('has-pad');
     openListed(p);
@@ -323,7 +322,7 @@ function padCard(p, v, scratch) {
   const top = el('span', 'card-top');
   top.append(el('span', `dot ${state}`), el('span', 'name', p.name));
   const meta = el('span', 'card-meta');
-  meta.append(el('span', 'label', p.label), el('span', 'when', p.openedAt ? ago(p.openedAt) : ''));
+  meta.append(el('span', 'label', p.label), whenEl(p));
   b.append(top, meta);
   b.addEventListener('click', () => openListed(p));
   const li = el('li');
@@ -385,9 +384,7 @@ document.getElementById('open-form').addEventListener('submit', async (e) => {
       error.hidden = false;
     },
   });
-  if (!ok) return;
-  history.replaceState(null, '', `?pad=${encodeURIComponent(dir)}`);
-  input.value = '';
+  if (ok) input.value = '';
 });
 // #endregion
 
@@ -400,8 +397,7 @@ function goHome() {
   document.getElementById('error').hidden = true;
   document.getElementById('empty').hidden = false;
   document.body.classList.remove('has-pad');
-  history.replaceState(null, '', location.pathname);
-  refresh();
+  setPadUrl(null);
   // The viewer's proxy sees the stream close a moment after the unload.
   setTimeout(refresh, 600);
 }

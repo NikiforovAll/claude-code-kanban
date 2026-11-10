@@ -85,14 +85,13 @@ h1 {
   font-size: 11px;
 }
 
-#home-button {
-  align-self: center;
-  margin: -4px -6px -4px 0;
-}
-
-#list-toggle {
+#list > header > .icon {
   align-self: center;
   margin: -4px -4px -4px 0;
+}
+
+#home-button {
+  margin-right: -6px;
 }
 
 body.list-collapsed #list {
@@ -107,18 +106,17 @@ body.list-collapsed #list > header {
   margin: 0;
 }
 
-body.list-collapsed #list > header > :not(#list-toggle, #home-button),
+body.list-collapsed #list > header > :not(.icon),
 body.list-collapsed #groups {
   display: none;
 }
 
-body.list-collapsed #list-toggle {
-  order: -1;
+body.list-collapsed #list > header > .icon {
   margin: 0;
 }
 
-body.list-collapsed #home-button {
-  margin: 0;
+body.list-collapsed #list-toggle {
+  order: -1;
 }
 
 ul {
@@ -468,15 +466,20 @@ kbd {
   gap: 0.35em;
   width: 100%;
   padding: 0.85em 1em;
+  color: var(--text-secondary);
+  text-align: left;
+}
+
+.card,
+.action {
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg-elevated);
-  color: var(--text-secondary);
-  text-align: left;
   cursor: pointer;
 }
 
-.card:hover:not(:disabled) {
+.card:hover:not(:disabled),
+.action:hover {
   border-color: var(--accent);
   background: var(--bg-hover);
   color: var(--text-primary);
@@ -495,12 +498,16 @@ kbd {
   min-width: 0;
 }
 
-.card .name {
+.card .name,
+.card-meta .label {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.card .name {
   font-weight: 500;
 }
 
@@ -508,14 +515,6 @@ kbd {
   padding-left: 15px;
   color: var(--text-muted);
   font-size: 0.85em;
-}
-
-.card-meta .label {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .card-meta .when {
@@ -536,16 +535,7 @@ kbd {
   gap: 0.6em;
   max-width: 100%;
   padding: 0.55em 0.95em 0.55em 0.8em;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg-elevated);
   color: var(--text-primary);
-  cursor: pointer;
-}
-
-.action:hover {
-  border-color: var(--accent);
-  background: var(--bg-hover);
 }
 
 .action svg {
@@ -672,12 +662,11 @@ kbd {
     border-right: 0;
   }
 
-  #list-toggle,
-  #home-button {
+  #list > header > .icon {
     display: none;
   }
 
-  body.list-collapsed #list > header > :not(#list-toggle, #home-button),
+  body.list-collapsed #list > header > :not(.icon),
   body.list-collapsed #groups {
     display: revert;
   }
