@@ -133,6 +133,32 @@
       } catch (_) {}
     }
 
+    // ConPTY drops DEC 2026, so the app's redraw after a resize lands over several frames and shows
+    // as a sweep. Turning the mode on locally keeps the old screen until the output goes quiet.
+    const HOLD_CAP_MS = 250;
+    const HOLD_QUIET_MS = 40;
+    const hold = { cap: 0, quiet: 0 };
+
+    function holdForRedraw() {
+      if (!state.attached || !state.holdRedraw || hold.cap) return;
+      state.term.write('\x1b[?2026h');
+      hold.cap = win.setTimeout(releaseHold, HOLD_CAP_MS);
+    }
+
+    function releaseHold() {
+      win.clearTimeout(hold.cap);
+      win.clearTimeout(hold.quiet);
+      hold.cap = 0;
+      hold.quiet = 0;
+      state.term.write('\x1b[?2026l');
+    }
+
+    function noteOutput() {
+      if (!hold.cap) return;
+      win.clearTimeout(hold.quiet);
+      hold.quiet = win.setTimeout(releaseHold, HOLD_QUIET_MS);
+    }
+
     // The fit addon measures 0×0 while the board's pane (or the hub's iframe) is display:none.
     function fit() {
       if (!state.fit || !host.offsetWidth || !host.offsetHeight) return;
@@ -140,7 +166,9 @@
       try {
         state.fit.fit();
       } catch (_) {}
-      if (state.term.cols !== cols || state.term.rows !== rows) paintNow();
+      if (state.term.cols === cols && state.term.rows === rows) return false;
+      paintNow();
+      return true;
     }
 
     function setBg(options) {
@@ -156,8 +184,7 @@
     function applyFont(size) {
       const term = state.term;
       term.options.fontSize = size;
-      fit();
-      paintNow();
+      if (!fit()) paintNow();
       doc.fonts
         ?.load(`${size}px ${term.options.fontFamily}`)
         .then(repaint)
@@ -266,7 +293,10 @@
         });
       }
       term.onData((d) => send({ t: 'in', d }));
-      term.onResize(({ cols, rows }) => send({ t: 'resize', cols, rows }));
+      term.onResize(({ cols, rows }) => {
+        send({ t: 'resize', cols, rows });
+        holdForRedraw();
+      });
       // One fit per frame while a drag resizes the pane. The atlas is rebuilt only when the frame comes
       // back from 0×0, which is also how a hidden hub iframe or pane shows again.
       let frame = 0;
@@ -349,6 +379,7 @@
           const bytes = new Uint8Array(ev.data);
           term.write(bytes, () => {
             ack(ws, bytes.length);
+            noteOutput();
             if (!outputSent && state.ws === ws && tailOf(term.buffer.active, 1)) {
               outputSent = true;
               up('output', { socketId });
@@ -364,6 +395,7 @@
         }
         if (msg.t === 'ready') {
           state.attached = true;
+          state.holdRedraw = !!msg.holdRedraw;
           // A retry keeps the last screen until the replay arrives.
           if (!reset) clearScreen();
           send({ t: 'resize', cols: term.cols, rows: term.rows });
