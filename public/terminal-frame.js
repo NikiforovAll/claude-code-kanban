@@ -123,12 +123,24 @@
       term.refresh(0, term.rows - 1);
     }
 
+    // A resize clears the WebGL canvas, and xterm 6 draws it again only on the next animation frame,
+    // so the terminal shows one blank frame. Its private _renderRows draws in this frame instead.
+    function paintNow() {
+      const rs = state.term?._core?._renderService;
+      if (typeof rs?._renderRows !== 'function') return;
+      try {
+        rs._renderRows(0, state.term.rows - 1);
+      } catch (_) {}
+    }
+
     // The fit addon measures 0×0 while the board's pane (or the hub's iframe) is display:none.
     function fit() {
       if (!state.fit || !host.offsetWidth || !host.offsetHeight) return;
+      const { cols, rows } = state.term;
       try {
         state.fit.fit();
       } catch (_) {}
+      if (state.term.cols !== cols || state.term.rows !== rows) paintNow();
     }
 
     function setBg(options) {
@@ -145,6 +157,7 @@
       const term = state.term;
       term.options.fontSize = size;
       fit();
+      paintNow();
       doc.fonts
         ?.load(`${size}px ${term.options.fontFamily}`)
         .then(repaint)
