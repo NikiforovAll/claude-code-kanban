@@ -10,14 +10,11 @@
 <body>
 <script src="/vendor/claude-hub-sdk.js"></script>
 <aside id="list" aria-label="Scratchpads">
-  <header><h1>Scratchpads</h1></header>
+  <header><h1>Scratchpads</h1><span id="count"></span></header>
   <nav id="groups"></nav>
-  <section id="running-section" hidden>
-    <h2>Running viewers</h2>
-    <ul id="running"></ul>
-  </section>
 </aside>
 <main id="main">
+  <header id="bar"><button id="back" type="button">‹ Pads</button></header>
   <div id="empty" class="note">
     <p>No pad open.</p>
     <p class="muted">Open a scratchpad from Kanban (click a linked <code>scratchpad.json</code>), or pick one from the list.</p>

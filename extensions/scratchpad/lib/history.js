@@ -20,7 +20,8 @@ function createHistory(file, max = 50) {
   function write() {
     const tmp = `${file}.${process.pid}.tmp`;
     try {
-      fs.writeFileSync(tmp, JSON.stringify({ pads: items }, null, 2));
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(tmp,JSON.stringify({ pads: items }, null, 2));
       fs.renameSync(tmp, file);
     } catch (e) {
       console.error(`history not saved: ${e.message}`);

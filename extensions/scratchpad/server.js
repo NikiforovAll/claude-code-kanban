@@ -4,6 +4,7 @@
 // No dependencies: the server runs on node: modules only, so a linked or bundled install needs no npm install.
 const fs = require('node:fs');
 const http = require('node:http');
+const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { createViewers } = require('./lib/viewers');
@@ -37,7 +38,9 @@ const viewers = createViewers({
   spawn,
   inject: bridge ? (html) => (html.includes('</head>') ? html.replace('</head>', `${tag}</head>`) : tag + html) : undefined,
 });
-const history = createHistory(path.join(__dirname, 'history.json'));
+// The hub runs one set of apps per Claude config dir, so each dir keeps its own pad list.
+const configDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+const history = createHistory(path.join(configDir, '.cck', 'scratchpads', 'history.json'));
 
 const routes = new Map();
 const posts = new Map();
@@ -113,7 +116,7 @@ const optional = (v) => (typeof v === 'string' && v ? v : null);
 routes.set('/api/pads', (_req, res) => {
   const groups = history.groups().map((g) => ({
     ...g,
-    pads: g.pads.map((p) => ({ ...p, key: canonicalPath(p.dir), name: path.basename(p.dir), running: viewers.running(p.dir) })),
+    pads: g.pads.map((p) => ({ ...p, key: canonicalPath(p.dir), name: path.basename(p.dir) })),
   }));
   res.json({ groups, viewers: viewers.list(), scratch: !!resolveBin() });
 });
@@ -122,7 +125,7 @@ posts.set('/api/open', async (req, res) => {
   const body = await readBody(req);
   const dir = padDir(body.path);
   const url = await viewers.serve(dir);
-  history.add({ dir, project: optional(body.project), session: optional(body.session) });
+  if (body.remember !== false) history.add({ dir, project: optional(body.project), session: optional(body.session) });
   res.json({ url, dir, key: canonicalPath(dir), name: path.basename(dir) });
 });
 

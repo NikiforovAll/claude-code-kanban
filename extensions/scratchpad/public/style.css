@@ -47,46 +47,66 @@ body {
   font: 13px/1.45 system-ui, -apple-system, 'Segoe UI', sans-serif;
 }
 
+button {
+  font: inherit;
+  color: inherit;
+}
+
+/* #region LIST */
 #list {
-  width: 260px;
+  width: 248px;
   flex: none;
   overflow-y: auto;
   border-right: 1px solid var(--border);
   background: var(--bg-deep);
-  padding: 12px 8px;
+  padding: 14px 8px 16px;
 }
 
 body.pane #list {
   display: none;
 }
 
+#list > header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 8px 10px;
+}
+
 h1 {
-  margin: 0 8px 12px;
+  flex: 1;
+  margin: 0;
   font-size: 14px;
   font-weight: 600;
 }
 
-h2,
-.group > summary {
-  margin: 14px 8px 4px;
+#count {
+  color: var(--text-muted);
   font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--text-tertiary);
 }
 
-.group > summary {
-  cursor: pointer;
-  list-style: none;
+#list-toggle {
+  align-self: center;
+  margin: -4px -4px -4px 0;
 }
 
-.group > summary::before {
-  content: '▾ ';
+body.list-collapsed #list {
+  width: 40px;
+  padding: 10px 4px;
 }
 
-.group:not([open]) > summary::before {
-  content: '▸ ';
+body.list-collapsed #list > header {
+  margin: 0;
+  justify-content: center;
+}
+
+body.list-collapsed #list > header > :not(#list-toggle),
+body.list-collapsed #groups {
+  display: none;
+}
+
+body.list-collapsed #list-toggle {
+  margin: 0;
 }
 
 ul {
@@ -95,31 +115,113 @@ ul {
   padding: 0;
 }
 
-.pad {
+.group + .group {
+  margin-top: 10px;
+}
+
+.group > summary {
   display: flex;
   align-items: center;
   gap: 6px;
-  width: 100%;
-  padding: 5px 8px;
-  border: 0;
-  border-radius: 6px;
-  background: none;
-  color: var(--text-secondary);
-  font: inherit;
-  text-align: left;
+  padding: 4px 8px;
+  border-radius: 4px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.group > summary::-webkit-details-marker {
+  display: none;
+}
+
+.group > summary:hover {
+  color: var(--text-secondary);
+}
+
+.group > summary::before {
+  content: '';
+  width: 0;
+  height: 0;
+  border-left: 4px solid currentColor;
+  border-top: 3.5px solid transparent;
+  border-bottom: 3.5px solid transparent;
+  transform: rotate(90deg);
+  transition: transform 0.12s;
+}
+
+.group:not([open]) > summary::before {
+  transform: none;
+}
+
+.group .label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.group .n {
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--text-muted);
+}
+
+.pad {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin-top: 1px;
+  border-radius: 6px;
+  color: var(--text-secondary);
 }
 
 .pad:hover,
-.pad:focus-visible {
+.pad:focus-within {
   background: var(--bg-hover);
   color: var(--text-primary);
-  outline: none;
 }
 
 .pad.current {
   background: var(--accent-dim);
   color: var(--text-primary);
+}
+
+.pad.current::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.pad .open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 6px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pad .open:focus-visible,
+.icon:focus-visible,
+#back:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 .pad .name {
@@ -130,69 +232,126 @@ ul {
   white-space: nowrap;
 }
 
+.pad.current .name {
+  font-weight: 500;
+}
+
 .pad .when {
+  flex: none;
   color: var(--text-muted);
   font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
 
 .dot {
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
   flex: none;
   border-radius: 50%;
+  border: 1.5px solid transparent;
+}
+
+.dot.live {
   background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-dim);
 }
 
-.dot.off {
-  background: transparent;
+.dot.idle {
+  border-color: var(--accent);
 }
 
-#running li {
+.dot.stopped {
+  border-color: var(--border);
+}
+
+.actions {
+  display: none;
+  gap: 2px;
+  padding-right: 4px;
+}
+
+.pad:hover .actions,
+.pad:focus-within .actions {
   display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 8px;
-  color: var(--text-secondary);
 }
 
-#running .name {
+.pad:hover .when,
+.pad:focus-within .when {
+  display: none;
+}
+
+.icon {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+
+.icon:hover {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+.icon svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.empty-list {
+  margin: 4px 8px 12px;
+  padding: 10px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+/* #endregion */
+
+/* #region MAIN */
+#main {
+  display: flex;
+  flex-direction: column;
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-#running .state {
-  color: var(--text-muted);
-  font-size: 11px;
+#bar {
+  display: none;
+  align-items: center;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-deep);
 }
 
-.mini {
-  padding: 1px 6px;
+#back {
+  padding: 3px 8px;
   border: 1px solid var(--border);
   border-radius: 4px;
   background: var(--bg-elevated);
   color: var(--text-secondary);
-  font: inherit;
-  font-size: 11px;
+  font-size: 12px;
   cursor: pointer;
 }
 
-.mini:hover {
+#back:hover {
   color: var(--text-primary);
-  border-color: var(--text-tertiary);
-}
-
-#main {
-  position: relative;
-  flex: 1;
-  min-width: 0;
 }
 
 #viewer {
+  flex: 1;
   width: 100%;
-  height: 100%;
+  min-height: 0;
   border: 0;
   display: block;
   background: var(--bg-surface);
@@ -206,16 +365,56 @@ ul {
   text-align: center;
 }
 
-.muted,
-.empty-list {
+.muted {
   color: var(--text-muted);
-}
-
-.empty-list {
-  margin: 8px;
 }
 
 code {
   font-family: ui-monospace, 'Cascadia Code', monospace;
   font-size: 12px;
+}
+/* #endregion */
+
+/* The viewer needs about 480px; below that, show the list or the pad, not both. */
+@media (max-width: 720px) {
+  body:not(.pane) #list {
+    width: 100%;
+    padding: 14px 8px 16px;
+    border-right: 0;
+  }
+
+  #list-toggle {
+    display: none;
+  }
+
+  body.list-collapsed #list > header > :not(#list-toggle),
+  body.list-collapsed #groups {
+    display: revert;
+  }
+
+  body.list-collapsed #list > header {
+    margin: 0 8px 10px;
+  }
+
+  body.has-pad:not(.pane) #list,
+  body:not(.has-pad):not(.pane) #main {
+    display: none;
+  }
+
+  body.has-pad:not(.pane) #bar {
+    display: flex;
+  }
+
+  .pad .open {
+    padding-block: 9px;
+  }
+
+  .actions {
+    display: flex;
+  }
+
+  .pad:hover .when,
+  .pad:focus-within .when {
+    display: inline;
+  }
 }
