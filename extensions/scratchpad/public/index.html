@@ -15,9 +15,39 @@
 </aside>
 <main id="main">
   <header id="bar"><button id="back" type="button">‹ Pads</button></header>
-  <div id="empty" class="note">
-    <p>No pad open.</p>
-    <p class="muted">Open a scratchpad from Kanban (click a linked <code>scratchpad.json</code>), or pick one from the list.</p>
+  <div id="empty">
+    <div class="home">
+      <header class="home-head">
+        <h2 id="home-title">No pad open</h2>
+        <p id="home-sub" class="muted">Pick up where you left off, or open a pad by its path.</p>
+      </header>
+      <div id="no-scratch" class="callout" hidden>
+        <strong>The <code>scratch</code> CLI is not on PATH, so pads cannot open.</strong>
+        <span>Install it with <code>bun add -g @nikiforovall/scratchpad</code>, then reload this page. No restart needed.</span>
+      </div>
+      <section id="recent" hidden>
+        <h3>Recent</h3>
+        <ul id="cards"></ul>
+      </section>
+      <section id="actions">
+        <h3>Quick actions</h3>
+        <div id="action-buttons"></div>
+        <form id="open-form" autocomplete="off">
+          <label for="open-path">Open a folder</label>
+          <div class="field">
+            <input id="open-path" type="text" spellcheck="false" placeholder="Pad folder or its scratchpad.json">
+            <button type="submit">Open</button>
+          </div>
+          <p id="open-error" role="alert" hidden></p>
+        </form>
+      </section>
+      <section class="keys">
+        <h3>Keys</h3>
+        <dl>
+          <dt><kbd>\</kbd></dt><dd>Hide or show the list</dd>
+        </dl>
+      </section>
+    </div>
   </div>
   <div id="error" class="note" hidden></div>
   <iframe id="viewer" title="Scratchpad" hidden></iframe>

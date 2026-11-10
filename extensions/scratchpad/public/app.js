@@ -167,8 +167,9 @@ function showError(message) {
   frame.hidden = true;
 }
 
-async function openPad(dir, { project = '', session = '', remember = true } = {}) {
+async function openPad(dir, { project = '', session = '', remember = true, onError = null } = {}) {
   document.getElementById('error').hidden = true;
+  let ok = false;
   try {
     document.body.classList.add('has-pad');
     const { url, key } = await api('/api/open', { path: dir, project, session, remember });
@@ -180,29 +181,46 @@ async function openPad(dir, { project = '', session = '', remember = true } = {}
     frame.src = src.href;
     frame.hidden = false;
     document.getElementById('empty').hidden = true;
+    ok = true;
   } catch (err) {
-    showError(err.message);
+    if (!onError) showError(err.message);
+    else {
+      document.body.classList.toggle('has-pad', !frame.hidden);
+      onError(err.message);
+    }
   }
   refresh();
+  return ok;
+}
+
+function openListed(p) {
+  history.replaceState(null, '', `?pad=${encodeURIComponent(p.dir)}`);
+  openPad(p.dir, { remember: false });
 }
 
 const ICONS = {
   restart: 'M13 8a5 5 0 1 1-1.46-3.54M13 2.5v2.5h-2.5',
   stop: 'M5 5h6v6H5z',
   sidebar: 'M2.5 3.5h11v9h-11zM6.5 3.5v9',
+  resume: 'M8 4.5V8l2.5 1.5M14 8A6 6 0 1 1 2 8a6 6 0 0 1 12 0',
 };
+
+function svgIcon(name) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 16 16');
+  svg.setAttribute('aria-hidden', 'true');
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  path.setAttribute('d', ICONS[name]);
+  svg.append(path);
+  return svg;
+}
 
 function iconButton(name, label, onClick) {
   const b = el('button', 'icon');
   b.type = 'button';
   b.title = label;
   b.setAttribute('aria-label', label);
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('viewBox', '0 0 16 16');
-  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-  path.setAttribute('d', ICONS[name]);
-  svg.append(path);
-  b.append(svg);
+  b.append(svgIcon(name));
   b.addEventListener('click', onClick);
   return b;
 }
@@ -222,8 +240,7 @@ function padRow(p, v) {
   open.append(el('span', `dot ${state}`), el('span', 'name', p.name), el('span', 'when', p.openedAt ? ago(p.openedAt) : ''));
   open.addEventListener('click', () => {
     if (p.key === current && !frame.hidden) return document.body.classList.add('has-pad');
-    history.replaceState(null, '', `?pad=${encodeURIComponent(p.dir)}`);
-    openPad(p.dir, { remember: false });
+    openListed(p);
   });
   li.append(open);
   if (v) {
@@ -273,6 +290,7 @@ function render({ groups, viewers, scratch }) {
   const others = viewers.filter((v) => !listed.has(v.key));
   if (others.length) nav.append(groupEl('Other running', null, others.map((v) => padRow(v, v))));
   document.getElementById('count').textContent = viewers.length ? `${viewers.length} running` : '';
+  renderHome({ groups, viewers, scratch }, byKey);
 }
 
 async function refresh() {
@@ -281,6 +299,86 @@ async function refresh() {
     render(await api('/api/pads'));
   } catch {}
 }
+// #endregion
+
+// #region HOME
+const RECENT = 6;
+
+function padCard(p, v, scratch) {
+  const [state, stateText] = viewerState(v);
+  const b = el('button', 'card');
+  b.type = 'button';
+  b.title = `${p.dir}\n${stateText}`;
+  b.disabled = !scratch;
+  const top = el('span', 'card-top');
+  top.append(el('span', `dot ${state}`), el('span', 'name', p.name));
+  const meta = el('span', 'card-meta');
+  meta.append(el('span', 'label', p.label), el('span', 'when', p.openedAt ? ago(p.openedAt) : ''));
+  b.append(top, meta);
+  b.addEventListener('click', () => openListed(p));
+  const li = el('li');
+  li.append(b);
+  return li;
+}
+
+function actionButton(icon, label, detail, onClick) {
+  const b = el('button', 'action');
+  b.type = 'button';
+  b.append(svgIcon(icon), el('span', 'action-label', label));
+  if (detail) b.append(el('span', 'action-detail', detail));
+  b.addEventListener('click', onClick);
+  return b;
+}
+
+function renderHome({ groups, viewers, scratch }, byKey) {
+  const pads = groups
+    .flatMap((g) => g.pads.map((p) => ({ ...p, label: g.label })))
+    .sort((a, b) => (b.openedAt || 0) - (a.openedAt || 0));
+  const has = pads.length > 0;
+  document.getElementById('home-title').textContent = has ? 'No pad open' : 'Welcome to Scratchpads';
+  document.getElementById('home-sub').textContent = has
+    ? 'Pick up where you left off, or open a pad by its path.'
+    : 'A scratchpad is a folder of notes with a scratchpad.json. Pads you open show up here and in the list.';
+  document.getElementById('no-scratch').hidden = scratch;
+  document.getElementById('recent').hidden = !has;
+  document.getElementById('cards').replaceChildren(...pads.slice(0, RECENT).map((p) => padCard(p, byKey.get(p.key), scratch)));
+
+  const buttons = document.getElementById('action-buttons');
+  buttons.replaceChildren();
+  if (scratch && has) buttons.append(actionButton('resume', 'Open last pad', pads[0].name, () => openListed(pads[0])));
+  const idle = viewers.filter((v) => !v.streams);
+  if (idle.length) {
+    const label = idle.length === 1 ? 'Stop the idle viewer' : `Stop ${idle.length} idle viewers`;
+    buttons.append(
+      actionButton('stop', label, 'No page shows them', async () => {
+        await Promise.all(idle.map((v) => api('/api/viewers/stop', { path: v.dir }).catch(() => {})));
+        refresh();
+      }),
+    );
+  }
+  buttons.hidden = !buttons.childElementCount;
+  document.getElementById('open-form').hidden = !scratch;
+  document.getElementById('actions').hidden = !scratch && !idle.length;
+}
+
+document.getElementById('open-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const input = document.getElementById('open-path');
+  const error = document.getElementById('open-error');
+  // Windows "Copy as path" wraps the path in quotes.
+  const dir = input.value.trim().replace(/^"(.*)"$/, '$1');
+  error.hidden = true;
+  if (!dir) return input.focus();
+  const ok = await openPad(dir, {
+    onError: (message) => {
+      error.textContent = message;
+      error.hidden = false;
+    },
+  });
+  if (!ok) return;
+  history.replaceState(null, '', `?pad=${encodeURIComponent(dir)}`);
+  input.value = '';
+});
 // #endregion
 
 document.getElementById('back').addEventListener('click', () => {
