@@ -85,6 +85,11 @@ h1 {
   font-size: 11px;
 }
 
+#home-button {
+  align-self: center;
+  margin: -4px -6px -4px 0;
+}
+
 #list-toggle {
   align-self: center;
   margin: -4px -4px -4px 0;
@@ -96,16 +101,23 @@ body.list-collapsed #list {
 }
 
 body.list-collapsed #list > header {
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
   margin: 0;
-  justify-content: center;
 }
 
-body.list-collapsed #list > header > :not(#list-toggle),
+body.list-collapsed #list > header > :not(#list-toggle, #home-button),
 body.list-collapsed #groups {
   display: none;
 }
 
 body.list-collapsed #list-toggle {
+  order: -1;
+  margin: 0;
+}
+
+body.list-collapsed #home-button {
   margin: 0;
 }
 
@@ -660,16 +672,19 @@ kbd {
     border-right: 0;
   }
 
-  #list-toggle {
+  #list-toggle,
+  #home-button {
     display: none;
   }
 
-  body.list-collapsed #list > header > :not(#list-toggle),
+  body.list-collapsed #list > header > :not(#list-toggle, #home-button),
   body.list-collapsed #groups {
     display: revert;
   }
 
   body.list-collapsed #list > header {
+    flex-direction: row;
+    align-items: baseline;
     margin: 0 8px 10px;
   }
 

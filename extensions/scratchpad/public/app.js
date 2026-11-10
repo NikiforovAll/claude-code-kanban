@@ -202,6 +202,7 @@ const ICONS = {
   restart: 'M13 8a5 5 0 1 1-1.46-3.54M13 2.5v2.5h-2.5',
   stop: 'M5 5h6v6H5z',
   sidebar: 'M2.5 3.5h11v9h-11zM6.5 3.5v9',
+  home: 'M2.5 7.5 8 3l5.5 4.5M4 6.5V13h8V6.5',
   resume: 'M8 4.5V8l2.5 1.5M14 8A6 6 0 1 1 2 8a6 6 0 0 1 12 0',
 };
 
@@ -381,6 +382,21 @@ document.getElementById('open-form').addEventListener('submit', async (e) => {
 });
 // #endregion
 
+function goHome() {
+  current = null;
+  viewerOrigin = null;
+  frame.hidden = true;
+  // Unloading the page closes its live-reload stream, so the viewer can go idle.
+  frame.src = 'about:blank';
+  document.getElementById('error').hidden = true;
+  document.getElementById('empty').hidden = false;
+  document.body.classList.remove('has-pad');
+  history.replaceState(null, '', location.pathname);
+  refresh();
+  // The viewer's proxy sees the stream close a moment after the unload.
+  setTimeout(refresh, 600);
+}
+
 document.getElementById('back').addEventListener('click', () => {
   document.body.classList.remove('has-pad');
   refresh();
@@ -410,7 +426,9 @@ function toggleList() {
 const listToggle = iconButton('sidebar', '', toggleList);
 listToggle.id = 'list-toggle';
 listToggle.setAttribute('aria-label', 'Toggle list');
-document.querySelector('#list > header').append(listToggle);
+const homeButton = iconButton('home', 'Home', goHome);
+homeButton.id = 'home-button';
+document.querySelector('#list > header').append(homeButton, listToggle);
 let collapsed = false;
 try {
   collapsed = localStorage.getItem(COLLAPSED) === '1';
