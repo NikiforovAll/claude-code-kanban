@@ -3312,7 +3312,7 @@ app.post('/api/terminal/pick-folder', async (req, res) => {
   }
 });
 
-// The hub's terminalHost setting reaches only the board page, which relays it here.
+// A change to the hub's terminalHost setting reaches only the board page, which relays it here.
 app.post('/api/terminal/options', (req, res) => {
   if (!terminal.authorized(req.get('x-terminal-token'))) return res.status(401).json({ error: 'invalid terminal token' });
   if (typeof req.body?.conptyDll !== 'boolean') return res.status(400).json({ error: 'conptyDll must be a boolean' });

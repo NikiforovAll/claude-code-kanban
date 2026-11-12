@@ -66,16 +66,16 @@ describe('createProgramStatus', () => {
     const ps = createProgramStatus();
     assert.equal(ps.handle('state=working:app=claude-code'), true);
     assert.equal(ps.handle('state=blocked:kind=permission:id=agent/1'), true);
-    assert.deepEqual(ps.summary(), { state: 'blocked', kind: 'permission', app: 'claude-code', msg: null, progress: null });
+    assert.deepEqual(ps.summary(), { state: 'blocked', kind: 'permission', app: 'claude-code', msg: null });
     assert.equal(ps.handle('state=clear:id=agent'), true);
-    assert.deepEqual(ps.summary(), { state: 'working', kind: null, app: 'claude-code', msg: null, progress: null });
+    assert.deepEqual(ps.summary(), { state: 'working', kind: null, app: 'claude-code', msg: null });
   });
 
   it('says no change when the summary stays the same', () => {
     const ps = createProgramStatus();
     ps.handle('state=working:app=claude-code:progress=10');
-    assert.equal(ps.handle('state=working:app=claude-code:progress=19'), false);
-    assert.equal(ps.handle('state=working:app=claude-code:progress=20'), true);
+    assert.equal(ps.handle('state=working:app=claude-code:progress=90'), false);
+    assert.equal(ps.handle('state=working:app=claude-code:msg=VGVzdHM='), true);
     assert.equal(ps.handle('state=nope'), false);
   });
 
@@ -92,7 +92,7 @@ describe('createProgramStatus', () => {
     const ps = createProgramStatus();
     ps.handle('state=working:app=brew');
     ps.handle('state=done');
-    assert.deepEqual(ps.summary(), { state: 'done', kind: null, app: null, msg: null, progress: null });
+    assert.deepEqual(ps.summary(), { state: 'done', kind: null, app: null, msg: null });
   });
 
   it('drops working and blocked on a prompt or exit, and keeps done and error', () => {

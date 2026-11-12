@@ -55,6 +55,13 @@
       "default": "dots"
     },
     {
+      "key": "cardStatus",
+      "type": "boolean",
+      "label": "Live status on session cards",
+      "help": "Shows what a session in the board's terminal reports it is doing, such as its message and progress, in the card's footer in place of the time.",
+      "default": true
+    },
+    {
       "key": "terminalHost",
       "type": "choice",
       "label": "Terminal host (Windows)",

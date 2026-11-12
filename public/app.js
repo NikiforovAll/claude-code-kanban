@@ -153,6 +153,7 @@ let runningTerminals = new Set();
 let trustWaiting = new Set();
 // What a program in an embedded terminal says it is doing (OSC 7501), by session id. It wins over the hook and transcript signals.
 let reportedStatus = new Map();
+let cardStatus = true;
 let selectedSessionIdx = -1;
 let selectedSessionKbId = null;
 let sessionJustSelected = false;
@@ -603,20 +604,18 @@ function sessionBarClass(s) {
   if (finish === 'error') return 'reported-error';
   return s.unread || finish === 'done' ? 'unread' : '';
 }
-function reportedStatusHtml(s) {
+function reportedStatusHtml(s, timeText) {
   const r = reportedStatus.get(s.id);
-  if (!r || trustWaiting.has(s.id)) return '';
+  if (!r || !cardStatus || trustWaiting.has(s.id)) return '';
   const finish = reportedFinish(s.id);
   const chip = r.state === 'blocked' ? reportKindLabel(r) : finish === 'error' ? 'Error' : null;
   const showMsg = r.msg && (r.state === 'blocked' || r.state === 'working' || finish);
-  const pct = Number.isInteger(r.progress) && (r.state === 'working' || r.state === 'blocked') ? r.progress : null;
-  if (!chip && !showMsg && pct === null) return '';
+  if (!chip && !showMsg) return '';
   const app = r.app && r.app !== 'claude-code' ? `<span class="report-app">${escapeHtml(r.app)}</span>` : '';
-  const progress =
-    pct === null
-      ? ''
-      : `<div class="progress-bar report-progress" title="Reported progress"><div class="progress-fill" style="width: ${pct}%"></div></div><span class="progress-text">${pct}%</span>`;
-  return `<div class="session-report report-${escapeHtml(r.state)}">${chip ? `<span class="report-chip">${chip}</span>` : ''}${app}<span class="report-msg">${showMsg ? escapeHtml(r.msg) : ''}</span>${progress}</div>`;
+  const msg = showMsg
+    ? `<span class="report-msg" title="${escapeHtml(r.msg)}">${escapeHtml(r.msg)}</span>`
+    : `<span class="report-msg">${timeText}</span>`;
+  return `<span class="session-report report-${escapeHtml(r.state)}">${chip ? `<span class="report-chip">${chip}</span>` : ''}${app}${msg}</span>`;
 }
 function isActiveSession(s) {
   if (isWaitingSession(s)) return false;
@@ -4500,15 +4499,16 @@ function renderSessions() {
         ? `<div class="session-progress" title="${escapeHtml(`${session.pending} pending, ${session.inProgress} in progress, ${session.completed} completed`)}"><div class="progress-bar"><div class="progress-fill done" style="width: ${pct(session.completed)}%"></div>${session.inProgress > 0 ? `<div class="progress-fill wip" style="width: ${pct(session.inProgress)}%"></div>` : ''}</div><span class="progress-text">${session.completed + session.inProgress}/${total}</span></div>`
         : '';
     const metricsHtml = progressHtml + (showCtx ? renderContextBar(session) : '');
+    const timeText = formatDate(session.modifiedAt);
+    const reportHtml = reportedStatusHtml(session, timeText);
     return `
           <button onclick="openSession('${sid}')" draggable="true" data-hub-part="session-card" data-session-id="${escapeHtml(session.id)}" class="session-item ${isActive ? 'active' : ''} ${sessionBarClass(session)} ${tempClass} ${idleClass} ${justFinishedClass}${childDepthClass(childDepth.get(session.id))}">
             <span class="session-pin-btn${pinClass}" onclick="event.stopPropagation();toggleSessionPin('${sid}')" title="${pinTitle} session">${pinState === 'sticky' ? SESSION_STAR_SVG : SESSION_PIN_SVG}</span>
             <div class="session-name">${escapeHtml(sessionName)}</div>
             ${renderSessionIdentity(projectHtml, session.gitBranch)}
-            ${reportedStatusHtml(session)}
             ${metricsHtml ? `<div class="session-metrics">${metricsHtml}</div>` : ''}
             <div class="session-footer">
-              <div class="session-time">${formatDate(session.modifiedAt)}</div>
+              <div class="session-time${reportHtml ? ' has-report' : ''}"${reportHtml ? ` title="${escapeHtml(timeText)}"` : ''}>${reportHtml || timeText}</div>
               <span class="session-indicators">
                 ${isTeam ? `<span class="team-badge" title="${memberCount} team members"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>${memberCount}</span>` : ''}
                 ${isTeam || session.project || showCtx ? `<span class="team-info-btn" onclick="event.stopPropagation(); showSessionInfoModal('${sid}')" title="View session info"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></span>` : ''}
@@ -12518,6 +12518,11 @@ function applyHubSettings(s) {
   else delete sessionsList.dataset.zenPattern;
   terminalHost = s.terminalHost || null;
   syncTerminalHost();
+  const showCardStatus = s.cardStatus !== false;
+  if (showCardStatus !== cardStatus) {
+    cardStatus = showCardStatus;
+    renderSessionViews();
+  }
 }
 
 // The settings can land before /api/config says whether this board has a terminal.
