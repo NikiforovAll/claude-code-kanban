@@ -25,7 +25,7 @@ function startServer(extraArgs) {
   // under one (fs-event.c), which kills the server the first time it writes to .cck.
   const dir = realpathSync.native(mkdtempSync(path.join(os.tmpdir(), 'cck-term-')));
   const child = spawn(process.execPath, [path.join(__dirname, '..', 'server.js'), ...extraArgs], {
-    env: { ...process.env, PORT: '0', CLAUDE_CONFIG_DIR: dir, CCK_TERMINAL_TOKEN: TOKEN, CLAUDE_HUB: '' },
+    env: { ...process.env, PORT: '0', CLAUDE_CONFIG_DIR: dir, CCK_TERMINAL_TOKEN: TOKEN, CLAUDE_HUB: '', HUB_APP_SETTINGS: '' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   const port = new Promise((resolve, reject) => {
@@ -549,6 +549,17 @@ describe('ptyEnv', () => {
     assert.equal(env.PORT, undefined);
   });
 
+  it('keeps the hub settings of the board out of the session', () => {
+    const saved = process.env.HUB_APP_SETTINGS;
+    process.env.HUB_APP_SETTINGS = '{"terminalHost":"bundled"}';
+    try {
+      assert.equal(ptyEnv({ claudeDir: '/c', isDefaultDir: true }).HUB_APP_SETTINGS, undefined);
+    } finally {
+      if (saved === undefined) delete process.env.HUB_APP_SETTINGS;
+      else process.env.HUB_APP_SETTINGS = saved;
+    }
+  });
+
   it('forces OSC 8 hyperlinks', () => {
     assert.equal(ptyEnv({ claudeDir: '/c', isDefaultDir: true }).FORCE_HYPERLINK, '1');
   });
@@ -629,6 +640,11 @@ describe('readTerminalConfig', () => {
   it('keeps the system ConPTY unless the block asks for the bundled one', () => {
     assert.equal(readTerminalConfig({ argv: [], env: {} }).conptyDll, false);
     assert.equal(readTerminalConfig({ argv: [], env: { CCK_TERMINAL: '{"conptyDll":true}' } }).conptyDll, true);
+  });
+  it('takes the bundled ConPTY from the hub setting at spawn', () => {
+    assert.equal(readTerminalConfig({ argv: [], env: { HUB_APP_SETTINGS: '{"terminalHost":"bundled"}' } }).conptyDll, true);
+    assert.equal(readTerminalConfig({ argv: [], env: { HUB_APP_SETTINGS: '{"terminalHost":"system"}' } }).conptyDll, false);
+    assert.equal(readTerminalConfig({ argv: [], env: { HUB_APP_SETTINGS: '{' } }).conptyDll, false);
   });
   it('restores terminals unless the block turns it off', () => {
     assert.equal(readTerminalConfig({ argv: [], env: {} }).restore, true);
@@ -921,7 +937,7 @@ describe('terminal restore', { concurrency: true }, () => {
     p.emit('\x1b]7501;state=blocked:kind=permi');
     p.emit('ssion:app=claude-code\x07');
     await until(() => t.list()[0].programStatus);
-    assert.deepEqual(t.list()[0].programStatus, { state: 'blocked', kind: 'permission', app: 'claude-code', msg: null, progress: null });
+    assert.deepEqual(t.list()[0].programStatus, { state: 'blocked', kind: 'permission', app: 'claude-code', msg: null });
     p.emit('\x1b]133;A\x07');
     await until(() => !t.list()[0].programStatus);
     assert.equal(t.list()[0].programStatus, null);
