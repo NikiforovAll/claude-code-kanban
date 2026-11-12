@@ -66,23 +66,33 @@ describe('createProgramStatus', () => {
     const ps = createProgramStatus();
     assert.equal(ps.handle('state=working:app=claude-code'), true);
     assert.equal(ps.handle('state=blocked:kind=permission:id=agent/1'), true);
-    assert.deepEqual(ps.summary(), { state: 'blocked', kind: 'permission', app: 'claude-code' });
+    assert.deepEqual(ps.summary(), { state: 'blocked', kind: 'permission', app: 'claude-code', msg: null, progress: null });
     assert.equal(ps.handle('state=clear:id=agent'), true);
-    assert.deepEqual(ps.summary(), { state: 'working', kind: null, app: 'claude-code' });
+    assert.deepEqual(ps.summary(), { state: 'working', kind: null, app: 'claude-code', msg: null, progress: null });
   });
 
   it('says no change when the summary stays the same', () => {
     const ps = createProgramStatus();
     ps.handle('state=working:app=claude-code:progress=10');
-    assert.equal(ps.handle('state=working:app=claude-code:progress=20'), false);
+    assert.equal(ps.handle('state=working:app=claude-code:progress=19'), false);
+    assert.equal(ps.handle('state=working:app=claude-code:progress=20'), true);
     assert.equal(ps.handle('state=nope'), false);
+  });
+
+  it('shows a short msg with bidi and invisible format characters removed', () => {
+    const ps = createProgramStatus();
+    ps.handle(`state=blocked:kind=question:msg=${b64('‮Which ​database?⁦')}`);
+    assert.equal(ps.summary().msg, 'Which database?');
+    ps.handle(`state=blocked:msg=${b64('x'.repeat(500))}`);
+    assert.equal(ps.summary().msg.length, 160);
+    assert.ok(ps.summary().msg.endsWith('…'));
   });
 
   it('replaces a record whole, so a key left out is gone', () => {
     const ps = createProgramStatus();
     ps.handle('state=working:app=brew');
     ps.handle('state=done');
-    assert.deepEqual(ps.summary(), { state: 'done', kind: null, app: null });
+    assert.deepEqual(ps.summary(), { state: 'done', kind: null, app: null, msg: null, progress: null });
   });
 
   it('drops working and blocked on a prompt or exit, and keeps done and error', () => {

@@ -1158,7 +1158,9 @@ body.booting .boot-splash {
 .session-item.unread::before,
 .session-item.permission-pending::before,
 .sp-row.unread::before,
-.sp-row.permission-pending::before {
+.sp-row.permission-pending::before,
+.session-item.reported-error::before,
+.sp-row.reported-error::before {
   content: '';
   position: absolute;
   inset: -1px;
@@ -1167,7 +1169,8 @@ body.booting .boot-splash {
 }
 
 .session-item.unread::before,
-.session-item.permission-pending::before {
+.session-item.permission-pending::before,
+.session-item.reported-error::before {
   border-radius: inherit;
 }
 
@@ -1175,6 +1178,63 @@ body.booting .boot-splash {
 .sp-row.permission-pending::before {
   border-left-color: var(--warning);
   animation: agent-badge-pulse 1.6s ease-in-out infinite;
+}
+
+.session-item.reported-error::before,
+.sp-row.reported-error::before {
+  border-left-color: var(--danger);
+}
+
+.session-report {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-top: var(--card-gap);
+  font-family: var(--sans);
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--text-secondary);
+}
+
+.report-chip {
+  flex: none;
+  padding: 0 6px;
+  border: 1px solid currentColor;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 14px;
+  color: var(--warning);
+}
+
+.report-error .report-chip,
+.report-chip.report-error {
+  color: var(--danger);
+}
+
+.report-app {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.report-msg {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.session-report .report-progress {
+  flex: none;
+  width: 40px;
+}
+
+.sp-report {
+  margin-left: 6px;
 }
 
 @media (prefers-reduced-motion: reduce) {

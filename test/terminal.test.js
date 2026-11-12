@@ -921,7 +921,7 @@ describe('terminal restore', { concurrency: true }, () => {
     p.emit('\x1b]7501;state=blocked:kind=permi');
     p.emit('ssion:app=claude-code\x07');
     await until(() => t.list()[0].programStatus);
-    assert.deepEqual(t.list()[0].programStatus, { state: 'blocked', kind: 'permission', app: 'claude-code' });
+    assert.deepEqual(t.list()[0].programStatus, { state: 'blocked', kind: 'permission', app: 'claude-code', msg: null, progress: null });
     p.emit('\x1b]133;A\x07');
     await until(() => !t.list()[0].programStatus);
     assert.equal(t.list()[0].programStatus, null);

@@ -3273,7 +3273,7 @@ const terminal = createTerminalClient({
   resolveCwd: resolveSessionFolder,
   shellRun: (id) => panes.shellPane(id)?.run || null,
   isAllowedFolder,
-  onChange: () => broadcast({ type: 'terminals-update', ids: terminal.ids(), awaitingTrust: terminal.awaitingTrust(), programStatus: terminal.programStatus() }),
+  onChange: () => broadcast({ type: 'terminals-update', ids: terminal.ids(), awaitingTrust: terminal.awaitingTrust(), programStatus: terminal.programStatus(), statusSilent: terminal.statusSilent() }),
   onExit: (id) => {
     if (dispatched.get(id)) broadcast({ type: 'dispatch-update' });
   },
