@@ -401,7 +401,9 @@ function markSessionRead(sessionId) {
 }
 
 function markOpenSessionRead() {
-  if (currentSessionId && viewMode === 'session' && isOnScreen()) markSessionRead(currentSessionId);
+  if (!currentSessionId || viewMode !== 'session' || !isOnScreen()) return;
+  markSessionRead(currentSessionId);
+  markReportSeen(currentSessionId);
 }
 
 async function loadSearchTasks() {
@@ -591,6 +593,11 @@ function reportedBlocked(id) {
 function reportedFinish(id) {
   const state = reportedStatus.get(id)?.state;
   return isFinishState(state) && !reportSeen.has(id) ? state : null;
+}
+function markReportSeen(id) {
+  if (!reportedFinish(id)) return;
+  reportSeen.add(id);
+  renderSessionViews();
 }
 function forgetSeenReports() {
   for (const id of reportSeen) if (!isFinishState(reportedStatus.get(id)?.state)) reportSeen.delete(id);
@@ -16527,10 +16534,7 @@ async function openSession(sessionId) {
   if (!alreadyOpen) termState.openedByUser = sessionId;
   else if (termState.attached && promptAwaitsUser(sessionId)) focusTerminalPane();
   markSessionRead(sessionId);
-  if (reportedFinish(sessionId)) {
-    reportSeen.add(sessionId);
-    renderSessionViews();
-  }
+  markReportSeen(sessionId);
   return fetchTasks(sessionId);
 }
 
