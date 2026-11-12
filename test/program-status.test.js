@@ -1,6 +1,6 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const { parseReport, createProgramStatus } = require('../lib/program-status');
+const { parseReport, createProgramStatus, createQueryScanner } = require('../lib/program-status');
 
 const b64 = (text) => Buffer.from(text, 'utf8').toString('base64');
 
@@ -119,5 +119,16 @@ describe('createProgramStatus', () => {
     ps.handle('state=blocked:id=first');
     for (let i = 0; i < 256; i++) ps.handle(`state=idle:id=r${i}`);
     assert.equal(ps.summary().state, 'idle');
+  });
+});
+
+describe('createQueryScanner', () => {
+  it('counts each query once, with either terminator and across chunks', () => {
+    const scan = createQueryScanner();
+    assert.equal(scan('a\x1b]7501;?\x07b\x1b]7501;?\x1b\\'), 2);
+    assert.equal(scan('\x1b]75'), 0);
+    assert.equal(scan('01;?\x07'), 1);
+    assert.equal(scan('plain output'), 0);
+    assert.equal(scan('\x1b]7501;state=idle\x07'), 0);
   });
 });

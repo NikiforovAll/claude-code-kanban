@@ -931,8 +931,14 @@ describe('terminal restore', { concurrency: true }, () => {
     const FRESH = 'aaaaaaaa-0000-0000-0000-000000000009';
     assert.equal((await t.startNew({ id: FRESH, cwd: os.tmpdir() })).id, FRESH);
     const p = pty.spawned[0];
-    p.emit('\x1b]7501;?\x1b\\');
-    await until(() => p.written.includes('\x1b]7501;?\x1b\\'));
+    const replies = () => p.written.filter((w) => w === QUERY_REPLY).length;
+    p.emit('\x1b]7501;?\x1b\\\x1b[c');
+    assert.equal(replies(), 1, 'the reply goes out before the bytes reach a viewer');
+    p.emit('\x1b]750');
+    p.emit('1;?\x07');
+    assert.equal(replies(), 2, 'a query split across chunks');
+    await wait(SAVE_MS);
+    assert.equal(replies(), 2, 'the parser does not reply again');
     assert.equal(t.list()[0].programStatus, null);
     p.emit('\x1b]7501;state=blocked:kind=permi');
     p.emit('ssion:app=claude-code\x07');
