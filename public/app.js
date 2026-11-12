@@ -6,6 +6,7 @@ const THEME_KEY = 'theme';
 const COLOR_THEME_KEY = 'color-theme';
 // Shared too, so after a config-dir switch the cursor goes where it was on the board just left.
 const FOCUS_ZONE_KEY = 'focus-zone';
+const SILENT_STATUS_HINT_KEY = 'silent-status-hint';
 const GLOBAL_KEYS = new Set([THEME_KEY, COLOR_THEME_KEY, FOCUS_ZONE_KEY]);
 // localStorage names are kept as they are: renaming one drops what users saved under it.
 const MESSAGE_PANEL_OPEN_KEY = 'message-panel-open';
@@ -577,9 +578,45 @@ function isWaitingSession(s) {
   const reported = reportedStatus.get(s.id);
   return reported ? reported.state === 'blocked' : !!s.hasWaitingForUser;
 }
+// A reported done or error stays on the card until the user opens the session (done until seen).
+const reportSeen = new Set();
+const REPORT_KIND_LABELS = { permission: 'Permission', question: 'Question', auth: 'Sign-in' };
+const reportKindLabel = (r) => REPORT_KIND_LABELS[r.kind] || 'Needs you';
+const isFinishState = (state) => state === 'done' || state === 'error';
+
+function reportedBlocked(id) {
+  return reportedStatus.get(id)?.state === 'blocked' && !trustWaiting.has(id);
+}
+function reportedFinish(id) {
+  const state = reportedStatus.get(id)?.state;
+  return isFinishState(state) && !reportSeen.has(id) ? state : null;
+}
+function forgetSeenReports() {
+  for (const id of reportSeen) if (!isFinishState(reportedStatus.get(id)?.state)) reportSeen.delete(id);
+  if (currentSessionId && viewMode === 'session' && isOnScreen() && reportedFinish(currentSessionId)) {
+    reportSeen.add(currentSessionId);
+  }
+}
 function sessionBarClass(s) {
   if (isWaitingSession(s)) return 'permission-pending';
-  return s.unread ? 'unread' : '';
+  const finish = reportedFinish(s.id);
+  if (finish === 'error') return 'reported-error';
+  return s.unread || finish === 'done' ? 'unread' : '';
+}
+function reportedStatusHtml(s) {
+  const r = reportedStatus.get(s.id);
+  if (!r || trustWaiting.has(s.id)) return '';
+  const finish = reportedFinish(s.id);
+  const chip = r.state === 'blocked' ? reportKindLabel(r) : finish === 'error' ? 'Error' : null;
+  const showMsg = r.msg && (r.state === 'blocked' || r.state === 'working' || finish);
+  const pct = Number.isInteger(r.progress) && (r.state === 'working' || r.state === 'blocked') ? r.progress : null;
+  if (!chip && !showMsg && pct === null) return '';
+  const app = r.app && r.app !== 'claude-code' ? `<span class="report-app">${escapeHtml(r.app)}</span>` : '';
+  const progress =
+    pct === null
+      ? ''
+      : `<div class="progress-bar report-progress" title="Reported progress"><div class="progress-fill" style="width: ${pct}%"></div></div><span class="progress-text">${pct}%</span>`;
+  return `<div class="session-report report-${escapeHtml(r.state)}">${chip ? `<span class="report-chip">${chip}</span>` : ''}${app}<span class="report-msg">${showMsg ? escapeHtml(r.msg) : ''}</span>${progress}</div>`;
 }
 function isActiveSession(s) {
   if (isWaitingSession(s)) return false;
@@ -4468,6 +4505,7 @@ function renderSessions() {
             <span class="session-pin-btn${pinClass}" onclick="event.stopPropagation();toggleSessionPin('${sid}')" title="${pinTitle} session">${pinState === 'sticky' ? SESSION_STAR_SVG : SESSION_PIN_SVG}</span>
             <div class="session-name">${escapeHtml(sessionName)}</div>
             ${renderSessionIdentity(projectHtml, session.gitBranch)}
+            ${reportedStatusHtml(session)}
             ${metricsHtml ? `<div class="session-metrics">${metricsHtml}</div>` : ''}
             <div class="session-footer">
               <div class="session-time">${formatDate(session.modifiedAt)}</div>
@@ -11009,8 +11047,10 @@ function setupEventSource() {
         if (!skipOffScreen()) refreshOpenPlan();
       }
 
-      if (data.type === 'terminals-update' && Array.isArray(data.ids))
+      if (data.type === 'terminals-update' && Array.isArray(data.ids)) {
         setRunningTerminals(data.ids, data.awaitingTrust, data.programStatus);
+        hintSilentStatus(data.statusSilent);
+      }
 
       if (data.type === 'terminal:ended' && typeof data.id === 'string') onTerminalEnded(data.id);
 
@@ -13457,6 +13497,15 @@ function spDotHtml(session) {
   return `${SP_STATES[spState(session)]}${runningTerminals.has(session.id) ? SP_TERMINAL : SP_DOT}</span>`;
 }
 
+function spReportHtml(session) {
+  if (reportedBlocked(session.id)) {
+    const r = reportedStatus.get(session.id);
+    const label = reportKindLabel(r);
+    return `<span class="report-chip sp-report" title="${escapeHtml(r.msg || label)}">${label}</span>`;
+  }
+  return reportedFinish(session.id) === 'error' ? '<span class="report-chip sp-report report-error">Error</span>' : '';
+}
+
 function spPinHtml(session) {
   const state = getSessionPinState(session.id);
   if (state === 'sticky') return `<span class="sp-pin sticky" title="Sticky">${SESSION_STAR_SVG}</span>`;
@@ -13538,6 +13587,7 @@ function renderSessionPicker() {
       return `${below && i === local.length ? section : ''}<button class="sp-row${s.id === currentSessionId ? ' current' : ''}${below ? ' outside' : ''} ${sessionBarClass(s)}" data-idx="${i}" title="${escapeHtml(s.project ? `${s.id}\n${s.project}` : s.id)}">
         ${spDotHtml(s)}
         <span class="sp-name">${escapeHtml(sessionDisplayName(s))}</span>
+        ${spReportHtml(s)}
         <span class="sp-project">${escapeHtml(project)}</span>
         ${s.gitBranch ? `<span class="sp-branch">${escapeHtml(s.gitBranch)}</span>` : ''}
         <span class="sp-count">${s.completed}/${s.taskCount}</span>
@@ -16472,6 +16522,10 @@ async function openSession(sessionId) {
   if (!alreadyOpen) termState.openedByUser = sessionId;
   else if (termState.attached && promptAwaitsUser(sessionId)) focusTerminalPane();
   markSessionRead(sessionId);
+  if (reportedFinish(sessionId)) {
+    reportSeen.add(sessionId);
+    renderSessionViews();
+  }
   return fetchTasks(sessionId);
 }
 
@@ -19388,6 +19442,8 @@ async function loadTerminals() {
   runningTerminals = new Set(list.map((t) => t.id));
   setTrustWaiting(list.filter((t) => t.awaitingTrust).map((t) => t.id));
   reportedStatus = new Map(list.filter((t) => t.programStatus).map((t) => [t.id, t.programStatus]));
+  forgetSeenReports();
+  hintSilentStatus(list.filter((t) => t.statusSilent).map((t) => t.id));
   rememberTerminalIds(list);
   syncShowCard();
   pushTerminalClaims();
@@ -19415,6 +19471,7 @@ function setTrustWaiting(ids) {
 function setRunningTerminals(ids, awaitingTrust = [], programStatus = {}) {
   runningTerminals = new Set(ids);
   reportedStatus = new Map(Object.entries(programStatus));
+  forgetSeenReports();
   setTrustWaiting(awaitingTrust);
   forgetEndedTerminals();
   syncShowCard();
@@ -19422,6 +19479,19 @@ function setRunningTerminals(ids, awaitingTrust = [], programStatus = {}) {
   if (ids.some((id) => !sessions.some((s) => s.id === id))) fetchSessions(false).catch(() => {});
   else renderSessionViews();
   renderActivityChip();
+}
+
+// Once per page: a program asked for status reports and none came, so the reply was lost.
+let silentStatusHinted = false;
+function hintSilentStatus(ids) {
+  if (silentStatusHinted || !ids?.length || store.getItem(SILENT_STATUS_HINT_KEY) === 'off') return;
+  silentStatusHinted = true;
+  showToast(
+    'Claude Code cannot report its status in this terminal',
+    'info',
+    { label: "Don't show again", onClick: () => store.setItem(SILENT_STATUS_HINT_KEY, 'off') },
+    'Set Terminal host (Windows) to Bundled in the Kanban settings, then start a new terminal.',
+  );
 }
 
 function showSessionTerminal(sessionId) {
@@ -20605,7 +20675,27 @@ function schedulePublish() {
   publishTimer = setTimeout(() => {
     publishSession();
     publishVoiceContext();
+    publishAttention();
   }, 150);
+}
+
+// attention.changed lists the sessions whose terminal reports blocked, for the hub's title,
+// taskbar badge and toast. Only the id, name and kind cross: the program's msg stays on the board.
+let publishedAttention = '[]';
+const ATTENTION_MAX = 20;
+
+function publishAttention() {
+  const blocked = [];
+  for (const [id, r] of reportedStatus) {
+    if (!reportedBlocked(id)) continue;
+    const s = sessions.find((x) => x.id === id);
+    blocked.push({ id, name: s ? sessionDisplayName(s) : id.slice(0, 8), kind: r.kind });
+    if (blocked.length === ATTENTION_MAX) break;
+  }
+  const key = JSON.stringify(blocked);
+  if (key === publishedAttention) return;
+  publishedAttention = key;
+  hub.publish('attention.changed', { blocked });
 }
 
 function publishSession() {
