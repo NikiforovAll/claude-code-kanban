@@ -27,6 +27,16 @@ When the transcript is older than `AGENT_STALE_MS` (30 min), the server skips th
 
 The client adds one more signal. `isSessionLive` (`public/app.js`) is `hasRecentLog` with a transcript write in the last `LIVE_INDICATOR_MS` (10 s).
 
+### Reported status (OSC 7501)
+
+A session in the board's embedded terminal can say what it is doing with the [Program Status Protocol](https://www.superlogical.com/rex/docs/build/program-status) (OSC 7501, revision 0.4). Claude Code 2.1.295 and later sends it, but only after the terminal answers its `OSC 7501 ; ?` query before the DA1 reply. So the terminal host answers it, from the headless xterm that sees every PTY byte (`watchProgramStatus` in `lib/terminal.js`), with no viewer attached and before the board's xterm answers DA1. `lib/program-status.js` parses and checks each report and keeps the records. A record is replaced whole by each report. `clear` removes a record and the records under it. OSC 133 `A` and claude's exit drop `working` and `blocked`. RIS drops all records.
+
+Each terminal reports one summary, `{state, kind, app}`: the record that needs the most attention (blocked, then working, then done or error, then idle; the newest wins a tie). It rides `terminals-update` and `/api/terminals` as `programStatus`, next to `awaitingTrust`, and reaches cck only when the summary changes, not on each report. The client keeps it in `reportedStatus`.
+
+While a session has a summary, it wins over the hook and transcript signals for the drawn state: Waiting is `blocked` (or the trust dialog), Working is `working`, and Live needs `working` too. Every other state draws from the signals above as before. A session outside the board's terminal, a Claude Code before 2.1.295, or one with `CLAUDE_CODE_DISABLE_TERMINAL_TITLE` set reports nothing and draws from the signals alone.
+
+On Windows the reply reaches claude only through the ConPTY that node-pty bundles (the terminal's `conptyDll` setting). Windows' own ConPTY answers DA1 itself and drops the reply, so claude decides the terminal has no support.
+
 ## Active filter
 
 A session is in the **Active** list when it has messages and at least one of these is true:
@@ -53,9 +63,9 @@ The client maps the signals to one state per session. The order matters: the fir
 
 | State | Rule (client) | Sidebar card | Picker dot |
 |---|---|---|---|
-| Waiting | `hasWaitingForUser` | `warm permission-pending`: yellow time and dot, waiting badge | `waiting`: yellow, filled |
+| Waiting | `hasWaitingForUser`, or a reported `blocked` | `warm permission-pending`: yellow time and dot, waiting badge | `waiting`: yellow, filled |
 | Live | `isSessionLive` | `warm`: green time and dot, pulse | `live`: green, filled |
-| Working | `hasRecentLog` or `hasRunningAgents` (`isActiveSession`) | `warm`: green time and dot; agent badge and pulse when agents run | `active`: accent, filled |
+| Working | `hasRecentLog` or `hasRunningAgents`, or a reported `working` (`isActiveSession`) | `warm`: green time and dot; agent badge and pulse when agents run | `active`: accent, filled |
 | Just finished | `hasRecentActivity` and a transcript write in the last `JUST_NOW_MS` (1 min), nothing above (`isJustFinished`) | `warm idle just-finished`: soft green time and dot | `justFinished`: soft green, filled |
 | Recently active, idle | `hasRecentActivity` or `inProgress > 0`, nothing above | `warm idle`: gray time and filled gray dot | `recent`: gray, filled |
 | Inactive | none of the above | `stale`: muted time, hollow ring, card at 0.85 opacity | `idle`: hollow ring |

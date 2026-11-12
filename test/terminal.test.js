@@ -5,6 +5,7 @@ const { mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } = require
 const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
+const { QUERY_REPLY } = require('../lib/program-status');
 const { createTerminalService, shellArgs, claudeCommand, readTerminalConfig, resolveShell, claudeArgsFor, parseNewSpec, findPickProcess, ptyEnv } = require('../lib/terminal');
 
 let WebSocket = null;
@@ -413,6 +414,8 @@ describe('folder trust dialog', { concurrency: true }, () => {
 
   // Recorded from a real claude by test/live-startup-dialogs.js; rerun it after a Claude Code update.
   const FIXTURES = path.join(__dirname, 'fixtures', 'startup-dialogs');
+  // claude probes for OSC 7501 at start, and the terminal answers it.
+  const typed = (p) => p.written.filter((w) => w !== QUERY_REPLY);
   for (const file of readdirSync(FIXTURES).filter((f) => f.endsWith('.json'))) {
     const fx = JSON.parse(readFileSync(path.join(FIXTURES, file), 'utf8'));
     it(`holds the prompt through each dialog of the recorded ${fx.case} start (${fx.claudeVersion})`, async () => {
@@ -420,13 +423,13 @@ describe('folder trust dialog', { concurrency: true }, () => {
       for (const step of fx.steps) {
         p.emit(step.output);
         await wait(PAST_QUIET_MS);
-        assert.deepEqual(p.written, [], `prompt sent over the ${step.dialog} dialog`);
+        assert.deepEqual(typed(p), [], `prompt sent over the ${step.dialog} dialog`);
         assert.equal(awaiting(t), step.awaitingTrust);
         assert.equal(t.paste(A, 'x'), false);
       }
       p.emit(fx.ready);
-      await until(() => p.written.length > 0);
-      assert.equal(p.written[0], '\x1b[200~do the task\x1b[201~');
+      await until(() => typed(p).length > 0);
+      assert.equal(typed(p)[0], '\x1b[200~do the task\x1b[201~');
       assert.equal(awaiting(t), false);
       t.shutdown();
     });
@@ -904,6 +907,24 @@ describe('terminal restore', { concurrency: true }, () => {
     fail = true;
     await until(() => t.list().length === 2);
     assert.equal(pty.spawned[1].opts.useConptyDll, undefined);
+    t.shutdown();
+  });
+
+  it('answers the OSC 7501 query and lists what the program reports until a prompt drops it', async () => {
+    const { t, pty } = service(false, null);
+    const FRESH = 'aaaaaaaa-0000-0000-0000-000000000009';
+    assert.equal((await t.startNew({ id: FRESH, cwd: os.tmpdir() })).id, FRESH);
+    const p = pty.spawned[0];
+    p.emit('\x1b]7501;?\x1b\\');
+    await until(() => p.written.includes('\x1b]7501;?\x1b\\'));
+    assert.equal(t.list()[0].programStatus, null);
+    p.emit('\x1b]7501;state=blocked:kind=permi');
+    p.emit('ssion:app=claude-code\x07');
+    await until(() => t.list()[0].programStatus);
+    assert.deepEqual(t.list()[0].programStatus, { state: 'blocked', kind: 'permission', app: 'claude-code' });
+    p.emit('\x1b]133;A\x07');
+    await until(() => !t.list()[0].programStatus);
+    assert.equal(t.list()[0].programStatus, null);
     t.shutdown();
   });
 

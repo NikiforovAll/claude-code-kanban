@@ -150,6 +150,8 @@ let appConfig = { marketplaceUrl: null, costUrl: null, memoryUrl: null, scratchA
 let runningTerminals = new Set();
 // Embedded sessions stuck on Claude Code's folder-trust dialog. No hook runs before it, so the server reads it off the screen.
 let trustWaiting = new Set();
+// What a program in an embedded terminal says it is doing (OSC 7501), by session id. It wins over the hook and transcript signals.
+let reportedStatus = new Map();
 let selectedSessionIdx = -1;
 let selectedSessionKbId = null;
 let sessionJustSelected = false;
@@ -571,14 +573,19 @@ function toggleSection(containerId, chevronId) {
 }
 
 function isWaitingSession(s) {
-  return !!s.hasWaitingForUser || trustWaiting.has(s.id);
+  if (trustWaiting.has(s.id)) return true;
+  const reported = reportedStatus.get(s.id);
+  return reported ? reported.state === 'blocked' : !!s.hasWaitingForUser;
 }
 function sessionBarClass(s) {
   if (isWaitingSession(s)) return 'permission-pending';
   return s.unread ? 'unread' : '';
 }
 function isActiveSession(s) {
-  return !isWaitingSession(s) && (s.inProgress > 0 || s.hasRecentLog || s.hasRunningAgents);
+  if (isWaitingSession(s)) return false;
+  const reported = reportedStatus.get(s.id);
+  if (reported) return reported.state === 'working';
+  return s.inProgress > 0 || s.hasRecentLog || s.hasRunningAgents;
 }
 function sessionState(s) {
   return isWaitingSession(s) ? 'waiting' : isActiveSession(s) ? 'working' : 'idle';
@@ -586,6 +593,8 @@ function sessionState(s) {
 // hasRecentLog carries the server's registry-idle correction: an open-but-idle
 // terminal keeps touching its JSONL, so mtime alone is not proof of activity.
 function isSessionLive(s) {
+  const reported = reportedStatus.get(s.id);
+  if (reported && reported.state !== 'working') return false;
   return !!s.hasRecentLog && Date.now() - Date.parse(s.modifiedAt) <= LIVE_INDICATOR_MS;
 }
 function isJustFinished(s) {
@@ -11001,7 +11010,7 @@ function setupEventSource() {
       }
 
       if (data.type === 'terminals-update' && Array.isArray(data.ids))
-        setRunningTerminals(data.ids, data.awaitingTrust);
+        setRunningTerminals(data.ids, data.awaitingTrust, data.programStatus);
 
       if (data.type === 'terminal:ended' && typeof data.id === 'string') onTerminalEnded(data.id);
 
@@ -19378,6 +19387,7 @@ async function loadTerminals() {
   const list = data.sessions || [];
   runningTerminals = new Set(list.map((t) => t.id));
   setTrustWaiting(list.filter((t) => t.awaitingTrust).map((t) => t.id));
+  reportedStatus = new Map(list.filter((t) => t.programStatus).map((t) => [t.id, t.programStatus]));
   rememberTerminalIds(list);
   syncShowCard();
   pushTerminalClaims();
@@ -19402,8 +19412,9 @@ function setTrustWaiting(ids) {
   }
 }
 
-function setRunningTerminals(ids, awaitingTrust = []) {
+function setRunningTerminals(ids, awaitingTrust = [], programStatus = {}) {
   runningTerminals = new Set(ids);
+  reportedStatus = new Map(Object.entries(programStatus));
   setTrustWaiting(awaitingTrust);
   forgetEndedTerminals();
   syncShowCard();
