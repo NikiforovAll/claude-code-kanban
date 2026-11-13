@@ -399,9 +399,10 @@ async function fetchSessions(includeTasks = true, focusId = currentSessionId) {
 // marks the terminal's reported done or error seen.
 function markSessionRead(sessionId) {
   const session = sessions.find((s) => s.id === sessionId);
-  const report = reportedFinish(sessionId) ? reportedStatus.get(sessionId) : null;
-  if (!session?.unread && !report) return;
-  if (session?.unread) {
+  const unread = session?.unread;
+  const report = reportedFinish(sessionId) && reportedStatus.get(sessionId);
+  if (!unread && !report) return;
+  if (unread) {
     session.unread = false;
     document.querySelector(`.session-item[data-session-id="${CSS.escape(sessionId)}"]`)?.classList.remove('unread');
   }
@@ -592,7 +593,6 @@ function isWaitingSession(s) {
   const reported = reportedStatus.get(s.id);
   return reported ? reported.state === 'blocked' : !!s.hasWaitingForUser;
 }
-// A reported done or error stays on the card until the user opens the session (done until seen).
 const REPORT_KIND_LABELS = { permission: 'Permission', question: 'Question', auth: 'Sign-in' };
 const reportKindLabel = (r) => REPORT_KIND_LABELS[r.kind] || 'Needs you';
 const isFinishState = (state) => state === 'done' || state === 'error';
@@ -600,6 +600,7 @@ const isFinishState = (state) => state === 'done' || state === 'error';
 function reportedBlocked(id) {
   return reportedStatus.get(id)?.state === 'blocked' && !trustWaiting.has(id);
 }
+// A reported done or error stays on the card until the user opens the session (done until seen).
 function reportedFinish(id) {
   const r = reportedStatus.get(id);
   return isFinishState(r?.state) && !r.seen ? r.state : null;

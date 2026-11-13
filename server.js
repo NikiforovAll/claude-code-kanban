@@ -2638,8 +2638,8 @@ app.post('/api/sessions/:sessionId/waiting/discard', (req, res) => {
 app.post('/api/sessions/:sessionId/read', (req, res) => {
   try {
     const sessionId = resolveSessionId(req.params.sessionId);
-    clearActivityMarker(sessionId, '_stop.json');
     terminal.markStatusSeen(sessionId);
+    clearActivityMarker(sessionId, '_stop.json');
     res.json({ ok: true });
   } catch {
     res.status(500).json({ error: 'Failed to mark session read' });
