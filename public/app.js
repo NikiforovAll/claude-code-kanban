@@ -8434,13 +8434,16 @@ function dismissSessionFromList(sid) {
     return;
   }
   // Ctrl+Alt+S would reveal the dismissed session, and revealing restores it.
-  const fallback = currentSessionId === sid && swapHistory[0] === sid ? swapHistory[1] : null;
   forgetSwapHistory(sid);
+  const fallback =
+    currentSessionId === sid
+      ? swapHistory.find((id) => !dismissedSessionIds.has(id) && sessions.some((s) => s.id === id))
+      : null;
   const targetIdx = newItems.length > 0 ? Math.max(0, prevIdx - 1) : -1;
   // If the dismissed session is currently open, navigate to the previous one
   if (currentSessionId === sid || selectedSessionId === sid) {
     selectedSessionId = null;
-    if (fallback && !dismissedSessionIds.has(fallback) && sessions.some((s) => s.id === fallback)) {
+    if (fallback) {
       revealSession(fallback).then(() => {
         const items = getNavigableItems();
         const idx = items.findIndex((el) => el.dataset?.sessionId === fallback);
