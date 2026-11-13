@@ -114,6 +114,31 @@ describe('createProgramStatus', () => {
     assert.equal(ps.summary(), null);
   });
 
+  it('marks a done seen until the next done, and says no change while nothing is finished', () => {
+    const ps = createProgramStatus();
+    ps.handle('state=working');
+    assert.equal(ps.markSeen(), false);
+    assert.equal(ps.summary().seen, undefined);
+    ps.handle('state=done');
+    assert.equal(ps.summary().seen, undefined);
+    assert.equal(ps.markSeen(), true);
+    assert.equal(ps.summary().seen, true);
+    assert.equal(ps.markSeen(), false);
+    ps.handle('state=working');
+    assert.equal(ps.summary().seen, undefined);
+    assert.equal(ps.handle('state=done'), true);
+    assert.equal(ps.summary().seen, undefined);
+  });
+
+  it('forgets seen on a reset', () => {
+    const ps = createProgramStatus();
+    ps.handle('state=error');
+    ps.markSeen();
+    ps.reset();
+    ps.handle('state=error');
+    assert.equal(ps.summary().seen, undefined);
+  });
+
   it('removes the least recently updated record past 256', () => {
     const ps = createProgramStatus();
     ps.handle('state=blocked:id=first');

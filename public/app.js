@@ -395,19 +395,26 @@ async function fetchSessions(includeTasks = true, focusId = currentSessionId) {
   }
 }
 
-// The Stop hook leaves _stop.json when a session ends its turn; deleting it marks the session read.
+// The Stop hook leaves _stop.json when a session ends its turn; the read route deletes it and
+// marks the terminal's reported done or error seen.
 function markSessionRead(sessionId) {
   const session = sessions.find((s) => s.id === sessionId);
-  if (!session?.unread) return;
-  session.unread = false;
-  document.querySelector(`.session-item[data-session-id="${CSS.escape(sessionId)}"]`)?.classList.remove('unread');
+  const report = reportedFinish(sessionId) ? reportedStatus.get(sessionId) : null;
+  if (!session?.unread && !report) return;
+  if (session?.unread) {
+    session.unread = false;
+    document.querySelector(`.session-item[data-session-id="${CSS.escape(sessionId)}"]`)?.classList.remove('unread');
+  }
+  if (report) {
+    report.seen = true;
+    renderSessionViews();
+  }
   api(apiPath`/api/sessions/${sessionId}/read`, { method: 'POST' }).catch((e) => console.error('[markSessionRead]', e));
 }
 
 function markOpenSessionRead() {
   if (!currentSessionId || viewMode !== 'session' || !isOnScreen()) return;
   markSessionRead(currentSessionId);
-  markReportSeen(currentSessionId);
 }
 
 async function loadSearchTasks() {
@@ -586,7 +593,6 @@ function isWaitingSession(s) {
   return reported ? reported.state === 'blocked' : !!s.hasWaitingForUser;
 }
 // A reported done or error stays on the card until the user opens the session (done until seen).
-const reportSeen = new Set();
 const REPORT_KIND_LABELS = { permission: 'Permission', question: 'Question', auth: 'Sign-in' };
 const reportKindLabel = (r) => REPORT_KIND_LABELS[r.kind] || 'Needs you';
 const isFinishState = (state) => state === 'done' || state === 'error';
@@ -595,19 +601,8 @@ function reportedBlocked(id) {
   return reportedStatus.get(id)?.state === 'blocked' && !trustWaiting.has(id);
 }
 function reportedFinish(id) {
-  const state = reportedStatus.get(id)?.state;
-  return isFinishState(state) && !reportSeen.has(id) ? state : null;
-}
-function markReportSeen(id) {
-  if (!reportedFinish(id)) return;
-  reportSeen.add(id);
-  renderSessionViews();
-}
-function forgetSeenReports() {
-  for (const id of reportSeen) if (!isFinishState(reportedStatus.get(id)?.state)) reportSeen.delete(id);
-  if (currentSessionId && viewMode === 'session' && isOnScreen() && reportedFinish(currentSessionId)) {
-    reportSeen.add(currentSessionId);
-  }
+  const r = reportedStatus.get(id);
+  return isFinishState(r?.state) && !r.seen ? r.state : null;
 }
 function sessionBarClass(s) {
   if (isWaitingSession(s)) return 'permission-pending';
@@ -16545,7 +16540,6 @@ async function openSession(sessionId) {
   if (!alreadyOpen) termState.openedByUser = sessionId;
   else if (termState.attached && promptAwaitsUser(sessionId)) focusTerminalPane();
   markSessionRead(sessionId);
-  markReportSeen(sessionId);
   return fetchTasks(sessionId);
 }
 
@@ -19462,7 +19456,7 @@ async function loadTerminals() {
   runningTerminals = new Set(list.map((t) => t.id));
   setTrustWaiting(list.filter((t) => t.awaitingTrust).map((t) => t.id));
   reportedStatus = new Map(list.filter((t) => t.programStatus).map((t) => [t.id, t.programStatus]));
-  forgetSeenReports();
+  markOpenSessionRead();
   hintSilentStatus(list.filter((t) => t.statusSilent).map((t) => t.id));
   rememberTerminalIds(list);
   syncShowCard();
@@ -19491,7 +19485,7 @@ function setTrustWaiting(ids) {
 function setRunningTerminals(ids, awaitingTrust = [], programStatus = {}) {
   runningTerminals = new Set(ids);
   reportedStatus = new Map(Object.entries(programStatus));
-  forgetSeenReports();
+  markOpenSessionRead();
   setTrustWaiting(awaitingTrust);
   forgetEndedTerminals();
   syncShowCard();
