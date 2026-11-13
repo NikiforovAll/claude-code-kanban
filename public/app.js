@@ -344,9 +344,12 @@ async function fetchSessions(includeTasks = true, focusId = currentSessionId) {
     // session members come back through `include`, as they may be past the page limit.
     const zenScope = !!(zenGroup || zenProject);
     const zenIds = zenGroup && sessionFilter !== 'active' ? sgSubtreeIds(zenGroup) : new Set();
-    const zenMembers = sessionGroups
-      .filter((g) => zenIds.has(g.id))
-      .flatMap((g) => g.members.filter((m) => m.type === 'session').map((m) => m.ref));
+    // A project's zen also holds the sessions of other projects placed `under` it in its group,
+    // which its project filter would drop. The client's Active rule still applies to them.
+    const inZen = (g, m) => zenIds.has(g.id) || (zenProject && m.under === zenProject);
+    const zenMembers = sessionGroups.flatMap((g) =>
+      g.members.filter((m) => m.type === 'session' && inZen(g, m)).map((m) => m.ref),
+    );
     const include = [
       focusId,
       revealedPlanSessionId,
@@ -363,6 +366,7 @@ async function fetchSessions(includeTasks = true, focusId = currentSessionId) {
         include: include.length ? include.join(',') : null,
         recentHours: recent ? RECENT_PROJECT_HOURS : null,
         project,
+        nest: zenProject ? 1 : null,
         filter: sessionFilter === 'active' ? 'active' : null,
       },
     });
@@ -4428,6 +4432,8 @@ function renderSessions() {
   let filteredSessions;
   if (zenScope) {
     const scoped = getFilteredSessions({ zen: true });
+    // inZenScope places a nested child with its parent, so the anchors come from the unscoped list.
+    if (zenProject) childAnchors = computeChildAnchors(scoped);
     filteredSessions = applyStableSessionOrder(zenProject ? scoped.filter(inZenScope) : scoped);
   } else if (zenMode) filteredSessions = zenSession ? [zenSession] : [];
   else filteredSessions = applyStableSessionOrder(getFilteredSessions());
@@ -4437,7 +4443,9 @@ function renderSessions() {
   const childDepth = new Map();
   const parentOf = new Map();
   for (const g of sessionGroups) for (const m of g.members) if (m.parent) parentOf.set(m.ref, m.parent);
-  childAnchors = computeChildAnchors(filteredSessions);
+  // Project zen keeps the anchors of the unscoped list: leaveZenScopeFor must see that a hidden
+  // child sits with a parent outside the scope.
+  if (!zenProject) childAnchors = computeChildAnchors(filteredSessions);
   for (const s of filteredSessions) {
     if (childAnchors.has(s.id) && !parentOf.has(s.id)) parentOf.set(s.id, s.nest.parent);
   }
@@ -12503,9 +12511,12 @@ function setZenScope(group, project) {
   else store.removeItem(ZEN_SCOPE_KEY);
 }
 
+// A project's zen holds what its block holds in the full list.
 function inZenScope(session) {
-  if (zenGroup) return sgSubtreeIds(zenGroup).has(sgGroupForSession(session)?.id);
-  return sessionProjectKey(session) === zenProject;
+  const group = sgGroupForSession(session);
+  if (zenGroup) return sgSubtreeIds(zenGroup).has(group?.id);
+  if (!group) return sessionProjectKey(placementOf(session)) === zenProject;
+  return sgHostOf(group, session) === zenProject;
 }
 
 // Opening a session the scope hides would leave it off screen, so the scope gives way.
@@ -20540,13 +20551,25 @@ function answerWaitingFromHub(behavior, message) {
 
 function needsYouQueue() {
   const live = sessions.filter((s) => (!s.placeholder || trustWaiting.has(s.id)) && !dismissedSessionIds.has(s.id));
-  return [...live.filter(isWaitingSession), ...live.filter((s) => !isWaitingSession(s) && s.unread)];
+  return [...live.filter(isWaitingSession), ...live.filter((s) => !isWaitingSession(s) && sessionBarClass(s))];
 }
+
+// Opening a session marks it read or answered, which drops it from the queue, so the next press
+// goes on in the order the queue had when this one was opened, not back to the start.
+let needsYouLast = { id: null, after: [] };
 
 function nextNeedsYou() {
   const queue = needsYouQueue();
-  const next = queue[(queue.findIndex((s) => s.id === currentSessionId) + 1) % queue.length];
+  const at = queue.findIndex((s) => s.id === currentSessionId);
+  let i = (at + 1) % queue.length;
+  if (at < 0 && needsYouLast.id === currentSessionId) {
+    const ahead = needsYouLast.after.find((id) => queue.some((s) => s.id === id));
+    if (ahead) i = queue.findIndex((s) => s.id === ahead);
+  }
+  const next = queue[i];
   if (!next || next.id === currentSessionId) return showToast('No other session needs you', 'info');
+  const ids = queue.map((s) => s.id);
+  needsYouLast = { id: next.id, after: [...ids.slice(i + 1), ...ids.slice(0, i)] };
   if (terminalPaneFocused() || isShowCardFocused()) termState.focusNext = true;
   return revealSession(next.id);
 }

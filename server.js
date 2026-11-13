@@ -1621,6 +1621,7 @@ app.get('/api/sessions', async (req, res) => {
     // the project filter, because pinning is a preference and the filter is an intent.
     // The client sends the session it currently has open, which it cannot render at all
     // if the row is missing — that one is not a preference.
+    const unfiltered = sessions;
     if (projectFilter) {
       const matches = projectMatcher(String(projectFilter));
       sessions = sessions.filter(s => matches(s.project, s.worktree?.repo) || includeIds.has(s.id));
@@ -1645,6 +1646,10 @@ app.get('/api/sessions', async (req, res) => {
       const missingPinned = sessions.filter(s => pinnedIds.has(s.id) && !topIds.has(s.id));
       sessions = [...top, ...missingPinned];
     }
+    // `nest=1` (zen on a project): the sidebar draws a nested child in its parent's place, so the
+    // client needs both ends of each nest link of the page to place a session as the full list does.
+    // Added after the limit, like pins, so they take no page slots.
+    if (projectFilter && req.query.nest === '1') sessions = withNestRelatives(sessions, unfiltered);
 
     // Loop info can mean a full read of the transcript, so only the rows sent pay for it, and
     // `lite=1` (the CLI's group list, which only counts and names sessions) skips it.
@@ -3504,11 +3509,43 @@ const forks = createDispatchedStore(jsonFile(FORKS_FILE));
 const linkedDocs = createLinkedDocStore(jsonFile(LINKED_DOCS_FILE));
 
 const nestStoreOf = (id) => (dispatched.get(id) ? dispatched : forks.get(id) ? forks : null);
+const nestOf = (id) => nestStoreOf(id)?.get(id);
+
+// The ancestors and descendants of the page's sessions along nest links, not their siblings.
+function withNestRelatives(page, all) {
+  const byId = new Map(all.map((s) => [s.id, s]));
+  const parentOf = new Map();
+  const childrenOf = new Map();
+  for (const s of all) {
+    const nest = nestOf(s.id);
+    if (!nest?.child || !byId.has(nest.parent)) continue;
+    parentOf.set(s.id, nest.parent);
+    if (!childrenOf.has(nest.parent)) childrenOf.set(nest.parent, []);
+    childrenOf.get(nest.parent).push(s.id);
+  }
+  const keep = new Set(page.map((s) => s.id));
+  const added = [];
+  const add = (id) => {
+    if (keep.has(id)) return false;
+    keep.add(id);
+    added.push(byId.get(id));
+    return true;
+  };
+  for (const s of page) {
+    for (let id = parentOf.get(s.id); id && add(id); id = parentOf.get(id));
+    const down = [...(childrenOf.get(s.id) || [])];
+    while (down.length) {
+      const id = down.pop();
+      if (add(id)) down.push(...(childrenOf.get(id) || []));
+    }
+  }
+  return added.length ? [...page, ...added] : page;
+}
 
 function withDispatchMarker(sessions) {
   return sessions.map((s) => {
     const marker = dispatched.get(s.id);
-    const nest = marker || forks.get(s.id);
+    const nest = nestOf(s.id);
     if (!nest) return s;
     return {
       ...s,

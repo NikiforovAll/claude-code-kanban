@@ -135,3 +135,55 @@ describe('sgSweepTransient', () => {
     assert.equal(sweep(one(), { filterProject: '__recent__' }).sessionGroups.length, 0, 'Recent is the full list');
   });
 });
+
+describe('project zen scope', () => {
+  const ctx = vm.createContext({
+    zenGroup: null,
+    zenProject: '/p',
+    childAnchors: new Map(),
+    sessionGroups: [{ id: 'g1', members: [{ type: 'session', ref: 'grouped' }] }],
+    sessionProjectKey: (s) => s.project,
+    placementOf: (s) => ctx.childAnchors.get(s.id) ?? s,
+  });
+  vm.runInContext(
+    ['sgGroupOf', 'sgGroupForSession', 'sgHostOf', 'computeChildAnchors', 'inZenScope'].map(fn).join('\n'),
+    ctx,
+  );
+  const nest = (parent) => ({ parent, child: true });
+  const list = [
+    { id: 'parent', project: '/p' },
+    { id: 'child', project: '/p/_scratch/x', nest: nest('parent') },
+    { id: 'grouped', project: '/p' },
+    { id: 'grouped-child', project: '/p', nest: nest('grouped') },
+    { id: 'other', project: '/q' },
+    { id: 'other-child', project: '/p', nest: nest('other') },
+  ];
+
+  it('holds what the project block holds: children go with their parent, grouped sessions stay out', () => {
+    ctx.list = list;
+    ctx.childAnchors = vm.runInContext('computeChildAnchors(list)', ctx);
+    const ids = vm.runInContext('list.filter(inZenScope).map((s) => s.id)', ctx);
+    assert.deepEqual([...ids], ['parent', 'child']);
+  });
+
+  it('follows the group a project sits in, with its under and loose sessions', () => {
+    ctx.sessionGroups = [
+      {
+        id: 'g2',
+        members: [
+          { type: 'project', ref: '/p' },
+          { type: 'session', ref: 'moved-in', under: '/p' },
+          { type: 'session', ref: 'loose', loose: true },
+        ],
+      },
+    ];
+    ctx.childAnchors = new Map();
+    ctx.list = [
+      { id: 'own', project: '/p' },
+      { id: 'moved-in', project: '/q' },
+      { id: 'loose', project: '/p' },
+    ];
+    const ids = vm.runInContext('list.filter(inZenScope).map((s) => s.id)', ctx);
+    assert.deepEqual([...ids], ['own', 'moved-in']);
+  });
+});

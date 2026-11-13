@@ -244,6 +244,7 @@ describe('voice.context', () => {
     Object.assign(c, {
       dismissedSessionIds: new Set(['gone']),
       isWaitingSession: (s) => !!s.waiting,
+      sessionBarClass: (s) => (s.unread ? 'unread' : ''),
       isPlanAsk: (kind) => kind === 'plan',
       getWaitingPill: (kind) => (kind === 'plan' ? 'Plan awaiting approval' : 'Question pending'),
       isWaitingAnswerable: () => !!c.currentWaiting?.id,
@@ -306,6 +307,38 @@ describe('session.next', () => {
     });
     vm.runInContext('nextNeedsYou()', c);
     assert.deepEqual(revealed, ['trust']);
+  });
+
+  it('goes to unread and reported sessions after the waiting ones', async () => {
+    const shim = await loadShim();
+    const c = shim.context;
+    const revealed = [];
+    const bar = { unread: 'unread', done: 'unread', error: 'reported-error' };
+    Object.assign(c, {
+      dismissedSessionIds: new Set(),
+      trustWaiting: new Set(),
+      isWaitingSession: (s) => !!s.waiting,
+      sessionBarClass: (s) => bar[s.state] || '',
+      revealSession: (id) => {
+        revealed.push(id);
+        c.currentSessionId = id;
+        const s = c.sessions.find((x) => x.id === id);
+        if (s.state !== 'error') delete s.state;
+      },
+      terminalPaneFocused: () => false,
+      isShowCardFocused: () => false,
+      showToast() {},
+      currentSessionId: 'idle',
+      sessions: [
+        { id: 'idle' },
+        { id: 'done', state: 'done' },
+        { id: 'unread', state: 'unread' },
+        { id: 'error', state: 'error' },
+        { id: 'ask', waiting: true },
+      ],
+    });
+    for (let i = 0; i < 5; i++) vm.runInContext('nextNeedsYou()', c);
+    assert.deepEqual(revealed, ['ask', 'done', 'unread', 'error', 'ask'], 'opening one marks it read');
   });
 });
 
