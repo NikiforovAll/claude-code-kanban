@@ -894,6 +894,34 @@ body::before {
   flex-shrink: 0;
 }
 
+.zen-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 0 8px;
+}
+.zen-empty-head {
+  padding: 0 8px;
+}
+.zen-empty-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.zen-empty-hint {
+  margin-top: 4px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+.zen-empty .home-keys {
+  width: auto;
+  margin: 0;
+}
+.zen-empty .home-key {
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
 /* After the ::after spacer, so the agents sit at the bottom of the free space. */
 .zen-agents {
   order: 1;

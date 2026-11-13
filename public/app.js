@@ -4244,9 +4244,17 @@ const HOME_ROWS = [
   { keys: ['?'], label: 'All shortcuts', run: showHelpModal },
 ];
 
+const ZEN_EMPTY_ROWS = [
+  HOME_ROWS.find((r) => r.run === openSessionPicker),
+  { keys: ['Ctrl', 'Shift', 'Z'], combo: true, label: 'Leave zen mode', run: toggleZenMode },
+];
+
 function renderHomeKeys() {
-  const list = document.getElementById('home-keys');
-  const rows = HOME_ROWS.filter((r) => (!r.when || r.when()) && helpKeys(r).length);
+  renderKeyRows(document.getElementById('home-keys'), HOME_ROWS);
+}
+
+function renderKeyRows(list, allRows) {
+  const rows = allRows.filter((r) => (!r.when || r.when()) && helpKeys(r).length);
   list.innerHTML = rows
     .map(
       (row) =>
@@ -4423,7 +4431,7 @@ function renderSessions() {
   // and still offers everything, or there would be no way to switch sessions without leaving zen.
   const zenSession = zenMode && currentSessionId ? sessions.find((s) => s.id === currentSessionId) : null;
   const zenScope = !!(zenGroup || zenProject);
-  sessionsList.classList.toggle('zen', !!zenSession || zenScope);
+  sessionsList.classList.toggle('zen', zenMode || zenScope);
   sessionsList.dataset.zenState = zenSession ? sessionState(zenSession) : '';
   let filteredSessions;
   if (zenScope) {
@@ -4567,14 +4575,48 @@ function renderSessions() {
       )
     : '';
 
+  // Zen draws one card and its panel, so it returns before the grouping below — leaving it in
+  // that chain would build the whole list only to discard it.
+  if (zenMode) {
+    if (!zenSession) {
+      const picks = applyStableSessionOrder(getFilteredSessions()).slice(0, 5);
+      sessionsList.innerHTML = `
+        <div class="zen-empty">
+          <div class="zen-empty-head">
+            <p class="zen-empty-title">No session open</p>
+            <p class="zen-empty-hint">Zen mode shows one session.${picks.length ? ' Pick one to continue.' : ''}</p>
+          </div>
+          ${picks.length ? `<div class="zen-empty-list">${picks.map((s) => renderSessionCard(s)).join('')}</div>` : ''}
+          <div class="home-keys"></div>
+        </div>`;
+      renderKeyRows(sessionsList.querySelector('.home-keys'), ZEN_EMPTY_ROWS);
+      restoreSessionCursor();
+      return;
+    }
+    sessionsList.innerHTML = `${renderSessionCard(zenSession)}
+      <div class="zen-panel">
+        ${renderContextDetail(zenSession, { tokens: false }) || '<div class="zen-panel-empty">No context data for this session</div>'}
+        ${renderScratchpadRow(zenSession)}
+        ${renderLinkedDocsHtml(zenSession.id)}
+        ${renderArtifactsHtml(zenSession.id)}
+        ${renderZenBookmarksHtml(zenSession.id)}
+      </div>
+      ${zenSession.hasWorkflow ? renderWorkflowLiveHtml(zenSession.id) : ''}
+      <div class="zen-agents"></div>`;
+    renderZenAgents(visibleAgents());
+    bindLinkedDocsHandlers(sessionsList.querySelector('.linked-docs-section'), zenSession.id);
+    artifactsSection.load(zenSession.id);
+    scratchFilesSection.load(zenSession.id);
+    if (zenSession.hasWorkflow) pollWorkflowLive(zenSession.id);
+    restoreSessionCursor();
+    return;
+  }
+
   if (filteredSessions.length === 0 && !zenScope) {
     let emptyMsg = 'No sessions found';
     let emptyHint = 'Tasks appear when you use Claude Code';
 
-    if (zenMode) {
-      emptyMsg = 'Zen mode: no session open';
-      emptyHint = 'Press Ctrl+Shift+Z to leave zen mode, then open a session';
-    } else if (searchQuery) {
+    if (searchQuery) {
       emptyMsg = `No results for "${escapeHtml(searchQuery)}"`;
       emptyHint = outside.rows.length
         ? 'Matches outside the current filters are below'
@@ -4597,28 +4639,6 @@ function renderSessions() {
             <p style="margin-top: 8px; font-size: 11px;">${emptyHint}</p>
           </div>
         ${outsideHtml}`;
-    return;
-  }
-
-  // Zen draws one card and its panel, so it returns before the grouping below — leaving it in
-  // that chain would build the whole list only to discard it.
-  if (zenMode) {
-    sessionsList.innerHTML = `${renderSessionCard(zenSession)}
-      <div class="zen-panel">
-        ${renderContextDetail(zenSession, { tokens: false }) || '<div class="zen-panel-empty">No context data for this session</div>'}
-        ${renderScratchpadRow(zenSession)}
-        ${renderLinkedDocsHtml(zenSession.id)}
-        ${renderArtifactsHtml(zenSession.id)}
-        ${renderZenBookmarksHtml(zenSession.id)}
-      </div>
-      ${zenSession.hasWorkflow ? renderWorkflowLiveHtml(zenSession.id) : ''}
-      <div class="zen-agents"></div>`;
-    renderZenAgents(visibleAgents());
-    bindLinkedDocsHandlers(sessionsList.querySelector('.linked-docs-section'), zenSession.id);
-    artifactsSection.load(zenSession.id);
-    scratchFilesSection.load(zenSession.id);
-    if (zenSession.hasWorkflow) pollWorkflowLive(zenSession.id);
-    restoreSessionCursor();
     return;
   }
 
