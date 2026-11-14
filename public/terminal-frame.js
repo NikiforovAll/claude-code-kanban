@@ -108,6 +108,11 @@
       if (parentOrigin) win.parent.postMessage({ ...data, type: MSG + t }, parentOrigin);
     }
 
+    // Ctrl+click (Cmd on macOS) on a folder skips the board's toast and opens the folder at once.
+    function upLink(e, href) {
+      up('link', e?.ctrlKey || e?.metaKey ? { href, ctrl: true } : { href });
+    }
+
     function send(msg) {
       if (state.ws?.readyState === win.WebSocket.OPEN) state.ws.send(JSON.stringify(msg));
     }
@@ -221,7 +226,7 @@
         cursorBlink: true,
         allowProposedApi: true,
         // xterm's default asks with confirm() and opens a window, which the installed hub window blocks.
-        linkHandler: { activate: (_e, uri) => up('link', { href: uri }), allowNonHttpProtocols: true },
+        linkHandler: { activate: upLink, allowNonHttpProtocols: true },
         ...o.themeOptions,
       });
       state.term = term;
@@ -230,7 +235,7 @@
       term.loadAddon(new win.Unicode11Addon.Unicode11Addon());
       term.unicode.activeVersion = '11';
       // Link providers scan a line only when the pointer moves onto it, never on output.
-      term.loadAddon(new win.WebLinksAddon.WebLinksAddon((_e, uri) => up('link', { href: uri })));
+      term.loadAddon(new win.WebLinksAddon.WebLinksAddon(upLink));
       const cellReuse = term.buffer.active.getNullCell();
       term.registerLinkProvider({
         provideLinks(y, done) {
@@ -240,7 +245,7 @@
           const links = pathsIn(text).map((p) => ({
             text: p.text,
             range: { start: { x: xs[p.index] + 1, y }, end: { x: xs[p.index + p.text.length - 1] + 1, y } },
-            activate: () => up('link', { href: p.path }),
+            activate: (e) => upLink(e, p.path),
           }));
           done(links.length ? links : undefined);
         },

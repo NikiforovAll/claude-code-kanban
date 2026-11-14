@@ -8825,13 +8825,22 @@ body.light .msg-assistant .msg-text {
   max-height: 70vh;
 }
 
+.preview-heading {
+  flex: 1;
+  min-width: 0;
+  margin-right: 12px;
+}
+
 #preview-modal-meta {
-  margin-top: 12px;
+  margin-top: 2px;
   font-size: 11px;
   color: var(--text-muted);
-  flex-shrink: 0;
   cursor: copy;
-  align-self: flex-start;
+  width: fit-content;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 #preview-modal-meta:hover {

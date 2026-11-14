@@ -260,6 +260,8 @@ describe('createTerminalFrame', () => {
     );
     links[0].activate();
     assert.deepEqual(w.posted.at(-1).message, { type: 'cck-term:link', href: 'C:/a/b.js' });
+    links[0].activate({ ctrlKey: true });
+    assert.deepEqual(w.posted.at(-1).message, { type: 'cck-term:link', href: 'C:/a/b.js', ctrl: true });
     term.linkProvider.provideLinks(1, (l) => {
       links = l;
     });

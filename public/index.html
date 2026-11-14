@@ -513,7 +513,10 @@
   <div id="preview-modal" class="modal-overlay" style="z-index:10002;" onclick="closePreviewModal()">
     <div class="modal preview-modal-dialog review-host" tabindex="-1" onclick="event.stopPropagation()">
       <div class="modal-header">
-        <h3 class="modal-title" id="preview-modal-title">Preview</h3>
+        <div class="preview-heading">
+          <h3 class="modal-title" id="preview-modal-title">Preview</h3>
+          <div id="preview-modal-meta" title="Click to copy path" onclick="copyPreviewPath(this)"></div>
+        </div>
         <div style="display:flex;gap:4px;align-items:center;">
           <button id="preview-pane-btn" class="icon-btn" aria-label="Open in a pane" title="Open in a pane" onclick="openPreviewInPane()">
             <svg fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><use href="#icon-pane"/></svg>
@@ -543,7 +546,6 @@
           <div id="preview-modal-body" class="rendered-md modal-zoomable"></div>
           <aside id="preview-review-panel" class="review-panel" hidden></aside>
         </div>
-        <div id="preview-modal-meta" title="Click to copy path" onclick="copyPreviewPath(this)"></div>
       </div>
     </div>
   </div>

@@ -25,6 +25,7 @@ const os = require('node:os');
 const crypto = require('node:crypto');
 const { spawn } = require('node:child_process');
 const { assertOpenTarget, openInEditor, whichSync, exeBehindShim } = require('./lib/open-editor');
+const { revealInFileManager } = require('./lib/reveal');
 const { createNetGuard } = require('./lib/net-guard');
 const { isContained, realpathDeepest } = require('./lib/contain');
 const { resolveScratchSubdir, listScratchDir } = require('./lib/scratch-files');
@@ -2264,6 +2265,19 @@ app.post('/api/open-folder', (req, res) => {
   }
 });
 
+// API: Show a folder, or a file selected in its folder, in the OS file manager.
+app.post('/api/reveal', (req, res) => {
+  try {
+    const target = assertOpenTarget(resolvePreviewPath(req.body?.path) || '', 'path');
+    revealInFileManager(target);
+    res.json({ success: true, path: target });
+  } catch (error) {
+    if (error.status) return res.status(error.status).json({ error: error.message });
+    console.error('Error revealing path:', error);
+    res.status(500).json({ error: 'Failed to open the file manager' });
+  }
+});
+
 // API: Open file in editor — either an existing path ({ file }) or content as a temp file ({ content, title })
 app.post('/api/open-in-editor', (req, res) => {
   try {
@@ -3898,9 +3912,20 @@ async function readHead(absPath) {
   }
 }
 
+// A name the allowlist does not know (.gitignore, Dockerfile, LICENSE) is text when its head
+// is also valid UTF-8: a stricter test than a listed extension gets, because here the name
+// claims nothing.
 async function confirmKind(absPath, kind) {
-  if (!kind) return null;
-  return (await readHead(absPath)).includes(0) ? null : kind;
+  if (!kind && PREVIEW_OPAQUE_EXTS.has(previewExtFor(absPath))) return null;
+  const head = await readHead(absPath);
+  if (head.includes(0)) return null;
+  if (kind) return kind;
+  try {
+    new TextDecoder('utf-8', { fatal: true }).decode(head, { stream: true });
+    return 'text';
+  } catch {
+    return null;
+  }
 }
 
 // Whole files are pushed into a modal, so anything huge freezes the tab regardless of kind.
@@ -3914,13 +3939,14 @@ const PREVIEW_TEXT_MAX_BYTES = 2 * 1024 * 1024;
 async function statFileTarget(absPath) {
   try {
     const stats = await fs.stat(absPath);
+    if (stats.isDirectory()) throw previewError(400, 'Not a file', 'is_dir');
     if (!stats.isFile()) throw previewError(400, 'Not a file', 'not_a_file');
     const kind = previewKindFor(absPath);
     return { size: stats.size, kind: kind === 'image' ? kind : await confirmKind(absPath, kind) };
   } catch (e) {
     if (e.status) throw e;
     if (e.code === 'ENOENT') throw previewError(404, 'File not found', 'file_not_found');
-    if (e.code === 'EISDIR') throw previewError(400, 'Not a file', 'not_a_file');
+    if (e.code === 'EISDIR') throw previewError(400, 'Not a file', 'is_dir');
     throw e;
   }
 }
@@ -4249,6 +4275,8 @@ app.get('/api/preview', async (req, res) => {
     // document is followed without knowing the target is there, so a link to a deleted
     // file would put a 404 in the browser console. The caller toasts it from `exists`.
     if (error.status === 404) return res.json({ path: abs, exists: false, content: null, kind: null });
+    // A folder is an answer too: the caller offers the file manager instead of a preview.
+    if (error.code === 'is_dir') return res.json({ path: abs, exists: true, content: null, kind: null, dir: true });
     // A previewError carries the status it wants reported and is an answer, not a
     // failure — a missing file or one too large to render is the user's doing.
     if (!error.status) console.error('Error in GET /api/preview:', error);

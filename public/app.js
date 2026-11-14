@@ -2917,14 +2917,14 @@ function showToast(msg, type, action, hint) {
     el.replaceChildren(text);
   } else el.textContent = msg;
   const hide = () => el.classList.remove('visible', 'has-action');
-  if (action) {
+  for (const a of action ? [].concat(action) : []) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'toast-action';
-    btn.textContent = action.label;
+    btn.textContent = a.label;
     btn.addEventListener('click', () => {
       hide();
-      action.onClick();
+      a.onClick();
     });
     el.append(btn);
     el.classList.add('has-action');
@@ -10280,7 +10280,13 @@ function openPreviewInEditor() {
 // answer to "not previewable" rather than a failure: callers that have a fallback
 // destination pass `onUnsupported` instead of keeping a copy of the extension list here.
 // A link followed inside an open preview keeps the preview's session.
-async function openPreviewByPath(filePath, base, onUnsupported, sessionId = previewSessionId || currentSessionId) {
+async function openPreviewByPath(
+  filePath,
+  base,
+  onUnsupported,
+  sessionId = previewSessionId || currentSessionId,
+  folderDirect = false,
+) {
   if (!filePath) return;
   try {
     const r = await api('/api/preview', { query: { path: filePath, base: base || null } });
@@ -10293,6 +10299,10 @@ async function openPreviewByPath(filePath, base, onUnsupported, sessionId = prev
       showToast('File not found', 'error');
       return;
     }
+    if (data.dir) {
+      openFolder(data.path, folderDirect);
+      return;
+    }
     if (data.kind === null) {
       if (onUnsupported) onUnsupported(data.path);
       else showToast('Nothing to preview in this file');
@@ -10302,6 +10312,66 @@ async function openPreviewByPath(filePath, base, onUnsupported, sessionId = prev
   } catch {
     showToast('Failed to load preview', 'error');
   }
+}
+
+const FILE_MANAGER = /^Win/i.test(navigator.userAgentData?.platform || navigator.platform || '')
+  ? 'Explorer'
+  : IS_MAC
+    ? 'Finder'
+    : 'file manager';
+
+function revealPath(target) {
+  postAndToast('/api/reveal', { path: target }, `in ${FILE_MANAGER}`);
+}
+
+// The global add-on with this key (the id in its addon.json) takes folders: the board shows it
+// in the dock and sends it the folder (`cck-addon:path`).
+const FOLDER_ADDON_KEY = 'file-explorer';
+const folderWaiting = new Map();
+
+function folderAddon() {
+  const a = showState.terminalId && dockAddonList?.global.find((x) => x.key === FOLDER_ADDON_KEY);
+  return (a && dockItems().find((p) => p.id === a.id)) || null;
+}
+
+// Sends the waiting folder to the add-on's page and gives the frame focus: this add-on hands the
+// board's keys back, so its frame can take it.
+function flushFolder(id, frame) {
+  const dir = folderWaiting.get(id);
+  if (!folderWaiting.delete(id)) return;
+  const origin = URL.parse(frame.src)?.origin;
+  if (origin) frame.contentWindow?.postMessage({ type: 'cck-addon:path', path: dir }, origin);
+  frame.focus({ preventScroll: true });
+  frame.contentWindow?.focus();
+}
+
+// Runs on each load of a dock frame: a folder asked for before the page was there goes to it now.
+function onDockFrameLoad(id, frame) {
+  frame.pageLoaded = true;
+  flushFolder(id, frame);
+}
+
+function openFolderInAddon(dir, addon) {
+  if (dockActivePane()?.id !== addon.id) {
+    setDockAddon(addon.id);
+    renderShow();
+  }
+  const frame = dockFrames.get(addon.id);
+  folderWaiting.set(addon.id, dir);
+  if (frame?.pageLoaded) flushFolder(addon.id, frame);
+}
+
+// A folder has no preview. The toast offers the file explorer add-on when the dock has it, else
+// the OS file manager; `direct` (Ctrl+click in the terminal) goes to the add-on at once.
+function openFolder(dir, direct) {
+  const explorer = folderAddon();
+  if (explorer && direct) return openFolderInAddon(dir, explorer);
+  showToast(`Folder: ${pathBasename(dir)}`, 'info', [
+    explorer
+      ? { label: `Open in ${explorer.title}`, onClick: () => openFolderInAddon(dir, explorer) }
+      : { label: `Open in ${FILE_MANAGER}`, onClick: () => revealPath(dir) },
+    { label: 'Copy path', onClick: () => copyText(dir, 'path') },
+  ]);
 }
 
 function handleSessionOpenEvent(data) {
@@ -15760,17 +15830,24 @@ function paneTargetFrom(raw) {
 }
 
 // The same target again answers the existing pane, so this also switches to it.
-async function addPane(raw) {
-  const sid = paneSessionId();
+// `show` also leaves the terminal view when it covers the pane, and moves focus into the pane.
+async function addPane(raw, { sid = paneSessionId(), show = false, label } = {}) {
   const t = sid && paneTargetFrom(raw);
   if (!t) return;
   if (t.error) {
     showToast(t.error, 'error');
     return;
   }
-  if (!(await postPane(sid, { target: t.target, base: getSessionBaseDir(sid) || undefined }))) return;
+  const onScreen = await postPane(sid, { target: t.target, base: getSessionBaseDir(sid) || undefined });
+  if (onScreen === null) return;
+  if (!show && !onScreen) {
+    if (label) toastPaneAdded(sid, onScreen, label);
+    return;
+  }
   closePanePop();
-  syncPanes();
+  if (!show) return syncPanes();
+  revealPane(sid, onScreen);
+  if (sid === paneSessionId() && !wantsTerminal()) focusActivePane();
 }
 
 // Shows the added pane. True when its session is still on screen, null when the add failed.
@@ -15840,7 +15917,7 @@ function openPreviewInPane() {
   const sid = previewSessionId;
   const target = currentPreviewPath;
   closePreviewModal();
-  addPaneToSession(sid, target, pathBasename(target));
+  addPane(target, { sid, label: pathBasename(target) });
 }
 
 // The plan modal also opens other sessions' plans; the pane goes to the plan's session, wherever it is.
@@ -15856,17 +15933,7 @@ function openPlanInPane() {
   const sid = _planSessionId;
   const target = _pendingPlanPath;
   closePlanModal();
-  addPaneToSession(sid, target, 'Plan');
-}
-
-async function addPaneToSession(sid, target, label) {
-  if (sid === paneSessionId()) return addPane(target);
-  if ((await postPane(sid, { target, base: getSessionBaseDir(sid) || undefined })) !== false) return;
-  const s = sessions.find((x) => x.id === sid);
-  showToast(`${label} added to ${s ? sessionDisplayName(s) : 'its session'}`, 'success', {
-    label: 'Open',
-    onClick: () => openSession(sid),
-  });
+  addPane(target, { sid, label: 'Plan' });
 }
 
 function msgDetailPaneSource() {
@@ -16727,8 +16794,8 @@ function terminalInitOptions(themeOptions) {
   };
 }
 
-function openTerminalLink(href) {
-  if (typeof href === 'string' && isLocalHref(href)) return openLocalHref(href);
+function openTerminalLink({ href, ctrl }) {
+  if (typeof href === 'string' && isLocalHref(href)) return openLocalHref(href, ctrl === true);
   const url = linkUrl(href);
   if (url) hub.openExternal(url);
 }
@@ -16752,7 +16819,7 @@ function onTerminalFrameMessage(t, m) {
       reconnectTerminal();
     }
   } else if (t === 'key') replayKey(m, document.getElementById('terminal-key-proxy'));
-  else if (t === 'link') openTerminalLink(m.href);
+  else if (t === 'link') openTerminalLink(m);
   // Chrome does not always fire focusin on the iframe element when its content takes focus.
   else if (t === 'focused') terminalHadFocus = terminalPaneFocused();
   else if (t === 'opening') {
@@ -16858,12 +16925,36 @@ function sendHostKeys(frames, bridged) {
 
 const urlPaneFrames = () => [...paneViews.querySelectorAll('.pane-url-frame')];
 
+function isAddonOrigin(origin) {
+  const list = dockAddonList;
+  return !!list && [...list.global, ...list.session].some((a) => URL.parse(a.url)?.origin === origin);
+}
+
+// The dock or URL pane frame a message came from, when the message's origin is that frame's page.
+function pageFrameOf(e) {
+  const dock = dockFrameEls().find((f) => f.contentWindow === e.source);
+  const frame = dock || urlPaneFrames().find((f) => f.contentWindow === e.source);
+  return frame && URL.parse(frame.src)?.origin === e.origin ? { dock, frame } : {};
+}
+
+// An add-on page asks the board to open a local path (`cck-addon:open` {path, pane?, reveal?}):
+// the preview modal, with `pane` a pane of the session, with `reveal` the file manager.
+window.addEventListener('message', (e) => {
+  const { type, path: target, reveal, pane } = e.data || {};
+  if (type !== 'cck-addon:open' || typeof target !== 'string' || !isLocalHref(target)) return;
+  const { dock, frame } = pageFrameOf(e);
+  if (!frame || !isAddonOrigin(e.origin)) return;
+  const sid = dock ? dockSid : paneSessionId();
+  if (reveal === true) revealPath(target);
+  else if (pane === true) addPane(target, { sid, show: true });
+  else openPreviewByPath(target, undefined, undefined, sid);
+});
+
 window.addEventListener('message', (e) => {
   const type = e.data?.type;
   if (type !== 'hub:hostKey' && type !== 'hub:hostReady') return;
-  const dock = dockFrameEls().find((f) => f.contentWindow === e.source);
-  const frame = dock || urlPaneFrames().find((f) => f.contentWindow === e.source);
-  if (!frame || URL.parse(frame.src)?.origin !== e.origin) return;
+  const { dock, frame } = pageFrameOf(e);
+  if (!frame) return;
   if (type === 'hub:hostReady') {
     if (!dock) frame.parentElement.classList.add('keys-bridged');
     const plain = Array.isArray(e.data.plainKeys) ? e.data.plainKeys.filter((k) => typeof k === 'string') : [];
@@ -17793,7 +17884,7 @@ window.addEventListener('message', (e) => {
     return;
   }
   if (t === 'link') {
-    openTerminalLink(m.href);
+    openTerminalLink(m);
     return;
   }
   if (t === 'focused') {
@@ -18930,6 +19021,7 @@ function createDockView(pane) {
   if (pane.run && !dockAddonUp.has(pane.id)) return startDockAddon(pane);
   const frame = paneUrlFrame(pane, 'dock-addon-frame');
   frame.dataset.target = pane.target;
+  frame.addEventListener('load', () => onDockFrameLoad(pane.id, frame));
   if (pane.addon || paneFraming.get(pane.target)) return frame;
   const sid = dockSid;
   probePaneFraming(sid, pane).then((frameable) => {
@@ -19132,7 +19224,7 @@ function initDockRail() {
     if (e.target.closest('[data-dock="close"]')) dockRailCommand(pane.id);
     else if (e.target.closest('[data-dock="expand"]')) setDockExpanded(!dockExpanded);
     else if (e.target.closest('[data-dock="remove"]')) removeDockItem(pane);
-    else if (e.target.closest('[data-dock="pane"]')) addPaneToSession(dockSid, pane.target, pane.title);
+    else if (e.target.closest('[data-dock="pane"]')) addPane(pane.target, { sid: dockSid, show: true });
     else if (e.target.closest('[data-dock="reload"]')) {
       dockAddonUp.delete(pane.id);
       dropDockView(pane.id);
@@ -20783,8 +20875,8 @@ function isLocalHref(href) {
   return /^file:/i.test(href) || (isAbsolutePath(href) && !href.startsWith('//'));
 }
 
-function openLocalHref(href) {
-  openPreviewByPath(href.replace(/#.*$/, ''), undefined, openFileInEditor);
+function openLocalHref(href, folderDirect) {
+  openPreviewByPath(href.replace(/#.*$/, ''), undefined, openFileInEditor, undefined, folderDirect);
 }
 
 // Capture, because the modals stop a click's propagation, and stopped here so a link in a message
@@ -20806,7 +20898,7 @@ document.addEventListener(
     if (!local && (!external || hub.inHub)) return;
     e.preventDefault();
     e.stopPropagation();
-    if (local) openLocalHref(href);
+    if (local) openLocalHref(href, e.ctrlKey || e.metaKey);
     else hub.openExternal(url.href);
   },
   true,
