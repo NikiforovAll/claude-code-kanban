@@ -2816,10 +2816,12 @@ function createResizeGrip({ onReset, ...drag }) {
 
 const MODAL_ZOOM_KEY = 'modal-zoom';
 const SHOW_ZOOM_KEY = 'show-zoom';
+const URL_ZOOM_KEY = 'url-zoom';
 const ZOOM_MIN = 0.7;
 const ZOOM_MAX = 2.0;
 let modalZoom = readZoom(MODAL_ZOOM_KEY);
 let showZoom = readZoom(SHOW_ZOOM_KEY);
+let urlZoom = readZoom(URL_ZOOM_KEY);
 
 function clampZoom(v) {
   return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, v));
@@ -2833,10 +2835,6 @@ function zoomLabel(z) {
   return `${Math.round(z * 100)}%`;
 }
 
-function modalZoomLabel() {
-  return zoomLabel(modalZoom);
-}
-
 // delta 0 resets to 100%. At a limit it returns z as is; else it saves and toasts the new zoom.
 function stepZoom(z, delta, key, label) {
   const next = delta === 0 ? 1 : clampZoom(Math.round((z + delta) * 10) / 10);
@@ -2848,13 +2846,23 @@ function stepZoom(z, delta, key, label) {
 
 function applyModalZoom() {
   document.documentElement.style.setProperty('--modal-zoom', String(modalZoom));
-  for (const el of document.querySelectorAll('.pane-zoom-val')) el.textContent = modalZoomLabel();
-  postToShowFrames(() => ({ type: `${SHOW_MSG}zoom`, z: modalZoom }), document.querySelectorAll(PANE_SHOW_FRAMES));
+  postToShowFrames(() => ({ type: `${SHOW_MSG}zoom`, z: modalZoom }), document.querySelectorAll(TEXT_ZOOM_FRAMES));
 }
 
 function adjustModalZoom(delta) {
   modalZoom = stepZoom(modalZoom, delta, MODAL_ZOOM_KEY, 'Text');
   applyModalZoom();
+}
+
+// URL and app panes keep their own zoom: a web page wants another scale than the board's text.
+function applyUrlZoom() {
+  document.documentElement.style.setProperty('--url-zoom', String(urlZoom));
+  for (const el of document.querySelectorAll('.pane-zoom-val')) el.textContent = zoomLabel(urlZoom);
+}
+
+function adjustUrlZoom(delta) {
+  urlZoom = stepZoom(urlZoom, delta, URL_ZOOM_KEY, 'Page');
+  applyUrlZoom();
 }
 
 // The show card above the terminal keeps its own text zoom: it sits beside a pane, so one
@@ -2885,7 +2893,9 @@ function zoomTarget() {
   if (isAnyModalOpen()) return isZoomableModalOpen() ? adjustModalZoom : null;
   if (isAskOnScreen()) return adjustModalZoom;
   if (isShowCardFocused()) return adjustShowZoom;
-  return isPaneDocOnScreen() ? adjustModalZoom : null;
+  const view = activePaneView();
+  if (view?.querySelector('.pane-url-frame')) return adjustUrlZoom;
+  return view?.querySelector('.modal-zoomable') ? adjustModalZoom : null;
 }
 
 const ZOOM_KEYS = { '+': 0.1, '=': 0.1, NumpadAdd: 0.1, '-': -0.1, _: -0.1, NumpadSubtract: -0.1, 0: 0, Numpad0: 0 };
@@ -2896,7 +2906,6 @@ function zoomDelta(e) {
 }
 
 let _toastTimer = null;
-let _manualRefreshing = false;
 //#endregion
 
 //#region TOAST
@@ -7203,7 +7212,6 @@ const SHORTCUT_TABS = [
           { keys: ['E'], label: 'Expand / restore task detail panel' },
           { keys: ['N'], label: 'Toggle scratchpad (in the sidebar: the item under the cursor)' },
           { keys: ['Ctrl', 'E'], combo: true, label: 'Set the session scratchpad emoji (in the scratchpad)' },
-          { keys: ['R'], label: 'Refresh data' },
           { keys: ['Esc'], label: 'Close panel / clear selection' },
         ],
       },
@@ -8948,22 +8956,6 @@ document.addEventListener('keydown', (e) => {
       return;
     }
     copyText(text, label, `Copied ${label}: ${e.ctrlKey ? text : text.slice(0, 8)}`);
-    return;
-  }
-  if (matchKey(e, 'KeyR')) {
-    e.preventDefault();
-    if (_manualRefreshing) return;
-    _manualRefreshing = true;
-    lastSessionsHash = '';
-    lastTasksHash = '';
-    const refreshes = [fetchSessions()];
-    if (currentSessionId) refreshes.push(fetchTasks(currentSessionId));
-    refreshRateLimits();
-    Promise.all(refreshes)
-      .then(() => showToast('Data refreshed', 'success'))
-      .finally(() => {
-        _manualRefreshing = false;
-      });
     return;
   }
   if (matchKey(e, 'KeyH')) {
@@ -14993,7 +14985,7 @@ function watchScrollFades(el) {
 // keys zoom the whole window and the pane keys do nothing. The bar zooms without keys and
 // says when the page has the keyboard; a click on it gives the keys back.
 function paneUrlBarHtml() {
-  return `<div class="pane-url-bar"><button class="icon-btn pane-keys" title="The page has keyboard focus. Click to turn the board shortcuts back on">Board shortcuts off · click to turn on</button><button class="icon-btn" data-pane-zoom="-0.1" title="Smaller" aria-label="Smaller">−</button><button class="icon-btn pane-zoom-val" data-pane-zoom="0" title="Reset size">${modalZoomLabel()}</button><button class="icon-btn" data-pane-zoom="0.1" title="Larger" aria-label="Larger">+</button></div>`;
+  return `<div class="pane-url-bar"><button class="icon-btn pane-keys" title="The page has keyboard focus. Click to turn the board shortcuts back on">Board shortcuts off · click to turn on</button><button class="icon-btn" data-pane-zoom="-0.1" title="Smaller" aria-label="Smaller">−</button><button class="icon-btn pane-zoom-val" data-pane-zoom="0" title="Reset size">${zoomLabel(urlZoom)}</button><button class="icon-btn" data-pane-zoom="0.1" title="Larger" aria-label="Larger">+</button></div>`;
 }
 
 function markPaneFrameFocus() {
@@ -15067,7 +15059,7 @@ function paneUrlFrame(pane, className) {
 }
 
 function mountPaneUrlFrame(pane, view) {
-  const frame = paneUrlFrame(pane, 'pane-frame pane-url-frame modal-zoomable');
+  const frame = paneUrlFrame(pane, 'pane-frame pane-url-frame');
   frame.addEventListener('load', () => view.classList.remove('keys-bridged'));
   view.appendChild(frame);
   view.insertAdjacentHTML('beforeend', paneUrlBarHtml());
@@ -15334,10 +15326,6 @@ function focusPaneTarget(target) {
   target.focus({ preventScroll: true });
   target.contentWindow?.focus();
   shellFrames.get(target)?.post('focus');
-}
-
-function isPaneDocOnScreen() {
-  return !!activePaneView()?.querySelector('.modal-zoomable');
 }
 
 function attachPaneReview(view, sessionId, opts) {
@@ -16296,7 +16284,7 @@ function applySplitRatio() {
 paneViews.addEventListener('click', (e) => {
   if (e.target.closest('[data-pane-open]')) openPaneExternally();
   const zoom = e.target.closest('[data-pane-zoom]');
-  if (zoom) adjustModalZoom(Number(zoom.dataset.paneZoom));
+  if (zoom) adjustUrlZoom(Number(zoom.dataset.paneZoom));
 });
 bindPreviewRelativeLinks(paneViews, (a) => a.closest('.pane-doc')?.dataset.path);
 watchScrollFades(paneTabs);
@@ -18759,7 +18747,8 @@ new MutationObserver(() => {
   });
 }).observe(document.body, { attributes: true, attributeFilter: ['class', 'data-color-theme', 'style'] });
 
-const PANE_SHOW_FRAMES = '.show-pane-frame, .themed-frame, .ask-frame, .dock-addon-frame, .pane-url-frame';
+const TEXT_ZOOM_FRAMES = '.show-pane-frame, .themed-frame, .ask-frame, .dock-addon-frame';
+const PANE_SHOW_FRAMES = `${TEXT_ZOOM_FRAMES}, .pane-url-frame`;
 
 // Builds the message only when a frame is there, because showTokens forces a style recalc.
 function postToShowFrames(makeMsg, frames = [showState.frame, ...document.querySelectorAll(PANE_SHOW_FRAMES)]) {
@@ -20268,6 +20257,7 @@ for (const k of readStoredList(ACTIVITY_FILTER_KEY)) activityFilter.add(k);
 initSidebarResize();
 applyModalZoom();
 applyShowZoom();
+applyUrlZoom();
 loadModalFullscreen();
 initModalResize();
 loadPanelWidths();

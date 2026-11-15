@@ -8802,6 +8802,10 @@ body.light .msg-assistant .msg-text {
   zoom: var(--modal-zoom, 1);
 }
 
+.pane-url-frame {
+  zoom: var(--url-zoom, 1);
+}
+
 /* Height is left to the flex column under `.storage-modal`'s 85vh cap — a `vh`
    cap here would be multiplied by the zoom above. */
 #storage-modal-body {
