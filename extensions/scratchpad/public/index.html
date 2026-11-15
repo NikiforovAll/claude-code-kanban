@@ -57,15 +57,19 @@
       </section>
       <section class="keys">
         <h3>Keys</h3>
-        <dl>
-          <dt><kbd>\</kbd></dt><dd>Hide or show the list</dd>
-        </dl>
+        <dl id="home-keys"></dl>
       </section>
     </div>
   </div>
   <div id="error" class="note" hidden></div>
   <iframe id="viewer" title="Scratchpad" hidden></iframe>
 </main>
+<dialog id="help" class="keys" aria-labelledby="help-title">
+  <header><h2 id="help-title">Keyboard shortcuts</h2><button type="button" class="icon" id="help-close" aria-label="Close">×</button></header>
+  <dl id="help-keys"></dl>
+  <h3 id="help-hub-title" hidden>Hub</h3>
+  <dl id="help-hub-keys" hidden></dl>
+</dialog>
 <script src="app.js"></script>
 </body>
 </html>

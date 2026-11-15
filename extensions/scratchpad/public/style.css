@@ -90,8 +90,43 @@ h1 {
   margin: -4px -4px -4px 0;
 }
 
-#home-button {
+#home-button,
+#help-button {
   margin-right: -6px;
+}
+
+#help {
+  width: min(520px, calc(100vw - 32px));
+  padding: 18px 22px 22px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+}
+
+#help::backdrop {
+  background: rgb(0 0 0 / 0.35);
+}
+
+#help > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+#help h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+#help h3 {
+  margin: 18px 0 10px;
+}
+
+.key-sep {
+  color: var(--text-muted);
 }
 
 body.list-collapsed #list {
@@ -785,6 +820,9 @@ kbd {
 }
 
 .keys dt {
+  display: flex;
+  align-items: center;
+  gap: 0.3em;
   color: var(--text-tertiary);
 }
 

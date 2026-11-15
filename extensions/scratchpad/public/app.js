@@ -120,12 +120,14 @@ new MutationObserver(() => {
 // the hub or, in a pane, to Kanban around it.
 let hostClaims = [];
 const LIST_KEY = { key: '\\', code: 'Backslash' };
+const PAD_STEP = { 'alt+ArrowUp': -1, 'alt+ArrowDown': 1 };
 
 function sendKeys() {
   if (!viewerOrigin || !frame.contentWindow || !window.ClaudeHubKeys) return;
   const sigs = hostClaims.map((k) => ClaudeHubKeys.keySigs(k)[0]).filter(Boolean);
   if (!inPane) sigs.push(...ClaudeHubKeys.keySigs(LIST_KEY));
-  frame.contentWindow.postMessage({ type: 'scratchpads:keys', combos: hub?.forwardCombos() ?? [], sigs }, viewerOrigin);
+  const combos = [...(hub?.forwardCombos() ?? []), ...(inPane ? [] : Object.keys(PAD_STEP))];
+  frame.contentWindow.postMessage({ type: 'scratchpads:keys', combos, sigs }, viewerOrigin);
 }
 
 function replayKey(m) {
@@ -202,6 +204,7 @@ const ICONS = {
   home: 'M2.5 7.5 8 3l5.5 4.5M4 6.5V13h8V6.5',
   forget: 'M4.5 4.5l7 7M11.5 4.5l-7 7',
   resume: 'M8 4.5V8l2.5 1.5M14 8A6 6 0 1 1 2 8a6 6 0 0 1 12 0',
+  help: 'M14 8A6 6 0 1 1 2 8a6 6 0 0 1 12 0M6.3 6.3a1.8 1.8 0 1 1 2.5 1.6c-.5.2-.8.6-.8 1.1v.3M8 11v.5',
 };
 
 function svgIcon(name) {
@@ -269,6 +272,7 @@ function padInfo(info) {
 
 function padRow(p, v, inHistory = true) {
   const li = el('li', `pad${p.key === current ? ' current' : ''}`);
+  li.dataset.key = p.key;
   const [state, stateText] = viewerState(v);
   const open = el('button', 'open');
   open.type = 'button';
@@ -321,6 +325,7 @@ function groupEl(label, title, rows) {
 
 function render({ groups, viewers, scratch }) {
   const nav = document.getElementById('groups');
+  const focusedKey = nav.contains(document.activeElement) ? document.activeElement.closest('.pad')?.dataset.key : null;
   nav.replaceChildren();
   if (!scratch) nav.append(el('p', 'empty-list', 'The scratch CLI is not on PATH, so pads cannot open.'));
   if (!groups.length && !viewers.length) nav.append(el('p', 'empty-list', 'Pads you open show up here, grouped by project.'));
@@ -335,6 +340,7 @@ function render({ groups, viewers, scratch }) {
   }
   const others = viewers.filter((v) => !listed.has(v.key));
   if (others.length) nav.append(groupEl('Other running', null, others.map((v) => padRow(v, v, false))));
+  if (focusedKey) nav.querySelector(`.pad[data-key="${CSS.escape(focusedKey)}"] .open`)?.focus();
   document.getElementById('count').textContent = viewers.length ? `${viewers.length} running` : '';
   renderHome({ groups, viewers, scratch }, byKey);
 }
@@ -481,17 +487,108 @@ listToggle.id = 'list-toggle';
 listToggle.setAttribute('aria-label', 'Toggle list');
 const homeButton = iconButton('home', 'Home', goHome);
 homeButton.id = 'home-button';
-document.querySelector('#list > header').append(homeButton, listToggle);
+const helpButton = iconButton('help', 'Keyboard shortcuts (?)', () => toggleHelp());
+helpButton.id = 'help-button';
+document.querySelector('#list > header').append(homeButton, helpButton, listToggle);
 let collapsed = false;
 try {
   collapsed = localStorage.getItem(COLLAPSED) === '1';
 } catch {}
 setCollapsed(collapsed);
 
+// #endregion
+
+// #region LIST_KEYS
+const KEY_ROWS = [
+  { keys: ['\\'], label: 'Hide or show the list' },
+  { keys: ['↑', '↓'], or: true, label: 'Move through the list (also J / K), Enter opens the pad' },
+  { keys: ['Alt', '↑/↓'], label: 'Open the previous or next pad, also from inside a pad' },
+  { keys: ['/'], label: 'Open a folder by its path' },
+  { keys: ['?'], label: 'Show these keys' },
+];
+const HUB_ROWS = [
+  { action: ['hub.prevApp', 'hub.nextApp'], label: 'Previous / next hub app' },
+  { action: 'hub.appByNumber', label: 'Jump to hub app by number' },
+  { action: 'hub.projectPicker', label: 'Project picker' },
+  { action: 'hub.appLauncher', label: 'App launcher' },
+];
+
+function keyRows(rows) {
+  return rows.flatMap(({ keys, or, label }) => {
+    const dt = el('dt');
+    keys.forEach((k, i) => {
+      if (i) dt.append(el('span', 'key-sep', or ? '/' : '+'));
+      dt.append(el('kbd', '', k));
+    });
+    return [dt, el('dd', '', label)];
+  });
+}
+
+document.getElementById('home-keys').append(...keyRows(KEY_ROWS));
+const help = document.getElementById('help');
+document.getElementById('help-close').addEventListener('click', () => help.close());
+help.addEventListener('click', (e) => {
+  if (e.target === help) help.close();
+});
+
+function toggleHelp() {
+  if (help.open) return help.close();
+  document.getElementById('help-keys').replaceChildren(...keyRows(KEY_ROWS));
+  const hubRows = HUB_ROWS.map((r) => ({ ...r, keys: hub?.keyLabel(r.action) })).filter((r) => r.keys?.length);
+  document.getElementById('help-hub-keys').replaceChildren(...keyRows(hubRows));
+  document.getElementById('help-hub-keys').hidden = document.getElementById('help-hub-title').hidden = !hubRows.length;
+  help.showModal();
+}
+
+const listButtons = () => [...document.querySelectorAll('#groups .pad .open')];
+const currentIndex = (buttons) => buttons.findIndex((b) => b.closest('.pad').classList.contains('current'));
+
+function moveListFocus(step) {
+  const buttons = listButtons();
+  if (!buttons.length || document.body.classList.contains('list-collapsed')) return false;
+  const focused = buttons.indexOf(document.activeElement);
+  const from = focused >= 0 ? focused : currentIndex(buttons);
+  const to = from < 0 ? (step > 0 ? 0 : buttons.length - 1) : Math.min(buttons.length - 1, Math.max(0, from + step));
+  buttons[to].focus();
+  buttons[to].scrollIntoView({ block: 'nearest' });
+  return true;
+}
+
+function stepPad(step) {
+  const buttons = listButtons();
+  const at = currentIndex(buttons);
+  const next = buttons[at < 0 ? (step > 0 ? 0 : buttons.length - 1) : at + step];
+  if (!next) return false;
+  next.click();
+  next.focus();
+  return true;
+}
+
+const LIST_STEP = { ArrowUp: -1, k: -1, ArrowDown: 1, j: 1 };
+
 document.addEventListener('keydown', (e) => {
-  if (e.key !== LIST_KEY.key || e.ctrlKey || e.altKey || e.metaKey || e.defaultPrevented) return;
-  if (e.target.closest?.('input, textarea, select, [contenteditable]')) return;
-  if (toggleList()) e.preventDefault();
+  if (e.defaultPrevented || inPane || (help.open && e.key !== '?')) return;
+  const step = PAD_STEP[window.ClaudeHubKeys?.comboOf(e)];
+  if (step) {
+    if (stepPad(step)) e.preventDefault();
+    return;
+  }
+  if (e.ctrlKey || e.altKey || e.metaKey) return;
+  if (e.target.closest?.('input, textarea, select, [contenteditable]')) {
+    if (e.key === 'Escape') e.target.blur();
+    return;
+  }
+  let done = false;
+  if (e.key === '?') {
+    toggleHelp();
+    done = true;
+  } else if (e.key === LIST_KEY.key) done = toggleList();
+  else if (LIST_STEP[e.key] && !e.shiftKey) done = moveListFocus(LIST_STEP[e.key]);
+  else if (e.key === '/' && !document.getElementById('empty').hidden && !document.getElementById('open-form').hidden) {
+    document.getElementById('open-path').focus();
+    done = true;
+  }
+  if (done) e.preventDefault();
 });
 // #endregion
 
