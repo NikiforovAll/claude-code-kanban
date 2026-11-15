@@ -9297,7 +9297,13 @@ function onReviewFrameMessage(e) {
   if (type !== 'select' || typeof e.data.quote !== 'string' || !e.data.quote.trim()) return;
   const box = activeReview.frame.getBoundingClientRect();
   const r = e.data.rect || {};
-  const rect = { left: box.left + (r.left || 0), top: box.top + (r.top || 0), bottom: box.top + (r.bottom || 0) };
+  // The frame reports its own CSS px; a zoomed ancestor (the modal zoom) scales them on the board.
+  const z = activeReview.frame.currentCSSZoom || 1;
+  const rect = {
+    left: box.left + (r.left || 0) * z,
+    top: box.top + (r.top || 0) * z,
+    bottom: box.top + (r.bottom || 0) * z,
+  };
   const c = e.data.context || {};
   const context = { heading: c.heading, element: c.element, selector: c.selector };
   const pos = Number.isFinite(e.data.pos) ? e.data.pos : 0;
