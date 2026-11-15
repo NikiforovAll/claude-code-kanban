@@ -11310,7 +11310,7 @@ pre.mermaid[data-mermaid-error]::before {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 8px 10px 4px;
+  padding: 6px 10px;
   margin-top: 8px;
   cursor: pointer;
   user-select: none;
@@ -11329,9 +11329,11 @@ pre.mermaid[data-mermaid-error]::before {
 
 .project-group-header.kb-selected,
 .pinned-sub-header.kb-selected,
-.sg-section-toggle.kb-selected {
+.sg-section-toggle.kb-selected,
+.session-group-header.kb-selected {
   color: var(--text-primary);
-  background: var(--bg-hover);
+  background: var(--session-active-bg);
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--text-primary) 18%, transparent);
   border-radius: 4px;
 }
 
@@ -11566,7 +11568,7 @@ pre.mermaid[data-mermaid-error]::before {
 
 /* #region SESSION_GROUPS */
 .sg-section-label {
-  padding: 10px 10px 2px;
+  padding: 7px 10px;
   margin-top: 10px;
   font-size: 11px;
   font-weight: 600;
@@ -11582,7 +11584,6 @@ pre.mermaid[data-mermaid-error]::before {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding-bottom: 4px;
   cursor: pointer;
 }
 
@@ -11607,11 +11608,6 @@ pre.mermaid[data-mermaid-error]::before {
 
 .session-group-header:hover {
   background: var(--bg-hover);
-}
-
-.session-group-header.kb-selected {
-  outline: 1px solid var(--accent);
-  outline-offset: -1px;
 }
 
 .session-group-header.sg-zen,
