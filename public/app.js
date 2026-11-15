@@ -13443,6 +13443,12 @@ const SP_COMMANDS = [
     run: (s) => openShellForSession(s.id),
   },
   {
+    id: 'session.fork',
+    title: 'Fork session',
+    when: (s) => !!s && !!forkableSession(s.id),
+    run: (s) => forkSession(s.id),
+  },
+  {
     id: 'terminal.manager',
     title: 'Open terminal manager',
     general: true,
