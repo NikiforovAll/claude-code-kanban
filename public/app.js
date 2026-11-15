@@ -13429,15 +13429,33 @@ const SP_COMMANDS = [
     when: (s) => !!s?.project && hub.can('project.memory'),
     run: (s) => openMemory(s.id),
   },
-  { id: 'session.new', title: 'New session', when: terminalAvailable, run: (s) => openNewSession(s?.project ?? null) },
+  {
+    id: 'session.new',
+    title: 'New session',
+    general: true,
+    when: terminalAvailable,
+    run: (s) => openNewSession(s?.project ?? null),
+  },
   {
     id: 'session.shell',
     title: 'New terminal shell',
     when: (s) => !!s && terminalAvailable() && !!getSessionBaseDir(s.id),
     run: (s) => openShellForSession(s.id),
   },
-  { id: 'terminal.manager', title: 'Open terminal manager', when: terminalAvailable, run: openTerminalManager },
-  { id: 'hub.restart', title: 'Restart Hub', when: () => hub.can('hub.restart'), run: () => hub.invoke('hub.restart') },
+  {
+    id: 'terminal.manager',
+    title: 'Open terminal manager',
+    general: true,
+    when: terminalAvailable,
+    run: openTerminalManager,
+  },
+  {
+    id: 'hub.restart',
+    title: 'Restart Hub',
+    general: true,
+    when: () => hub.can('hub.restart'),
+    run: () => hub.invoke('hub.restart'),
+  },
 ];
 const SP_COMMAND_KEYS = new Map(
   SHORTCUT_TABS.flatMap((t) => t.groups.flatMap((g) => g.rows))
@@ -13628,7 +13646,9 @@ function spPinHtml(session) {
 
 function renderPickerCommands(list, query) {
   const selectedId = spRows[spIdx]?.id;
-  spRows = SP_COMMANDS.filter((c) => c.when(spTarget) && fuzzyMatch(c.title, query));
+  const shown = SP_COMMANDS.filter((c) => c.when(spTarget) && fuzzyMatch(c.title, query));
+  spRows = [...shown.filter((c) => !c.general), ...shown.filter((c) => c.general)];
+  const firstGeneral = spRows.findIndex((c) => c.general);
   const target = spTarget
     ? `<div class="sp-target">Session: <b>${escapeHtml(sessionDisplayName(spTarget))}</b>${spTarget.project ? ` · ${escapeHtml(pathBasename(spTarget.project))}` : ''}</div>`
     : '<div class="sp-target">No current session</div>';
@@ -13636,7 +13656,8 @@ function renderPickerCommands(list, query) {
     .map((c, i) => {
       const keyRow = SP_COMMAND_KEYS.get(c.id);
       const keys = keyRow ? `<span class="sp-keys">${keyChipsHtml(keyRow)}</span>` : '';
-      return `<button class="sp-row" data-idx="${i}"><span class="sp-name">${escapeHtml(c.title)}</span>${keys}</button>`;
+      const section = i > 0 && i === firstGeneral ? '<div class="sp-section">General</div>' : '';
+      return `${section}<button class="sp-row" data-idx="${i}"><span class="sp-name">${escapeHtml(c.title)}</span>${keys}</button>`;
     })
     .join('');
   list.innerHTML = target + (rows || '<div class="sp-empty">No command matches</div>');
