@@ -185,6 +185,7 @@ function makePage(local = {}) {
     showToast: (msg, kind) => ctx.toasts.push([msg, kind]),
     fetchSessions: () => ctx.fetched++,
     renderSessions: () => ctx.rendered++,
+    updatePinBtnsState: () => {},
     api: async (url, opts = {}) => {
       if (url === '/api/session/pins') return json({ pins: server.pins });
       if (url === '/api/session/pins/import') {
@@ -217,6 +218,8 @@ function makePage(local = {}) {
         'sendPinChange',
         'postPins',
         'clearSessionPin',
+        'putSessionPin',
+        'setSessionPinState',
         'toggleSessionPin',
         'toggleSessionSticky',
         'unpinSession',

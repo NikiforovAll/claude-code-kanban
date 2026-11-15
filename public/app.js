@@ -2255,6 +2255,7 @@ function showPinnedSessions(added) {
   const known = new Set(sessions.map((s) => s.id));
   if (added.some((id) => !known.has(id))) fetchSessions(false);
   else renderSessions();
+  updatePinBtnsState();
 }
 
 function sendPinChange(sessionId) {
@@ -2283,40 +2284,43 @@ function clearSessionPin(sessionId) {
   deferredPinPlacement.delete(sessionId);
 }
 
-function unpinSession(sessionId) {
+// A sticky that `session open` added is only this page's, so only an unpin drops it.
+function putSessionPin(sessionId, state) {
+  const opened = openedStickyIds.has(sessionId);
   clearSessionPin(sessionId);
+  if (state === 'none') return;
+  pinnedSessionIds.add(sessionId);
+  if (state === 'sticky') stickySessionIds.add(sessionId);
+  else if (opened) {
+    stickySessionIds.add(sessionId);
+    openedStickyIds.add(sessionId);
+  }
+}
+
+function setSessionPinState(sessionId, state) {
+  putSessionPin(sessionId, state);
+  if (state === 'sticky' && sessionId === currentSessionId) deferredPinPlacement.add(sessionId);
   sendPinChange(sessionId);
   renderSessions();
+  updatePinBtnsState();
+}
+
+function unpinSession(sessionId) {
+  setSessionPinState(sessionId, 'none');
 }
 
 function toggleSessionPin(sessionId) {
-  if (pinnedSessionIds.has(sessionId)) return unpinSession(sessionId);
-  pinnedSessionIds.add(sessionId);
-  sendPinChange(sessionId);
-  renderSessions();
+  setSessionPinState(sessionId, pinnedSessionIds.has(sessionId) ? 'none' : 'pinned');
 }
 
 function toggleSessionSticky(sessionId) {
-  if (stickySessionIds.has(sessionId)) {
-    clearSessionPin(sessionId);
-  } else {
-    pinnedSessionIds.add(sessionId);
-    stickySessionIds.add(sessionId);
-    if (sessionId === currentSessionId) deferredPinPlacement.add(sessionId);
-  }
-  sendPinChange(sessionId);
-  renderSessions();
+  setSessionPinState(sessionId, stickySessionIds.has(sessionId) ? 'none' : 'sticky');
 }
 
 // The echo of this page's own change is a no-op, so the selected session keeps its deferred place.
 function handleSessionPinEvent({ id, state }) {
   if (!id || getSessionPinState(id, { saved: true }) === state) return;
-  clearSessionPin(id);
-  if (state === 'pinned') pinnedSessionIds.add(id);
-  if (state === 'sticky') {
-    pinnedSessionIds.add(id);
-    stickySessionIds.add(id);
-  }
+  putSessionPin(id, state);
   showPinnedSessions(isAnyPinned(id) ? [id] : []);
 }
 
@@ -13122,15 +13126,20 @@ let _infoModalSessionId = null;
 let _pendingPlanContent = null;
 let _pendingPlanPath = null;
 
-function updateStickyBtnState() {
+function setPinBtnState(btn, on, onTitle, offTitle) {
+  btn.style.display = '';
+  btn.classList.toggle('active', on);
+  btn.title = on ? onTitle : offTitle;
+  btn.querySelector('svg')?.setAttribute('fill', on ? 'currentColor' : 'none');
+}
+
+function updatePinBtnsState() {
+  const pinBtn = document.getElementById('session-info-pin-btn');
   const stickyBtn = document.getElementById('session-info-sticky-btn');
-  if (!stickyBtn || !_infoModalSessionId) return;
-  const isSticky = stickySessionIds.has(_infoModalSessionId);
-  stickyBtn.style.display = '';
-  stickyBtn.classList.toggle('active', isSticky);
-  stickyBtn.title = isSticky ? 'Remove sticky pin' : 'Sticky pin — always show in the list';
-  const svg = stickyBtn.querySelector('svg');
-  if (svg) svg.setAttribute('fill', isSticky ? 'currentColor' : 'none');
+  if (!pinBtn || !stickyBtn || !_infoModalSessionId) return;
+  const state = getSessionPinState(_infoModalSessionId);
+  setPinBtnState(pinBtn, state === 'pinned', 'Unpin session', 'Pin session');
+  setPinBtnState(stickyBtn, state === 'sticky', 'Remove sticky pin', 'Sticky pin — always show in the list');
 }
 
 // Purely cosmetic: the tmp root is identical for every session and the encoded
@@ -13328,8 +13337,10 @@ function showInfoModal(session, teamConfig, tasks, planContent, parentInfo) {
   // would stack up once per open and fire the click handler N times.
   bindLinkedDocsHandlers(bodyEl.querySelector('.linked-docs-section'), session.id);
   _infoModalSessionId = session.id;
-  updateStickyBtnState();
+  updatePinBtnsState();
   updateDismissBtnState();
+  const agentsBtn = document.getElementById('session-info-agents-btn');
+  if (agentsBtn) agentsBtn.style.display = session.id === currentSessionId && currentAgents.length ? '' : 'none';
   const costBtn = document.getElementById('session-info-cost-btn');
   if (costBtn) costBtn.style.display = hub.can('session.cost') ? '' : 'none';
   const mkBtn = document.getElementById('session-info-marketplace-btn');
