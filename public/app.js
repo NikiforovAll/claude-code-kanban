@@ -13455,13 +13455,6 @@ const SP_COMMANDS = [
     when: terminalAvailable,
     run: openTerminalManager,
   },
-  {
-    id: 'hub.restart',
-    title: 'Restart Hub',
-    general: true,
-    when: () => hub.can('hub.restart'),
-    run: () => hub.invoke('hub.restart'),
-  },
 ];
 const SP_COMMAND_KEYS = new Map(
   SHORTCUT_TABS.flatMap((t) => t.groups.flatMap((g) => g.rows))
