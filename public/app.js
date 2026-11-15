@@ -9081,7 +9081,7 @@ function startReview(opts) {
     hot: null,
   };
   if (!frame) {
-    contentEl.addEventListener('mouseup', () => setTimeout(offerReviewComment, 0), { signal });
+    document.addEventListener('mouseup', () => setTimeout(offerReviewComment, 0), { signal });
     contentEl.addEventListener('mousemove', (e) => queueReviewHover(e.clientX, e.clientY), { signal });
   }
   window.addEventListener('message', onReviewFrameMessage, { signal });
@@ -9180,11 +9180,14 @@ function setReviewHot(c, fromText) {
 function reviewSelection() {
   const sel = window.getSelection();
   if (!activeReview || !sel || sel.isCollapsed || !sel.rangeCount) return null;
-  const range = sel.getRangeAt(0);
-  if (!activeReview.contentEl.contains(range.commonAncestorContainer)) return null;
-  const quote = sel.toString().trim();
+  const { contentEl } = activeReview;
+  const range = sel.getRangeAt(0).cloneRange();
+  if (!contentEl.contains(range.startContainer)) return null;
+  const pastEnd = !contentEl.contains(range.endContainer);
+  if (pastEnd) range.setEnd(contentEl, contentEl.childNodes.length);
+  const quote = (pastEnd ? range : sel).toString().trim();
   if (!quote) return null;
-  return { quote, range: range.cloneRange(), rect: range.getBoundingClientRect() };
+  return { quote, range, rect: range.getBoundingClientRect() };
 }
 
 // A re-render replaces the nodes a range points at, so a comment keeps its text and the
