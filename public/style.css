@@ -8487,7 +8487,6 @@ body.light {
   --bg-elevated: #fbfaf9;
   --bg-hover: #d2d0cc;
   --session-active-bg: var(--bg-elevated);
-  --session-active-border: var(--border);
   --border: #cfcbc4;
   --text-primary: #0a0a0a;
   --text-secondary: #2c2c2c;
@@ -11187,7 +11186,6 @@ select.form-input option:checked {
     --bg-elevated: #fbfaf9;
     --bg-hover: #d2d0cc;
     --session-active-bg: var(--bg-elevated);
-    --session-active-border: var(--border);
     --border: #cfcbc4;
     --text-primary: #0a0a0a;
     --text-secondary: #2c2c2c;
