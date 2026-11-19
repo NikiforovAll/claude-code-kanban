@@ -2883,7 +2883,8 @@ function adjustShowZoom(delta) {
 
 // The markup decides what scales: `.modal-zoomable` marks a modal's reading
 // surface, and style.css hangs the zoom on that same class. Confirm dialogs
-// carry no such body — nothing there is worth enlarging.
+// carry no such body — nothing there is worth enlarging. Page Up and Page Down
+// scroll from that class too (pageTopModal).
 function isZoomableModalOpen() {
   return document.querySelector('.modal-overlay.visible .modal-zoomable') !== null;
 }
@@ -8570,6 +8571,23 @@ const MODAL_CLOSERS = {
   'pane-pop': () => closePanePop(),
 };
 
+function topModalId() {
+  const visible = [...document.querySelectorAll('.modal-overlay.visible')];
+  return MODAL_ESC_PRIORITY.find((id) => visible.some((m) => m.id === id)) || visible[visible.length - 1].id;
+}
+
+// Focus is on the dialog, a button or the page behind, not inside the text, so the browser finds no
+// scroll box for Page Up and Page Down.
+function pageTopModal(e) {
+  const overlay = document.getElementById(topModalId());
+  let box = overlay.querySelector('.modal-zoomable');
+  const scrolls = (el) => el.scrollHeight > el.clientHeight && /auto|scroll/.test(getComputedStyle(el).overflowY);
+  while (box && box !== overlay && !scrolls(box)) box = box.parentElement;
+  if (!box || box === overlay || box.contains(e.target)) return false;
+  box.scrollBy({ top: (e.key === 'PageDown' ? 1 : -1) * box.clientHeight * 0.9 });
+  return true;
+}
+
 document.addEventListener('keydown', (e) => {
   // Scale the open modal's reading surface, or the file pane's, instead of letting the browser zoom
   // the whole page. Sits above the text-field guard so it still works with the
@@ -8627,12 +8645,13 @@ document.addEventListener('keydown', (e) => {
         return;
       }
       // Close only the topmost so a child Esc doesn't also dismiss its parent.
-      const visible = [...document.querySelectorAll('.modal-overlay.visible')];
-      const topId = MODAL_ESC_PRIORITY.find((id) => visible.some((m) => m.id === id)) || visible[visible.length - 1].id;
+      const topId = topModalId();
       const close = MODAL_CLOSERS[topId];
       if (close) close();
       else document.getElementById(topId).classList.remove('visible');
       e.stopImmediatePropagation();
+    } else if (matchKey(e, 'PageDown', 'PageUp')) {
+      if (pageTopModal(e)) e.preventDefault();
     } else if (e.key === '?' && document.getElementById('help-modal').classList.contains('visible')) {
       e.preventDefault();
       closeHelpModal();
