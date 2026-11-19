@@ -79,6 +79,8 @@ for (const m of src.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/gi)) {
 
 if (!/color-scheme\s*:\s*var\(\s*--color-scheme/.test(src))
   report('warn', null, 'no-color-scheme', 'color-scheme does not follow var(--color-scheme): scrollbars and native controls follow the OS');
+if (!/::-webkit-scrollbar\s*\{/.test(src))
+  report('warn', null, 'no-thin-scrollbar', "no ::-webkit-scrollbar rule: the page shows the OS scrollbar, not the board's thin one");
 if (!hasListener) report('error', null, 'no-token-listener', "no 'cck-show:tokens' message listener");
 for (const v of usedVars) {
   if (!CONTRACT.has(v) && !definedVars.has(v)) report('warn', null, 'unknown-var', `${v} is not a board token and is not defined`);

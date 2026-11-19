@@ -28,7 +28,16 @@ The URL is the page's only input from the board. The page reads the values the b
 
 ## 3. Take the board's theme
 
-Style the page with the variables of the HTML contract in [the show skill](../../show/SKILL.md#html-contract), in its flat style. Set fallback values for them in `:where(:root)`, and set `:root { color-scheme: var(--color-scheme, light dark); }` so scrollbars and form controls follow the board, not the OS. Apply the board's values from its message, which it sends on each load and each theme change:
+Style the page with the variables of the HTML contract in [the show skill](../../show/SKILL.md#html-contract), in its flat style. Set fallback values for them in `:where(:root)`, and set `:root { color-scheme: var(--color-scheme, light dark); }` so scrollbars and form controls follow the board, not the OS. Scrollbars still take the OS shape, so copy the board's thin scrollbar:
+
+```css
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-text-muted); }
+```
+
+Apply the board's values from its message, which it sends on each load and each theme change:
 
 ```js
 addEventListener('message', (e) => {
@@ -77,7 +86,7 @@ Run the static check, `scripts/theme-check.mjs` in this skill's base directory, 
 node <skill base dir>/scripts/theme-check.mjs <folder>/index.html
 ```
 
-It fails on a literal color (hex, `rgb()`, `hsl()`, `oklch()`, a named color) in CSS, a `style` attribute, an SVG `fill` or `stroke`, or a JS string, and on a page with no `cck-show:tokens` listener. It warns on a variable that is not a board token, a token with no fallback, a literal font, and a missing `color-scheme`. A literal color is allowed only as a token's fallback in `:where(:root)`. For a shade, mix a token: `color-mix(in srgb, var(--color-accent) 14%, transparent)`.
+It fails on a literal color (hex, `rgb()`, `hsl()`, `oklch()`, a named color) in CSS, a `style` attribute, an SVG `fill` or `stroke`, or a JS string, and on a page with no `cck-show:tokens` listener. It warns on a variable that is not a board token, a token with no fallback, a literal font, a missing `color-scheme`, and a missing `::-webkit-scrollbar` rule. A literal color is allowed only as a token's fallback in `:where(:root)`. For a shade, mix a token: `color-mix(in srgb, var(--color-accent) 14%, transparent)`.
 
 A pass does not prove the page follows the theme. The check reads one file, so it does not see colors built at runtime (`'#' + hex`, colors from the server), linked stylesheets, library CSS, canvas or images. Keep those on tokens too, and when the page has any of them, open it on the rail and switch the board between light and dark.
 
