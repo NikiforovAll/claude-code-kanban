@@ -101,19 +101,21 @@ describe('kanbot', () => {
       assert.doesNotMatch(help, /# Costs/);
     });
 
-    it('loads the plugin of each found app that ships one', () => {
+    it('points at the skill file of each found app that ships one', () => {
       reset();
       const appRoot = (name) => path.join(root, 'apps', name);
       serverFile('.cost', { pid: process.pid, port: 4330, script: path.join(appRoot('cost'), 'server.js') });
       serverFile('.memory', { pid: process.pid, port: 4331, script: path.join(appRoot('memory'), 'bin.js') });
-      const memoryPlugin = path.join(appRoot('memory'), 'plugin', 'plugins', 'memory-diagnoser');
-      fs.mkdirSync(path.join(memoryPlugin, '.claude-plugin'), { recursive: true });
-      fs.writeFileSync(path.join(memoryPlugin, '.claude-plugin', 'plugin.json'), '{}');
+      const skillDir = path.join(appRoot('memory'), 'plugin', 'plugins', 'memory-diagnoser', 'skills', 'memory-analysis');
+      fs.mkdirSync(skillDir, { recursive: true });
+      fs.writeFileSync(path.join(skillDir, 'SKILL.md'), '');
       const apps = findKanbotApps({ claudeDir: root, which: noBin });
-      assert.deepEqual(apps.map((a) => a.pluginDir), [null, memoryPlugin]);
+      assert.deepEqual(apps.map((a) => a.skillDir), [null, skillDir]);
       const { extraArgs, help } = helpOf(apps);
-      assert.deepEqual(extraArgs.slice(0, 5), ['--plugin-dir', KANBOT_PLUGIN_DIR, '--plugin-dir', memoryPlugin, '--agent']);
-      assert.match(help, /# Costs[\s\S]*# Memory analysis/);
+      assert.equal(extraArgs.filter((a) => a === '--plugin-dir').length, 1);
+      assert.deepEqual(extraArgs.slice(-4), ['--add-dir', root, '--add-dir', skillDir]);
+      assert.equal(help.match(/Before you answer/g).length, 1);
+      assert.ok(help.includes(`read \`${path.join(skillDir, 'SKILL.md').replace(/\\/g, '/')}\``));
       reset();
     });
   });
