@@ -15157,10 +15157,20 @@ function paneBlockedHtml(pane) {
   );
 }
 
+function isLoopbackUrl(url) {
+  try {
+    return PANE_LOOPBACK.has(new URL(url, location.href).hostname);
+  } catch {
+    return false;
+  }
+}
+
 function paneUrlFrame(pane, className) {
   const frame = document.createElement('iframe');
   frame.className = className;
   frame.setAttribute('sandbox', PANE_URL_SANDBOX);
+  // A cross-origin frame cannot write the clipboard without this; only local apps get it.
+  if (isLoopbackUrl(pane.target)) frame.allow = 'clipboard-write';
   frame.setAttribute('referrerpolicy', 'no-referrer');
   frame.title = pane.title;
   frame.src = pane.target;
