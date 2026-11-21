@@ -62,7 +62,7 @@ const { buildDecision, decisionFileName, isDecisionFile, approvalsFrom, boardRef
 const { getClaudeDir, getArgValue, storageNamespace, isDefaultClaudeDir } = require('./lib/claude-dir');
 const { readTerminalConfig } = require('./lib/terminal');
 const { createTerminalClient } = require('./lib/terminal-client');
-const { kanbotOn, kanbotModel, createKanbot, findCostCli, readCostServer } = require('./lib/kanbot');
+const { kanbotOn, kanbotModel, createKanbot, findKanbotApps, readCostServer } = require('./lib/kanbot');
 const { AGENT_ID_RE } = require('./cli');
 const { createShowStore, mountShowRoutes, showBodyParser, SHOW_PATH } = require('./lib/show');
 const { createAskStore, mountAskRoutes, askBodyParser, ASK_PATH } = require('./lib/ask');
@@ -3672,7 +3672,7 @@ async function ensureKanbot() {
   const started = await terminal.startNew(kanbot.startSpec({
     model: kanbotModelSetting(),
     boardUrl: `http://127.0.0.1:${boardPort}`,
-    costCli: findCostCli({ claudeDir: CLAUDE_DIR, which: whichSync }),
+    apps: findKanbotApps({ claudeDir: CLAUDE_DIR, which: whichSync }),
   }));
   if (started.error) return started;
   kanbot.ptyId = started.id;

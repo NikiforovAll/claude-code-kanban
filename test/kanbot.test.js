@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { kanbotOn, kanbotModel, createKanbot, findCostCli, readCostServer, KANBOT_AGENT, KANBOT_PLUGIN_DIR } = require('../lib/kanbot');
+const { kanbotOn, kanbotModel, createKanbot, findKanbotApps, readCostServer, KANBOT_AGENT, KANBOT_PLUGIN_DIR } = require('../lib/kanbot');
 const { encodeProjectDirName } = require('../lib/claude-dir');
 
 const A = '11111111-1111-4111-8111-111111111111';
@@ -59,38 +59,62 @@ describe('kanbot', () => {
     assert.ok(fs.existsSync(path.join(KANBOT_PLUGIN_DIR, 'agents', 'kanbot.md')));
   });
 
-  it('names the cost CLI in the help prompt when there is one', () => {
-    const spec = createKanbot({ cckDir: cck, projectsDir: projects }).startSpec({ costCli: 'node "/x/server.js"' });
-    const help = fs.readFileSync(spec.extraArgs[spec.extraArgs.indexOf('--append-system-prompt-file') + 1], 'utf8');
-    assert.match(help, /`node "\/x\/server\.js" help`/);
-    assert.match(help, /claude-code-kanban session cost <id>/);
-  });
-
-  describe('findCostCli', () => {
+  describe('findKanbotApps', () => {
     const noBin = () => null;
-    const serverFile = (rec) => {
-      fs.mkdirSync(path.join(root, '.cost'), { recursive: true });
-      fs.writeFileSync(path.join(root, '.cost', 'server.json'), JSON.stringify(rec));
+    const serverFile = (dir, rec) => {
+      fs.mkdirSync(path.join(root, dir), { recursive: true });
+      fs.writeFileSync(path.join(root, dir, 'server.json'), JSON.stringify(rec));
+    };
+    const reset = () => {
+      for (const dir of ['.cost', '.memory']) fs.rmSync(path.join(root, dir), { recursive: true, force: true });
+    };
+    const helpOf = (apps) => {
+      const { extraArgs } = createKanbot({ cckDir: cck, projectsDir: projects }).startSpec({ apps });
+      return { extraArgs, help: fs.readFileSync(extraArgs[extraArgs.indexOf('--append-system-prompt-file') + 1], 'utf8') };
     };
 
-    it('takes the script of the live cost server from its server.json', () => {
+    it('takes the script of a live server from its server.json', () => {
+      reset();
       assert.equal(readCostServer(root), null);
-      serverFile({ pid: process.pid, port: 4321, script: 'C:\\hub\\cost\\server.js' });
+      serverFile('.cost', { pid: process.pid, port: 4321, script: 'C:\\hub\\cost\\server.js' });
       assert.deepEqual(readCostServer(root), { url: 'http://localhost:4321', script: 'C:\\hub\\cost\\server.js' });
-      assert.equal(findCostCli({ claudeDir: root, which: noBin }), 'node "C:/hub/cost/server.js"');
-      serverFile({ pid: 2 ** 31 - 2, port: 4321, script: 'C:\\hub\\cost\\server.js' });
+      const { help } = helpOf(findKanbotApps({ claudeDir: root, which: noBin }));
+      assert.match(help, /# Costs\n\n`node "C:\/hub\/cost\/server\.js" help`/);
+      assert.match(help, /claude-code-kanban session cost <id>/);
+      assert.doesNotMatch(help, /# Memory analysis/);
+      serverFile('.cost', { pid: 2 ** 31 - 2, port: 4321, script: 'C:\\hub\\cost\\server.js' });
       assert.equal(readCostServer(root), null);
+      assert.deepEqual(findKanbotApps({ claudeDir: root, which: noBin }), []);
     });
 
     it('takes the bin on PATH only when its package has the CLI', () => {
+      reset();
       const prefix = path.join(root, 'npm');
-      const bin = path.join(prefix, 'claude-code-cost.cmd');
-      fs.mkdirSync(path.join(prefix, 'node_modules', 'claude-code-cost', 'lib'), { recursive: true });
+      const bin = path.join(prefix, 'claude-code-memory-explorer.cmd');
+      const which = (name) => (name === 'claude-code-memory-explorer' ? bin : null);
+      fs.mkdirSync(path.join(prefix, 'node_modules', 'claude-code-memory-explorer', 'lib'), { recursive: true });
       fs.writeFileSync(bin, '');
-      assert.equal(findCostCli({ claudeDir: root, which: () => bin }), null);
-      fs.writeFileSync(path.join(prefix, 'node_modules', 'claude-code-cost', 'lib', 'cli.js'), '');
-      assert.equal(findCostCli({ claudeDir: root, which: () => bin }), 'claude-code-cost');
-      assert.equal(findCostCli({ claudeDir: root, which: noBin }), null);
+      assert.deepEqual(findKanbotApps({ claudeDir: root, which }), []);
+      fs.writeFileSync(path.join(prefix, 'node_modules', 'claude-code-memory-explorer', 'lib', 'cli.js'), '');
+      const { help } = helpOf(findKanbotApps({ claudeDir: root, which }));
+      assert.match(help, /# Memory analysis\n\n`claude-code-memory-explorer help`/);
+      assert.doesNotMatch(help, /# Costs/);
+    });
+
+    it('loads the plugin of each found app that ships one', () => {
+      reset();
+      const appRoot = (name) => path.join(root, 'apps', name);
+      serverFile('.cost', { pid: process.pid, port: 4330, script: path.join(appRoot('cost'), 'server.js') });
+      serverFile('.memory', { pid: process.pid, port: 4331, script: path.join(appRoot('memory'), 'bin.js') });
+      const memoryPlugin = path.join(appRoot('memory'), 'plugin', 'plugins', 'memory-diagnoser');
+      fs.mkdirSync(path.join(memoryPlugin, '.claude-plugin'), { recursive: true });
+      fs.writeFileSync(path.join(memoryPlugin, '.claude-plugin', 'plugin.json'), '{}');
+      const apps = findKanbotApps({ claudeDir: root, which: noBin });
+      assert.deepEqual(apps.map((a) => a.pluginDir), [null, memoryPlugin]);
+      const { extraArgs, help } = helpOf(apps);
+      assert.deepEqual(extraArgs.slice(0, 5), ['--plugin-dir', KANBOT_PLUGIN_DIR, '--plugin-dir', memoryPlugin, '--agent']);
+      assert.match(help, /# Costs[\s\S]*# Memory analysis/);
+      reset();
     });
   });
 
