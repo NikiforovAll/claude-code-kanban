@@ -266,6 +266,8 @@ const SESSION_STALE_MS = 5 * 60 * 1000;
 // never the "active" status (which stays accurate via hasRecentLog).
 const SESSION_GRACE_MS = 2 * 60 * 1000;
 const WAITING_RESOLVE_GRACE_MS = 15 * 1000;
+// A finished background task stays in the agents answer this long; the client uses the same window.
+const BACKGROUND_KEEP_MS = 5 * 60 * 1000;
 const CLEANUP_MAX_AGE_MS = 2 * 24 * 60 * 60 * 1000;
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 const RETENTION_FIRST_RUN_MS = 5 * 60 * 1000;
@@ -2372,10 +2374,36 @@ const RESULT_SCAN = 3;
 // Same for the modelUnavailable latch and extractModelFromTranscript.
 const MODEL_SCAN = 2;
 
+// A background task dies with its claude process and leaves no notification, so one with no
+// end counts as running only while the process that started it is alive.
+async function sessionBackgroundTasks(sessionId, digest) {
+  try {
+    const live = loadLiveSessions().find((s) => s.sessionId === sessionId && s.pid && isPidAlive(s.pid));
+    const now = Date.now();
+    if (!digest) {
+      const meta = loadSessionMetadata()[sessionId];
+      if (!meta?.jsonlPath) return [];
+      // No process and no recent write: nothing can run and every end is past the window.
+      if (!live && now - (getSessionLogStat(meta).mtime || 0) > BACKGROUND_KEEP_MS) return [];
+      digest = await getSessionDigest(meta.jsonlPath);
+    }
+    const tasks = digest?.backgroundTasks;
+    if (!tasks?.length) return [];
+    return tasks.filter((t) => {
+      if (t.endedAt) return now - Date.parse(t.endedAt) < BACKGROUND_KEEP_MS;
+      return !!live && Date.parse(t.startedAt) >= live.startedAt;
+    });
+  } catch (_) {
+    return [];
+  }
+}
+
 app.get('/api/sessions/:sessionId/agents', async (req, res) => {
   const sessionId = resolveSessionId(req.params.sessionId);
   const agentDir = path.join(AGENT_ACTIVITY_DIR, sessionId);
-  if (!existsSync(agentDir)) return res.json({ agents: [], waitingForUser: null });
+  if (!existsSync(agentDir)) {
+    return res.json({ agents: [], waitingForUser: null, background: await sessionBackgroundTasks(sessionId) });
+  }
   try {
     const metadata = loadSessionMetadata();
     const meta = metadata[sessionId] || {};
@@ -2629,9 +2657,9 @@ app.get('/api/sessions/:sessionId/agents', async (req, res) => {
       const usage = byAgentId[agent.agentId]?.usage;
       if (usage) agent.usage = usage;
     }
-    res.json({ agents: visibleAgents, waitingForUser, teamColors });
+    res.json({ agents: visibleAgents, waitingForUser, teamColors, background: await sessionBackgroundTasks(sessionId, digest) });
   } catch {
-    res.json({ agents: [], waitingForUser: null });
+    res.json({ agents: [], waitingForUser: null, background: [] });
   }
 });
 

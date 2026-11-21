@@ -121,6 +121,7 @@ let searchQuery = ''; // Search query for fuzzy search
 let allTasksCache = []; // Cache all tasks for search
 let ownerFilter = '';
 let currentAgents = [];
+let currentBackground = [];
 let currentWaiting = null;
 let lastWaitingHash = '';
 let lastAgentsHash = '';
@@ -886,11 +887,13 @@ let agentLogLimit = AGENT_LOG_PAGE;
 const ZEN_AGENTS_MAX = 5;
 const LIVE_INDICATOR_MS = 10 * 1000;
 const JUST_NOW_MS = 60 * 1000;
+const BACKGROUND_KEEP_MS = 5 * 60 * 1000;
 //#endregion
 
 //#region AGENT_FETCHING
 function resetAgentState() {
   currentAgents = [];
+  currentBackground = [];
   currentWaiting = null;
   lastAgentsHash = '';
   lastWaitingHash = '';
@@ -911,6 +914,7 @@ async function fetchAgents(sessionId) {
     if (hash === lastAgentsHash) return;
     lastAgentsHash = hash;
     currentAgents = agents;
+    currentBackground = data.background || [];
     updateTeamColors(agents, data.teamColors);
     for (const k of Object.keys(ownerColorCache)) delete ownerColorCache[k];
     renderAgentFooter();
@@ -970,6 +974,7 @@ async function fetchProjectView(projectPath) {
     if (r.waitingForUser && !mergedWaiting) mergedWaiting = r.waitingForUser;
   }
   currentWaiting = mergedWaiting;
+  currentBackground = agentResults.flatMap((r) => r.background || []);
   Object.assign(teamColorMap, mergedColors);
 
   renderProjectView();
@@ -1003,7 +1008,8 @@ async function refreshProjectAgents() {
     if (r.waitingForUser && !mergedWaiting) mergedWaiting = r.waitingForUser;
   }
   currentWaiting = mergedWaiting;
-  const hash = JSON.stringify({ agents: currentAgents, waiting: currentWaiting });
+  currentBackground = agentResults.flatMap((r) => r.background || []);
+  const hash = JSON.stringify({ agents: currentAgents, waiting: currentWaiting, background: currentBackground });
   if (hash === lastAgentsHash) return;
   lastAgentsHash = hash;
   renderAgentFooter();
@@ -3543,14 +3549,19 @@ function renderZenAgents(agents) {
   const el = zenMode && sessionsList.querySelector('.zen-agents');
   if (!el) return;
   const active = agents.filter((a) => a.status === 'active');
-  const html = zenAgentsHtml(active);
+  const running = currentBackground.filter((t) => !t.endedAt);
+  const html = zenAgentsHtml(active) + zenBackgroundHtml(running);
   if (html !== el.dataset.shape) {
     el.dataset.shape = html;
     el.innerHTML = html;
   }
   const now = Date.now();
+  const elapsed = [
+    ...active.slice(0, ZEN_AGENTS_MAX).map((a) => agentElapsed(a, now)),
+    ...running.slice(0, ZEN_AGENTS_MAX).map((t) => now - Date.parse(t.startedAt)),
+  ];
   el.querySelectorAll('.zen-agent-time').forEach((t, i) => {
-    t.textContent = formatDuration(agentElapsed(active[i], now));
+    t.textContent = formatDuration(elapsed[i]);
   });
 }
 
@@ -3581,12 +3592,72 @@ function visibleAgents() {
     }
   }
   // Sort: active/idle first, then by updatedAt desc
-  const statusOrder = { active: 0, idle: 1, stopped: 2 };
   return filtered.sort(
     (a, b) =>
-      (statusOrder[a.status] ?? 2) - (statusOrder[b.status] ?? 2) ||
+      (AGENT_STATUS_ORDER[a.status] ?? 2) - (AGENT_STATUS_ORDER[b.status] ?? 2) ||
       new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0),
   );
+}
+
+const BACKGROUND_KINDS = {
+  shell: { name: 'Background shell', icon: ICON_TERMINAL },
+  monitor: {
+    name: 'Monitor',
+    icon: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>',
+  },
+};
+
+const AGENT_STATUS_ORDER = { active: 0, idle: 1, stopped: 2 };
+
+function visibleBackground(now) {
+  return currentBackground.filter((t) => !t.endedAt || now - Date.parse(t.endedAt) < BACKGROUND_KEEP_MS);
+}
+
+const backgroundKind = (t) => BACKGROUND_KINDS[t.kind] || BACKGROUND_KINDS.shell;
+const backgroundLabel = (t) => t.description || t.command || backgroundKind(t).name;
+const backgroundKindHtml = (t) =>
+  `<span class="background-kind">${backgroundKind(t).icon}${backgroundKind(t).name}</span>`;
+const backgroundClickAttr = (t) => (t.outputFile ? ` onclick="openPreviewByPath('${escAttrJs(t.outputFile)}')"` : '');
+
+function zenBackgroundHtml(running) {
+  if (!running.length) return '';
+  const rows = running.slice(0, ZEN_AGENTS_MAX).map((t) => {
+    const label = truncateAtWord(backgroundLabel(t), 200);
+    return `<button type="button" class="zen-agent" title="${escapeHtml(t.command || label)}"${backgroundClickAttr(t)}>
+      <span class="agent-dot active"></span>
+      <span class="zen-agent-text"><span class="zen-agent-task">${escapeHtml(label)}</span><span class="agent-ident-row">${backgroundKindHtml(t)}</span></span>
+      <span class="zen-agent-time"></span>
+    </button>`;
+  });
+  return `<div class="panel-section-header"><span>Background</span><span class="panel-section-count">${running.length}</span></div>${rows.join('')}`;
+}
+
+function backgroundCardHtml(t, now) {
+  const running = !t.endedAt;
+  const label = backgroundLabel(t);
+  const elapsed = (running ? now : Date.parse(t.endedAt)) - Date.parse(t.startedAt);
+  const status = running ? 'running' : t.status === 'completed' ? 'done' : t.status;
+  return `<div class="agent-card background-card ${running ? 'active' : 'stopped'}${t.outputFile ? ' has-output' : ''}" title="${escapeHtml(t.command || label)}"${backgroundClickAttr(t)}>
+    <div class="agent-task">${escapeHtml(label)}</div>
+    <div class="agent-ident-row">${backgroundKindHtml(t)}</div>
+    <div class="agent-status-row"><span class="agent-status"><span class="agent-dot ${running ? 'active' : 'stopped'}"></span>${escapeHtml(status)}</span><span class="agent-duration">${formatDuration(elapsed)}</span></div>
+  </div>`;
+}
+
+function agentCardHtml(a, now) {
+  const status = agentStatus(a);
+  const displayText = agentTaskText(a);
+  const nameColor = a.agentName ? resolveNamedColor(a.color) || getOwnerColor(a.agentName) : null;
+  const nameBadgeHtml = nameColor
+    ? `<span class="task-owner-badge task-owner-badge--compact" style="background:${nameColor.bg};color:${nameColor.color}">${escapeHtml(a.agentName)}</span>`
+    : '';
+  const selectedClass = a.agentId === currentAgentModalId ? ' selected' : '';
+  return `<div class="agent-card ${status}${selectedClass}" data-agent-id="${escapeHtml(a.agentId)}" onclick="showAgentModal('${escAttrJs(a.agentId)}')">
+    ${agentLogButton(a.agentId, 'agent-card-log-btn')}
+    <div class="agent-task" title="${escapeHtml(displayText)}">${escapeHtml(displayText)}</div>
+    <div class="agent-ident-row">${agentIdentHtml(a)}${nameBadgeHtml}</div>
+    <div class="agent-status-row"><span class="agent-status"><span class="agent-dot ${status}"></span>${status}</span><span class="agent-duration">${formatDuration(agentElapsed(a, now))}</span></div>
+  </div>`;
 }
 
 function renderAgentFooter() {
@@ -3596,6 +3667,7 @@ function renderAgentFooter() {
   const label = document.getElementById('agent-footer-label');
   const now = Date.now();
   const agents = visibleAgents();
+  const background = visibleBackground(now);
   renderZenAgents(agents);
   renderAgentViews(agents);
   const expanded = footer.classList.contains('expanded');
@@ -3603,8 +3675,9 @@ function renderAgentFooter() {
   const hidden = agents.length - visible.length;
 
   const permFresh = isWaitingFresh();
+  const backgroundRunning = background.filter((t) => !t.endedAt).length;
 
-  if (visible.length === 0 && !permFresh) {
+  if (visible.length === 0 && !permFresh && !background.length) {
     footer.classList.remove('visible');
     clearInterval(agentDurationInterval);
     agentDurationInterval = null;
@@ -3615,41 +3688,36 @@ function renderAgentFooter() {
 
   footer.classList.add('visible');
   const running = agents.filter((a) => a.status === 'active').length;
-  label.innerHTML = `Agents log <span class="agent-footer-count">${agents.length}</span>${running ? `<span class="agent-footer-running">· ${running} running</span>` : ''}`;
+  const labelPart = (n, word) => (n ? `<span class="agent-footer-running">· ${n} ${word}</span>` : '');
+  label.innerHTML = `Agents log <span class="agent-footer-count">${agents.length}</span>${labelPart(running, 'running')}${labelPart(backgroundRunning, 'in background')}`;
 
   const permHtml = permFresh
     ? `<button type="button" class="permission-badge" onclick="showWaitingDetail()">${currentWaiting.kind === 'question' ? '❓ Question pending' : currentWaiting.kind === 'plan' ? '📋 Plan pending' : `⏳ Awaiting: ${escapeHtml(currentWaiting.toolName || 'unknown')}`}</button>`
     : '';
 
+  const cards = [
+    ...background.map((t) => ({
+      rank: t.endedAt ? AGENT_STATUS_ORDER.stopped : AGENT_STATUS_ORDER.active,
+      at: Date.parse(t.endedAt || t.startedAt),
+      html: backgroundCardHtml(t, now),
+    })),
+    ...visible.map((a) => ({
+      rank: AGENT_STATUS_ORDER[a.status] ?? AGENT_STATUS_ORDER.stopped,
+      at: new Date(a.updatedAt || 0).getTime(),
+      html: agentCardHtml(a, now),
+    })),
+  ].sort((a, b) => a.rank - b.rank || b.at - a.at);
+
   content.innerHTML =
     permHtml +
-    visible
-      .map((a) => {
-        const elapsed = agentElapsed(a, now);
-        const status = agentStatus(a);
-        const displayText = agentTaskText(a);
-        const taskHtml = `<div class="agent-task" title="${escapeHtml(displayText)}">${escapeHtml(displayText)}</div>`;
-        const agentNameVal = a.agentName || null;
-        const nameColor = agentNameVal ? resolveNamedColor(a.color) || getOwnerColor(agentNameVal) : null;
-        const nameBadgeHtml = nameColor
-          ? `<span class="task-owner-badge task-owner-badge--compact" style="background:${nameColor.bg};color:${nameColor.color}">${escapeHtml(agentNameVal)}</span>`
-          : '';
-        const selectedClass = a.agentId === currentAgentModalId ? ' selected' : '';
-        return `<div class="agent-card ${status}${selectedClass}" data-agent-id="${escapeHtml(a.agentId)}" onclick="showAgentModal('${escAttrJs(a.agentId)}')">
-          ${agentLogButton(a.agentId, 'agent-card-log-btn')}
-          ${taskHtml}
-          <div class="agent-ident-row">${agentIdentHtml(a)}${nameBadgeHtml}</div>
-          <div class="agent-status-row"><span class="agent-status"><span class="agent-dot ${status}"></span>${status}</span><span class="agent-duration">${formatDuration(elapsed)}</span></div>
-        </div>`;
-      })
-      .join('') +
+    cards.map((c) => c.html).join('') +
     (expanded && hidden > 0
       ? `<button type="button" class="agent-footer-more" onclick="showMoreAgents()">Show ${Math.min(hidden, AGENT_LOG_PAGE)} more${hidden > AGENT_LOG_PAGE ? ` <span>of ${hidden}</span>` : ''}</button>`
       : '');
   updateScrollFades(content);
 
   clearInterval(agentDurationInterval);
-  if (visible.some((a) => a.status === 'active' || a.status === 'idle')) {
+  if (backgroundRunning || visible.some((a) => a.status === 'active' || a.status === 'idle')) {
     agentDurationInterval = setInterval(() => isOnScreen() && renderAgentFooter(), 1000);
     if (!agentPollInterval) {
       agentPollInterval = setInterval(() => {
@@ -10145,7 +10213,7 @@ function renderSourcePreview(filePath, content) {
 // Every kind but html, which needs a frame.
 function renderPreviewContent(bodyEl, filePath, content, kind) {
   if (kind === 'text') {
-    bodyEl.innerHTML = renderSourcePreview(filePath, content);
+    bodyEl.innerHTML = renderSourcePreview(filePath, stripAnsi(content));
   } else if (kind === 'image') {
     const img = document.createElement('img');
     img.className = 'preview-image';

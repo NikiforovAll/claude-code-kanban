@@ -7769,6 +7769,20 @@ button.agent-map-node:hover {
 .agent-card.fading {
   opacity: 0.4;
 }
+.agent-card.background-card {
+  border-style: dashed;
+}
+.agent-card.background-card:not(.has-output) {
+  cursor: default;
+}
+.agent-card.background-card:not(.has-output):hover {
+  border-color: var(--border);
+}
+.background-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
 .agent-task {
   max-width: 240px;
   padding-right: 14px;
