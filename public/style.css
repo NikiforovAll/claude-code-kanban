@@ -10173,6 +10173,12 @@ select.form-input option:checked {
   display: none;
 }
 
+.ns-divided {
+  margin-top: 4px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
 .ns-label {
   padding-top: 9px;
   font-size: 12px;
@@ -11529,7 +11535,8 @@ pre.mermaid[data-mermaid-error]::before {
 }
 
 .pinned-sub-header:hover .pinned-ungroup-btn,
-.session-group-header:hover .sg-action {
+.session-group-header:hover .sg-action,
+.session-group-header.kb-selected .sg-action {
   opacity: 1;
 }
 
@@ -11641,15 +11648,16 @@ pre.mermaid[data-mermaid-error]::before {
   outline: none;
 }
 
-.sg-action.sg-rename {
-  margin-left: auto;
+.sg-action.sg-new,
+.sg-action.sg-rename,
+.sg-action.sg-delete {
   display: flex;
   align-items: center;
 }
 
-.sg-action.sg-delete {
-  font-size: 15px;
-  padding: 0 2px;
+.sg-action.sg-new,
+:not(.sg-new) + .sg-action.sg-rename {
+  margin-left: auto;
 }
 
 .session-group-sessions {

@@ -5786,7 +5786,8 @@ function sgHostOf(group, placed) {
 }
 // `opts.under` places the session under another project block of the group; `opts.loose` lifts it
 // out of its project block onto the group's own level. `opts.parent` follows the server's place():
-// left out, a move inside the group keeps it; null clears it.
+// left out, a move inside the group keeps it; null clears it. `opts.project` is the project of a
+// session that is not in `sessions` yet.
 function sgAssign(groupId, type, ref, opts = {}) {
   const group = sgGroupById(groupId);
   if (!group) return;
@@ -5797,7 +5798,7 @@ function sgAssign(groupId, type, ref, opts = {}) {
   if (type === 'project') {
     for (const s of sessions) if (sessionProjectKey(s) === ref) sgDetach('session', s.id);
   }
-  const own = type === 'session' ? sessionProjectKey(sessions.find((s) => s.id === ref)) : null;
+  const own = type === 'session' ? (opts.project ?? sessionProjectKey(sessions.find((s) => s.id === ref))) : null;
   // Under its own project block is simply the natural placement - no override needed.
   const under = opts.under && opts.under !== own ? opts.under : null;
   const loose = !under && !!opts.loose;
@@ -5813,6 +5814,15 @@ function sgAssign(groupId, type, ref, opts = {}) {
     group.members.push(member);
   }
   persistSessionGroups();
+}
+
+function sgDefaultFolder(group) {
+  let recent = null;
+  for (const s of sessions) {
+    if (s.placeholder || sgGroupForSession(s) !== group) continue;
+    if (!recent || (s.modifiedAt || '') > (recent.modifiedAt || '')) recent = s;
+  }
+  return sessionProjectKey(recent) || group.members.find((m) => m.type === 'project')?.ref || null;
 }
 
 function sgCreateGroup(name) {
@@ -5905,8 +5915,9 @@ function sgHeaderHtml(group, countHtml) {
   const hint = group.transient ? 'goes when its sessions leave the Active view' : 'drop sessions or projects here';
   const attrs = `class="session-group-header${group.transient ? ' sg-transient' : ''}${collapsed ? ' collapsed' : ''}${group.id === zenGroup ? ' sg-zen' : ''}" draggable="${editing ? 'false' : 'true'}" data-group-id="${escapeHtml(group.id)}" title="${escapeHtml(group.name)} — ${hint}"`;
   const actions = `${group.transient ? '<span class="sg-action sg-keep" title="Keep this group after its sessions end">Keep</span>' : ''}
+          ${terminalAvailable() ? `<span class="sg-action sg-new" title="New session in ${escapeHtml(group.name)}">${PLUS_SVG}</span>` : ''}
           <span class="sg-action sg-rename" title="Rename group"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></span>
-          <span class="sg-action sg-delete" title="Delete group (members return to Projects)">&times;</span>
+          <span class="sg-action sg-delete" title="Delete group (members return to Projects)"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg></span>
           ${headerPadBtnHtml(_groupScratchpadKey(group.id), group.name)}`;
   return `
         <div ${attrs} data-group-path="${escapeHtml(sgKey(group.id))}">
@@ -12806,6 +12817,10 @@ document.addEventListener('click', (e) => {
       sgConfirmDelete(group);
       return;
     }
+    if (e.target.closest('.sg-new')) {
+      openNewSession(sgDefaultFolder(group), false, group.id);
+      return;
+    }
   }
 
   const header = e.target.closest(COLLAPSIBLE_HEADER_SELECTOR);
@@ -19561,6 +19576,10 @@ function dropPlaceholder(id) {
 
 function forgetPlaceholder(id) {
   if (!newSpecs.delete(id)) return false;
+  if (sgGroupOf('session', id)) {
+    sgDetach('session', id);
+    persistSessionGroups();
+  }
   setTerminalMode(id, false);
   // Before the socket's close handler runs, or it would reconnect and start the session again.
   if (termState.sessionId === id) detachTerminal();
@@ -19679,10 +19698,26 @@ function showSessionTerminal(sessionId) {
   else fetchTasks(sessionId);
 }
 
-function openNewSession(folder, resume = false) {
+function setNewSessionGroup(groupId) {
+  const select = document.getElementById('ns-group');
+  select.innerHTML = `<option value="">No group</option>${sessionGroups
+    .map((g) => `<option value="${escapeHtml(g.id)}">${escapeHtml(sgPathOf(g))}</option>`)
+    .join('')}`;
+  select.value = groupId ?? '';
+  document.getElementById('ns-group-row').hidden = !sessionGroups.length;
+}
+
+// Before the placeholder's first merge, so that merge reveals the group and not the project.
+function joinNewSessionGroup(id) {
+  const groupId = document.getElementById('ns-group').value;
+  if (groupId) sgAssign(groupId, 'session', id, { project: newSpecs.get(id).cwd });
+}
+
+function openNewSession(folder, resume = false, groupId = null) {
   if (!terminalAvailable() || document.getElementById('new-session-modal').classList.contains('visible')) return;
   if (terminalPaneFocused()) leaveTerminalPane();
   ns.resume = resume;
+  setNewSessionGroup(resume ? null : groupId);
   ns.extraArgs = [];
   document.querySelector('.new-session-modal').classList.toggle('ns-resume', resume);
   document.getElementById('ns-title').textContent = resume ? 'Resume session' : 'New session';
@@ -19965,6 +20000,7 @@ async function startNewSession() {
   }
   newSpecs.set(id, { ...(ns.resume ? { cwd: v.cwd } : v), mode: ns.resume ? 'pick' : 'new', startedAt: Date.now() });
   setTerminalMode(id, true);
+  joinNewSessionGroup(id);
   if (v.stay) return startNewSessionInBackground(id, v);
   closeNewSession();
   openPlaceholder(id);
@@ -20004,6 +20040,7 @@ async function startNewSessionInBackground(id, v) {
     forgetPlaceholder(id);
     newSpecs.set(r.session, spec);
     setTerminalMode(r.session, true);
+    joinNewSessionGroup(r.session);
     refreshPlaceholders();
   }
   closeNewSession();

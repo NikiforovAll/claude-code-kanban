@@ -27,6 +27,39 @@ describe('sgHostOf', () => {
   });
 });
 
+describe('sgDefaultFolder', () => {
+  const group = { id: 'g1', members: [{ type: 'project', ref: 'C:/api' }] };
+  const folderOf = (sessions, g = group) =>
+    vm.runInNewContext(`${fn('sgDefaultFolder')}\nsgDefaultFolder(group)`, {
+      sessions,
+      group: g,
+      sgGroupForSession: (s) => (s.inGroup ? g : null),
+      sessionProjectKey: require('../public/project-match.js').sessionProjectKey,
+    });
+
+  it('gives the folder of the most recent session of the group', () => {
+    const sessions = [
+      { id: 'a', inGroup: true, project: 'C:/api', modifiedAt: '2026-01-01' },
+      { id: 'b', inGroup: true, project: 'C:/web', modifiedAt: '2026-01-03' },
+      { id: 'c', inGroup: false, project: 'C:/other', modifiedAt: '2026-01-09' },
+      { id: 'p', inGroup: true, placeholder: true, project: 'C:/new', modifiedAt: '2026-01-10' },
+    ];
+    assert.equal(folderOf(sessions), 'C:/web');
+  });
+
+  it('gives the repo of a worktree session', () => {
+    const sessions = [
+      { id: 'a', inGroup: true, project: 'C:/api/.claude/worktrees/w', worktree: { repo: 'C:/api' }, modifiedAt: '1' },
+    ];
+    assert.equal(folderOf(sessions), 'C:/api');
+  });
+
+  it('falls back to the first project of the group, then to nothing', () => {
+    assert.equal(folderOf([]), 'C:/api');
+    assert.equal(folderOf([], { id: 'g2', members: [] }), null);
+  });
+});
+
 describe('expandActiveGroups', () => {
   function setup() {
     const ctx = {
