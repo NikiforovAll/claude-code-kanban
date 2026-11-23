@@ -4708,7 +4708,7 @@ function renderSessions() {
     renderZenAgents(visibleAgents());
     bindLinkedDocsHandlers(sessionsList.querySelector('.linked-docs-section'), zenSession.id);
     artifactsSection.load(zenSession.id);
-    scratchFilesSection.load(zenSession.id);
+    loadScratchFiles(zenSession.id);
     if (zenSession.hasWorkflow) pollWorkflowLive(zenSession.id);
     restoreSessionCursor();
     return;
@@ -10970,6 +10970,8 @@ const scratchFilesSection = makeSectionLoader({
 // Outlives the cache entries on purpose: a refetch on the TTL must not collapse a list
 // the user opened.
 const scratchFilesExpanded = new Set();
+const SCRATCHPAD_FOLDED_KEY = sectionCollapsedKey('zen-scratchpad');
+let scratchpadFolded = store.getItem(SCRATCHPAD_FOLDED_KEY) === 'true';
 // Open folders only, keyed by absolute path: path -> { status: 'loading' | 'ready' |
 // 'error', children }. Closing a folder drops its entry, so the cache is bounded by
 // what is on screen and a reopen shows fresh contents for one readdir.
@@ -11024,6 +11026,11 @@ function scratchFilesInnerHtml(sessionId) {
 // Delegated at the document because the whole zen panel is re-rendered on every SSE tick,
 // which would drop a listener bound on the section.
 document.addEventListener('click', (e) => {
+  const row = e.target.closest('.zen-scratchpad');
+  if (row && !e.target.closest('.row-actions')) {
+    toggleScratchpadFolded(row);
+    return;
+  }
   const toggle = e.target.closest('.scratch-folder-toggle');
   if (!toggle) return;
   const section = toggle.closest('[data-scratch-files-for]');
@@ -11048,8 +11055,21 @@ async function toggleScratchFolder(sessionId, dirPath) {
   }
 }
 
-function renderScratchFilesHtml(sessionId) {
-  return `<div class="scratch-files-section" data-scratch-files-for="${escapeHtml(sessionId)}">${scratchFilesInnerHtml(sessionId)}</div>`;
+function loadScratchFiles(sessionId) {
+  if (!scratchpadFolded) scratchFilesSection.load(sessionId);
+}
+
+function toggleScratchpadFolded(row) {
+  scratchpadFolded = !scratchpadFolded;
+  store.setItem(SCRATCHPAD_FOLDED_KEY, scratchpadFolded);
+  row.classList.toggle('collapsed', scratchpadFolded);
+  const sessionId = row.dataset.scratchSession;
+  paintSectionSlots('data-scratch-files-for', sessionId, scratchpadFolded ? '' : scratchFilesInnerHtml(sessionId));
+  loadScratchFiles(sessionId);
+}
+
+function renderScratchFilesSlot(sessionId, inner) {
+  return `<div class="scratch-files-section" data-scratch-files-for="${escapeHtml(sessionId)}">${inner}</div>`;
 }
 
 // biome-ignore lint/correctness/noUnusedVariables: used in HTML
@@ -13280,15 +13300,15 @@ function abbreviateScratchpadDir(dir) {
 function renderScratchpadRow(session) {
   const dir = session?.scratchpadDir;
   if (!dir) return '';
-  return `<div class="zen-scratchpad">
-    <span class="zen-scratchpad-label">Scratchpad</span>
-    <span class="zen-scratchpad-path" title="${escapeHtml(dir)}">${escapeHtml(abbreviateScratchpadDir(dir))}</span>
+  return `<div class="zen-scratchpad panel-section-header${scratchpadFolded ? ' collapsed' : ''}" data-scratch-session="${escapeHtml(session.id)}" title="${escapeHtml(dir)}">
+    ${groupChevronSvg(12)}
+    <span>Scratchpad</span>
     <span class="row-actions">
       <button onclick="copyWithFeedback('${escAttrJs(dir)}', this)" title="Copy">${ICON_COPY}</button>
       <button data-folder="${escapeHtml(dir)}" onclick="openFolderInEditor(this.dataset.folder)" title="Open in editor">${ICON_OPEN_EXTERNAL}</button>
     </span>
   </div>
-  ${renderScratchFilesHtml(session.id)}`;
+  ${renderScratchFilesSlot(session.id, scratchpadFolded ? '' : scratchFilesInnerHtml(session.id))}`;
 }
 
 function showInfoModal(session, teamConfig, tasks, planContent, parentInfo) {

@@ -1540,31 +1540,18 @@ body.booting .boot-splash {
 }
 
 .zen-scratchpad {
-  display: flex;
-  align-items: center;
-  gap: 8px;
   margin-top: 12px;
   padding-top: 10px;
   border-top: 1px solid var(--border);
-  font-size: 11px;
+  cursor: pointer;
 }
 
-.zen-scratchpad-label {
-  font-weight: 500;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  white-space: nowrap;
+.zen-scratchpad:hover {
+  color: var(--text-primary);
 }
 
-.zen-scratchpad-path {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: var(--font-mono);
-  color: var(--text-secondary);
+.zen-scratchpad .row-actions {
+  margin-left: auto;
 }
 
 .zen-panel:hover .row-actions {
@@ -11411,7 +11398,8 @@ pre.mermaid[data-mermaid-error]::before {
 .project-group-header .group-chevron,
 .session-group-header .group-chevron,
 .sg-section-toggle .group-chevron,
-.scratch-folder-toggle .group-chevron {
+.scratch-folder-toggle .group-chevron,
+.zen-scratchpad .group-chevron {
   transition: transform 0.15s ease;
   flex-shrink: 0;
   display: block;
@@ -11420,7 +11408,8 @@ pre.mermaid[data-mermaid-error]::before {
 .project-group-header.collapsed .group-chevron,
 .session-group-header.collapsed .group-chevron,
 .sg-section-toggle.collapsed .group-chevron,
-.scratch-folder-toggle.collapsed .group-chevron {
+.scratch-folder-toggle.collapsed .group-chevron,
+.zen-scratchpad.collapsed .group-chevron {
   transform: rotate(-90deg);
 }
 
