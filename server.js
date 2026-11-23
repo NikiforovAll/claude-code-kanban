@@ -4039,7 +4039,11 @@ function resolvePreviewPath(rawPath, base) {
   // Normalized, not passed through: a linked document is identified by its path string,
   // and `C:/a/b` typed into the link editor has to reach the same string as the `C:\a\b`
   // a server-side `path.join` produces, or the same file is linked twice.
-  if (path.isAbsolute(filePath)) return dropUrlFragment(path.normalize(filePath));
+  if (path.isAbsolute(filePath)) {
+    const abs = dropUrlFragment(path.normalize(filePath));
+    // Claude Code names its task output files under the 8.3 short temp dir (NIKIFO~1).
+    return /~\d/.test(abs) ? realpathDeepest(abs) : abs;
+  }
   if (base && typeof base === 'string' && path.isAbsolute(base)) {
     let baseDir = base;
     try {

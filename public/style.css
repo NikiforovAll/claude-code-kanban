@@ -8864,6 +8864,53 @@ body.light .msg-assistant .msg-text {
   color: var(--text-primary);
 }
 
+#preview-task {
+  flex: none;
+  display: grid;
+  gap: 6px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+#preview-task[hidden] {
+  display: none;
+}
+
+.preview-task-meta {
+  justify-content: flex-start;
+  gap: 12px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.preview-task-meta .agent-status,
+.preview-task-meta .agent-duration {
+  font-size: 11px;
+}
+
+.preview-task-desc {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.preview-task-cmd {
+  position: relative;
+}
+
+.preview-task-cmd pre {
+  max-height: 7.5em;
+  overflow: auto;
+  padding-right: 40px;
+  font-size: 12px;
+}
+
+.preview-task-cmd .icon-btn {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+}
+
 /* Rendered HTML pages need far more room than a markdown doc. */
 .modal.preview-modal-dialog.preview-html {
   width: 96vw;

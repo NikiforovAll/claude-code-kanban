@@ -3617,7 +3617,29 @@ const backgroundKind = (t) => BACKGROUND_KINDS[t.kind] || BACKGROUND_KINDS.shell
 const backgroundLabel = (t) => t.description || t.command || backgroundKind(t).name;
 const backgroundKindHtml = (t) =>
   `<span class="background-kind">${backgroundKind(t).icon}${backgroundKind(t).name}</span>`;
-const backgroundClickAttr = (t) => (t.outputFile ? ` onclick="openPreviewByPath('${escAttrJs(t.outputFile)}')"` : '');
+const backgroundClickAttr = (t) => (t.outputFile ? ` onclick="openBackgroundOutput('${escAttrJs(t.taskId)}')"` : '');
+
+function backgroundStatusRowHtml(t, now) {
+  const running = !t.endedAt;
+  const status = running ? 'running' : t.status === 'completed' ? 'done' : t.status;
+  const elapsed = (running ? now : Date.parse(t.endedAt)) - Date.parse(t.startedAt);
+  return `<span class="agent-status"><span class="agent-dot ${running ? 'active' : 'stopped'}"></span>${escapeHtml(status)}</span><span class="agent-duration">${formatDuration(elapsed)}</span>`;
+}
+
+// The output file holds only what the task printed, so the modal shows the task above it.
+// biome-ignore lint/correctness/noUnusedVariables: used in HTML
+async function openBackgroundOutput(taskId) {
+  const t = currentBackground.find((x) => x.taskId === taskId);
+  if (!t?.outputFile || !(await openPreviewByPath(t.outputFile))) return;
+  const el = document.getElementById('preview-task');
+  el.innerHTML = `<div class="agent-status-row preview-task-meta">${backgroundKindHtml(t)}${backgroundStatusRowHtml(t, Date.now())}</div>
+    ${t.description ? `<div class="preview-task-desc">${escapeHtml(t.description)}</div>` : ''}
+    ${t.command ? `<div class="preview-task-cmd"><pre class="perm-code">${escapeHtml(t.command)}</pre><button type="button" class="icon-btn" aria-label="Copy command" title="Copy command">${ICON_COPY}</button></div>` : ''}`;
+  el.querySelector('.preview-task-cmd button')?.addEventListener('click', (e) =>
+    copyWithFeedback(t.command, e.currentTarget),
+  );
+  el.hidden = false;
+}
 
 function zenBackgroundHtml(running) {
   if (!running.length) return '';
@@ -3635,12 +3657,10 @@ function zenBackgroundHtml(running) {
 function backgroundCardHtml(t, now) {
   const running = !t.endedAt;
   const label = backgroundLabel(t);
-  const elapsed = (running ? now : Date.parse(t.endedAt)) - Date.parse(t.startedAt);
-  const status = running ? 'running' : t.status === 'completed' ? 'done' : t.status;
   return `<div class="agent-card background-card ${running ? 'active' : 'stopped'}${t.outputFile ? ' has-output' : ''}" title="${escapeHtml(t.command || label)}"${backgroundClickAttr(t)}>
     <div class="agent-task">${escapeHtml(label)}</div>
     <div class="agent-ident-row">${backgroundKindHtml(t)}</div>
-    <div class="agent-status-row"><span class="agent-status"><span class="agent-dot ${running ? 'active' : 'stopped'}"></span>${escapeHtml(status)}</span><span class="agent-duration">${formatDuration(elapsed)}</span></div>
+    <div class="agent-status-row">${backgroundStatusRowHtml(t, now)}</div>
   </div>`;
 }
 
@@ -10254,6 +10274,7 @@ function localImageUrl(src, base) {
 }
 
 function openPreviewModal(filePath, content, kind, sessionId) {
+  document.getElementById('preview-task').hidden = true;
   currentPreviewPath = filePath;
   currentPreviewContent = kind === 'image' ? null : content;
   document.getElementById('preview-copy-content-btn').style.display = currentPreviewContent == null ? 'none' : '';
@@ -10412,6 +10433,7 @@ async function openPreviewByPath(
       return;
     }
     openPreviewModal(data.path, data.content, data.kind, sessionId);
+    return true;
   } catch {
     showToast('Failed to load preview', 'error');
   }
